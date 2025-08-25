@@ -17,7 +17,7 @@ Client: Blazor WebAssembly.
 
 ```
 # from repo root
-cd .\farm-web\Server
+cd .\src\server
 
 # restore
  dotnet restore
@@ -38,7 +38,7 @@ cd ..\Client
 Then open http://localhost:5000 (port chosen by dev server). For a simple setup you can also host the static client via any static server and point it to the API base.
 
 ## Config
-- Connection string: `Server/appsettings.json` (SQLite file farm.db in Server folder by default)
+- Connection string: `server/appsettings.json` (SQLite file farm.db in Server folder by default)
 - Moonraker URL: set per printer (e.g., http://192.168.1.50:7125)
 
 ## Notes

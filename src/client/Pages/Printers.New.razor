@@ -1,0 +1,60 @@
+
+@page "/printers/new"
+@using Farm.Web.Shared
+@using Microsoft.AspNetCore.Components.Forms
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject Farm.Web.Client.ToastService toast
+
+<h2>Add Printer</h2>
+
+<EditForm Model="printer" OnValidSubmit="AddPrinter">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <div class="form-group">
+        <label>Name</label>
+        <InputText class="form-control" @bind-value="printer.Name" />
+    </div>
+    <div class="form-group">
+        <label>Backend</label>
+        <InputSelect class="form-control" @bind-value="printer.Backend">
+            <option value="@PrinterBackend.Moonraker">Moonraker</option>
+            <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
+        </InputSelect>
+    </div>
+    <div class="form-group">
+        <label>Base URL</label>
+        <InputText class="form-control" @bind-value="printer.MoonrakerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+    </div>
+    @if (printer.Backend == PrinterBackend.PrusaLink)
+    {
+        <div class="form-group">
+            <label>API Key</label>
+            <InputText class="form-control" @bind-value="printer.ApiKey" />
+        </div>
+    }
+    <div class="form-group">
+        <label>Notes</label>
+        <InputTextArea class="form-control" @bind-value="printer.Notes" />
+    </div>
+    <button class="btn btn-primary" type="submit">Add Printer</button>
+    <a class="btn btn-secondary" href="/printers">Cancel</a>
+</EditForm>
+
+@code {
+    private CreatePrinterDto printer = new();
+
+    private async Task AddPrinter()
+    {
+        var resp = await Http.PostAsJsonAsync("api/printers", printer);
+        if (resp.IsSuccessStatusCode)
+        {
+            toast.Success("Printer added");
+            Nav.NavigateTo("/printers");
+        }
+        else
+        {
+            toast.Error($"Failed: {(int)resp.StatusCode}");
+        }
+    }
+}

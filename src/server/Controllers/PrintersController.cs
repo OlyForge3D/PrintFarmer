@@ -10,7 +10,7 @@ namespace Farm.Web.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrintersController(AppDbContext db, MoonrakerClient moon) : ControllerBase
+public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa) : ControllerBase
 {
     private static string NormalizeMoonrakerUrl(string url)
     {
@@ -44,28 +44,55 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
         var items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
         var dtos = await Task.WhenAll(items.Select(async p =>
         {
-            var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
-            return new PrinterDto(
-                p.Id,
-                p.Name,
-                p.MoonrakerUrl,
-                p.Notes,
-                status.IsOnline,
-                status.State,
-                p.Manufacturer?.Name,
-                p.Model?.Name,
-                status.Progress,
-                status.JobName,
-                status.ThumbnailUrl,
-                status.CameraStreamUrl,
-                status.CameraSnapshotUrl,
-                status.X,
-                status.Y,
-                status.Z,
-                status.HotendTemp,
-                status.BedTemp,
-                status.HotendTarget,
-                status.BedTarget);
+            if (p.Backend == 1) // PrusaLink
+            {
+                var status = await prusa.GetCompositeStatusAsync(p.MoonrakerUrl, p.ApiKey, ct);
+                return new PrinterDto(
+                    Id: p.Id,
+                    Name: p.Name,
+                    MoonrakerUrl: p.MoonrakerUrl,
+                    Notes: p.Notes,
+                    IsOnline: status.IsOnline,
+                    State: status.State,
+                    ManufacturerName: p.Manufacturer?.Name,
+                    ModelName: p.Model?.Name,
+                    Progress: status.Progress,
+                    JobName: status.JobName,
+                    ThumbnailUrl: status.ThumbnailUrl,
+                    CameraStreamUrl: status.CameraStreamUrl,
+                    CameraSnapshotUrl: status.CameraSnapshotUrl,
+                    Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
+                    ApiKey: p.ApiKey
+                );
+            }
+            else // Moonraker
+            {
+                var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
+                return new PrinterDto(
+                    Id: p.Id,
+                    Name: p.Name,
+                    MoonrakerUrl: p.MoonrakerUrl,
+                    Notes: p.Notes,
+                    IsOnline: status.IsOnline,
+                    State: status.State,
+                    ManufacturerName: p.Manufacturer?.Name,
+                    ModelName: p.Model?.Name,
+                    Progress: status.Progress,
+                    JobName: status.JobName,
+                    ThumbnailUrl: status.ThumbnailUrl,
+                    CameraStreamUrl: status.CameraStreamUrl,
+                    CameraSnapshotUrl: status.CameraSnapshotUrl,
+                    X: status.X,
+                    Y: status.Y,
+                    Z: status.Z,
+                    HotendTemp: status.HotendTemp,
+                    BedTemp: status.BedTemp,
+                    HotendTarget: status.HotendTarget,
+                    BedTarget: status.BedTarget,
+                    Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
+                    ApiKey: p.ApiKey
+                );
+            }
         }));
         return Ok(dtos);
     }
@@ -73,30 +100,57 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<PrinterDto>> Get(Guid id, CancellationToken ct)
     {
-    var p = await db.Printers.Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
+        var p = await db.Printers.Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) return NotFound();
-    var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
-    return new PrinterDto(
-        p.Id,
-        p.Name,
-        p.MoonrakerUrl,
-        p.Notes,
-        status.IsOnline,
-        status.State,
-        p.Manufacturer?.Name,
-        p.Model?.Name,
-        status.Progress,
-        status.JobName,
-        status.ThumbnailUrl,
-        status.CameraStreamUrl,
-        status.CameraSnapshotUrl,
-        status.X,
-        status.Y,
-    status.Z,
-    status.HotendTemp,
-    status.BedTemp,
-    status.HotendTarget,
-    status.BedTarget);
+        if (p.Backend == 1) // PrusaLink
+        {
+            var status = await prusa.GetCompositeStatusAsync(p.MoonrakerUrl, p.ApiKey, ct);
+            return new PrinterDto(
+                Id: p.Id,
+                Name: p.Name,
+                MoonrakerUrl: p.MoonrakerUrl,
+                Notes: p.Notes,
+                IsOnline: status.IsOnline,
+                State: status.State,
+                ManufacturerName: p.Manufacturer?.Name,
+                ModelName: p.Model?.Name,
+                Progress: status.Progress,
+                JobName: status.JobName,
+                ThumbnailUrl: status.ThumbnailUrl,
+                CameraStreamUrl: status.CameraStreamUrl,
+                CameraSnapshotUrl: status.CameraSnapshotUrl,
+                Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
+                ApiKey: p.ApiKey
+            );
+        }
+        else // Moonraker
+        {
+            var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
+            return new PrinterDto(
+                Id: p.Id,
+                Name: p.Name,
+                MoonrakerUrl: p.MoonrakerUrl,
+                Notes: p.Notes,
+                IsOnline: status.IsOnline,
+                State: status.State,
+                ManufacturerName: p.Manufacturer?.Name,
+                ModelName: p.Model?.Name,
+                Progress: status.Progress,
+                JobName: status.JobName,
+                ThumbnailUrl: status.ThumbnailUrl,
+                CameraStreamUrl: status.CameraStreamUrl,
+                CameraSnapshotUrl: status.CameraSnapshotUrl,
+                X: status.X,
+                Y: status.Y,
+                Z: status.Z,
+                HotendTemp: status.HotendTemp,
+                BedTemp: status.BedTemp,
+                HotendTarget: status.HotendTarget,
+                BedTarget: status.BedTarget,
+                Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
+                ApiKey: p.ApiKey
+            );
+        }
     }
 
     [HttpGet("{id:guid}/details")]
@@ -159,32 +213,61 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
         Notes = dto.Notes,
         ManufacturerId = manufacturerId,
         ModelId = modelId,
-        DateAcquired = dto.DateAcquired
+        DateAcquired = dto.DateAcquired,
+        Backend = (int)dto.Backend,
+        ApiKey = dto.ApiKey
     };
         db.Printers.Add(p);
         await db.SaveChangesAsync(ct);
-    var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
-    return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
-        p.Id,
-        p.Name,
-        p.MoonrakerUrl,
-        p.Notes,
-        status.IsOnline,
-        status.State,
-        null,
-        null,
-        status.Progress,
-        status.JobName,
-        status.ThumbnailUrl,
-        status.CameraStreamUrl,
-        status.CameraSnapshotUrl,
-        status.X,
-        status.Y,
-    status.Z,
-    status.HotendTemp,
-    status.BedTemp,
-    status.HotendTarget,
-    status.BedTarget));
+    if (p.Backend == 1) // PrusaLink
+    {
+        var status = await prusa.GetCompositeStatusAsync(p.MoonrakerUrl, p.ApiKey, ct);
+        return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            MoonrakerUrl: p.MoonrakerUrl,
+            Notes: p.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: null,
+            ModelName: null,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: status.CameraStreamUrl,
+            CameraSnapshotUrl: status.CameraSnapshotUrl,
+            Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
+            ApiKey: p.ApiKey
+        ));
+    }
+    else
+    {
+        var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
+        return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            MoonrakerUrl: p.MoonrakerUrl,
+            Notes: p.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: null,
+            ModelName: null,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: status.CameraStreamUrl,
+            CameraSnapshotUrl: status.CameraSnapshotUrl,
+            X: status.X,
+            Y: status.Y,
+            Z: status.Z,
+            HotendTemp: status.HotendTemp,
+            BedTemp: status.BedTemp,
+            HotendTarget: status.HotendTarget,
+            BedTarget: status.BedTarget,
+            Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
+            ApiKey: p.ApiKey
+        ));
+    }
     }
 
     [HttpPut("{id:guid}")]
@@ -225,8 +308,12 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
         p.MoonrakerUrl = NormalizeMoonrakerUrl(dto.MoonrakerUrl);
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
-    p.ModelId = modelId;
+        p.ModelId = modelId;
         p.DateAcquired = dto.DateAcquired;
+        if (dto.Backend.HasValue)
+            p.Backend = (int)dto.Backend.Value;
+        if (dto.ApiKey != null)
+            p.ApiKey = dto.ApiKey;
         await db.SaveChangesAsync(ct);
         return NoContent();
     }

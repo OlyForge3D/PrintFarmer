@@ -1,5 +1,11 @@
 namespace Farm.Web.Shared;
 
+public enum PrinterBackend
+{
+	Moonraker = 0,
+	PrusaLink = 1
+}
+
 public record PrinterDto(
 	Guid Id,
 	string Name,
@@ -20,7 +26,9 @@ public record PrinterDto(
 	double? HotendTemp = null,
 	double? BedTemp = null,
 	double? HotendTarget = null,
-	double? BedTarget = null);
+	double? BedTarget = null,
+	PrinterBackend Backend = PrinterBackend.Moonraker,
+	string? ApiKey = null);
 
 // Real-time update payload for SignalR
 public record PrinterStatusUpdate(
@@ -50,6 +58,8 @@ public class CreatePrinterDto
 	public string? NewManufacturerName { get; set; }
 	public string? NewModelName { get; set; }
 	public DateTime? DateAcquired { get; set; }
+	public PrinterBackend Backend { get; set; } = PrinterBackend.Moonraker;
+	public string? ApiKey { get; set; }
 }
 
 public record UpdatePrinterDto(
@@ -60,7 +70,9 @@ public record UpdatePrinterDto(
 	Guid? ModelId,
 	string? NewManufacturerName,
 	string? NewModelName,
-	DateTime? DateAcquired);
+	DateTime? DateAcquired,
+	PrinterBackend? Backend = null,
+	string? ApiKey = null);
 
 // Local spools removed; Spoolman is the source of truth
 

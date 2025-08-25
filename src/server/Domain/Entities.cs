@@ -4,8 +4,12 @@ public class Printer
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string MoonrakerUrl { get; set; } = string.Empty; // e.g., http://printer:7125
+    public string MoonrakerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL
     public string? Notes { get; set; }
+
+    // Backend type (Moonraker or PrusaLink)
+    public int Backend { get; set; } = 0; // 0 = Moonraker, 1 = PrusaLink
+    public string? ApiKey { get; set; } // For PrusaLink
 
     // Metadata
     public Guid? ManufacturerId { get; set; }
