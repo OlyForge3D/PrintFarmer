@@ -1,0 +1,224 @@
+@page "/printers/{id:guid}/edit"
+@using Farm.Web.Shared
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject Farm.Web.Client.ToastService toast
+
+<h2>Edit Printer Details</h2>
+
+@if (form is null)
+{
+  <p>Loading…</p>
+}
+else
+{
+  <div class="form">
+    <label>Name</label>
+    <div class="field">
+      <input class="@(string.IsNullOrWhiteSpace(form.Name) ? "invalid" : null)" @bind="form.Name" />
+      @if (string.IsNullOrWhiteSpace(form.Name))
+      {
+        <div class="hint error">Name is required.</div>
+      }
+    </div>
+
+    <label>Moonraker URL</label>
+    <div class="field">
+      <input class="@(string.IsNullOrWhiteSpace(form.MoonrakerUrl) ? "invalid" : null)" @bind="form.MoonrakerUrl" />
+      @if (string.IsNullOrWhiteSpace(form.MoonrakerUrl))
+      {
+        <div class="hint error">Moonraker URL is required.</div>
+      }
+    </div>
+
+    <label>Notes</label>
+  <input @bind="form.Notes" />
+
+    <label>Manufacturer</label>
+    <div class="field">
+      <div class="row-inline" style="gap:.25rem; align-items:center;">
+        <select style="flex:1" @bind="selectedManufacturerId" @bind:after="OnManufacturerChanged">
+          <option value="">-- Select --</option>
+          @foreach (var m in manufacturers)
+          {
+            <option value="@m.Id">@m.Name</option>
+          }
+        </select>
+        <button class="icon-btn" title="New Manufacturer" aria-label="New Manufacturer" @onclick="ShowNewManufacturer" type="button">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z"/>
+          </svg>
+        </button>
+      </div>
+      @if (showNewManufacturer)
+      {
+        <input placeholder="New manufacturer name" @bind="newManufacturerName" />
+      }
+    </div>
+
+    <label>Model</label>
+    <div class="field">
+      <div class="row-inline" style="gap:.25rem; align-items:center;">
+        <select style="flex:1" @bind="selectedModelId">
+          <option value="">-- Select --</option>
+          @foreach (var m in models)
+          {
+            <option value="@m.Id">@m.Name</option>
+          }
+        </select>
+        <button class="icon-btn" title="New Model" aria-label="New Model" @onclick="ShowNewModel" type="button">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z"/>
+          </svg>
+        </button>
+      </div>
+      @if (showNewModel)
+      {
+        <input placeholder="New model name" @bind="newModelName" />
+      }
+    </div>
+
+    <label>Model Max (mm)</label>
+    <div class="field">
+      <div class="row">
+        <span>X: @modelMaxX?.ToString() ?? "—"</span>
+        <span>Y: @modelMaxY?.ToString() ?? "—"</span>
+        <span>Z: @modelMaxZ?.ToString() ?? "—"</span>
+      </div>
+      <div class="hint">Edit model dimensions from the Catalog.</div>
+    </div>
+
+    <label>Date Acquired</label>
+  <input type="date" @bind-value="form.DateAcquired" @bind-value:format="yyyy-MM-dd" />
+
+    <div class="actions">
+  <button class="btn primary" @onclick="Save" disabled="@(!IsValid())">Save</button>
+  <button class="btn" @onclick="Cancel" type="button">Cancel</button>
+    </div>
+  </div>
+}
+
+@code {
+  [Parameter] public Guid id { get; set; }
+  private class EditFormModel
+  {
+    public string Name { get; set; } = string.Empty;
+    public string MoonrakerUrl { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public DateTime? DateAcquired { get; set; }
+  }
+  private EditFormModel? form;
+  private List<ManufacturerDto> manufacturers = new();
+  private List<ModelDto> models = new();
+  private Guid? selectedManufacturerId;
+  private Guid? selectedModelId;
+  private bool showNewManufacturer;
+  private bool showNewModel;
+  private string? newManufacturerName;
+  private string? newModelName;
+  private double? modelMaxX;
+  private double? modelMaxY;
+  private double? modelMaxZ;
+
+  protected override async Task OnInitializedAsync()
+  {
+    var details = await Http.GetFromJsonAsync<PrinterDetailsDto>($"api/printers/{id}/details");
+    if (details is not null)
+    {
+  form = new EditFormModel
+      {
+        Name = details.Name,
+        MoonrakerUrl = details.MoonrakerUrl,
+        Notes = details.Notes,
+        DateAcquired = details.DateAcquired
+      };
+      selectedManufacturerId = details.ManufacturerId;
+      selectedModelId = details.ModelId;
+  modelMaxX = details.ModelMaxX;
+  modelMaxY = details.ModelMaxY;
+  modelMaxZ = details.ModelMaxZ;
+    }
+    manufacturers = await Http.GetFromJsonAsync<List<ManufacturerDto>>("api/catalog/manufacturers") ?? new();
+    await LoadModels();
+  }
+
+  private async Task LoadModels()
+  {
+    if (selectedManufacturerId is Guid mid)
+      models = await Http.GetFromJsonAsync<List<ModelDto>>($"api/catalog/models?manufacturerId={mid}") ?? new();
+    else
+      models = new();
+  }
+
+  private async Task OnManufacturerChanged()
+  {
+    // reset model when manufacturer changes
+    selectedModelId = null;
+    await LoadModels();
+  }
+
+  private void ShowNewManufacturer() => showNewManufacturer = !showNewManufacturer;
+  private void ShowNewModel() => showNewModel = !showNewModel;
+
+  private async Task Save()
+  {
+    // Ensure new Manufacturer/Model exist first, handle duplicates by selecting existing
+    if (!string.IsNullOrWhiteSpace(newManufacturerName))
+    {
+      var mresp = await Http.PostAsJsonAsync("api/catalog/manufacturers", newManufacturerName);
+      if ((int)mresp.StatusCode == 409)
+      {
+        var existing = await mresp.Content.ReadFromJsonAsync<ManufacturerDto>();
+        if (existing is not null) selectedManufacturerId = existing.Id;
+      }
+      else if (mresp.IsSuccessStatusCode)
+      {
+        var created = await mresp.Content.ReadFromJsonAsync<ManufacturerDto>();
+        if (created is not null) selectedManufacturerId = created.Id;
+      }
+    }
+    if (!string.IsNullOrWhiteSpace(newModelName) && selectedManufacturerId is Guid mid)
+    {
+      var mresp = await Http.PostAsJsonAsync("api/catalog/models", new { ManufacturerId = mid, Name = newModelName });
+      if ((int)mresp.StatusCode == 409)
+      {
+        var existing = await mresp.Content.ReadFromJsonAsync<ModelDto>();
+        if (existing is not null) selectedModelId = existing.Id;
+      }
+      else if (mresp.IsSuccessStatusCode)
+      {
+        var created = await mresp.Content.ReadFromJsonAsync<ModelDto>();
+        if (created is not null) selectedModelId = created.Id;
+      }
+    }
+    var dto = new UpdatePrinterDto(
+  form!.Name,
+  form!.MoonrakerUrl,
+  form!.Notes,
+      selectedManufacturerId,
+      selectedModelId,
+      null,
+      null,
+  form!.DateAcquired
+    );
+    var resp = await Http.PutAsJsonAsync($"api/printers/{id}", dto);
+    if (resp.IsSuccessStatusCode) { toast.Success("Saved"); Nav.NavigateTo("/"); }
+    else { toast.Error($"Save failed: {(int)resp.StatusCode}"); }
+  }
+
+  private void Cancel() => Nav.NavigateTo("/");
+
+  private bool IsValid()
+  {
+    if (form is null) return false;
+    if (string.IsNullOrWhiteSpace(form.Name)) return false;
+    if (string.IsNullOrWhiteSpace(form.MoonrakerUrl)) return false;
+    if (!string.IsNullOrWhiteSpace(newModelName))
+    {
+      if (selectedManufacturerId is null && string.IsNullOrWhiteSpace(newManufacturerName)) return false;
+    }
+    return true;
+  }
+}
+
+

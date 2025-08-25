@@ -1,0 +1,106 @@
+@page "/settings"
+@using Farm.Web.Shared
+@inject HttpClient Http
+@inject Farm.Web.Client.ToastService toast
+
+<h2>Settings</h2>
+
+<div class="form">
+  <label>Spoolman Base URL</label>
+  <div class="field">
+    <input placeholder="http://spoolman:8000" @bind="spoolmanBase" />
+    <div class="hint">Base URL to your Spoolman instance. No API key required.</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" @onclick="SaveSpoolman" disabled="@string.IsNullOrWhiteSpace(spoolmanBase)">Save</button>
+    <a class="btn" href="/spools">View Spools</a>
+  </div>
+</div>
+
+<div class="manage-card" style="margin-top:1rem; max-width:720px;">
+  <div class="section">
+    <div class="section-title">Filament Temperature Presets</div>
+    <div class="hint">Defaults used by preset buttons on the Printers page. Admins can override per material.</div>
+    <div class="form" style="margin-top:.5rem;">
+      <label>ABS (Hotend / Bed)</label>
+      <div class="row row-inline">
+        <input type="number" style="width:120px;" @bind-value="absHotend" @bind-value:event="oninput" />
+        <input type="number" style="width:120px;" @bind-value="absBed" @bind-value:event="oninput" />
+      </div>
+      <label>ASA (Hotend / Bed)</label>
+      <div class="row row-inline">
+        <input type="number" style="width:120px;" @bind-value="asaHotend" @bind-value:event="oninput" />
+        <input type="number" style="width:120px;" @bind-value="asaBed" @bind-value:event="oninput" />
+      </div>
+      <label>PLA (Hotend / Bed)</label>
+      <div class="row row-inline">
+        <input type="number" style="width:120px;" @bind-value="plaHotend" @bind-value:event="oninput" />
+        <input type="number" style="width:120px;" @bind-value="plaBed" @bind-value:event="oninput" />
+      </div>
+      <label>PC (Hotend / Bed)</label>
+      <div class="row row-inline">
+        <input type="number" style="width:120px;" @bind-value="pcHotend" @bind-value:event="oninput" />
+        <input type="number" style="width:120px;" @bind-value="pcBed" @bind-value:event="oninput" />
+      </div>
+      <label>PCTG (Hotend / Bed)</label>
+      <div class="row row-inline">
+        <input type="number" style="width:120px;" @bind-value="pctgHotend" @bind-value:event="oninput" />
+        <input type="number" style="width:120px;" @bind-value="pctgBed" @bind-value:event="oninput" />
+      </div>
+      <label>PETG (Hotend / Bed)</label>
+      <div class="row row-inline">
+        <input type="number" style="width:120px;" @bind-value="petgHotend" @bind-value:event="oninput" />
+        <input type="number" style="width:120px;" @bind-value="petgBed" @bind-value:event="oninput" />
+      </div>
+      <div class="actions">
+        <button class="btn primary" @onclick="SavePresets">Save Presets</button>
+      </div>
+    </div>
+  </div>
+  
+</div>
+
+@code {
+  private string spoolmanBase = string.Empty;
+  private FilamentPresetsDto? presets;
+  private double absHotend, absBed, asaHotend, asaBed, plaHotend, plaBed, pcHotend, pcBed, pctgHotend, pctgBed, petgHotend, petgBed;
+
+  protected override async Task OnInitializedAsync()
+  {
+    var cfg = await Http.GetFromJsonAsync<SpoolmanConfigDto>("api/spoolman/config");
+    if (cfg is not null) spoolmanBase = cfg.BaseUrl;
+    presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets");
+    if (presets is not null)
+    {
+      absHotend = presets.Abs.Hotend ?? 0; absBed = presets.Abs.Bed ?? 0;
+      asaHotend = presets.Asa.Hotend ?? 0; asaBed = presets.Asa.Bed ?? 0;
+      plaHotend = presets.Pla.Hotend ?? 0; plaBed = presets.Pla.Bed ?? 0;
+      pcHotend = presets.Pc.Hotend ?? 0; pcBed = presets.Pc.Bed ?? 0;
+      pctgHotend = presets.Pctg.Hotend ?? 0; pctgBed = presets.Pctg.Bed ?? 0;
+      petgHotend = presets.Petg.Hotend ?? 0; petgBed = presets.Petg.Bed ?? 0;
+    }
+  }
+
+  private async Task SaveSpoolman()
+  {
+    var resp = await Http.PostAsJsonAsync("api/spoolman/config", new SpoolmanConfigDto(spoolmanBase));
+    if (resp.IsSuccessStatusCode) toast.Success("Spoolman URL saved");
+    else toast.Error($"Save failed: {(int)resp.StatusCode}");
+  }
+
+  private async Task SavePresets()
+  {
+    var body = new FilamentPresetsDto(
+      new TempTargets(absHotend, absBed),
+      new TempTargets(asaHotend, asaBed),
+      new TempTargets(plaHotend, plaBed),
+      new TempTargets(pcHotend, pcBed),
+      new TempTargets(pctgHotend, pctgBed),
+      new TempTargets(petgHotend, petgBed)
+    );
+    var resp = await Http.PostAsJsonAsync("/api/presets", body);
+    if (resp.IsSuccessStatusCode) toast.Success("Presets saved");
+    else toast.Error($"Save failed: {(int)resp.StatusCode}");
+  }
+}

@@ -1,0 +1,43 @@
+@page "/manage"
+@using Farm.Web.Shared
+@inject HttpClient Http
+
+<h2>Management</h2>
+
+<div class="manage-grid">
+  <div class="manage-card">
+    <h3>Catalog</h3>
+    <p>Manage Manufacturers and Models.</p>
+    <a class="btn" href="/catalog">Open Catalog</a>
+  </div>
+
+  <div class="manage-card">
+    <h3>Printers</h3>
+    <p>Edit printer details.</p>
+    <ul>
+      @if (printers is null)
+      {
+        <li>Loading…</li>
+      }
+      else if (printers.Count == 0)
+      {
+        <li>No printers.</li>
+      }
+      else
+      {
+        @foreach (var p in printers)
+        {
+          <li><a href="/printers/@p.Id/edit">@p.Name</a></li>
+        }
+      }
+    </ul>
+  </div>
+</div>
+
+@code {
+  private List<PrinterDto>? printers;
+  protected override async Task OnInitializedAsync()
+  {
+    printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+  }
+}

@@ -1,0 +1,472 @@
+@page "/"
+@using Farm.Web.Shared
+@implements IDisposable
+@inject HttpClient Http
+@inject Farm.Web.Client.ToastService toast
+@inject Farm.Web.Client.RealtimeService realtime
+
+<h2>Printers</h2>
+
+<div class="row">
+    <a href="/printers/new">Add Printer</a>
+    <a href="/catalog">Catalog</a>
+    <button @onclick="Refresh">Refresh</button>
+ </div>
+
+@if (printers is null)
+{
+    <p>Loading…</p>
+}
+else if (!printers.Any())
+{
+    <p>No printers yet.</p>
+}
+else
+{
+    <button @onclick="Refresh">Refresh</button>
+    <div class="cards">
+        @foreach (var p in printers)
+        {
+            <div class="card">
+                <div class="card-header" title="@HeaderTooltip(p)">
+                    <div>
+                        @if (editingId == p.Id)
+                        {
+                            <input style="width: 160px" @bind="editName" />
+                            <input style="width: 220px" @bind="editUrl" />
+                        }
+                        else
+                        {
+                            <div class="name-row">
+                                <div class="name caps-font" style="color:inherit;">@p.Name</div>
+                                <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
+                                        <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
+                                    </svg>
+                                </a>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
+                            {
+                                <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
+                            }
+                            <div class="url-row">
+                                <div class="url mini-header">@p.MoonrakerUrl</div>
+                                <a class="icon-btn" href="@ToPort80(p.MoonrakerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                        <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                    </svg>
+                                </a>
+                            </div>
+                        }
+                    </div>
+                    <div class="status @(p.IsOnline ? "online" : "offline")">
+                        @(p.IsOnline ? (p.State ?? "") : "Offline")
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="mini-header">Temps</div>
+                    <div class="axis-fields">
+                        <div class="axis-field">
+                            <label>Hotend</label>
+                            <input class="temp-input" type="number" value="@GetHotend(p.Id)" @oninput="(e)=> SetHotend(p.Id, ToDouble(e.Value))" />
+                            <span class="temp-readout" title="Current → Target">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15 14.76V5a3 3 0 10-6 0v9.76a5 5 0 106 0zM10 5a2 2 0 114 0v9.76l.2.2A3 3 0 1110 15l.2-.24V5z"/><path d="M12 17a1 1 0 001-1V8a1 1 0 10-2 0v8a1 1 0 001 1z"/></svg>
+                                @FmtTemp(p.HotendTemp)@(p.HotendTarget is double ht ? $" → {FmtTemp(ht)}" : "")
+                            </span>
+                        </div>
+                        <div class="axis-field">
+                            <label>Bed</label>
+                            <input class="temp-input" type="number" value="@GetBed(p.Id)" @oninput="(e)=> SetBed(p.Id, ToDouble(e.Value))" />
+                            <span class="temp-readout" title="Current → Target">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15 14.76V5a3 3 0 10-6 0v9.76a5 5 0 106 0zM10 5a2 2 0 114 0v9.76l.2.2A3 3 0 1110 15l.2-.24V5z"/><path d="M12 17a1 1 0 001-1V8a1 1 0 10-2 0v8a1 1 0 001 1z"/></svg>
+                                @FmtTemp(p.BedTemp)@(p.BedTarget is double bt ? $" → {FmtTemp(bt)}" : "")
+                            </span>
+                        </div>
+                        <div class="axis-go">
+                            <button class="btn btn-inline" @onclick="() => SetTemps(p.Id, GetHotend(p.Id), GetBed(p.Id))"><span class="caps-label">SET</span></button>
+                        </div>
+                    </div>
+                    <div class="preset-row">
+                        <button class="btn preset" style="background:#6b7280" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Abs)" @onclick="() => ApplyPresetAbs(p.Id)">ABS</button>
+                        <button class="btn preset" style="background:#f59e0b" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Asa)" @onclick="() => ApplyPresetAsa(p.Id)">ASA</button>
+                        <button class="btn preset" style="background:#10b981" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Pla)" @onclick="() => ApplyPresetPla(p.Id)">PLA</button>
+                        <button class="btn preset" style="background:#8b5cf6" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Pc)" @onclick="() => ApplyPresetPc(p.Id)">PC</button>
+                        <button class="btn preset" style="background:#06b6d4" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Pctg)" @onclick="() => ApplyPresetPctg(p.Id)">PCTG</button>
+                        <button class="btn preset" style="background:#ef4444" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Petg)" @onclick="() => ApplyPresetPetg(p.Id)">PETG</button>
+                        <button class="btn preset cooldown" style="background:#1fa2ff" disabled="@IsPrinting(p)" title="Cooldown (set all heaters to 0)" aria-label="Cooldown" @onclick="() => ApplyCooldown(p.Id)">❄</button>
+                    </div>
+                </div>
+
+                <div class="section move-section">
+                    <div class="mini-header">Move</div>
+                    <div class="move-grids">
+                        <div class="move-pads">
+                        <div class="xy-pad">
+                            <button class="btn pad-btn xy home-all" title="Home all axes" aria-label="Home all axes" disabled="@IsPrinting(p)" @onclick="() => Home(p.Id)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 3l9 8h-3v9h-5v-6H11v6H6v-9H3l9-8z"/>
+                                </svg>
+                            </button>
+                            <button class="btn pad-btn xy up"    disabled="@IsPrinting(p)" @onclick="() => MoveY(p.Id,  GetStep(p.Id))">▲</button>
+                            <button class="btn pad-btn xy left"  disabled="@IsPrinting(p)" @onclick="() => MoveX(p.Id, -GetStep(p.Id))">◀</button>
+                            <button class="btn pad-btn xy home" title="Home X/Y" aria-label="Home X and Y" disabled="@IsPrinting(p)" @onclick="() => HomeXY(p.Id)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 3l9 8h-3v9h-5v-6H11v6H6v-9H3l9-8z"/>
+                                </svg>
+                            </button>
+                            <button class="btn pad-btn xy right" disabled="@IsPrinting(p)" @onclick="() => MoveX(p.Id,  GetStep(p.Id))">▶</button>
+                            <button class="btn pad-btn xy down"  disabled="@IsPrinting(p)" @onclick="() => MoveY(p.Id, -GetStep(p.Id))">▼</button>
+                        </div>
+                        <div class="z-pad">
+                            <button class="btn pad-btn z up"   disabled="@IsPrinting(p)" @onclick="() => MoveZ(p.Id,  GetStep(p.Id))">Z+</button>
+                            <button class="btn pad-btn z home" title="Home Z" aria-label="Home Z axis" disabled="@IsPrinting(p)" @onclick="() => HomeZ(p.Id)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 3l9 8h-3v9h-5v-6H11v6H6v-9H3l9-8z"/>
+                                </svg>
+                            </button>
+                            <button class="btn pad-btn z down" disabled="@IsPrinting(p)" @onclick="() => MoveZ(p.Id, -GetStep(p.Id))">Z-</button>
+                        </div>
+            <div class="ctrl-pad" title="Print Controls">
+                            <div class="mini-header">Controls</div>
+                            <div class="row" style="align-items:center; gap:.5rem;">
+                <button class="btn pad-btn" title="Pause" aria-label="Pause" disabled="@(!IsPrinting(p))" @onclick="() => Pause(p.Id)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3v14H7zM14 5h3v14h-3z"/></svg>
+                                </button>
+                <button class="btn pad-btn" title="Resume" aria-label="Resume" disabled="@(!IsPaused(p))" @onclick="() => Resume(p.Id)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                <button class="btn pad-btn danger" title="Emergency Stop" aria-label="Emergency Stop" disabled="@(!p.IsOnline)" @onclick="() => EmergencyStop(p.Id)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L2 22h20L12 2zm-1 7h2v6h-2V9zm0 8h2v2h-2v-2z"/></svg>
+                                </button>
+                            </div>
+                            <div class="step-block">
+                                <div class="mini-header">Steps</div>
+                                <div class="step-group">
+                                    <button class=@StepBtnClass(p.Id,1) @onclick="() => SetStep(p.Id, 1)">1</button>
+                                    <button class=@StepBtnClass(p.Id,10) @onclick="() => SetStep(p.Id, 10)">10</button>
+                                    <button class=@StepBtnClass(p.Id,50) @onclick="() => SetStep(p.Id, 50)">50</button>
+                                </div>
+                            </div>
+                            
+                        </div>
+                        </div>
+
+                        
+
+                        <div class="axis-fields">
+                            <div class="axis-field">
+                                <span class="axis-inset">X</span>
+                                <input type="number" value="@GetMoveX(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveX(p.Id, ToDouble(e.Value))" title="Set X" />
+                                <span class="axis-value">[@FmtPos(p.X)]</span>
+                            </div>
+                            <div class="axis-field">
+                                <span class="axis-inset">Y</span>
+                                <input type="number" value="@GetMoveY(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveY(p.Id, ToDouble(e.Value))" title="Set Y" />
+                                <span class="axis-value">[@FmtPos(p.Y)]</span>
+                            </div>
+                            <div class="axis-field">
+                                <span class="axis-inset">Z</span>
+                                <input type="number" value="@GetMoveZ(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveZ(p.Id, ToDouble(e.Value))" title="Set Z" />
+                                <span class="axis-value">[@FmtPos(p.Z)]</span>
+                            </div>
+                            <div class="axis-go">
+                                <button class="btn btn-inline" disabled="@IsPrinting(p)" @onclick="() => MoveTo(p.Id, GetMoveX(p.Id), GetMoveY(p.Id), GetMoveZ(p.Id))"><span class="caps-label">GO</span></button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                @if (p.IsOnline && string.Equals(p.State, "printing", StringComparison.OrdinalIgnoreCase))
+                {
+                    <div class="section">
+                        <div class="mini-header">Job</div>
+                        <div class="job">
+                            <div class="meta">
+                                <div class="job-name caps-label">@p.JobName</div>
+                                @if (p.Progress is double prog)
+                                {
+                                    <div class="progress-row">
+                                        <div class="progress"><div class="bar" style="width:@prog%"></div></div>
+                                        <div class="percent caps-label">@($"{prog:0.0}%")</div>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(p.ThumbnailUrl))
+                                {
+                                    <img class="thumb" src="@p.ThumbnailUrl" alt="thumbnail" />
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(p.CameraStreamUrl))
+                    {
+                        <div class="section">
+                            <div class="mini-header">Livestream</div>
+                            <div class="stream">
+                                <img src="@p.CameraStreamUrl" alt="live stream" />
+                            </div>
+                        </div>
+                    }
+                }
+
+        <div class="card-footer">
+                    @if (editingId == p.Id)
+                    {
+                        <button @onclick="() => SaveEdit(p)">Save</button>
+                        <button @onclick="CancelEdit">Cancel</button>
+                    }
+                    else
+                    {
+            
+                        @if (!p.IsOnline)
+                        {
+                            <button class="icon-btn danger" title="Delete" aria-label="Delete" @onclick="() => Delete(p.Id)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                                </svg>
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<PrinterDto>? printers;
+    // creation moved to /printers/new
+    private Guid? editingId;
+    private string editName = string.Empty;
+    private string editUrl = string.Empty;
+    private string? editNotes;
+
+    protected override async Task OnInitializedAsync()
+    {
+    printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+    // preload presets for tooltips
+    try { presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets"); } catch { presets = null; }
+    // Switch to SignalR push updates
+        await realtime.EnsureConnectedAsync();
+        // Subscribe to all updates (Guid.Empty wildcard) and merge into current list
+        realtime.Subscribe(Guid.Empty, update =>
+        {
+            if (printers is null) return;
+            var idx = printers.FindIndex(p => p.Id == update.Id);
+            if (idx >= 0)
+            {
+                var existing = printers[idx];
+                printers[idx] = existing with
+                {
+                    IsOnline = update.IsOnline,
+                    State = update.State,
+                    Progress = update.Progress,
+                    JobName = update.JobName ?? existing.JobName,
+                    ThumbnailUrl = update.ThumbnailUrl ?? existing.ThumbnailUrl,
+                    CameraStreamUrl = update.CameraStreamUrl ?? existing.CameraStreamUrl,
+                    X = update.X ?? existing.X,
+                    Y = update.Y ?? existing.Y,
+                    Z = update.Z ?? existing.Z,
+                    HotendTemp = update.HotendTemp ?? existing.HotendTemp,
+                    BedTemp = update.BedTemp ?? existing.BedTemp,
+                    HotendTarget = update.HotendTarget ?? existing.HotendTarget,
+                    BedTarget = update.BedTarget ?? existing.BedTarget,
+                };
+                InvokeAsync(StateHasChanged);
+            }
+        });
+        // Leave manual refresh available, but disable tight polling timer
+    }
+    public void Dispose()
+    {
+        // Best-effort unsubscribe wildcard
+        realtime.Unsubscribe(Guid.Empty);
+    }
+
+    private bool _refreshing;
+    private async Task Refresh()
+    {
+        if (editingId is not null) return; // avoid clobbering edits
+        if (_refreshing) return; // prevent overlap
+        _refreshing = true;
+        try
+        {
+            printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+            StateHasChanged();
+        }
+        finally { _refreshing = false; }
+    }
+
+    // create removed; use /printers/new
+
+    private async Task Delete(Guid id)
+    {
+    var resp = await Http.DeleteAsync($"api/printers/{id}");
+    if (resp.IsSuccessStatusCode) { await Refresh(); toast.Success("Printer deleted"); }
+    else { toast.Error($"Delete failed: {(int)resp.StatusCode}"); }
+    }
+
+    private void StartEdit(PrinterDto p)
+    {
+    // no polling timer now
+        editingId = p.Id;
+        editName = p.Name;
+        editUrl = p.MoonrakerUrl;
+        editNotes = p.Notes;
+    }
+    private void CancelEdit()
+    {
+        editingId = null;
+        editName = string.Empty;
+        editUrl = string.Empty;
+        editNotes = null;
+    // no polling timer now
+    }
+    private async Task SaveEdit(PrinterDto p)
+    {
+        if (editingId != p.Id) return;
+    var dto = new UpdatePrinterDto(editName, editUrl, editNotes, null, null, null, null, null);
+        var resp = await Http.PutAsJsonAsync($"api/printers/{p.Id}", dto);
+        if (resp.IsSuccessStatusCode)
+        {
+            editingId = null;
+            await Refresh();
+            toast.Success("Saved changes");
+        }
+        else { toast.Error($"Save failed: {(int)resp.StatusCode}"); }
+    }
+
+    private async Task Home(Guid id)
+    {
+        await Http.PostAsync($"api/printers/{id}/home", null);
+    }
+    private async Task HomeXY(Guid id)
+    {
+        await Http.PostAsync($"api/printers/{id}/homexy", null);
+    }
+    private async Task HomeZ(Guid id)
+    {
+        await Http.PostAsync($"api/printers/{id}/homez", null);
+    }
+    private async Task SetTemps(Guid id, double hotend, double bed)
+    {
+        await Http.PostAsJsonAsync($"api/printers/{id}/temps", new TempTargets(hotend, bed));
+    }
+
+    // --- Presets ---
+    private FilamentPresetsDto? presets;
+    private async Task EnsurePresetsAsync()
+    {
+        if (presets is not null) return;
+        try { presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets"); }
+        catch { presets = null; }
+    }
+    private async Task ApplyPreset(Guid id, string material)
+    {
+        await EnsurePresetsAsync();
+        if (presets is null) return;
+        TempTargets targets = material.ToUpperInvariant() switch
+        {
+            "ABS" => presets.Abs,
+            "ASA" => presets.Asa,
+            "PLA" => presets.Pla,
+            "PC" => presets.Pc,
+            "PCTG" => presets.Pctg,
+            "PETG" => presets.Petg,
+            _ => new TempTargets(GetHotend(id), GetBed(id))
+        };
+        if (targets.Hotend is double h) SetHotend(id, h);
+        if (targets.Bed is double b) SetBed(id, b);
+        await SetTemps(id, GetHotend(id), GetBed(id));
+        StateHasChanged();
+    }
+    private Task ApplyPresetAbs(Guid id) => ApplyPreset(id, "ABS");
+    private Task ApplyPresetAsa(Guid id) => ApplyPreset(id, "ASA");
+    private Task ApplyPresetPla(Guid id) => ApplyPreset(id, "PLA");
+    private Task ApplyPresetPc(Guid id) => ApplyPreset(id, "PC");
+    private Task ApplyPresetPctg(Guid id) => ApplyPreset(id, "PCTG");
+    private Task ApplyPresetPetg(Guid id) => ApplyPreset(id, "PETG");
+    private async Task ApplyCooldown(Guid id)
+    {
+        SetHotend(id, 0);
+        SetBed(id, 0);
+        await SetTemps(id, 0, 0);
+        StateHasChanged();
+    }
+
+    private static string PresetTip(TempTargets? t)
+        => t is TempTargets tt ? ($"Hotend: {(tt.Hotend?.ToString("0") ?? "-")}°C, Bed: {(tt.Bed?.ToString("0") ?? "-")}°C") : "";
+    private async Task Move(Guid id, double x, double y, double z)
+        => await Http.PostAsJsonAsync($"api/printers/{id}/move", new MoveRequest(x, y, z, 3000));
+
+    private async Task MoveX(Guid id, double dx)
+        => await Http.PostAsJsonAsync($"api/printers/{id}/move", new MoveRequest(dx, null, null, 3000));
+    private async Task MoveY(Guid id, double dy)
+        => await Http.PostAsJsonAsync($"api/printers/{id}/move", new MoveRequest(null, dy, null, 3000));
+    private async Task MoveZ(Guid id, double dz)
+        => await Http.PostAsJsonAsync($"api/printers/{id}/move", new MoveRequest(null, null, dz, 3000));
+    private async Task MoveTo(Guid id, double x, double y, double z)
+        => await Http.PostAsJsonAsync($"api/printers/{id}/moveto", new MoveRequest(x, y, z, 3000));
+
+    // simple per-printer input storage
+    private readonly Dictionary<Guid, double> hotend = new();
+    private readonly Dictionary<Guid, double> bed = new();
+    private readonly Dictionary<Guid, double> mvx = new();
+    private readonly Dictionary<Guid, double> mvy = new();
+    private readonly Dictionary<Guid, double> mvz = new();
+    private readonly Dictionary<Guid, double> step = new();
+
+    private double GetHotend(Guid id) => hotend.TryGetValue(id, out var v) ? v : 200;
+    private double GetBed(Guid id) => bed.TryGetValue(id, out var v) ? v : 60;
+    private double GetMoveX(Guid id) => mvx.TryGetValue(id, out var v) ? v : 0;
+    private double GetMoveY(Guid id) => mvy.TryGetValue(id, out var v) ? v : 0;
+    private double GetMoveZ(Guid id) => mvz.TryGetValue(id, out var v) ? v : 25;
+    private void SetHotend(Guid id, double v) => hotend[id] = v;
+    private void SetBed(Guid id, double v) => bed[id] = v;
+    private void SetMoveX(Guid id, double v) => mvx[id] = v;
+    private void SetMoveY(Guid id, double v) => mvy[id] = v;
+    private void SetMoveZ(Guid id, double v) => mvz[id] = v;
+    private double GetStep(Guid id) => step.TryGetValue(id, out var v) ? v : 10;
+    private void SetStep(Guid id, double v) => step[id] = v;
+    private string StepBtnClass(Guid id, double v) => $"btn-step {(GetStep(id) == v ? "active" : string.Empty)}";
+    private static bool IsPrinting(PrinterDto p) => p.IsOnline && string.Equals(p.State, "printing", StringComparison.OrdinalIgnoreCase);
+    private static bool IsPaused(PrinterDto p) => p.IsOnline && string.Equals(p.State, "paused", StringComparison.OrdinalIgnoreCase);
+    private static double ToDouble(object? v) => double.TryParse(Convert.ToString(v), out var d) ? d : 0;
+    private static string FmtPos(double? v) => v is double d ? d.ToString("0.###") : "--";
+    private static string FmtTemp(double? v) => v is double d ? d.ToString("0") + "°C" : "--";
+    private string HeaderTooltip(PrinterDto p)
+        => string.IsNullOrWhiteSpace(p.ManufacturerName) && string.IsNullOrWhiteSpace(p.ModelName)
+            ? ""
+            : $"{p.ManufacturerName} {p.ModelName}".Trim();
+
+    private async Task Pause(Guid id) => await Http.PostAsync($"api/printers/{id}/pause", null);
+    private async Task Resume(Guid id) => await Http.PostAsync($"api/printers/{id}/resume", null);
+    private async Task EmergencyStop(Guid id) => await Http.PostAsync($"api/printers/{id}/emergency-stop", null);
+
+    private static string ToPort80(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "#";
+        try
+        {
+            var uri = new Uri(url);
+            var builder = new UriBuilder(uri)
+            {
+                Scheme = Uri.UriSchemeHttp,
+                Port = 80
+            };
+            return builder.Uri.ToString();
+        }
+        catch
+        {
+            // Fallback: if it's not a valid URI, prepend http:// and :80
+            var trimmed = url.Trim();
+            if (!trimmed.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                trimmed = "http://" + trimmed;
+            return trimmed.EndsWith(":80", StringComparison.Ordinal) ? trimmed : trimmed.TrimEnd('/') + ":80";
+        }
+    }
+}
+

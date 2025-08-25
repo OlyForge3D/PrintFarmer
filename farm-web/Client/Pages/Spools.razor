@@ -1,0 +1,439 @@
+@page "/spools"
+@using Farm.Web.Shared
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<h2>Spools</h2>
+
+<div class="row">
+    <a class="btn" href="/settings">Open Settings</a>
+    <button class="btn" @onclick="RefreshFromSpoolman">Refresh</button>
+    <div class="row-inline">
+        <label>Page Size</label>
+        <select @onchange="OnPageSizeChanged" value="@pageSizeString">
+            <option value="10">10</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="All">All</option>
+        </select>
+    </div>
+    <button class="btn ghost" title="Reset to default sort (ID ascending)" @onclick="ResetSortingAsync">Reset sorting</button>
+    @if (!string.IsNullOrWhiteSpace(spoolmanError))
+    {
+        <span class="hint error">@spoolmanError</span>
+    }
+</div>
+
+<div class="row row-inline" style="align-items:center; gap:1rem;">
+    <label>Filters</label>
+    <div class="row-inline">
+        <label>Material</label>
+        <select @onchange="OnMaterialChanged" value="@selectedMaterial">
+            <option value="">All</option>
+            @foreach (var m in MaterialOptions())
+            {
+                <option value="@m">@m</option>
+            }
+        </select>
+    </div>
+    <div class="row-inline">
+        <label>Vendor</label>
+        <select @onchange="OnVendorChanged" value="@selectedVendor">
+            <option value="">All</option>
+            @foreach (var v in VendorOptions())
+            {
+                <option value="@v">@v</option>
+            }
+        </select>
+    </div>
+    <div class="row-inline">
+        <label>Color</label>
+        <select @onchange="OnColorChanged" value="@selectedColor">
+            <option value="">All</option>
+            @foreach (var c in ColorOptions())
+            {
+                <option value="@c">@c</option>
+            }
+        </select>
+    </div>
+</div>
+
+<!-- Local spools removed; managed in Spoolman UI -->
+
+@if (spools is null)
+{
+    <p>Loading…</p>
+}
+else if (!spools.Any())
+{
+    <p>No spools found in Spoolman.</p>
+}
+else
+{
+    <table id="spools-table" class="table">
+    <thead>
+            <tr>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Id"))">ID @SortIndicator("Id")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',0)" ontouchstart="columnResizer.start(event,'spools-table',0)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Vendor"))">Vendor @SortIndicator("Vendor")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',1)" ontouchstart="columnResizer.start(event,'spools-table',1)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Filament"))">Filament @SortIndicator("Filament")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',2)" ontouchstart="columnResizer.start(event,'spools-table',2)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Material"))">Material @SortIndicator("Material")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',3)" ontouchstart="columnResizer.start(event,'spools-table',3)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Weight"))">Remaining Weight @SortIndicator("Weight")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',4)" ontouchstart="columnResizer.start(event,'spools-table',4)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Color"))">Color @SortIndicator("Color")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',5)" ontouchstart="columnResizer.start(event,'spools-table',5)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("Registered"))">Registered @SortIndicator("Registered")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',6)" ontouchstart="columnResizer.start(event,'spools-table',6)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("FirstUsed"))">First Used @SortIndicator("FirstUsed")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',7)" ontouchstart="columnResizer.start(event,'spools-table',7)"></span>
+                </th>
+                <th class="resizable">
+                    <button class="link-btn" @onclick="@(() => SortByAsync("LastUsed"))">Last Used @SortIndicator("LastUsed")</button>
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',8)" ontouchstart="columnResizer.start(event,'spools-table',8)"></span>
+                </th>
+                <th class="resizable">Actions
+                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',9)" ontouchstart="columnResizer.start(event,'spools-table',9)"></span>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+    @foreach (var s in PagedSpools())
+            {
+                <tr>
+            <td>@s.Id</td>
+            <td>@(string.IsNullOrWhiteSpace(s.Vendor) ? "-" : s.Vendor)</td>
+            <td>@(string.IsNullOrWhiteSpace(s.FilamentName) ? "-" : s.FilamentName)</td>
+            <td>@s.Material</td>
+            <td>@(s.RemainingWeightG?.ToString("0") ?? "-")</td>
+            <td>
+                @if (!string.IsNullOrWhiteSpace(s.ColorHex))
+                {
+                    <span class="swatch" style="background-color:@s.ColorHex" title="@s.ColorHex" aria-label="Color swatch"></span>
+                }
+                else
+                {
+                    <span>-</span>
+                }
+            </td>
+            <td>@FormatDate(s.RegisteredAt)</td>
+            <td>@FormatDate(s.FirstUsedAt)</td>
+            <td>@FormatDate(s.LastUsedAt)</td>
+            <td>
+                @if (!string.IsNullOrWhiteSpace(spoolmanBase))
+                {
+                    <a class="icon-btn" href="@($"{spoolmanBase}/spool/edit/{s.Id}")" target="_blank" rel="noopener noreferrer" title="Edit in Spoolman" aria-label="Edit in Spoolman">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:middle;">
+                            <path d="M16.862 3.487a1.5 1.5 0 0 1 2.121 0l1.53 1.53a1.5 1.5 0 0 1 0 2.121l-9.9 9.9a1.5 1.5 0 0 1-.53.354l-4.243 1.414a.75.75 0 0 1-.948-.948l1.414-4.243a1.5 1.5 0 0 1 .354-.53l9.9-9.9zm-2.475 3.005l-9.193 9.193-.707 2.121 2.121-.707 9.193-9.193-1.414-1.414z" />
+                        </svg>
+                    </a>
+                }
+                else
+                {
+                    <a class="btn ghost" href="/settings" title="Configure Spoolman URL">Configure URL</a>
+                }
+            </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div class="row row-inline" style="justify-content: space-between; align-items:center;">
+        <div class="hint">@ShowingRange()</div>
+        @if (ShowPaging())
+        {
+            <div class="row-inline">
+                <button class="btn" @onclick="PrevPage" disabled="@IsPrevDisabled()">Prev</button>
+                <span class="hint">Page @currentPage of @TotalPages</span>
+                <button class="btn" @onclick="NextPage" disabled="@IsNextDisabled()">Next</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<SpoolmanSpoolDto>? spools;
+    private string? spoolmanBase;
+    private int currentPage = 1;
+    private int pageSize = 10; // 10, 50, 100, or int.MaxValue (All)
+    private const string PageSizeStorageKey = "spools.pageSize";
+    private const string SortKeyStorageKey = "spools.sortKey";
+    private const string SortAscStorageKey = "spools.sortAsc";
+    private string sortKey = "Id";
+    private bool sortAsc = true;
+    private string? selectedMaterial = string.Empty;
+    private string? selectedVendor = string.Empty;
+    private string? selectedColor = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+    await LoadSpoolmanConfig();
+    await LoadPagePreferences();
+    await RefreshFromSpoolman();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try { await JS.InvokeVoidAsync("columnResizer.applySaved", "spools-table"); } catch { }
+        }
+    }
+
+    private async Task Refresh()
+    {
+    await RefreshFromSpoolman();
+        StateHasChanged();
+    }
+
+    private string? spoolmanError;
+
+    private async Task LoadSpoolmanConfig()
+    {
+    var cfg = await Http.GetFromJsonAsync<SpoolmanConfigDto>("api/spoolman/config");
+        if (cfg is not null)
+        {
+            spoolmanBase = cfg.BaseUrl;
+        }
+    }
+    // Saving moved to Settings page
+    private async Task RefreshFromSpoolman()
+    {
+        try
+        {
+            spools = await Http.GetFromJsonAsync<List<SpoolmanSpoolDto>>("api/spoolman/spools") ?? [];
+            spoolmanError = null;
+            currentPage = 1;
+        }
+        catch
+        {
+            spoolmanError = "Unable to fetch from Spoolman. Check URL/API Key.";
+        }
+    }
+
+    // Local create/delete removed
+
+    // Paging helpers
+    private IEnumerable<SpoolmanSpoolDto> PagedSpools()
+    {
+        var data = SortedSpools().ToList();
+        if (pageSize == int.MaxValue)
+        {
+            foreach (var s in data) yield return s;
+            yield break;
+        }
+        var start = (currentPage - 1) * pageSize;
+        if (start < 0) start = 0;
+        if (start >= data.Count) start = Math.Max(0, (TotalPages - 1) * pageSize);
+        var end = Math.Min(start + pageSize, data.Count);
+        for (int i = start; i < end; i++) yield return data[i];
+    }
+
+    private int TotalPages => TotalItems == 0 || pageSize == int.MaxValue
+        ? 1
+        : (int)Math.Ceiling((double)TotalItems / pageSize);
+    private int TotalItems => SortedSpools().Count();
+    private bool ShowPaging() => pageSize != int.MaxValue && TotalItems > pageSize;
+    private bool IsPrevDisabled() => currentPage <= 1;
+    private bool IsNextDisabled() => currentPage >= TotalPages;
+    private void PrevPage() { if (currentPage > 1) currentPage--; }
+    private void NextPage() { if (currentPage < TotalPages) currentPage++; }
+
+    private string pageSizeString
+        => pageSize == int.MaxValue ? "All" : pageSize.ToString();
+
+    private async Task OnPageSizeChanged(ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        SetPageSizeFromString(val);
+        await JS.InvokeVoidAsync("localStorage.setItem", PageSizeStorageKey, pageSizeString);
+    }
+
+    private string ShowingRange()
+    {
+    var total = TotalItems;
+        if (total == 0) return "No items";
+        if (pageSize == int.MaxValue) return $"Showing 1–{total} of {total}";
+        var start = ((currentPage - 1) * pageSize) + 1;
+        var end = Math.Min(currentPage * pageSize, total);
+        return $"Showing {start}–{end} of {total}";
+    }
+
+    private async Task LoadPagePreferences()
+    {
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", PageSizeStorageKey);
+            if (!string.IsNullOrWhiteSpace(stored))
+            {
+                SetPageSizeFromString(stored);
+            }
+            var sk = await JS.InvokeAsync<string?>("localStorage.getItem", SortKeyStorageKey);
+            if (!string.IsNullOrWhiteSpace(sk) && IsValidSortKey(sk)) sortKey = sk;
+            var sa = await JS.InvokeAsync<string?>("localStorage.getItem", SortAscStorageKey);
+            if (!string.IsNullOrWhiteSpace(sa) && bool.TryParse(sa, out var asc)) sortAsc = asc;
+        }
+        catch { }
+    }
+
+    private void SetPageSizeFromString(string? val)
+    {
+        if (string.Equals(val, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            pageSize = int.MaxValue;
+            currentPage = 1;
+        }
+        else if (int.TryParse(val, out var sz) && (sz == 10 || sz == 50 || sz == 100))
+        {
+            pageSize = sz;
+            currentPage = 1;
+        }
+        else
+        {
+            pageSize = 10;
+            currentPage = 1;
+        }
+    }
+
+    // Sorting helpers
+    private IEnumerable<SpoolmanSpoolDto> SortedSpools()
+    {
+        IEnumerable<SpoolmanSpoolDto> data = FilteredSpools();
+        switch (sortKey)
+        {
+            case "Id":
+                data = sortAsc ? data.OrderBy(s => s.Id) : data.OrderByDescending(s => s.Id); break;
+            case "Material":
+                data = sortAsc ? data.OrderBy(s => s.Material ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                               : data.OrderByDescending(s => s.Material ?? string.Empty, StringComparer.OrdinalIgnoreCase); break;
+            case "Filament":
+                data = sortAsc ? data.OrderBy(s => s.FilamentName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                               : data.OrderByDescending(s => s.FilamentName ?? string.Empty, StringComparer.OrdinalIgnoreCase); break;
+            case "Vendor":
+                data = sortAsc ? data.OrderBy(s => s.Vendor ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                               : data.OrderByDescending(s => s.Vendor ?? string.Empty, StringComparer.OrdinalIgnoreCase); break;
+            case "Weight":
+                data = sortAsc ? data.OrderBy(s => s.RemainingWeightG ?? double.MinValue)
+                               : data.OrderByDescending(s => s.RemainingWeightG ?? double.MinValue); break;
+            case "Color":
+                data = sortAsc ? data.OrderBy(s => s.ColorHex ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                               : data.OrderByDescending(s => s.ColorHex ?? string.Empty, StringComparer.OrdinalIgnoreCase); break;
+            case "Registered":
+                data = sortAsc ? data.OrderBy(s => s.RegisteredAt ?? DateTime.MinValue)
+                               : data.OrderByDescending(s => s.RegisteredAt ?? DateTime.MinValue); break;
+            case "FirstUsed":
+                data = sortAsc ? data.OrderBy(s => s.FirstUsedAt ?? DateTime.MinValue)
+                               : data.OrderByDescending(s => s.FirstUsedAt ?? DateTime.MinValue); break;
+            case "LastUsed":
+                data = sortAsc ? data.OrderBy(s => s.LastUsedAt ?? DateTime.MinValue)
+                               : data.OrderByDescending(s => s.LastUsedAt ?? DateTime.MinValue); break;
+            
+        }
+        return data;
+    }
+
+    private async Task SortByAsync(string key)
+    {
+        if (sortKey == key) sortAsc = !sortAsc; else { sortKey = key; sortAsc = true; }
+        currentPage = 1;
+        try
+        {
+            if (IsValidSortKey(sortKey))
+            {
+                await JS.InvokeVoidAsync("localStorage.setItem", SortKeyStorageKey, sortKey);
+            }
+            await JS.InvokeVoidAsync("localStorage.setItem", SortAscStorageKey, sortAsc.ToString());
+        }
+        catch { }
+    }
+
+    private string SortIndicator(string key)
+        => sortKey == key ? (sortAsc ? "▲" : "▼") : string.Empty;
+
+    private static bool IsValidSortKey(string key)
+        => key is "Id" or "Material" or "Filament" or "Vendor" or "Weight" or "Color" or "Registered" or "FirstUsed" or "LastUsed";
+
+    private async Task ResetSortingAsync()
+    {
+        sortKey = "Id";
+        sortAsc = true;
+        currentPage = 1;
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.removeItem", SortKeyStorageKey);
+            await JS.InvokeVoidAsync("localStorage.removeItem", SortAscStorageKey);
+        }
+        catch { }
+    }
+
+    // Filter helpers
+    private IEnumerable<SpoolmanSpoolDto> FilteredSpools()
+    {
+        if (spools is null) return Enumerable.Empty<SpoolmanSpoolDto>();
+        IEnumerable<SpoolmanSpoolDto> q = spools;
+        if (!string.IsNullOrWhiteSpace(selectedMaterial))
+            q = q.Where(s => string.Equals(s.Material, selectedMaterial, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(selectedVendor))
+            q = q.Where(s => string.Equals(s.Vendor, selectedVendor, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(selectedColor))
+            q = q.Where(s => string.Equals(s.ColorHex, selectedColor, StringComparison.OrdinalIgnoreCase));
+        return q;
+    }
+
+    private IEnumerable<string> MaterialOptions() => spools is null
+        ? Enumerable.Empty<string>()
+        : spools.Select(s => s.Material)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> VendorOptions() => spools is null
+        ? Enumerable.Empty<string>()
+        : spools.Select(s => s.Vendor ?? "")
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> ColorOptions() => spools is null
+        ? Enumerable.Empty<string>()
+        : spools.Select(s => s.ColorHex ?? "")
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
+
+    private static string FormatDate(DateTime? dt)
+        => dt.HasValue ? dt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-";
+
+    private void OnMaterialChanged(ChangeEventArgs e)
+    {
+        selectedMaterial = e.Value?.ToString();
+        currentPage = 1;
+    }
+    private void OnVendorChanged(ChangeEventArgs e)
+    {
+        selectedVendor = e.Value?.ToString();
+        currentPage = 1;
+    }
+    private void OnColorChanged(ChangeEventArgs e)
+    {
+        selectedColor = e.Value?.ToString();
+        currentPage = 1;
+    }
+}
+

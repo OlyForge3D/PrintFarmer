@@ -1,0 +1,30 @@
+@inject ToastService Toaster
+
+<div class="toast-container">
+    @foreach (var t in Toaster.Toasts)
+    {
+        <div class="toast @t.Type">
+            <span>@t.Message</span>
+            <button @onclick="() => Toaster.Dismiss(t.Id)">×</button>
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Toaster.OnChanged += StateHasChanged;
+    }
+    public void Dispose()
+    {
+        Toaster.OnChanged -= StateHasChanged;
+    }
+}
+
+<style>
+.toast-container { position: fixed; top: 16px; right: 16px; display:flex; flex-direction:column; gap:8px; z-index: 1000; }
+.toast { min-width: 240px; max-width: 440px; padding: 10px 12px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); color:#e5e7eb; display:flex; align-items:center; justify-content:space-between; font-weight:600; }
+.toast.success { background: linear-gradient(180deg,#065f46,#064e3b); border:1px solid rgba(16,185,129,.35); }
+.toast.error { background: linear-gradient(180deg,#7f1d1d,#450a0a); border:1px solid rgba(239,68,68,.35); }
+.toast button { background: transparent; border:none; color:#e5e7eb; font-size:16px; cursor:pointer; }
+</style>
