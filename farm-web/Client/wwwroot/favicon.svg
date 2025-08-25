@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="title desc">
+  <title id="title">ForgeIQ Favicon</title>
+  <desc id="desc">Rounded gradient badge with stylized P and F monogram.</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="12" ry="12" fill="url(#g)"/>
+  <g fill="#ffffff">
+    <path d="M16 16h8c6 0 10 4 10 8s-4 8-10 8h-4v8h-4V16zm8 4h-4v8h4c4 0 6-2.2 6-4s-2-4-6-4z"/>
+    <path d="M34 16h14v4H38v6h8v4h-8v10h-4V16z"/>
+  </g>
+</svg>

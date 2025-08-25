@@ -1,4 +1,4 @@
-# Print Farm Web (Blazor + ASP.NET Core)
+# ForgeIQ Web (Blazor + ASP.NET Core)
 
 Minimal hosted solution to manage a Klipper/Moonraker-based print farm:
 - Add/remove printers and spools

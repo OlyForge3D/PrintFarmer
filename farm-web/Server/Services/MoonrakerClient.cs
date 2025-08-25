@@ -251,7 +251,7 @@ public class MoonrakerClient(HttpClient http)
             var baseNorm2 = NormalizeBaseUrl(baseUrl);
             var guesses = new (string snapshot, string stream)[]
             {
-                ("/webcam/?action=snapshot", "/webcam/?action=stream"),
+                ("/webcam/?action=stream", "/webcam/?action=stream"),
                 ("/webcam?action=snapshot", "/webcam?action=stream"),
                 ("/webcam/snapshot", "/webcam/stream"),
             };

@@ -62,7 +62,7 @@ else
                         }
                     </div>
                     <div class="status @(p.IsOnline ? "online" : "offline")">
-                        @(p.IsOnline ? (p.State ?? "") : "Offline")
+                        @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
                     </div>
                 </div>
 
