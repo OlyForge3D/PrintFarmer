@@ -13,6 +13,7 @@ public record PrinterDto(
 	string? JobName = null,
 	string? ThumbnailUrl = null,
 	string? CameraStreamUrl = null,
+	string? CameraSnapshotUrl = null,
 	double? X = null,
 	double? Y = null,
 	double? Z = null,

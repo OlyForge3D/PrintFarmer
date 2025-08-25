@@ -50,6 +50,12 @@ else
                             {
                                 <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
                             }
+                            @if (TryGetSnapshotUrl(p, out var snapUrl))
+                            {
+                                <div class="snapshot-row">
+                                    <img src="@snapUrl" alt="webcam snapshot" style="display:block; max-width:200px; max-height:120px; border-radius:6px; border:1px solid rgba(255,255,255,.08)" />
+                                </div>
+                            }
                             <div class="url-row">
                                 <div class="url mini-header">@p.MoonrakerUrl</div>
                                 <a class="icon-btn" href="@ToPort80(p.MoonrakerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
@@ -246,7 +252,15 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-    printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+        printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+        if (printers is not null)
+        {
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            foreach (var pr in printers)
+            {
+                if (pr.IsOnline) snapshotStamps[pr.Id] = now;
+            }
+        }
     // preload presets for tooltips
     try { presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets"); } catch { presets = null; }
     // Switch to SignalR push updates
@@ -275,10 +289,13 @@ else
                     HotendTarget = update.HotendTarget ?? existing.HotendTarget,
                     BedTarget = update.BedTarget ?? existing.BedTarget,
                 };
+        // Invalidate snapshot cache for this printer so it refreshes on next tick when status changes
+        snapshotStamps[update.Id] = 0;
                 InvokeAsync(StateHasChanged);
             }
         });
         // Leave manual refresh available, but disable tight polling timer
+    _ = StartSnapshotTimerAsync();
     }
     public void Dispose()
     {
@@ -467,6 +484,44 @@ else
                 trimmed = "http://" + trimmed;
             return trimmed.EndsWith(":80", StringComparison.Ordinal) ? trimmed : trimmed.TrimEnd('/') + ":80";
         }
+    }
+
+    // --- Snapshots ---
+    private readonly Dictionary<Guid, long> snapshotStamps = new();
+    private readonly TimeSpan snapshotInterval = TimeSpan.FromSeconds(30);
+    private CancellationTokenSource? snapshotCts;
+    private string SnapshotUrl(PrinterDto p)
+        => $"{p.CameraSnapshotUrl}?t={snapshotStamps.GetValueOrDefault(p.Id, 0)}";
+    private bool TryGetSnapshotUrl(PrinterDto p, out string url)
+    {
+        url = string.Empty;
+        if (string.IsNullOrWhiteSpace(p.CameraSnapshotUrl)) return false;
+        if (!snapshotStamps.TryGetValue(p.Id, out var ts) || ts == 0) return false;
+        url = SnapshotUrl(p);
+        return true;
+    }
+    private async Task StartSnapshotTimerAsync()
+    {
+        snapshotCts?.Cancel();
+        var cts = snapshotCts = new CancellationTokenSource();
+        try
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                await Task.Delay(snapshotInterval, cts.Token);
+                if (printers is null || printers.Count == 0) continue;
+                var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                foreach (var pr in printers)
+                {
+                    if (pr.IsOnline)
+                    {
+                        snapshotStamps[pr.Id] = now; // bump cache-buster to refresh image src
+                    }
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (TaskCanceledException) { }
     }
 }
 

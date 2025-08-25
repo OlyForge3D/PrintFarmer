@@ -58,6 +58,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
                 status.JobName,
                 status.ThumbnailUrl,
                 status.CameraStreamUrl,
+                status.CameraSnapshotUrl,
                 status.X,
                 status.Y,
                 status.Z,
@@ -88,6 +89,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
         status.JobName,
         status.ThumbnailUrl,
         status.CameraStreamUrl,
+        status.CameraSnapshotUrl,
         status.X,
         status.Y,
     status.Z,
@@ -175,6 +177,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
         status.JobName,
         status.ThumbnailUrl,
         status.CameraStreamUrl,
+        status.CameraSnapshotUrl,
         status.X,
         status.Y,
     status.Z,
@@ -236,6 +239,16 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon) : Control
         db.Printers.Remove(p);
         await db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    [HttpGet("{id:guid}/snapshot")]
+    public async Task<IActionResult> GetSnapshot(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FindAsync([id], ct);
+        if (p is null) return NotFound();
+        var bytes = await moon.GetCameraSnapshotAsync(p.MoonrakerUrl, ct);
+        if (bytes is null) return NotFound();
+        return File(bytes, "image/jpeg");
     }
 
     [HttpPost("{id:guid}/home")]

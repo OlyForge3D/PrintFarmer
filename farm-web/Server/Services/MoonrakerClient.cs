@@ -12,6 +12,7 @@ public record PrinterCompositeStatus(
     string? JobName,
     string? ThumbnailUrl,
     string? CameraStreamUrl,
+    string? CameraSnapshotUrl,
     double? X = null,
     double? Y = null,
     double? Z = null,
@@ -247,45 +248,103 @@ public class MoonrakerClient(HttpClient http)
                     }
                 }
             }
-            // If list is empty or doesn't include a usable URL, try common fallback endpoints
-            var baseNorm2 = NormalizeBaseUrl(baseUrl);
-            var guesses = new (string snapshot, string stream)[]
+        }
+        catch { }
+        return null;
+    }
+
+    private async Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/webcams/list";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            var root = doc.RootElement;
+            JsonElement cams;
+            if ((root.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array) ||
+                (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array))
             {
-                ("/webcam/?action=stream", "/webcam/?action=stream"),
-                ("/webcam?action=snapshot", "/webcam?action=stream"),
-                ("/webcam/snapshot", "/webcam/stream"),
-            };
-            foreach (var g in guesses)
-            {
-                try
+                foreach (var cam in cams.EnumerateArray())
                 {
-                    using var headReq = new HttpRequestMessage(HttpMethod.Head, baseNorm2 + g.snapshot);
-                    using var headResp = await http.SendAsync(headReq, cts.Token);
-                    if (headResp.IsSuccessStatusCode)
-                        return baseNorm2 + g.stream;
-                }
-                catch { /* ignore and continue */ }
-                // Try lightweight GET if HEAD not supported
-                try
-                {
-                    using var getReq = new HttpRequestMessage(HttpMethod.Get, baseNorm2 + g.snapshot);
-                    using var getResp = await http.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-                    if (getResp.IsSuccessStatusCode)
+                    bool enabled = true;
+                    if (cam.TryGetProperty("enabled", out var en))
                     {
-                        if (getResp.Content.Headers.ContentType?.MediaType is string mt &&
-                            (mt.StartsWith("image/", StringComparison.OrdinalIgnoreCase) || mt.Contains("multipart", StringComparison.OrdinalIgnoreCase)))
+                        if (en.ValueKind == JsonValueKind.False) enabled = false;
+                        else if (en.ValueKind == JsonValueKind.True) enabled = true;
+                    }
+                    if (!enabled) continue;
+
+                    // Try direct snapshot_url from listing
+                    if (cam.TryGetProperty("snapshot_url", out var sn) && sn.ValueKind == JsonValueKind.String)
+                    {
+                        var s = sn.GetString();
+                        if (!string.IsNullOrWhiteSpace(s))
                         {
-                            return baseNorm2 + g.stream;
+                            if (Uri.TryCreate(s, UriKind.Absolute, out var abs)) return abs.ToString();
+                            var baseNorm = NormalizeBaseUrl(baseUrl);
+                            var rel = s!.StartsWith('/') ? s : "/" + s;
+                            return baseNorm + rel;
                         }
-                        // Some cams don't set content-type correctly; accept success anyway
-                        return baseNorm2 + g.stream;
+                    }
+
+                    // Prefer resolved URLs via /server/webcams/test using uid or name
+                    string? uid = null;
+                    if (cam.TryGetProperty("uid", out var uidEl) && uidEl.ValueKind == JsonValueKind.String)
+                        uid = uidEl.GetString();
+                    string? name = null;
+                    if (cam.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String)
+                        name = nmEl.GetString();
+
+                    var baseNorm2 = NormalizeBaseUrl(baseUrl);
+                    var testUrl = uid is not null
+                        ? $"{baseNorm2}/server/webcams/test?uid={Uri.EscapeDataString(uid)}"
+                        : (name is not null ? $"{baseNorm2}/server/webcams/test?name={Uri.EscapeDataString(name)}" : null);
+                    if (testUrl is not null)
+                    {
+                        try
+                        {
+                            using var tresp = await http.PostAsync(testUrl, content: null, cts.Token);
+                            if (tresp.IsSuccessStatusCode)
+                            {
+                                await using var tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
+                                using var tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
+                                var troot = tdoc.RootElement;
+                                if (troot.TryGetProperty("result", out var tresult))
+                                    troot = tresult;
+                                if (troot.TryGetProperty("snapshot_url", out var tsu) && tsu.ValueKind == JsonValueKind.String)
+                                {
+                                    var s = tsu.GetString();
+                                    if (!string.IsNullOrWhiteSpace(s)) return s;
+                                }
+                            }
+                        }
+                        catch { }
                     }
                 }
-                catch { /* ignore and continue */ }
             }
         }
         catch { }
         return null;
+    }
+
+    public async Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            var url = await GetCameraSnapshotUrlAsync(baseUrl, ct);
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            using var resp = await http.GetAsync(url!, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch { return null; }
     }
 
     public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -350,11 +409,13 @@ public class MoonrakerClient(HttpClient http)
 
         // Only query camera when online
         string? cam = null;
+        string? snap = null;
         if (status.IsOnline)
         {
             cam = await GetCameraStreamUrlAsync(baseUrl, ct);
+            snap = await GetCameraSnapshotUrlAsync(baseUrl, ct);
         }
-        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, x, y, z, hotend, bed, hotendT, bedT);
+        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
