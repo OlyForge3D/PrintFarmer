@@ -170,7 +170,9 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             p.Model?.MaxX,
             p.Model?.MaxY,
             p.Model?.MaxZ,
-            p.DateAcquired
+            p.DateAcquired,
+            (PrinterBackend)p.Backend,
+            p.ApiKey
         );
     }
 

@@ -3,6 +3,8 @@
 @inject HttpClient Http
 @inject NavigationManager Nav
 @inject Farm.Web.Client.ToastService toast
+@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Components.Forms
 
 <h2>Edit Printer Details</h2>
 
@@ -22,14 +24,31 @@ else
       }
     </div>
 
-    <label>Moonraker URL</label>
+
+    <label>Backend</label>
     <div class="field">
-      <input class="@(string.IsNullOrWhiteSpace(form.MoonrakerUrl) ? "invalid" : null)" @bind="form.MoonrakerUrl" />
+      <InputSelect class="form-control" TValue="PrinterBackend" @bind-Value="form.Backend">
+        <option value="@PrinterBackend.Moonraker">Moonraker</option>
+        <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
+      </InputSelect>
+    </div>
+
+    <label>Base URL</label>
+    <div class="field">
+      <input class="@(string.IsNullOrWhiteSpace(form.MoonrakerUrl) ? "invalid" : null)" @bind="form.MoonrakerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
       @if (string.IsNullOrWhiteSpace(form.MoonrakerUrl))
       {
-        <div class="hint error">Moonraker URL is required.</div>
+        <div class="hint error">Base URL is required.</div>
       }
     </div>
+
+    @if (form.Backend == PrinterBackend.PrusaLink)
+    {
+      <label>API Key</label>
+      <div class="field">
+        <input class="form-control" @bind="form.ApiKey" />
+      </div>
+    }
 
     <label>Notes</label>
   <input @bind="form.Notes" />
@@ -81,15 +100,18 @@ else
     <label>Model Max (mm)</label>
     <div class="field">
       <div class="row">
-        <span>X: @modelMaxX?.ToString() ?? "—"</span>
-        <span>Y: @modelMaxY?.ToString() ?? "—"</span>
-        <span>Z: @modelMaxZ?.ToString() ?? "—"</span>
+        <span>X: @(@modelMaxX?.ToString() ?? "—")</span>
+        <span>Y: @(@modelMaxY?.ToString() ?? "—")</span>
+        <span>Z: @(@modelMaxZ?.ToString() ?? "—")</span>
       </div>
       <div class="hint">Edit model dimensions from the Catalog.</div>
     </div>
 
     <label>Date Acquired</label>
-  <input type="date" @bind-value="form.DateAcquired" @bind-value:format="yyyy-MM-dd" />
+    <div class="row-inline" style="gap:.5rem; align-items:center;">
+  <input type="date" class="form-control" @bind-value="form.DateAcquired" @bind-value:format="yyyy-MM-dd" @ref="dateAcqEditRef" />
+  <button type="button" class="btn" @onclick="(()=>OpenDatePicker(dateAcqEditRef))" title="Pick date">📅</button>
+    </div>
 
     <div class="actions">
   <button class="btn primary" @onclick="Save" disabled="@(!IsValid())">Save</button>
@@ -106,6 +128,8 @@ else
     public string MoonrakerUrl { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public DateTime? DateAcquired { get; set; }
+    public PrinterBackend Backend { get; set; } = PrinterBackend.Moonraker;
+    public string? ApiKey { get; set; }
   }
   private EditFormModel? form;
   private List<ManufacturerDto> manufacturers = new();
@@ -119,24 +143,27 @@ else
   private double? modelMaxX;
   private double? modelMaxY;
   private double? modelMaxZ;
+  private ElementReference dateAcqEditRef;
 
   protected override async Task OnInitializedAsync()
   {
     var details = await Http.GetFromJsonAsync<PrinterDetailsDto>($"api/printers/{id}/details");
     if (details is not null)
     {
-  form = new EditFormModel
+      form = new EditFormModel
       {
         Name = details.Name,
         MoonrakerUrl = details.MoonrakerUrl,
         Notes = details.Notes,
-        DateAcquired = details.DateAcquired
+        DateAcquired = details.DateAcquired,
+        Backend = details.Backend,
+        ApiKey = details.ApiKey
       };
       selectedManufacturerId = details.ManufacturerId;
       selectedModelId = details.ModelId;
-  modelMaxX = details.ModelMaxX;
-  modelMaxY = details.ModelMaxY;
-  modelMaxZ = details.ModelMaxZ;
+      modelMaxX = details.ModelMaxX;
+      modelMaxY = details.ModelMaxY;
+      modelMaxZ = details.ModelMaxZ;
     }
     manufacturers = await Http.GetFromJsonAsync<List<ManufacturerDto>>("api/catalog/manufacturers") ?? new();
     await LoadModels();
@@ -159,6 +186,11 @@ else
 
   private void ShowNewManufacturer() => showNewManufacturer = !showNewManufacturer;
   private void ShowNewModel() => showNewModel = !showNewModel;
+
+  private async Task OpenDatePicker(ElementReference el)
+  {
+    await JS.InvokeVoidAsync("PF.openDatePicker", el);
+  }
 
   private async Task Save()
   {
@@ -192,14 +224,16 @@ else
       }
     }
     var dto = new UpdatePrinterDto(
-  form!.Name,
-  form!.MoonrakerUrl,
-  form!.Notes,
+      form!.Name,
+      form!.MoonrakerUrl,
+      form!.Notes,
       selectedManufacturerId,
       selectedModelId,
       null,
       null,
-  form!.DateAcquired
+      form!.DateAcquired,
+      form!.Backend,
+      form!.ApiKey
     );
     var resp = await Http.PutAsJsonAsync($"api/printers/{id}", dto);
     if (resp.IsSuccessStatusCode) { toast.Success("Saved"); Nav.NavigateTo("/"); }
@@ -212,7 +246,9 @@ else
   {
     if (form is null) return false;
     if (string.IsNullOrWhiteSpace(form.Name)) return false;
-    if (string.IsNullOrWhiteSpace(form.MoonrakerUrl)) return false;
+  if (string.IsNullOrWhiteSpace(form.MoonrakerUrl)) return false;
+  // Optionally require ApiKey for PrusaLink
+  if (form.Backend == PrinterBackend.PrusaLink && string.IsNullOrWhiteSpace(form.ApiKey)) return false;
     if (!string.IsNullOrWhiteSpace(newModelName))
     {
       if (selectedManufacturerId is null && string.IsNullOrWhiteSpace(newManufacturerName)) return false;

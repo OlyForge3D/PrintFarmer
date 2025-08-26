@@ -5,6 +5,7 @@
 @inject HttpClient Http
 @inject NavigationManager Nav
 @inject Farm.Web.Client.ToastService toast
+@inject IJSRuntime JS
 
 <h2>Add Printer</h2>
 
@@ -37,12 +38,25 @@
         <label>Notes</label>
         <InputTextArea class="form-control" @bind-value="printer.Notes" />
     </div>
+    <div class="form-group">
+        <label>Date Acquired</label>
+        <div class="row-inline" style="gap:.5rem; align-items:center;">
+            <input type="date" class="form-control" @bind-value="printer.DateAcquired" @bind-value:format="yyyy-MM-dd" @ref="dateAcqAddRef" />
+            <button type="button" class="btn" @onclick="(()=>OpenDatePicker(dateAcqAddRef))" title="Pick date">📅</button>
+        </div>
+    </div>
     <button class="btn btn-primary" type="submit">Add Printer</button>
     <a class="btn btn-secondary" href="/printers">Cancel</a>
 </EditForm>
 
 @code {
     private CreatePrinterDto printer = new();
+    private ElementReference dateAcqAddRef;
+
+    private async Task OpenDatePicker(ElementReference el)
+    {
+        await JS.InvokeVoidAsync("PF.openDatePicker", el);
+    }
 
     private async Task AddPrinter()
     {

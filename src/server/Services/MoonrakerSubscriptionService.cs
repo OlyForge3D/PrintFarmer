@@ -24,12 +24,30 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-    _cts.Cancel();
-    var tasks = new List<Task>(_loops.Values);
-    if (_mainLoop is not null) tasks.Add(_mainLoop);
-    return Task.WhenAll(tasks);
+        // Signal cancellation to background loops
+        _cts.Cancel();
+        var tasks = new List<Task>(_loops.Values);
+        if (_mainLoop is not null) tasks.Add(_mainLoop);
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown
+        }
+        catch (AggregateException aex) when (aex.InnerExceptions.All(e => e is OperationCanceledException))
+        {
+            // Also fine during shutdown
+        }
+        catch (Exception ex)
+        {
+            // Don't fail stop on background task errors
+            logger.LogDebug(ex, "Ignoring background task error during StopAsync");
+        }
     }
 
     public void Dispose()
@@ -40,13 +58,16 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     private async Task RunAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+    while (!ct.IsCancellationRequested)
         {
             try
             {
                 using var scope = scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var printers = await db.Printers.AsNoTracking().ToListAsync(ct);
+                // Only subscribe to Moonraker-backed printers (Backend == 0)
+                var printers = await db.Printers.AsNoTracking()
+                    .Where(p => p.Backend == 0)
+                    .ToListAsync(ct);
                 foreach (var p in printers)
                 {
                     _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoop(p, ct), ct));
@@ -56,7 +77,14 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             {
                 logger.LogError(ex, "Error enumerating printers for subscription");
             }
-            await Task.Delay(TimeSpan.FromSeconds(10), ct);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 
@@ -76,11 +104,33 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     private async Task SubscribePrinterLoop(Printer printer, CancellationToken ct)
     {
         var id = printer.Id;
-        while (!ct.IsCancellationRequested)
+    while (!ct.IsCancellationRequested)
         {
             ClientWebSocket? ws = null;
             try
             {
+                // Re-check backend on each iteration in case it changed
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var current = await db.Printers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+                    if (current is null)
+                    {
+                        // Printer removed; stop loop
+                        return;
+                    }
+                    if (current.Backend != 0)
+                    {
+                        // Not Moonraker anymore; back off and retry later without connecting
+                        await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Backend check failed for printer {Printer}", printer.Name);
+                }
                 var uri = BuildWsUri(printer.MoonrakerUrl);
                 ws = new ClientWebSocket();
                 await ws.ConnectAsync(uri, ct);
@@ -223,6 +273,11 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                     }
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Graceful shutdown
+                break;
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Moonraker WS loop error for printer {Printer}", printer.Name);
@@ -233,7 +288,14 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             }
 
             // Backoff before reconnect
-            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 }

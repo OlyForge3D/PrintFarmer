@@ -113,7 +113,9 @@ public record PrinterDetailsDto(
 	double? ModelMaxX,
 	double? ModelMaxY,
 	double? ModelMaxZ,
-	DateTime? DateAcquired);
+	DateTime? DateAcquired,
+	PrinterBackend Backend = PrinterBackend.Moonraker,
+	string? ApiKey = null);
 
 // Filament temperature presets (admin-configurable)
 public record FilamentPresetsDto(

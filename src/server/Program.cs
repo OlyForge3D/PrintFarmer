@@ -27,35 +27,49 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    // --- Migration safety check for missing columns ---
-    var conn = db.Database.GetDbConnection();
-    conn.Open();
-    using (var cmd = conn.CreateCommand())
+    var provider = db.Database.ProviderName;
+    if (provider != null && provider.Contains("InMemory", StringComparison.OrdinalIgnoreCase))
     {
-        // Add Backend column if missing
-        cmd.CommandText = "PRAGMA table_info(Printers);";
-        using var reader = cmd.ExecuteReader();
-        bool hasBackend = false, hasApiKey = false;
-        while (reader.Read())
-        {
-            var col = reader[1]?.ToString();
-            if (col == "Backend") hasBackend = true;
-            if (col == "ApiKey") hasApiKey = true;
-        }
-        reader.Close();
-        if (!hasBackend)
-        {
-            cmd.CommandText = "ALTER TABLE Printers ADD COLUMN Backend INTEGER DEFAULT 0;";
-            cmd.ExecuteNonQuery();
-        }
-        if (!hasApiKey)
-        {
-            cmd.CommandText = "ALTER TABLE Printers ADD COLUMN ApiKey TEXT NULL;";
-            cmd.ExecuteNonQuery();
-        }
+        db.Database.EnsureCreated();
     }
-    conn.Close();
-    db.Database.Migrate();
+    else if (db.Database.IsSqlite())
+    {
+        // --- Migration safety check for missing columns (SQLite only) ---
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        using (var cmd = conn.CreateCommand())
+        {
+            // Check if Printers table exists first
+            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Printers';";
+            var exists = cmd.ExecuteScalar()?.ToString() == "Printers";
+            if (exists)
+            {
+                // Add Backend column if missing
+                cmd.CommandText = "PRAGMA table_info(Printers);";
+                using var reader = cmd.ExecuteReader();
+                bool hasBackend = false, hasApiKey = false;
+                while (reader.Read())
+                {
+                    var col = reader[1]?.ToString();
+                    if (col == "Backend") hasBackend = true;
+                    if (col == "ApiKey") hasApiKey = true;
+                }
+                reader.Close();
+                if (!hasBackend)
+                {
+                    cmd.CommandText = "ALTER TABLE Printers ADD COLUMN Backend INTEGER DEFAULT 0;";
+                    cmd.ExecuteNonQuery();
+                }
+                if (!hasApiKey)
+                {
+                    cmd.CommandText = "ALTER TABLE Printers ADD COLUMN ApiKey TEXT NULL;";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+        conn.Close();
+        db.Database.Migrate();
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -73,6 +87,11 @@ app.MapHub<PrinterHub>("/hubs/printers");
 // Minimal API for presets
 app.MapGet("/api/presets", (PresetService svc) => Results.Ok(svc.GetPresets()));
 app.MapPost("/api/presets", (PresetService svc, FilamentPresetsDto body) => { svc.SavePresets(body); return Results.NoContent(); });
+// Basic health endpoint for UI ping and tests
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+// Expose Program for WebApplicationFactory in tests
+public partial class Program { }
