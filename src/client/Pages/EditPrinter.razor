@@ -35,7 +35,10 @@ else
 
     <label>Base URL</label>
     <div class="field">
-      <input class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind="form.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+      <div class="row-inline" style="gap:.5rem; align-items:center;">
+        <input class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind="form.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+        <button class="btn" type="button" title="Resolve to IP" @onclick="ResolveHostname">Resolve</button>
+      </div>
       @if (string.IsNullOrWhiteSpace(form.ServerUrl))
       {
         <div class="hint error">Base URL is required.</div>
@@ -43,6 +46,10 @@ else
       @if (!string.IsNullOrWhiteSpace(originalServerUrl))
       {
         <div class="hint">Original URL: @originalServerUrl</div>
+      }
+      @if (!string.IsNullOrWhiteSpace(ipAddress))
+      {
+        <div class="hint">IP Address: @ipAddress</div>
       }
     </div>
 
@@ -136,6 +143,7 @@ else
     public string? ApiKey { get; set; }
   }
   private string? originalServerUrl;
+  private string? ipAddress;
   private EditFormModel? form;
   private List<ManufacturerDto> manufacturers = new();
   private List<ModelDto> models = new();
@@ -165,6 +173,7 @@ else
         ApiKey = details.ApiKey
       };
       originalServerUrl = details.OriginalServerUrl;
+  ipAddress = details.IpAddress;
       selectedManufacturerId = details.ManufacturerId;
       selectedModelId = details.ModelId;
       modelMaxX = details.ModelMaxX;
@@ -245,6 +254,36 @@ else
     var resp = await Http.PutAsJsonAsync($"api/printers/{id}", dto);
     if (resp.IsSuccessStatusCode) { toast.Success("Saved"); Nav.NavigateTo("/"); }
     else { toast.Error($"Save failed: {(int)resp.StatusCode}"); }
+  }
+
+  private async Task ResolveHostname()
+  {
+    if (form is null || string.IsNullOrWhiteSpace(form.ServerUrl)) return;
+    try
+    {
+      var req = new ResolveHostnameRequest(form.ServerUrl, form.Backend);
+      var resp = await Http.PostAsJsonAsync("api/printers/resolve", req);
+      if (resp.IsSuccessStatusCode)
+      {
+        var data = await resp.Content.ReadFromJsonAsync<ResolveHostnameResponse>();
+        if (data is not null)
+        {
+          originalServerUrl = data.NormalizedInputUrl;
+          form.ServerUrl = data.ResolvedBaseUrl;
+          ipAddress = data.ResolvedIp;
+          toast.Success("Resolved");
+          StateHasChanged();
+        }
+      }
+      else
+      {
+        toast.Error($"Resolve failed: {(int)resp.StatusCode}");
+      }
+    }
+    catch
+    {
+      toast.Error("Resolve failed");
+    }
   }
 
   private void Cancel() => Nav.NavigateTo("/");

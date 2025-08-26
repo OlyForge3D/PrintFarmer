@@ -50,7 +50,7 @@ using (var scope = app.Services.CreateScope())
                 // Add Backend column if missing
                 cmd.CommandText = "PRAGMA table_info(Printers);";
                 using var reader = cmd.ExecuteReader();
-                bool hasBackend = false, hasApiKey = false, hasServerUrl = false, hasMoonrakerUrl = false, hasOriginalServerUrl = false, hasOriginalHostName = false;
+                bool hasBackend = false, hasApiKey = false, hasServerUrl = false, hasMoonrakerUrl = false, hasOriginalServerUrl = false, hasOriginalHostName = false, hasIp = false;
                 while (reader.Read())
                 {
                     var col = reader[1]?.ToString();
@@ -60,6 +60,7 @@ using (var scope = app.Services.CreateScope())
                     if (col == "MoonrakerUrl") hasMoonrakerUrl = true;
                     if (col == "OriginalServerUrl") hasOriginalServerUrl = true;
                     if (col == "OriginalHostName") hasOriginalHostName = true;
+                    if (col == "IpAddress") hasIp = true;
                 }
                 reader.Close();
                 // Rename MoonrakerUrl -> ServerUrl (or add ServerUrl) if needed
@@ -115,6 +116,11 @@ using (var scope = app.Services.CreateScope())
                     cmd.CommandText = "ALTER TABLE Printers ADD COLUMN ApiKey TEXT NULL;";
                     cmd.ExecuteNonQuery();
                 }
+                if (!hasIp)
+                {
+                    cmd.CommandText = "ALTER TABLE Printers ADD COLUMN IpAddress TEXT NULL;";
+                    cmd.ExecuteNonQuery();
+                }
             }
             else
             {
@@ -124,6 +130,7 @@ using (var scope = app.Services.CreateScope())
                     Name TEXT NOT NULL,
                     ServerUrl TEXT,
                     OriginalServerUrl TEXT,
+                    IpAddress TEXT NULL,
                     Notes TEXT NULL,
                     Backend INTEGER NOT NULL DEFAULT 0,
                     ApiKey TEXT NULL,

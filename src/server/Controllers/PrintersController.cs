@@ -12,6 +12,13 @@ namespace Farm.Web.Server.Controllers;
 [Route("api/[controller]")]
 public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa) : ControllerBase
 {
+    private static string EnsureLocalSuffix(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return host;
+        if (System.Net.IPAddress.TryParse(host, out _)) return host;
+        if (host.Contains('.')) return host;
+        return host + ".local";
+    }
     private static string NormalizeServerUrl(string url, int defaultPort)
     {
         if (string.IsNullOrWhiteSpace(url)) return url;
@@ -63,7 +70,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     CameraSnapshotUrl: status.CameraSnapshotUrl,
                     Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
                     ApiKey: p.ApiKey,
-                    OriginalServerUrl: p.OriginalServerUrl
+                    OriginalServerUrl: p.OriginalServerUrl,
+                    IpAddress: p.IpAddress
                 );
             }
             else // Moonraker
@@ -92,7 +100,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     BedTarget: status.BedTarget,
                     Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
                     ApiKey: p.ApiKey,
-                    OriginalServerUrl: p.OriginalServerUrl
+                    OriginalServerUrl: p.OriginalServerUrl,
+                    IpAddress: p.IpAddress
                 );
             }
         }));
@@ -122,7 +131,9 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 CameraStreamUrl: status.CameraStreamUrl,
                 CameraSnapshotUrl: status.CameraSnapshotUrl,
                 Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-                ApiKey: p.ApiKey
+                ApiKey: p.ApiKey,
+                OriginalServerUrl: p.OriginalServerUrl,
+                IpAddress: p.IpAddress
             );
         }
         else // Moonraker
@@ -150,7 +161,9 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
                 Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-                ApiKey: p.ApiKey
+                ApiKey: p.ApiKey,
+                OriginalServerUrl: p.OriginalServerUrl,
+                IpAddress: p.IpAddress
             );
         }
     }
@@ -164,7 +177,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 p.Id,
                 p.Name,
                 p.ServerUrl,
-            p.Notes,
+                p.Notes,
             p.ManufacturerId,
             p.Manufacturer?.Name,
             p.ModelId,
@@ -175,7 +188,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             p.DateAcquired,
             (PrinterBackend)p.Backend,
             p.ApiKey,
-            p.OriginalServerUrl
+            p.OriginalServerUrl,
+            p.IpAddress
         );
     }
 
@@ -215,12 +229,14 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     var defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : 7125;
     var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
     string resolvedBase = normalizedInput;
+    string? resolvedIp = null;
     try
     {
         var uri = new Uri(normalizedInput);
         if (!System.Net.IPAddress.TryParse(uri.Host, out _))
         {
-            var addresses = await System.Net.Dns.GetHostAddressesAsync(uri.Host, ct);
+            var hostToResolve = EnsureLocalSuffix(uri.Host);
+            var addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
             var firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
             if (firstIp is not null)
             {
@@ -229,7 +245,12 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     Host = firstIp.ToString()
                 };
                 resolvedBase = ub.Uri.ToString().TrimEnd('/');
+                resolvedIp = firstIp.ToString();
             }
+        }
+        else
+        {
+            resolvedIp = uri.Host;
         }
     }
     catch { }
@@ -239,6 +260,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         Name = dto.Name,
         ServerUrl = resolvedBase,
         OriginalServerUrl = normalizedInput,
+    IpAddress = resolvedIp,
         Notes = dto.Notes,
         ManufacturerId = manufacturerId,
         ModelId = modelId,
@@ -267,7 +289,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             CameraSnapshotUrl: status.CameraSnapshotUrl,
             Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
             ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
         ));
     }
     else
@@ -296,7 +319,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             BedTarget: status.BedTarget,
             Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
             ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
         ));
     }
     }
@@ -339,12 +363,14 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     var defaultPort = dto.Backend.HasValue ? (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 : 7125) : (p.Backend == 1 ? 80 : 7125);
     var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
         string resolvedBase = normalizedInput;
+        string? resolvedIp = null;
         try
         {
             var uri = new Uri(normalizedInput);
             if (!System.Net.IPAddress.TryParse(uri.Host, out _))
             {
-                var addresses = await System.Net.Dns.GetHostAddressesAsync(uri.Host, ct);
+                var hostToResolve = EnsureLocalSuffix(uri.Host);
+                var addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
                 var firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
                 if (firstIp is not null)
                 {
@@ -353,12 +379,18 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                         Host = firstIp.ToString()
                     };
                     resolvedBase = ub.Uri.ToString().TrimEnd('/');
+                    resolvedIp = firstIp.ToString();
                 }
+            }
+            else
+            {
+                resolvedIp = uri.Host;
             }
         }
         catch { }
     p.ServerUrl = resolvedBase;
     p.OriginalServerUrl = normalizedInput;
+    p.IpAddress = resolvedIp;
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
@@ -369,6 +401,45 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             p.ApiKey = dto.ApiKey;
         await db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    [HttpPost("resolve")]
+    public async Task<ActionResult<Farm.Web.Shared.ResolveHostnameResponse>> ResolveHost([FromBody] Farm.Web.Shared.ResolveHostnameRequest body, CancellationToken ct)
+    {
+        var defaultPort = body.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 7125;
+        var normalized = NormalizeServerUrl(body.ServerUrl, defaultPort);
+        try
+        {
+            var uri = new Uri(normalized);
+            var host = uri.Host;
+            if (!System.Net.IPAddress.TryParse(host, out _))
+            {
+                host = EnsureLocalSuffix(host);
+            }
+            string? ip = null;
+            try
+            {
+                if (!System.Net.IPAddress.TryParse(host, out _))
+                {
+                    var addrs = await System.Net.Dns.GetHostAddressesAsync(host, ct);
+                    var firstIp = Array.Find(addrs, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addrs.FirstOrDefault();
+                    ip = firstIp?.ToString();
+                }
+                else
+                {
+                    ip = host;
+                }
+            }
+            catch { }
+
+            var ub = new UriBuilder(uri) { Host = ip ?? uri.Host };
+            var baseUrl = ub.Uri.ToString().TrimEnd('/');
+            return new Farm.Web.Shared.ResolveHostnameResponse(normalized, ip, baseUrl);
+        }
+        catch
+        {
+            return BadRequest("Invalid URL");
+        }
     }
 
     [HttpDelete("{id:guid}")]

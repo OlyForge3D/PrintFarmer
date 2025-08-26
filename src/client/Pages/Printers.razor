@@ -42,7 +42,7 @@ else
                           {
                               <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
                           }
-                          @if (TryGetSnapshotUrl(p, out var snapUrl))
+                          @if (IsCameraVisible(p.Id) && TryGetSnapshotUrl(p, out var snapUrl))
                           {
                               <div class="snapshot-row">
                                   <img src="@snapUrl" alt="webcam snapshot" style="display:block; max-width:200px; max-height:120px; border-radius:6px; border:1px solid rgba(255,255,255,.08)" />
@@ -198,7 +198,7 @@ else
                             </div>
                         </div>
                     </div>
-                    @if (!string.IsNullOrWhiteSpace(p.CameraStreamUrl))
+                    @if (IsCameraVisible(p.Id) && !string.IsNullOrWhiteSpace(p.CameraStreamUrl))
                     {
                         <div class="section">
                             <div class="mini-header">Livestream</div>
@@ -211,6 +211,11 @@ else
 
         <div class="card-footer">
             
+                        <button class="icon-btn" title="@CameraBtnTitle(p.Id)" aria-label="Toggle camera" @onclick="() => ToggleCamera(p.Id)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M17 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3.5l4 4v-11l-4 4z"/>
+                            </svg>
+                        </button>
                         @if (!p.IsOnline)
                         {
                             <button class="icon-btn danger" title="Delete" aria-label="Delete" @onclick="() => Delete(p.Id)">
@@ -441,6 +446,7 @@ else
     private readonly Dictionary<Guid, long> snapshotStamps = new();
     private readonly TimeSpan snapshotInterval = TimeSpan.FromSeconds(30);
     private CancellationTokenSource? snapshotCts;
+    private readonly HashSet<Guid> cameraVisible = new();
     private string SnapshotUrl(PrinterDto p)
         => $"{p.CameraSnapshotUrl}?t={snapshotStamps.GetValueOrDefault(p.Id, 0)}";
     private bool TryGetSnapshotUrl(PrinterDto p, out string url)
@@ -451,6 +457,13 @@ else
         url = SnapshotUrl(p);
         return true;
     }
+    private bool IsCameraVisible(Guid id) => cameraVisible.Contains(id);
+    private void ToggleCamera(Guid id)
+    {
+        if (!cameraVisible.Add(id)) cameraVisible.Remove(id);
+        StateHasChanged();
+    }
+    private string CameraBtnTitle(Guid id) => IsCameraVisible(id) ? "Hide camera" : "Show camera";
     private async Task StartSnapshotTimerAsync()
     {
         snapshotCts?.Cancel();

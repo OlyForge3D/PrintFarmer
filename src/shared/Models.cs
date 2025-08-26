@@ -29,7 +29,8 @@ public record PrinterDto(
 	double? BedTarget = null,
 	PrinterBackend Backend = PrinterBackend.Moonraker,
 	string? ApiKey = null,
-	string? OriginalServerUrl = null);
+	string? OriginalServerUrl = null,
+	string? IpAddress = null);
 
 // Real-time update payload for SignalR
 public record PrinterStatusUpdate(
@@ -119,7 +120,8 @@ public record PrinterDetailsDto(
 	DateTime? DateAcquired,
 	PrinterBackend Backend = PrinterBackend.Moonraker,
 	string? ApiKey = null,
-	string? OriginalServerUrl = null);
+	string? OriginalServerUrl = null,
+	string? IpAddress = null);
 
 // Filament temperature presets (admin-configurable)
 public record FilamentPresetsDto(
@@ -129,3 +131,7 @@ public record FilamentPresetsDto(
 	TempTargets Pc,
 	TempTargets Pctg,
 	TempTargets Petg);
+
+// Resolve hostname/IP utility
+public record ResolveHostnameRequest(string ServerUrl, PrinterBackend Backend);
+public record ResolveHostnameResponse(string NormalizedInputUrl, string? ResolvedIp, string ResolvedBaseUrl);

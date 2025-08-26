@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(p => p.Name).IsRequired().HasMaxLength(128);
             b.Property(p => p.ServerUrl).IsRequired().HasMaxLength(256);
             b.Property(p => p.OriginalServerUrl).HasMaxLength(256);
+            b.Property(p => p.IpAddress).HasMaxLength(64);
             b.Property(p => p.Backend).HasDefaultValue(0);
             b.Property(p => p.ApiKey);
             b.HasOne(p => p.Manufacturer)

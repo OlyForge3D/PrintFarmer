@@ -25,7 +25,14 @@
     </div>
     <div class="form-group">
         <label>Base URL</label>
-        <InputText class="form-control" @bind-value="printer.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+        <div class="row-inline" style="gap:.5rem; align-items:center;">
+            <InputText class="form-control" @bind-value="printer.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+            <button class="btn" type="button" @onclick="ResolveHostname">Resolve</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(ipAddress))
+        {
+            <div class="hint">IP Address: @ipAddress</div>
+        }
     </div>
     @if (printer.Backend == PrinterBackend.PrusaLink)
     {
@@ -51,6 +58,7 @@
 
 @code {
     private CreatePrinterDto printer = new();
+    private string? ipAddress;
     private ElementReference dateAcqAddRef;
 
     private async Task OpenDatePicker(ElementReference el)
@@ -70,5 +78,32 @@
         {
             toast.Error($"Failed: {(int)resp.StatusCode}");
         }
+    }
+
+    private async Task ResolveHostname()
+    {
+        if (string.IsNullOrWhiteSpace(printer.ServerUrl)) return;
+        try
+        {
+            var req = new ResolveHostnameRequest(printer.ServerUrl, printer.Backend);
+            var resp = await Http.PostAsJsonAsync("api/printers/resolve", req);
+            if (resp.IsSuccessStatusCode)
+            {
+                var data = await resp.Content.ReadFromJsonAsync<ResolveHostnameResponse>();
+                if (data is not null)
+                {
+                    // Update form with resolved info
+                    printer.ServerUrl = data.ResolvedBaseUrl;
+                    printer.OriginalServerUrl = data.NormalizedInputUrl;
+                    ipAddress = data.ResolvedIp;
+                    toast.Success("Resolved");
+                }
+            }
+            else
+            {
+                toast.Error($"Resolve failed: {(int)resp.StatusCode}");
+            }
+        }
+        catch { toast.Error("Resolve failed"); }
     }
 }
