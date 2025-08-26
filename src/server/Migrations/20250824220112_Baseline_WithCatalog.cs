@@ -24,16 +24,7 @@ namespace Farm.Web.Server.Migrations
                 FOREIGN KEY (ManufacturerId) REFERENCES Manufacturers(Id) ON DELETE CASCADE
             );");
             migrationBuilder.Sql(@"CREATE UNIQUE INDEX IF NOT EXISTS IX_Models_ManufacturerId_Name ON Models(ManufacturerId, Name);");
-
-            // Augment existing Printers table with new columns if they don't exist
-            migrationBuilder.Sql(@"ALTER TABLE Printers ADD COLUMN ManufacturerId TEXT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE Printers ADD COLUMN ModelId TEXT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE Printers ADD COLUMN MaxX REAL NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE Printers ADD COLUMN MaxY REAL NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE Printers ADD COLUMN MaxZ REAL NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE Printers ADD COLUMN DateAcquired TEXT NULL;");
-            migrationBuilder.Sql(@"CREATE INDEX IF NOT EXISTS IX_Printers_ManufacturerId ON Printers(ManufacturerId);");
-            migrationBuilder.Sql(@"CREATE INDEX IF NOT EXISTS IX_Printers_ModelId ON Printers(ModelId);");
+            // Printers table augmentation is handled via SQLite startup safety in Program.cs
 
             // Ensure Spools table exists (it should from initial create); create if not present
             migrationBuilder.Sql(@"CREATE TABLE IF NOT EXISTS Spools (

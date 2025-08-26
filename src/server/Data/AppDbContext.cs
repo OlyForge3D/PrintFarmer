@@ -16,7 +16,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasKey(p => p.Id);
             b.Property(p => p.Name).IsRequired().HasMaxLength(128);
-            b.Property(p => p.MoonrakerUrl).IsRequired().HasMaxLength(256);
+            b.Property(p => p.ServerUrl).IsRequired().HasMaxLength(256);
+            b.Property(p => p.OriginalServerUrl).HasMaxLength(256);
             b.Property(p => p.Backend).HasDefaultValue(0);
             b.Property(p => p.ApiKey);
             b.HasOne(p => p.Manufacturer)

@@ -9,7 +9,7 @@ public enum PrinterBackend
 public record PrinterDto(
 	Guid Id,
 	string Name,
-	string MoonrakerUrl,
+	string ServerUrl,
 	string? Notes,
 	bool IsOnline,
 	string? State,
@@ -28,7 +28,8 @@ public record PrinterDto(
 	double? HotendTarget = null,
 	double? BedTarget = null,
 	PrinterBackend Backend = PrinterBackend.Moonraker,
-	string? ApiKey = null);
+	string? ApiKey = null,
+	string? OriginalServerUrl = null);
 
 // Real-time update payload for SignalR
 public record PrinterStatusUpdate(
@@ -50,7 +51,8 @@ public record PrinterStatusUpdate(
 public class CreatePrinterDto
 {
 	public string Name { get; set; } = string.Empty;
-	public string MoonrakerUrl { get; set; } = string.Empty;
+	public string ServerUrl { get; set; } = string.Empty;
+	public string? OriginalServerUrl { get; set; }
 	public string? Notes { get; set; }
 	public Guid? ManufacturerId { get; set; }
 	public Guid? ModelId { get; set; }
@@ -64,7 +66,7 @@ public class CreatePrinterDto
 
 public record UpdatePrinterDto(
 	string Name,
-	string MoonrakerUrl,
+	string ServerUrl,
 	string? Notes,
 	Guid? ManufacturerId,
 	Guid? ModelId,
@@ -72,7 +74,8 @@ public record UpdatePrinterDto(
 	string? NewModelName,
 	DateTime? DateAcquired,
 	PrinterBackend? Backend = null,
-	string? ApiKey = null);
+	string? ApiKey = null,
+	string? OriginalServerUrl = null);
 
 // Local spools removed; Spoolman is the source of truth
 
@@ -104,7 +107,7 @@ public record ModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX =
 public record PrinterDetailsDto(
 	Guid Id,
 	string Name,
-	string MoonrakerUrl,
+	string ServerUrl,
 	string? Notes,
 	Guid? ManufacturerId,
 	string? ManufacturerName,
@@ -115,7 +118,8 @@ public record PrinterDetailsDto(
 	double? ModelMaxZ,
 	DateTime? DateAcquired,
 	PrinterBackend Backend = PrinterBackend.Moonraker,
-	string? ApiKey = null);
+	string? ApiKey = null,
+	string? OriginalServerUrl = null);
 
 // Filament temperature presets (admin-configurable)
 public record FilamentPresetsDto(

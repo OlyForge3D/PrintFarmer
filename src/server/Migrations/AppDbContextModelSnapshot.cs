@@ -46,6 +46,12 @@ namespace Farm.Web.Server.Migrations
                     b.Property<DateTime?>("DateAcquired")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ApiKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Backend")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid?>("ManufacturerId")
                         .HasColumnType("TEXT");
 
@@ -61,8 +67,7 @@ namespace Farm.Web.Server.Migrations
                     b.Property<Guid?>("ModelId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("MoonrakerUrl")
-                        .IsRequired()
+                    b.Property<string>("OriginalServerUrl")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -72,6 +77,11 @@ namespace Farm.Web.Server.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Notes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerUrl")
+                        .IsRequired()
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

@@ -16,7 +16,10 @@ builder.Services.AddHttpClient<MoonrakerClient>();
 builder.Services.AddHttpClient<PrusaLinkClient>();
 builder.Services.AddHttpClient<SpoolmanService>();
 builder.Services.AddSignalR();
-builder.Services.AddHostedService<MoonrakerSubscriptionService>();
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService<MoonrakerSubscriptionService>();
+}
 builder.Services.AddSingleton<PresetService>();
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy
@@ -28,7 +31,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var provider = db.Database.ProviderName;
-    if (provider != null && provider.Contains("InMemory", StringComparison.OrdinalIgnoreCase))
+    if (provider != null && (provider.Contains("InMemory", StringComparison.OrdinalIgnoreCase) || app.Environment.IsEnvironment("Testing")))
     {
         db.Database.EnsureCreated();
     }
@@ -47,14 +50,61 @@ using (var scope = app.Services.CreateScope())
                 // Add Backend column if missing
                 cmd.CommandText = "PRAGMA table_info(Printers);";
                 using var reader = cmd.ExecuteReader();
-                bool hasBackend = false, hasApiKey = false;
+                bool hasBackend = false, hasApiKey = false, hasServerUrl = false, hasMoonrakerUrl = false, hasOriginalServerUrl = false, hasOriginalHostName = false;
                 while (reader.Read())
                 {
                     var col = reader[1]?.ToString();
                     if (col == "Backend") hasBackend = true;
                     if (col == "ApiKey") hasApiKey = true;
+                    if (col == "ServerUrl") hasServerUrl = true;
+                    if (col == "MoonrakerUrl") hasMoonrakerUrl = true;
+                    if (col == "OriginalServerUrl") hasOriginalServerUrl = true;
+                    if (col == "OriginalHostName") hasOriginalHostName = true;
                 }
                 reader.Close();
+                // Rename MoonrakerUrl -> ServerUrl (or add ServerUrl) if needed
+                if (!hasServerUrl)
+                {
+                    if (hasMoonrakerUrl)
+                    {
+                        try
+                        {
+                            cmd.CommandText = "ALTER TABLE Printers RENAME COLUMN MoonrakerUrl TO ServerUrl;";
+                            cmd.ExecuteNonQuery();
+                            hasServerUrl = true;
+                        }
+                        catch
+                        {
+                            // Fallback: add ServerUrl and copy data
+                            try
+                            {
+                                cmd.CommandText = "ALTER TABLE Printers ADD COLUMN ServerUrl TEXT;";
+                                cmd.ExecuteNonQuery();
+                                cmd.CommandText = "UPDATE Printers SET ServerUrl = MoonrakerUrl WHERE ServerUrl IS NULL OR ServerUrl = ''";
+                                cmd.ExecuteNonQuery();
+                                hasServerUrl = true;
+                            }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        try { cmd.CommandText = "ALTER TABLE Printers ADD COLUMN ServerUrl TEXT"; cmd.ExecuteNonQuery(); hasServerUrl = true; } catch { }
+                    }
+                }
+                // Rename OriginalHostName -> OriginalServerUrl (or add OriginalServerUrl) if needed
+                if (!hasOriginalServerUrl)
+                {
+                    if (hasOriginalHostName)
+                    {
+                        try { cmd.CommandText = "ALTER TABLE Printers RENAME COLUMN OriginalHostName TO OriginalServerUrl;"; cmd.ExecuteNonQuery(); hasOriginalServerUrl = true; }
+                        catch { try { cmd.CommandText = "ALTER TABLE Printers ADD COLUMN OriginalServerUrl TEXT"; cmd.ExecuteNonQuery(); hasOriginalServerUrl = true; } catch { } }
+                    }
+                    else
+                    {
+                        try { cmd.CommandText = "ALTER TABLE Printers ADD COLUMN OriginalServerUrl TEXT"; cmd.ExecuteNonQuery(); hasOriginalServerUrl = true; } catch { }
+                    }
+                }
                 if (!hasBackend)
                 {
                     cmd.CommandText = "ALTER TABLE Printers ADD COLUMN Backend INTEGER DEFAULT 0;";
@@ -65,6 +115,26 @@ using (var scope = app.Services.CreateScope())
                     cmd.CommandText = "ALTER TABLE Printers ADD COLUMN ApiKey TEXT NULL;";
                     cmd.ExecuteNonQuery();
                 }
+            }
+            else
+            {
+                // Create Printers table with the latest schema (idempotent for fresh DBs)
+                cmd.CommandText = @"CREATE TABLE IF NOT EXISTS Printers (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    ServerUrl TEXT,
+                    OriginalServerUrl TEXT,
+                    Notes TEXT NULL,
+                    Backend INTEGER NOT NULL DEFAULT 0,
+                    ApiKey TEXT NULL,
+                    ManufacturerId TEXT NULL,
+                    ModelId TEXT NULL,
+                    DateAcquired TEXT NULL
+                );";
+                cmd.ExecuteNonQuery();
+                // Helpful indexes (match migrations when present)
+                try { cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Printers_ManufacturerId ON Printers(ManufacturerId);"; cmd.ExecuteNonQuery(); } catch { }
+                try { cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Printers_ModelId ON Printers(ModelId);"; cmd.ExecuteNonQuery(); } catch { }
             }
         }
         conn.Close();

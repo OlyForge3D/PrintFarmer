@@ -12,7 +12,7 @@ namespace Farm.Web.Server.Controllers;
 [Route("api/[controller]")]
 public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa) : ControllerBase
 {
-    private static string NormalizeMoonrakerUrl(string url)
+    private static string NormalizeServerUrl(string url, int defaultPort)
     {
         if (string.IsNullOrWhiteSpace(url)) return url;
         var trimmed = url.Trim();
@@ -27,7 +27,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             var ub = new UriBuilder(trimmed);
             if (ub.Port == -1)
             {
-                ub.Port = 7125;
+                ub.Port = defaultPort;
             }
             return ub.Uri.ToString().TrimEnd('/');
         }
@@ -46,11 +46,11 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         {
             if (p.Backend == 1) // PrusaLink
             {
-                var status = await prusa.GetCompositeStatusAsync(p.MoonrakerUrl, p.ApiKey, ct);
+                var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
                 return new PrinterDto(
                     Id: p.Id,
                     Name: p.Name,
-                    MoonrakerUrl: p.MoonrakerUrl,
+                    ServerUrl: p.ServerUrl,
                     Notes: p.Notes,
                     IsOnline: status.IsOnline,
                     State: status.State,
@@ -62,16 +62,17 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     CameraStreamUrl: status.CameraStreamUrl,
                     CameraSnapshotUrl: status.CameraSnapshotUrl,
                     Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-                    ApiKey: p.ApiKey
+                    ApiKey: p.ApiKey,
+                    OriginalServerUrl: p.OriginalServerUrl
                 );
             }
             else // Moonraker
             {
-                var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
+                var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
                 return new PrinterDto(
                     Id: p.Id,
                     Name: p.Name,
-                    MoonrakerUrl: p.MoonrakerUrl,
+                    ServerUrl: p.ServerUrl,
                     Notes: p.Notes,
                     IsOnline: status.IsOnline,
                     State: status.State,
@@ -90,7 +91,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     HotendTarget: status.HotendTarget,
                     BedTarget: status.BedTarget,
                     Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-                    ApiKey: p.ApiKey
+                    ApiKey: p.ApiKey,
+                    OriginalServerUrl: p.OriginalServerUrl
                 );
             }
         }));
@@ -104,11 +106,11 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         if (p is null) return NotFound();
         if (p.Backend == 1) // PrusaLink
         {
-            var status = await prusa.GetCompositeStatusAsync(p.MoonrakerUrl, p.ApiKey, ct);
+            var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
             return new PrinterDto(
                 Id: p.Id,
                 Name: p.Name,
-                MoonrakerUrl: p.MoonrakerUrl,
+                ServerUrl: p.ServerUrl,
                 Notes: p.Notes,
                 IsOnline: status.IsOnline,
                 State: status.State,
@@ -125,11 +127,11 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         }
         else // Moonraker
         {
-            var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
+            var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
             return new PrinterDto(
                 Id: p.Id,
                 Name: p.Name,
-                MoonrakerUrl: p.MoonrakerUrl,
+                ServerUrl: p.ServerUrl,
                 Notes: p.Notes,
                 IsOnline: status.IsOnline,
                 State: status.State,
@@ -158,10 +160,10 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.AsNoTracking().Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) return NotFound();
-        return new PrinterDetailsDto(
-            p.Id,
-            p.Name,
-            p.MoonrakerUrl,
+            return new PrinterDetailsDto(
+                p.Id,
+                p.Name,
+                p.ServerUrl,
             p.Notes,
             p.ManufacturerId,
             p.Manufacturer?.Name,
@@ -172,7 +174,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             p.Model?.MaxZ,
             p.DateAcquired,
             (PrinterBackend)p.Backend,
-            p.ApiKey
+            p.ApiKey,
+            p.OriginalServerUrl
         );
     }
 
@@ -208,10 +211,34 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             modelId = existingModel.Id;
         }
 
+    // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
+    var defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : 7125;
+    var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
+    string resolvedBase = normalizedInput;
+    try
+    {
+        var uri = new Uri(normalizedInput);
+        if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+        {
+            var addresses = await System.Net.Dns.GetHostAddressesAsync(uri.Host, ct);
+            var firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
+            if (firstIp is not null)
+            {
+                var ub = new UriBuilder(uri)
+                {
+                    Host = firstIp.ToString()
+                };
+                resolvedBase = ub.Uri.ToString().TrimEnd('/');
+            }
+        }
+    }
+    catch { }
+
     var p = new Printer {
         Id = Guid.NewGuid(),
         Name = dto.Name,
-        MoonrakerUrl = NormalizeMoonrakerUrl(dto.MoonrakerUrl),
+        ServerUrl = resolvedBase,
+        OriginalServerUrl = normalizedInput,
         Notes = dto.Notes,
         ManufacturerId = manufacturerId,
         ModelId = modelId,
@@ -223,11 +250,11 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         await db.SaveChangesAsync(ct);
     if (p.Backend == 1) // PrusaLink
     {
-        var status = await prusa.GetCompositeStatusAsync(p.MoonrakerUrl, p.ApiKey, ct);
+        var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
         return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
             Id: p.Id,
             Name: p.Name,
-            MoonrakerUrl: p.MoonrakerUrl,
+            ServerUrl: p.ServerUrl,
             Notes: p.Notes,
             IsOnline: status.IsOnline,
             State: status.State,
@@ -239,16 +266,17 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             CameraStreamUrl: status.CameraStreamUrl,
             CameraSnapshotUrl: status.CameraSnapshotUrl,
             Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-            ApiKey: p.ApiKey
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl
         ));
     }
     else
     {
-        var status = await moon.GetCompositeStatusAsync(p.MoonrakerUrl, ct);
+        var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
         return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
             Id: p.Id,
             Name: p.Name,
-            MoonrakerUrl: p.MoonrakerUrl,
+            ServerUrl: p.ServerUrl,
             Notes: p.Notes,
             IsOnline: status.IsOnline,
             State: status.State,
@@ -267,7 +295,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             HotendTarget: status.HotendTarget,
             BedTarget: status.BedTarget,
             Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-            ApiKey: p.ApiKey
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl
         ));
     }
     }
@@ -306,8 +335,30 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             modelId = existingModel.Id;
         }
 
-        p.Name = dto.Name;
-        p.MoonrakerUrl = NormalizeMoonrakerUrl(dto.MoonrakerUrl);
+    p.Name = dto.Name;
+    var defaultPort = dto.Backend.HasValue ? (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 : 7125) : (p.Backend == 1 ? 80 : 7125);
+    var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
+        string resolvedBase = normalizedInput;
+        try
+        {
+            var uri = new Uri(normalizedInput);
+            if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+            {
+                var addresses = await System.Net.Dns.GetHostAddressesAsync(uri.Host, ct);
+                var firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
+                if (firstIp is not null)
+                {
+                    var ub = new UriBuilder(uri)
+                    {
+                        Host = firstIp.ToString()
+                    };
+                    resolvedBase = ub.Uri.ToString().TrimEnd('/');
+                }
+            }
+        }
+        catch { }
+    p.ServerUrl = resolvedBase;
+    p.OriginalServerUrl = normalizedInput;
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
@@ -335,7 +386,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var bytes = await moon.GetCameraSnapshotAsync(p.MoonrakerUrl, ct);
+    var bytes = await moon.GetCameraSnapshotAsync(p.ServerUrl, ct);
         if (bytes is null) return NotFound();
         return File(bytes, "image/jpeg");
     }
@@ -345,7 +396,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.SendHomeAsync(p.MoonrakerUrl, ct);
+    var ok = await moon.SendHomeAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to send home command");
     }
 
@@ -354,7 +405,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.HomeXYAsync(p.MoonrakerUrl, ct);
+    var ok = await moon.HomeXYAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to home XY");
     }
 
@@ -363,7 +414,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.HomeZAsync(p.MoonrakerUrl, ct);
+    var ok = await moon.HomeZAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to home Z");
     }
 
@@ -372,7 +423,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.SetTempsAsync(p.MoonrakerUrl, targets.Hotend, targets.Bed, ct);
+    var ok = await moon.SetTempsAsync(p.ServerUrl, targets.Hotend, targets.Bed, ct);
         return new CommandResult(ok, ok ? null : "Failed to set temperatures");
     }
 
@@ -381,7 +432,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.MoveAsync(p.MoonrakerUrl, req.X, req.Y, req.Z, req.F, ct);
+    var ok = await moon.MoveAsync(p.ServerUrl, req.X, req.Y, req.Z, req.F, ct);
         return new CommandResult(ok, ok ? null : "Failed to move");
     }
 
@@ -390,7 +441,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.MoveToAsync(p.MoonrakerUrl, req.X, req.Y, req.Z, req.F, ct);
+    var ok = await moon.MoveToAsync(p.ServerUrl, req.X, req.Y, req.Z, req.F, ct);
         return new CommandResult(ok, ok ? null : "Failed to move to position");
     }
 
@@ -399,7 +450,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.PauseAsync(p.MoonrakerUrl, ct);
+    var ok = await moon.PauseAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to pause");
     }
 
@@ -408,7 +459,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.ResumeAsync(p.MoonrakerUrl, ct);
+    var ok = await moon.ResumeAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to resume");
     }
 
@@ -417,7 +468,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.EmergencyStopAsync(p.MoonrakerUrl, ct);
+    var ok = await moon.EmergencyStopAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to emergency stop");
     }
 }

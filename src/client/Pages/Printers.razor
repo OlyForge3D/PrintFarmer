@@ -23,49 +23,40 @@ else if (!printers.Any())
 }
 else
 {
-    <button @onclick="Refresh">Refresh</button>
     <div class="cards">
         @foreach (var p in printers)
         {
             <div class="card">
                 <div class="card-header" title="@HeaderTooltip(p)">
                     <div>
-                        @if (editingId == p.Id)
-                        {
-                            <input style="width: 160px" @bind="editName" />
-                            <input style="width: 220px" @bind="editUrl" />
-                        }
-                        else
-                        {
-                            <div class="name-row">
-                                <div class="name caps-font" style="color:inherit;">@p.Name</div>
-                                <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                        <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
-                                        <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
-                                    </svg>
-                                </a>
-                            </div>
-                            @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
-                            {
-                                <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
-                            }
-                            @if (TryGetSnapshotUrl(p, out var snapUrl))
-                            {
-                                <div class="snapshot-row">
-                                    <img src="@snapUrl" alt="webcam snapshot" style="display:block; max-width:200px; max-height:120px; border-radius:6px; border:1px solid rgba(255,255,255,.08)" />
-                                </div>
-                            }
-                            <div class="url-row">
-                                <div class="url mini-header">@p.MoonrakerUrl</div>
-                                <a class="icon-btn" href="@ToPort80(p.MoonrakerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                        <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
-                                        <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
-                                    </svg>
-                                </a>
-                            </div>
-                        }
+                          <div class="name-row">
+                              <div class="name caps-font" style="color:inherit;">@p.Name</div>
+                              <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                      <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
+                                      <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
+                                  </svg>
+                              </a>
+                          </div>
+                          @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
+                          {
+                              <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
+                          }
+                          @if (TryGetSnapshotUrl(p, out var snapUrl))
+                          {
+                              <div class="snapshot-row">
+                                  <img src="@snapUrl" alt="webcam snapshot" style="display:block; max-width:200px; max-height:120px; border-radius:6px; border:1px solid rgba(255,255,255,.08)" />
+                              </div>
+                          }
+                          <div class="url-row">
+                              <div class="url mini-header">@p.ServerUrl</div>
+                              <a class="icon-btn" href="@ToPort80(p.ServerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                      <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                      <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                  </svg>
+                              </a>
+                          </div>
                     </div>
                     <div class="status @(p.IsOnline ? "online" : "offline")">
                         @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
@@ -219,13 +210,6 @@ else
                 }
 
         <div class="card-footer">
-                    @if (editingId == p.Id)
-                    {
-                        <button @onclick="() => SaveEdit(p)">Save</button>
-                        <button @onclick="CancelEdit">Cancel</button>
-                    }
-                    else
-                    {
             
                         @if (!p.IsOnline)
                         {
@@ -235,7 +219,6 @@ else
                                 </svg>
                             </button>
                         }
-                    }
                 </div>
             </div>
         }
@@ -245,10 +228,6 @@ else
 @code {
     private List<PrinterDto>? printers;
     // creation moved to /printers/new
-    private Guid? editingId;
-    private string editName = string.Empty;
-    private string editUrl = string.Empty;
-    private string? editNotes;
 
     protected override async Task OnInitializedAsync()
     {
@@ -307,7 +286,6 @@ else
     private bool _refreshing;
     private async Task Refresh()
     {
-        if (editingId is not null) return; // avoid clobbering edits
         if (_refreshing) return; // prevent overlap
         _refreshing = true;
         try
@@ -327,35 +305,7 @@ else
     else { toast.Error($"Delete failed: {(int)resp.StatusCode}"); }
     }
 
-    private void StartEdit(PrinterDto p)
-    {
-    // no polling timer now
-        editingId = p.Id;
-        editName = p.Name;
-        editUrl = p.MoonrakerUrl;
-        editNotes = p.Notes;
-    }
-    private void CancelEdit()
-    {
-        editingId = null;
-        editName = string.Empty;
-        editUrl = string.Empty;
-        editNotes = null;
-    // no polling timer now
-    }
-    private async Task SaveEdit(PrinterDto p)
-    {
-        if (editingId != p.Id) return;
-    var dto = new UpdatePrinterDto(editName, editUrl, editNotes, null, null, null, null, null);
-        var resp = await Http.PutAsJsonAsync($"api/printers/{p.Id}", dto);
-        if (resp.IsSuccessStatusCode)
-        {
-            editingId = null;
-            await Refresh();
-            toast.Success("Saved changes");
-        }
-        else { toast.Error($"Save failed: {(int)resp.StatusCode}"); }
-    }
+    // inline editing removed; edit pages are handled under /printers/{id}/edit
 
     private async Task Home(Guid id)
     {

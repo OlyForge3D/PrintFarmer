@@ -4,7 +4,8 @@ public class Printer
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string MoonrakerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL
+    public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
+    public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
     public string? Notes { get; set; }
 
     // Backend type (Moonraker or PrusaLink)

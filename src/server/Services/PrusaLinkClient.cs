@@ -6,31 +6,9 @@ using System.Net;
 
 namespace Farm.Web.Server.Services;
 
-public class PrusaLinkClient(HttpClient http)
+public class PrusaLinkClient(HttpClient http) : PrinterClientBase
 {
-    private static string NormalizeBaseUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return url;
-        var trimmed = url.Trim();
-        if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            trimmed = "http://" + trimmed;
-        }
-        try
-        {
-            var ub = new UriBuilder(trimmed);
-            if (ub.Port == -1)
-            {
-                ub.Port = 80;
-            }
-            return ub.Uri.ToString().TrimEnd('/');
-        }
-        catch
-        {
-            return url.TrimEnd('/');
-        }
-    }
+    private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 80);
 
     private static void AddApiKey(HttpRequestMessage req, string? apiKey)
     {
@@ -94,15 +72,15 @@ public class PrusaLinkClient(HttpClient http)
                 if (job.TryGetProperty("progress", out var prog) && prog.ValueKind == JsonValueKind.Number)
                     progress = prog.GetDouble();
                 if (job.TryGetProperty("thumbnail", out var th) && th.ValueKind == JsonValueKind.String)
-                    thumb = th.GetString();
+                    thumb = NormalizeCameraUrl(th.GetString(), NormalizeBaseUrl(baseUrl));
             }
             // Camera URLs
             if (doc.TryGetProperty("webcam", out var cam))
             {
                 if (cam.TryGetProperty("stream", out var s) && s.ValueKind == JsonValueKind.String)
-                    stream = s.GetString();
+                    stream = NormalizeCameraUrl(s.GetString(), NormalizeBaseUrl(baseUrl));
                 if (cam.TryGetProperty("snapshot", out var sn) && sn.ValueKind == JsonValueKind.String)
-                    snap = sn.GetString();
+                    snap = NormalizeCameraUrl(sn.GetString(), NormalizeBaseUrl(baseUrl));
             }
             return new PrusaJob(null, progress, jobName, thumb, stream, snap);
         }

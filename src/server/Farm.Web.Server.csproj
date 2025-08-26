@@ -17,9 +17,13 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Refit.HttpClientFactory" Version="7.0.0" />
+  
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\Farm.Web.Shared.csproj" />
-  <ProjectReference Include="..\Client\Farm.Web.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Tests\**\*.cs" />
+    <None Include="Tests\**\*.cs" />
   </ItemGroup>
 </Project>

@@ -35,10 +35,14 @@ else
 
     <label>Base URL</label>
     <div class="field">
-      <input class="@(string.IsNullOrWhiteSpace(form.MoonrakerUrl) ? "invalid" : null)" @bind="form.MoonrakerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
-      @if (string.IsNullOrWhiteSpace(form.MoonrakerUrl))
+      <input class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind="form.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+      @if (string.IsNullOrWhiteSpace(form.ServerUrl))
       {
         <div class="hint error">Base URL is required.</div>
+      }
+      @if (!string.IsNullOrWhiteSpace(originalServerUrl))
+      {
+        <div class="hint">Original URL: @originalServerUrl</div>
       }
     </div>
 
@@ -125,12 +129,13 @@ else
   private class EditFormModel
   {
     public string Name { get; set; } = string.Empty;
-    public string MoonrakerUrl { get; set; } = string.Empty;
+  public string ServerUrl { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public DateTime? DateAcquired { get; set; }
     public PrinterBackend Backend { get; set; } = PrinterBackend.Moonraker;
     public string? ApiKey { get; set; }
   }
+  private string? originalServerUrl;
   private EditFormModel? form;
   private List<ManufacturerDto> manufacturers = new();
   private List<ModelDto> models = new();
@@ -153,12 +158,13 @@ else
       form = new EditFormModel
       {
         Name = details.Name,
-        MoonrakerUrl = details.MoonrakerUrl,
+        ServerUrl = details.ServerUrl,
         Notes = details.Notes,
         DateAcquired = details.DateAcquired,
         Backend = details.Backend,
         ApiKey = details.ApiKey
       };
+      originalServerUrl = details.OriginalServerUrl;
       selectedManufacturerId = details.ManufacturerId;
       selectedModelId = details.ModelId;
       modelMaxX = details.ModelMaxX;
@@ -225,7 +231,7 @@ else
     }
     var dto = new UpdatePrinterDto(
       form!.Name,
-      form!.MoonrakerUrl,
+  form!.ServerUrl,
       form!.Notes,
       selectedManufacturerId,
       selectedModelId,
@@ -233,7 +239,8 @@ else
       null,
       form!.DateAcquired,
       form!.Backend,
-      form!.ApiKey
+  form!.ApiKey,
+  originalServerUrl
     );
     var resp = await Http.PutAsJsonAsync($"api/printers/{id}", dto);
     if (resp.IsSuccessStatusCode) { toast.Success("Saved"); Nav.NavigateTo("/"); }
@@ -246,7 +253,7 @@ else
   {
     if (form is null) return false;
     if (string.IsNullOrWhiteSpace(form.Name)) return false;
-  if (string.IsNullOrWhiteSpace(form.MoonrakerUrl)) return false;
+  if (string.IsNullOrWhiteSpace(form.ServerUrl)) return false;
   // Optionally require ApiKey for PrusaLink
   if (form.Backend == PrinterBackend.PrusaLink && string.IsNullOrWhiteSpace(form.ApiKey)) return false;
     if (!string.IsNullOrWhiteSpace(newModelName))

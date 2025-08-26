@@ -131,7 +131,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 {
                     logger.LogDebug(ex, "Backend check failed for printer {Printer}", printer.Name);
                 }
-                var uri = BuildWsUri(printer.MoonrakerUrl);
+                var uri = BuildWsUri(printer.ServerUrl);
                 ws = new ClientWebSocket();
                 await ws.ConnectAsync(uri, ct);
 
