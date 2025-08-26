@@ -276,8 +276,9 @@ else
                 printers[idx] = existing with
                 {
                     IsOnline = update.IsOnline,
-                    State = update.State,
-                    Progress = update.Progress,
+                    // Preserve existing State/Progress when update doesn't include them
+                    State = string.IsNullOrWhiteSpace(update.State) ? existing.State : update.State,
+                    Progress = update.Progress ?? existing.Progress,
                     JobName = update.JobName ?? existing.JobName,
                     ThumbnailUrl = update.ThumbnailUrl ?? existing.ThumbnailUrl,
                     CameraStreamUrl = update.CameraStreamUrl ?? existing.CameraStreamUrl,
