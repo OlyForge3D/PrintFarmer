@@ -242,7 +242,7 @@ else
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (var pr in printers)
             {
-                if (pr.IsOnline) snapshotStamps[pr.Id] = now;
+                if (pr.IsOnline || !string.IsNullOrWhiteSpace(pr.CameraSnapshotUrl)) snapshotStamps[pr.Id] = now;
             }
         }
     // preload presets for tooltips
@@ -458,11 +458,7 @@ else
         return true;
     }
     private bool IsCameraVisible(Guid id) => cameraVisible.Contains(id);
-    private void ToggleCamera(Guid id)
-    {
-        if (!cameraVisible.Add(id)) cameraVisible.Remove(id);
-        StateHasChanged();
-    }
+
     private string CameraBtnTitle(Guid id) => IsCameraVisible(id) ? "Hide camera" : "Show camera";
     private async Task StartSnapshotTimerAsync()
     {
@@ -477,7 +473,7 @@ else
                 var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 foreach (var pr in printers)
                 {
-                    if (pr.IsOnline)
+                    if (!string.IsNullOrWhiteSpace(pr.CameraSnapshotUrl))
                     {
                         snapshotStamps[pr.Id] = now; // bump cache-buster to refresh image src
                     }
@@ -486,6 +482,23 @@ else
             }
         }
         catch (TaskCanceledException) { }
+    }
+
+    // When toggling on, ensure an initial timestamp so the first image loads
+    private void ToggleCamera(Guid id)
+    {
+        if (!cameraVisible.Add(id))
+        {
+            cameraVisible.Remove(id);
+        }
+        else
+        {
+            if (!snapshotStamps.ContainsKey(id) || snapshotStamps[id] == 0)
+            {
+                snapshotStamps[id] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            }
+        }
+        StateHasChanged();
     }
 }
 
