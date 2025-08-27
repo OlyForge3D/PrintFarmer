@@ -29,7 +29,7 @@ public class PresetService
         _presets = presets;
         try
         {
-            var json = JsonSerializer.Serialize(_presets, new JsonSerializerOptions{ WriteIndented = true });
+            var json = JsonSerializer.Serialize(_presets, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_path, json);
         }
         catch { /* ignore */ }

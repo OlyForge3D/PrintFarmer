@@ -174,27 +174,27 @@ public class SpoolmanService
                       ?? string.Empty;
 
         // Remaining weight could be in grams or another field name
-    double? remaining = TryGetDoubleNullable(el, "remaining_weight_g", "remaining_weight", "remaining_weight_grams", "mass_remaining_g", "weight_remaining_g");
+        double? remaining = TryGetDoubleNullable(el, "remaining_weight_g", "remaining_weight", "remaining_weight_grams", "mass_remaining_g", "weight_remaining_g");
 
         // Color may be direct or nested under filament/profile
-    var color = TryGetString(el, "color_hex", "color")
-        ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "color_hex", "hex_color", "color" });
-    color = NormalizeHexColor(color);
+        var color = TryGetString(el, "color_hex", "color")
+            ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "color_hex", "hex_color", "color" });
+        color = NormalizeHexColor(color);
 
-    // Filament name and vendor/manufacturer
-    var filamentName = TryGetString(el, "filament_name")
-               ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "name", "filament_name", "display_name" });
-    var vendor =
-        // Preferred path per Spoolman: filament.vendor.name
-        TryGetStringAtPath(el, "filament", "vendor", "name")
-        // Common alternative: profile.vendor.name
-        ?? TryGetStringAtPath(el, "profile", "vendor", "name")
-        // Fallbacks
-        ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "vendor", "manufacturer", "brand", "name" })
-        ?? TryGetString(el, "vendor", "manufacturer");
+        // Filament name and vendor/manufacturer
+        var filamentName = TryGetString(el, "filament_name")
+                   ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "name", "filament_name", "display_name" });
+        var vendor =
+            // Preferred path per Spoolman: filament.vendor.name
+            TryGetStringAtPath(el, "filament", "vendor", "name")
+            // Common alternative: profile.vendor.name
+            ?? TryGetStringAtPath(el, "profile", "vendor", "name")
+            // Fallbacks
+            ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "vendor", "manufacturer", "brand", "name" })
+            ?? TryGetString(el, "vendor", "manufacturer");
 
         // In-use/active detection
-    var inUse = TryGetBool(el, "in_use", "is_active", "active", "selected");
+        var inUse = TryGetBool(el, "in_use", "is_active", "active", "selected");
         if (!inUse.HasValue)
         {
             // Some schemas use archived=false to indicate active
@@ -202,13 +202,13 @@ public class SpoolmanService
             if (archived.HasValue) inUse = !archived.Value;
         }
 
-    // Dates: registered, first used, last used (tolerant to various names and formats)
-    var registeredAt = TryGetDateTime(el, "registered");
-    var firstUsedAt = TryGetDateTime(el, "first_used");
-    var lastUsedAt = TryGetDateTime(el, "last_used");
+        // Dates: registered, first used, last used (tolerant to various names and formats)
+        var registeredAt = TryGetDateTime(el, "registered");
+        var firstUsedAt = TryGetDateTime(el, "first_used");
+        var lastUsedAt = TryGetDateTime(el, "last_used");
 
-    return new SpoolmanSpoolDto(id, name ?? "Spool", material, remaining, color, inUse ?? false, filamentName, vendor,
-        registeredAt, firstUsedAt, lastUsedAt);
+        return new SpoolmanSpoolDto(id, name ?? "Spool", material, remaining, color, inUse ?? false, filamentName, vendor,
+            registeredAt, firstUsedAt, lastUsedAt);
     }
 
     private static int TryGetInt(JsonElement el, params string[] names)

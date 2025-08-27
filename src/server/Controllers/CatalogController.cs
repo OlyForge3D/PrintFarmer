@@ -57,7 +57,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
         var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = req.ManufacturerId, Name = trimmed };
         db.Models.Add(model);
         await db.SaveChangesAsync(ct);
-    return CreatedAtAction(nameof(GetModels), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ));
+        return CreatedAtAction(nameof(GetModels), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ));
     }
 
     public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ);
