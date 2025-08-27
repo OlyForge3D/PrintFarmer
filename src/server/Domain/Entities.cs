@@ -48,3 +48,9 @@ public class PrinterModel
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
 }
+
+public class SpoolmanConfig
+{
+    public int Id { get; set; } // Single row table; use Id = 1
+    public string BaseUrl { get; set; } = string.Empty;
+}

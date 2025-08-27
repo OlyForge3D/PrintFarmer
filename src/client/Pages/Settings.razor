@@ -8,8 +8,20 @@
 <div class="form">
   <label>Spoolman Base URL</label>
   <div class="field">
-    <input placeholder="http://spoolman:8000" @bind="spoolmanBase" />
-    <div class="hint">Base URL to your Spoolman instance. No API key required.</div>
+    <input placeholder="http://spoolman:7912" @bind="spoolmanBase" @bind:event="oninput" />
+    <div class="hint">Base URL to your Spoolman instance. No API key required. Example: http://spoolman:8000</div>
+    @if (!string.IsNullOrWhiteSpace(spoolmanBase))
+    {
+      <div class="hint">Will save as: <code>@NormalizedUrl</code></div>
+      <div class="row row-inline" style="gap:.5rem; margin-top:.25rem;">
+        <a class="btn ghost" href="@NormalizedUrl" target="_blank" rel="noopener noreferrer">Open Spoolman</a>
+        <button class="btn" @onclick="TestSpoolman" disabled="@testing">@((testing ? "Testing..." : "Test connection"))</button>
+        @if (testOk.HasValue)
+        {
+          <span class="hint @((testOk == true ? "ok" : "error"))">@testMessage</span>
+        }
+      </div>
+    }
   </div>
 
   <div class="actions">
@@ -65,6 +77,12 @@
   private string spoolmanBase = string.Empty;
   private FilamentPresetsDto? presets;
   private double absHotend, absBed, asaHotend, asaBed, plaHotend, plaBed, pcHotend, pcBed, pctgHotend, pctgBed, petgHotend, petgBed;
+  private bool testing;
+  private bool? testOk;
+  private string? testMessage;
+
+  private string NormalizedUrl
+    => NormalizeBaseUrl(spoolmanBase ?? string.Empty);
 
   protected override async Task OnInitializedAsync()
   {
@@ -84,9 +102,40 @@
 
   private async Task SaveSpoolman()
   {
-    var resp = await Http.PostAsJsonAsync("api/spoolman/config", new SpoolmanConfigDto(spoolmanBase));
+    var resp = await Http.PostAsJsonAsync("api/spoolman/config", new SpoolmanConfigDto(NormalizedUrl));
     if (resp.IsSuccessStatusCode) toast.Success("Spoolman URL saved");
     else toast.Error($"Save failed: {(int)resp.StatusCode}");
+  }
+
+  private async Task TestSpoolman()
+  {
+    testing = true; testOk = null; testMessage = null;
+    try
+    {
+      // Attempt to fetch spools using current config (not saved yet); temporarily POST then GET
+      var save = await Http.PostAsJsonAsync("api/spoolman/config", new SpoolmanConfigDto(NormalizedUrl));
+      if (!save.IsSuccessStatusCode)
+      {
+        testOk = false; testMessage = $"Save failed: {(int)save.StatusCode}"; return;
+      }
+      var spools = await Http.GetFromJsonAsync<List<SpoolmanSpoolDto>>("api/spoolman/spools");
+      testOk = true;
+      testMessage = spools is { Count: > 0 } ? $"Connected. {spools.Count} spool(s) found." : "Connected. No spools returned.";
+    }
+    catch (Exception ex)
+    {
+      testOk = false; testMessage = $"Failed: {ex.Message}";
+    }
+    finally { testing = false; }
+  }
+
+  private static string NormalizeBaseUrl(string url)
+  {
+    if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+    var t = url.Trim();
+    if (!t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !t.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+      t = "http://" + t;
+    return t.TrimEnd('/');
   }
 
   private async Task SavePresets()

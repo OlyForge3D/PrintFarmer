@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Farm.Web.Server.Data;
+using Farm.Web.Server.Domain;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Server.Services;
@@ -7,34 +9,54 @@ namespace Farm.Web.Server.Services;
 public class SpoolmanService
 {
     private readonly HttpClient http;
-    private SpoolmanConfigDto? _config;
-    private readonly string _configPath = Path.Combine(AppContext.BaseDirectory, "spoolman.config.json");
+    private readonly AppDbContext db;
 
-    public SpoolmanService(HttpClient http)
+    public SpoolmanService(HttpClient http, AppDbContext db)
     {
         this.http = http;
-        try
-        {
-            if (File.Exists(_configPath))
-            {
-                var text = File.ReadAllText(_configPath);
-                var cfg = JsonSerializer.Deserialize<SpoolmanConfigDto>(text);
-                if (cfg is not null) _config = cfg;
-            }
-        }
-        catch { }
+        this.db = db;
     }
 
-    public SpoolmanConfigDto? GetConfig() => _config;
+    public SpoolmanConfigDto? GetConfig()
+    {
+        var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+        if (row is null)
+        {
+            // One-time migration from legacy JSON file if present
+            try
+            {
+                var legacyPath = Path.Combine(AppContext.BaseDirectory, "spoolman.config.json");
+                if (File.Exists(legacyPath))
+                {
+                    var text = File.ReadAllText(legacyPath);
+                    var cfg = JsonSerializer.Deserialize<SpoolmanConfigDto>(text);
+                    if (cfg is not null && !string.IsNullOrWhiteSpace(cfg.BaseUrl))
+                    {
+                        SetConfig(cfg);
+                        row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+                    }
+                }
+            }
+            catch { }
+        }
+        return row is null ? null : new SpoolmanConfigDto(row.BaseUrl);
+    }
+
     public void SetConfig(SpoolmanConfigDto config)
     {
-        _config = config with { BaseUrl = NormalizeBaseUrl(config.BaseUrl) };
-        try
+        var baseUrl = NormalizeBaseUrl(config.BaseUrl);
+        var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+        if (row is null)
         {
-            var json = JsonSerializer.Serialize(_config);
-            File.WriteAllText(_configPath, json);
+            row = new SpoolmanConfig { Id = 1, BaseUrl = baseUrl };
+            db.SpoolmanConfigs.Add(row);
         }
-        catch { }
+        else
+        {
+            row.BaseUrl = baseUrl;
+            db.SpoolmanConfigs.Update(row);
+        }
+        db.SaveChanges();
     }
 
     private static string NormalizeBaseUrl(string url)
@@ -51,10 +73,11 @@ public class SpoolmanService
 
     public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
     {
-        if (_config is null || string.IsNullOrWhiteSpace(_config.BaseUrl)) return [];
+    var cfg = GetConfig();
+    if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl)) return [];
 
-        // Official Spoolman endpoint for listing spools
-        var baseUrl = _config.BaseUrl.TrimEnd('/');
+    // Official Spoolman endpoint for listing spools
+    var baseUrl = cfg.BaseUrl.TrimEnd('/');
         var url = $"{baseUrl}/api/v1/spool";
         try
         {

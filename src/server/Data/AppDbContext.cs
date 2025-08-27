@@ -9,6 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Spool> Spools => Set<Spool>();
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
     public DbSet<PrinterModel> Models => Set<PrinterModel>();
+    public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -59,6 +60,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(s => s.AssignedPrinterId)
              .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<SpoolmanConfig>(b =>
+        {
+            b.HasKey(c => c.Id);
+            b.Property(c => c.BaseUrl).IsRequired().HasMaxLength(256);
         });
     }
 }

@@ -127,6 +127,21 @@ using (var scope = app.Services.CreateScope())
                     cmd.CommandText = "ALTER TABLE Printers ADD COLUMN IpAddress TEXT NULL;";
                     cmd.ExecuteNonQuery();
                 }
+                // Ensure SpoolmanConfigs exists even on older DBs
+                try
+                {
+                    cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='SpoolmanConfigs';";
+                    var hasCfg = cmd.ExecuteScalar()?.ToString() == "SpoolmanConfigs";
+                    if (!hasCfg)
+                    {
+                        cmd.CommandText = @"CREATE TABLE IF NOT EXISTS SpoolmanConfigs (
+                            Id INTEGER NOT NULL PRIMARY KEY,
+                            BaseUrl TEXT NOT NULL
+                        );";
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch { }
             }
             else
             {
@@ -148,6 +163,13 @@ using (var scope = app.Services.CreateScope())
                 // Helpful indexes (match migrations when present)
                 try { cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Printers_ManufacturerId ON Printers(ManufacturerId);"; cmd.ExecuteNonQuery(); } catch { }
                 try { cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Printers_ModelId ON Printers(ModelId);"; cmd.ExecuteNonQuery(); } catch { }
+
+                // Create SpoolmanConfigs (single-row) table if missing
+                cmd.CommandText = @"CREATE TABLE IF NOT EXISTS SpoolmanConfigs (
+                    Id INTEGER NOT NULL PRIMARY KEY,
+                    BaseUrl TEXT NOT NULL
+                );";
+                cmd.ExecuteNonQuery();
             }
         }
         conn.Close();
