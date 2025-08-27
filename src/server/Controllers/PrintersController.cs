@@ -108,6 +108,85 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         return Ok(dtos);
     }
 
+    [HttpGet("basic")]
+    public async Task<ActionResult<IEnumerable<PrinterBasicDto>>> GetBasic(CancellationToken ct)
+    {
+        var items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
+        var dtos = items.Select(p => new PrinterBasicDto(
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            ManufacturerName: p.Manufacturer?.Name,
+            ModelName: p.Model?.Name,
+            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : Farm.Web.Shared.PrinterBackend.Moonraker,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
+        )).ToList();
+        return Ok(dtos);
+    }
+
+    [HttpGet("{id:guid}/status")]
+    public async Task<ActionResult<PrinterStatusDto>> GetStatus(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null) return NotFound();
+        
+        try
+        {
+            if (p.Backend == 1) // PrusaLink
+            {
+                var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
+                return new PrinterStatusDto(
+                    Id: p.Id,
+                    IsOnline: status.IsOnline,
+                    State: status.State,
+                    Progress: status.Progress,
+                    JobName: status.JobName,
+                    ThumbnailUrl: status.ThumbnailUrl,
+                    CameraStreamUrl: status.CameraStreamUrl,
+                    CameraSnapshotUrl: status.CameraSnapshotUrl
+                );
+            }
+            else // Moonraker
+            {
+                var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
+                return new PrinterStatusDto(
+                    Id: p.Id,
+                    IsOnline: status.IsOnline,
+                    State: status.State,
+                    Progress: status.Progress,
+                    JobName: status.JobName,
+                    ThumbnailUrl: status.ThumbnailUrl,
+                    CameraStreamUrl: status.CameraStreamUrl,
+                    CameraSnapshotUrl: status.CameraSnapshotUrl,
+                    X: status.X,
+                    Y: status.Y,
+                    Z: status.Z,
+                    HotendTemp: status.HotendTemp,
+                    BedTemp: status.BedTemp,
+                    HotendTarget: status.HotendTarget,
+                    BedTarget: status.BedTarget
+                );
+            }
+        }
+        catch
+        {
+            // Return offline status if there's any error
+            return new PrinterStatusDto(
+                Id: p.Id,
+                IsOnline: false,
+                State: null,
+                Progress: null,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null
+            );
+        }
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<PrinterDto>> Get(Guid id, CancellationToken ct)
     {

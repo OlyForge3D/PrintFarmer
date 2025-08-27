@@ -1,6 +1,6 @@
 {
-  "name": "PrintFarmer (.NET 8 + Blazor WASM hosted)",
-  "image": "mcr.microsoft.com/devcontainers/dotnet:8.0",
+  "name": "PrintFarmer (.NET 9 + Blazor WASM hosted)",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:9.0",
   "features": {
     "ghcr.io/devcontainers/features/sqlite:1": {}
   },

@@ -32,6 +32,37 @@ public record PrinterDto(
     string? OriginalServerUrl = null,
     string? IpAddress = null);
 
+// Basic printer info without live status (for fast loading)
+public record PrinterBasicDto(
+    Guid Id,
+    string Name,
+    string ServerUrl,
+    string? Notes,
+    string? ManufacturerName = null,
+    string? ModelName = null,
+    PrinterBackend Backend = PrinterBackend.Moonraker,
+    string? ApiKey = null,
+    string? OriginalServerUrl = null,
+    string? IpAddress = null);
+
+// Live status info for a specific printer
+public record PrinterStatusDto(
+    Guid Id,
+    bool IsOnline,
+    string? State,
+    double? Progress = null,
+    string? JobName = null,
+    string? ThumbnailUrl = null,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null,
+    double? X = null,
+    double? Y = null,
+    double? Z = null,
+    double? HotendTemp = null,
+    double? BedTemp = null,
+    double? HotendTarget = null,
+    double? BedTarget = null);
+
 // Real-time update payload for SignalR
 public record PrinterStatusUpdate(
     Guid Id,

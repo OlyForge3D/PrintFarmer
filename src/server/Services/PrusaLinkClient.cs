@@ -36,12 +36,14 @@ public class PrusaLinkClient(HttpClient http) : PrinterClientBase
     {
         try
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
             var url = $"{NormalizeBaseUrl(baseUrl)}/api/v1/status";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             AddApiKey(req, apiKey);
-            using var resp = await http.SendAsync(req, ct);
+            using var resp = await http.SendAsync(req, cts.Token);
             if (!resp.IsSuccessStatusCode) return new PrusaStatus(false, null);
-            var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
             string? state = null;
             if (doc.TryGetProperty("printer", out var printer) && printer.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String)
                 state = st.GetString();
@@ -54,12 +56,14 @@ public class PrusaLinkClient(HttpClient http) : PrinterClientBase
     {
         try
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
             var url = $"{NormalizeBaseUrl(baseUrl)}/api/v1/job";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             AddApiKey(req, apiKey);
-            using var resp = await http.SendAsync(req, ct);
+            using var resp = await http.SendAsync(req, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
             string? jobName = null;
             double? progress = null;
             string? thumb = null;

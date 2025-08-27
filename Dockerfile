@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
-# Multi-stage build for PrintFarmer (Blazor WASM hosted, .NET 8)
+# Multi-stage build for PrintFarmer (Blazor WASM hosted, .NET 9)
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 # Kestrel default in container; override to 0.0.0.0 so it is reachable
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 EXPOSE 8080
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Prereqs for Emscripten toolchain used by wasm-tools (needs `python` on PATH)

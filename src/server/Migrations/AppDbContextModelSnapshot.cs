@@ -15,7 +15,7 @@ namespace Farm.Web.Server.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "8.0.8");
+            modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
 
             modelBuilder.Entity("Farm.Web.Server.Domain.Manufacturer", b =>
                 {
@@ -43,32 +43,25 @@ namespace Farm.Web.Server.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime?>("DateAcquired")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("ApiKey")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Backend")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime?>("DateAcquired")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<Guid?>("ManufacturerId")
                         .HasColumnType("TEXT");
 
-                    b.Property<double?>("MaxX")
-                        .HasColumnType("REAL");
-
-                    b.Property<double?>("MaxY")
-                        .HasColumnType("REAL");
-
-                    b.Property<double?>("MaxZ")
-                        .HasColumnType("REAL");
-
                     b.Property<Guid?>("ModelId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OriginalServerUrl")
-                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
@@ -77,6 +70,10 @@ namespace Farm.Web.Server.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Notes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalServerUrl")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ServerUrl")
@@ -101,6 +98,15 @@ namespace Farm.Web.Server.Migrations
 
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("TEXT");
+
+                    b.Property<double?>("MaxX")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("MaxY")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("MaxZ")
+                        .HasColumnType("REAL");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -146,6 +152,22 @@ namespace Farm.Web.Server.Migrations
                     b.HasIndex("AssignedPrinterId");
 
                     b.ToTable("Spools");
+                });
+
+            modelBuilder.Entity("Farm.Web.Server.Domain.SpoolmanConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BaseUrl")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SpoolmanConfigs");
                 });
 
             modelBuilder.Entity("Farm.Web.Server.Domain.Printer", b =>

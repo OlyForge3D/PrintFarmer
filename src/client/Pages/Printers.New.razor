@@ -9,48 +9,52 @@
 
 <h2>Add Printer</h2>
 
-<EditForm Model="printer" OnValidSubmit="AddPrinter">
+<EditForm Model="printer" OnValidSubmit="AddPrinter" class="add-printer-form">
     <DataAnnotationsValidator />
     <ValidationSummary />
+    
+    <div class="form-label">Name</div>
     <div class="form-group">
-        <label>Name</label>
         <InputText class="form-control" @bind-Value="printer.Name" />
+        <div class="hint">Enter a descriptive name for your printer</div>
     </div>
+    
+    <div class="form-label">Manufacturer</div>
     <div class="form-group">
-        <label>Manufacturer</label>
-        <div class="row-inline" style="gap:.5rem; align-items:center;">
-            <select class="form-control" style="flex:1" @bind="selectedManufacturerId" @bind:after="OnManufacturerChanged">
+        <div class="input-with-button">
+            <select class="form-control flex-input" @bind="selectedManufacturerId" @bind:after="OnManufacturerChanged">
                 <option value="">— Select —</option>
                 @foreach (var m in manufacturers)
                 {
                     <option value="@m.Id">@m.Name</option>
                 }
             </select>
-            <button class="btn" title="New Manufacturer" aria-label="New Manufacturer" @onclick="ToggleNewManufacturer" type="button">New</button>
+            <button class="btn-standard" title="New Manufacturer" aria-label="New Manufacturer" @onclick="ToggleNewManufacturer" type="button">New</button>
         </div>
         @if (showNewManufacturer)
         {
-            <div class="row-inline" style="gap:.5rem; align-items:center; margin-top:.5rem;">
+            <div class="new-item-input">
                 <input class="form-control" placeholder="New manufacturer name" @bind="newManufacturerName" />
             </div>
         }
+        <div class="hint">Choose the printer manufacturer</div>
     </div>
 
+    <div class="form-label">Model</div>
     <div class="form-group">
-        <label>Model</label>
-        <div class="row-inline" style="gap:.5rem; align-items:center;">
-            <select class="form-control" style="flex:1" @bind="selectedModelId">
+        <div class="input-with-button">
+            <select class="form-control flex-input" @bind="selectedModelId">
                 <option value="">— Select —</option>
                 @foreach (var m in models)
                 {
                     <option value="@m.Id">@m.Name</option>
                 }
             </select>
-            <button class="btn" title="@((selectedManufacturerId is null) ? "Select a manufacturer first" : "New Model")" aria-label="New Model" @onclick="ToggleNewModel" type="button" disabled="@(selectedManufacturerId is null)">New</button>
+            <button class="btn-standard" title="@((selectedManufacturerId is null) ? "Select a manufacturer first" : "New Model")" aria-label="New Model" @onclick="ToggleNewModel" type="button" disabled="@(selectedManufacturerId is null)">New</button>
         </div>
         @if (showNewModel && selectedManufacturerId is Guid)
         {
-            <div class="row-inline" style="gap:.5rem; align-items:center; margin-top:.5rem;">
+            <div class="new-item-input">
                 <input class="form-control" placeholder="New model name" @bind="newModelName" />
             </div>
         }
@@ -62,45 +66,65 @@
                 <div class="hint">Max: X @(@md.MaxX?.ToString() ?? "—"), Y @(@md.MaxY?.ToString() ?? "—"), Z @(@md.MaxZ?.ToString() ?? "—")</div>
             }
         }
+        else
+        {
+            <div class="hint">Choose or create the printer model</div>
+        }
     </div>
+    
+    <div class="form-label">Backend</div>
     <div class="form-group">
-        <label>Backend</label>
         <InputSelect class="form-control" TValue="PrinterBackend" @bind-Value="printer.Backend">
             <option value="@PrinterBackend.Moonraker">Moonraker</option>
             <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
         </InputSelect>
+        <div class="hint">Select the printer firmware type</div>
     </div>
+    
+    <div class="form-label">Base URL</div>
     <div class="form-group">
-        <label>Base URL</label>
-        <div class="row-inline" style="gap:.5rem; align-items:center;">
-            <InputText class="form-control" @bind-Value="printer.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
-            <button class="btn" type="button" @onclick="ResolveHostname">Resolve</button>
+        <div class="input-with-button">
+            <InputText class="form-control flex-input" @bind-Value="printer.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+            <button class="btn-standard" type="button" @onclick="ResolveHostname">Resolve</button>
         </div>
         @if (!string.IsNullOrWhiteSpace(ipAddress))
         {
             <div class="hint">IP Address: @ipAddress</div>
         }
+        else
+        {
+            <div class="hint">Full URL including protocol and port</div>
+        }
     </div>
+    
     @if (printer.Backend == PrinterBackend.PrusaLink)
     {
+        <div class="form-label">API Key</div>
         <div class="form-group">
-            <label>API Key</label>
             <InputText class="form-control" @bind-Value="printer.ApiKey" />
+            <div class="hint">API key required for PrusaLink printers</div>
         </div>
     }
+    
+    <div class="form-label">Notes</div>
     <div class="form-group">
-        <label>Notes</label>
-    <InputTextArea class="form-control" @bind-Value="printer.Notes" />
+        <InputTextArea class="form-control" @bind-Value="printer.Notes" />
+        <div class="hint">Optional notes about this printer</div>
     </div>
+    
+    <div class="form-label">Date Acquired</div>
     <div class="form-group">
-        <label>Date Acquired</label>
-        <div class="row-inline" style="gap:.5rem; align-items:center;">
-            <input type="date" class="form-control" @bind-value="printer.DateAcquired" @bind-value:format="yyyy-MM-dd" @ref="dateAcqAddRef" />
-            <button type="button" class="btn" @onclick="(()=>OpenDatePicker(dateAcqAddRef))" title="Pick date">📅</button>
+        <div class="input-with-button">
+            <input type="date" class="form-control flex-input" @bind-value="printer.DateAcquired" @bind-value:format="yyyy-MM-dd" @ref="dateAcqAddRef" />
+            <button type="button" class="btn-standard" @onclick="(()=>OpenDatePicker(dateAcqAddRef))" title="Pick date">📅</button>
         </div>
+        <div class="hint">When did you acquire this printer?</div>
     </div>
-    <button class="btn btn-primary" type="submit">Add Printer</button>
-    <a class="btn btn-secondary" href="/printers">Cancel</a>
+    
+    <div class="form-actions">
+        <a class="btn-cancel btn-action" href="/printers">Cancel</a>
+        <button class="btn-submit btn-action" type="submit">Add Printer</button>
+    </div>
 </EditForm>
 
 @code {

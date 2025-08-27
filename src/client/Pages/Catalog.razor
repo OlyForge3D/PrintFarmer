@@ -4,67 +4,104 @@
 @inject Farm.Web.Client.ToastService toast
 @using Microsoft.AspNetCore.Components.Forms
 
+<PageTitle>Catalog - ForgeIQ</PageTitle>
+
 <h2>Catalog</h2>
 
-<div class="grid">
-  <section>
-    <h3>Manufacturers</h3>
-    <div class="row">
-      <input placeholder="New manufacturer" @bind="newManufacturer" />
-      <button @onclick="AddManufacturer">Add</button>
-    </div>
-    <ul>
-      @foreach (var m in manufacturers)
-      {
-        <li @onclick="() => SelectManufacturer(m)">@m.Name</li>
-      }
-    </ul>
-  </section>
-
-  <section>
-    <h3>Models</h3>
-    @if (selectedManufacturer is null)
-    {
-      <p>Select a manufacturer to view models.</p>
-    }
-    else
-    {
-      <div class="row">
-        <input placeholder="New model" @bind="newModel" />
-        <button @onclick="AddModel">Add</button>
-      </div>
-      @if (models.Count == 0)
-      {
-        <p>No models yet.</p>
-      }
-      else
-      {
-        <div class="list">
-          @foreach (var m in models)
-          {
-            var ed = GetEdit(m);
-            bool isDirty = (ed.MaxX != m.MaxX) || (ed.MaxY != m.MaxY) || (ed.MaxZ != m.MaxZ);
-            <div class="card row" style="align-items:center; gap:12px;">
-              <div style="min-width:220px; font-weight:600;">@m.Name</div>
-              <div class="row" style="gap:8px; align-items:center;">
-                <label title="Max X (mm)">X</label>
-                <InputNumber TValue="double?" @bind-Value="ed.MaxX" class="input number" />
-                <label title="Max Y (mm)">Y</label>
-                <InputNumber TValue="double?" @bind-Value="ed.MaxY" class="input number" />
-                <label title="Max Z (mm)">Z</label>
-                <InputNumber TValue="double?" @bind-Value="ed.MaxZ" class="input number" />
-                <span>mm</span>
-              </div>
-              <div class="row" style="margin-left:auto; gap:8px;">
-                <button disabled="@(!isDirty)" @onclick="() => SaveModel(m)">Save</button>
-                <button disabled="@(!isDirty)" @onclick="() => ResetModel(m)">Reset</button>
-              </div>
+<div class="catalog-container">
+    <!-- Manufacturers Section -->
+    <div class="catalog-section manufacturers-section">
+        <div class="section-header">
+            <h3>Manufacturers</h3>
+            <div class="add-form">
+                <input @bind="newManufacturer" @onkeypress="@(async (e) => { if (e.Key == "Enter") await AddManufacturer(); })" 
+                       placeholder="Manufacturer name" class="form-control" />
+                <button @onclick="AddManufacturer" class="btn" disabled="@string.IsNullOrWhiteSpace(newManufacturer)">Add</button>
             </div>
-          }
         </div>
-      }
-    }
-  </section>
+
+        <div class="manufacturers-grid">
+            @foreach (var manufacturer in manufacturers)
+            {
+                <div class="manufacturer-card @(selectedManufacturer?.Id == manufacturer.Id ? "selected" : "")"
+                     @onclick="() => SelectManufacturer(manufacturer)">
+                    <div class="manufacturer-name">@manufacturer.Name</div>
+                    <div class="manufacturer-stats">@GetModelCount(manufacturer.Id) models</div>
+                </div>
+            }
+        </div>
+
+        @if (!manufacturers.Any())
+        {
+            <div class="empty-state">
+                No manufacturers found. Add your first manufacturer above.
+            </div>
+        }
+    </div>
+
+    <!-- Models Section -->
+    <div class="catalog-section models-section">
+        <div class="section-header">
+            <h3>Models @(selectedManufacturer != null ? $"— {selectedManufacturer.Name}" : "")</h3>
+            @if (selectedManufacturer is not null)
+            {
+                <div class="add-form">
+                    <input @bind="newModel" @onkeypress="@(async (e) => { if (e.Key == "Enter") await AddModel(); })" 
+                           placeholder="Model name" class="form-control" />
+                    <button @onclick="AddModel" class="btn" disabled="@string.IsNullOrWhiteSpace(newModel)">Add</button>
+                </div>
+            }
+        </div>
+
+        @if (selectedManufacturer is not null)
+        {
+            <div class="models-list">
+                @foreach (var model in models)
+                {
+                    var edit = GetEdit(model);
+                    bool isDirty = (edit.MaxX != model.MaxX) || (edit.MaxY != model.MaxY) || (edit.MaxZ != model.MaxZ);
+                    <div class="model-card">
+                        <div class="model-header">
+                            <h4 class="model-name">@model.Name</h4>
+                            <div class="model-actions">
+                                <button @onclick="() => SaveModel(model)" class="btn btn-success btn-sm" disabled="@(!isDirty)">Save</button>
+                                <button @onclick="() => ResetModel(model)" class="btn btn-secondary btn-sm" disabled="@(!isDirty)">Reset</button>
+                            </div>
+                        </div>
+                        
+                        <div class="model-dimensions">
+                            <div class="dimension-group">
+                                <label class="dimension-label">Max X (mm)</label>
+                                <InputNumber TValue="double?" @bind-Value="edit.MaxX" class="dimension-input" placeholder="—" />
+                            </div>
+                            <div class="dimension-group">
+                                <label class="dimension-label">Max Y (mm)</label>
+                                <InputNumber TValue="double?" @bind-Value="edit.MaxY" class="dimension-input" placeholder="—" />
+                            </div>
+                            <div class="dimension-group">
+                                <label class="dimension-label">Max Z (mm)</label>
+                                <InputNumber TValue="double?" @bind-Value="edit.MaxZ" class="dimension-input" placeholder="—" />
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @if (!models.Any())
+            {
+                <div class="empty-state">
+                    No models found for @selectedManufacturer.Name. Add your first model above.
+                </div>
+            }
+        }
+        else
+        {
+            <div class="selection-prompt">
+                <div class="prompt-icon">🏭</div>
+                <div class="prompt-text">Select a manufacturer to view and manage models</div>
+            </div>
+        }
+    </div>
 </div>
 
 @code {
@@ -74,10 +111,27 @@
   private string? newManufacturer;
   private string? newModel;
   private readonly Dictionary<Guid, EditModel> edit = new();
+  private Dictionary<Guid, int> manufacturerModelCounts = new();
 
   protected override async Task OnInitializedAsync()
   {
     manufacturers = await Http.GetFromJsonAsync<List<ManufacturerDto>>("api/catalog/manufacturers") ?? new();
+    await LoadManufacturerModelCounts();
+  }
+
+  private async Task LoadManufacturerModelCounts()
+  {
+    manufacturerModelCounts.Clear();
+    foreach (var manufacturer in manufacturers)
+    {
+      var manufacturerModels = await Http.GetFromJsonAsync<List<ModelDto>>($"api/catalog/models?manufacturerId={manufacturer.Id}") ?? new();
+      manufacturerModelCounts[manufacturer.Id] = manufacturerModels.Count;
+    }
+  }
+
+  private int GetModelCount(Guid manufacturerId)
+  {
+    return manufacturerModelCounts.TryGetValue(manufacturerId, out var count) ? count : 0;
   }
 
   private async Task AddManufacturer()
@@ -87,6 +141,7 @@
     if (resp.IsSuccessStatusCode)
     {
       manufacturers = await Http.GetFromJsonAsync<List<ManufacturerDto>>("api/catalog/manufacturers") ?? new();
+      await LoadManufacturerModelCounts();
       newManufacturer = string.Empty;
       toast.Success("Manufacturer added");
     }
@@ -106,8 +161,8 @@
   private async Task SelectManufacturer(ManufacturerDto m)
   {
     selectedManufacturer = m;
-  models = await Http.GetFromJsonAsync<List<ModelDto>>($"api/catalog/models?manufacturerId={m.Id}") ?? new();
-  BuildEditState();
+    models = await Http.GetFromJsonAsync<List<ModelDto>>($"api/catalog/models?manufacturerId={m.Id}") ?? new();
+    BuildEditState();
   }
 
   private async Task AddModel()
@@ -120,6 +175,9 @@
       BuildEditState();
       newModel = string.Empty;
       toast.Success("Model added");
+      
+      // Update count for this manufacturer
+      manufacturerModelCounts[selectedManufacturer.Id] = models.Count;
     }
     else if ((int)resp.StatusCode == 409)
     {
@@ -192,4 +250,3 @@
     public double? MaxZ { get; set; }
   }
 }
-

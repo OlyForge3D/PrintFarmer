@@ -12,8 +12,14 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=farm.db"));
 
-builder.Services.AddHttpClient<MoonrakerClient>();
-builder.Services.AddHttpClient<PrusaLinkClient>();
+builder.Services.AddHttpClient<MoonrakerClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddHttpClient<PrusaLinkClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 builder.Services.AddHttpClient<SpoolmanService>();
 builder.Services.AddSignalR();
 if (!builder.Environment.IsEnvironment("Testing"))

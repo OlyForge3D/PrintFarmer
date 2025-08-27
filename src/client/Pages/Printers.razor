@@ -10,7 +10,6 @@
 <div class="row">
     <a href="/printers/new">Add Printer</a>
     <a href="/catalog">Catalog</a>
-    <button @onclick="Refresh">Refresh</button>
  </div>
 
 @if (printers is null)
@@ -26,67 +25,186 @@ else
     <div class="cards">
         @foreach (var p in printers)
         {
-            <div class="card">
-                <div class="card-header" title="@HeaderTooltip(p)">
-                    <div>
-                          <div class="name-row">
-                              <div class="name caps-font" style="color:inherit;">@p.Name</div>
-                              <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                      <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
-                                      <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
-                                  </svg>
-                              </a>
-                          </div>
-                          @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
-                          {
-                              <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
-                          }
-                          @if (IsCameraVisible(p.Id) && TryGetSnapshotUrl(p, out var snapUrl))
-                          {
-                              <div class="snapshot-row">
-                                  <img src="@snapUrl" alt="webcam snapshot" style="display:block; max-width:200px; max-height:120px; border-radius:6px; border:1px solid rgba(255,255,255,.08)" />
-                              </div>
-                          }
-                          <div class="url-row">
-                              <div class="url mini-header">@p.ServerUrl</div>
-                              <a class="icon-btn" href="@ToPort80(p.ServerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                      <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
-                                      <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
-                                  </svg>
-                              </a>
-                          </div>
+            @if (IsCollapsed(p.Id))
+            {
+                <!-- Collapsed View -->
+                <div class="card">
+                    <div class="card-header-unified">
+                        <div class="card-header-main">
+                            <div class="printer-identity">
+                                <div class="name caps-font">@p.Name</div>
+                                @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
+                                {
+                                    <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
+                                }
+                                <div class="url-row">
+                                    <div class="url mini-header">@p.ServerUrl</div>
+                                    <a class="icon-btn" href="@ToPort80(p.ServerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
+                                        <!-- External link icon -->
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                            <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                            <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                        </svg>
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="status @(loadingStatuses.Contains(p.Id) ? "loading" : p.IsOnline ? "online" : "offline")">
+                                @if (loadingStatuses.Contains(p.Id))
+                                {
+                                    <span class="status-loading">
+                                        <!-- Loading spinner -->
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="spinner">
+                                            <path d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z"/>
+                                        </svg>
+                                        Loading...
+                                    </span>
+                                }
+                                else
+                                {
+                                    @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
+                                }
+                            </div>
+                        </div>
+                        <div class="card-header-actions">
+                            <button class="icon-btn toggle-btn" @onclick="() => ToggleCard(p.Id)" title="Expand card" aria-label="Expand card">
+                                <!-- Maximize/Expand icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M3 3h18v18H3V3zm2 2v14h14V5H5z"/>
+                                    <path d="M7 7h10v10H7V7z"/>
+                                </svg>
+                            </button>
+                            <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
+                                <!-- Edit icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
+                                    <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
+                                </svg>
+                            </a>
+                        </div>
                     </div>
-                    <div class="status @(p.IsOnline ? "online" : "offline")">
-                        @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
+                    
+                    <div class="control-buttons">
+                        <button class="btn btn-control" title="Pause" aria-label="Pause" disabled="@(!IsPrinting(p))" @onclick="() => Pause(p.Id)">
+                            <!-- Pause icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M7 5h3v14H7zM14 5h3v14h-3z"/>
+                            </svg>
+                            Pause
+                        </button>
+                        <button class="btn btn-control" title="Resume" aria-label="Resume" disabled="@(!IsPaused(p))" @onclick="() => Resume(p.Id)">
+                            <!-- Play/Resume icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                            Resume
+                        </button>
+                        <button class="btn btn-control btn-danger" title="Emergency Stop" aria-label="Emergency Stop" disabled="@(!p.IsOnline)" @onclick="() => EmergencyStop(p.Id)">
+                            <!-- Emergency stop icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M12 2L2 22h20L12 2zm-1 7h2v6h-2V9zm0 8h2v2h-2v-2z"/>
+                            </svg>
+                            Stop
+                        </button>
                     </div>
                 </div>
+            }
+            else
+            {
+                <!-- Expanded View (Original) -->
+                <div class="card">
+                    <div class="card-header-unified" title="@HeaderTooltip(p)">
+                        <div class="card-header-main">
+                            <div class="printer-identity">
+                                <div class="name caps-font">@p.Name</div>
+                                @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
+                                {
+                                    <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
+                                }
+                                <div class="url-row">
+                                    <div class="url mini-header">@p.ServerUrl</div>
+                                    <a class="icon-btn" href="@ToPort80(p.ServerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
+                                        <!-- External link icon -->
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                            <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                            <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                        </svg>
+                                    </a>
+                                </div>
+                                @if (IsCameraVisible(p.Id) && TryGetSnapshotUrl(p, out var snapUrl))
+                                {
+                                    <div class="snapshot-row">
+                                        <img src="@snapUrl" alt="webcam snapshot" 
+                                             onerror="this.style.display='none'" 
+                                             onload="this.style.display='block'" />
+                                    </div>
+                                }
+                            </div>
+                            <div class="status @(loadingStatuses.Contains(p.Id) ? "loading" : p.IsOnline ? "online" : "offline")">
+                                @if (loadingStatuses.Contains(p.Id))
+                                {
+                                    <span class="status-loading">
+                                        <!-- Loading spinner -->
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="spinner">
+                                            <path d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z"/>
+                                        </svg>
+                                        Loading...
+                                    </span>
+                                }
+                                else
+                                {
+                                    @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
+                                }
+                            </div>
+                        </div>
+                        <div class="card-header-actions">
+                            <button class="icon-btn toggle-btn" @onclick="() => ToggleCard(p.Id)" title="Collapse card" aria-label="Collapse card">
+                                <!-- Minimize/Collapse icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M5 12h14v2H5z"/>
+                                </svg>
+                            </button>
+                            <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
+                                <!-- Edit icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
+                                    <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
+                                </svg>
+                            </a>
+                        </div>
+                    </div>
 
                 <div class="section">
                     <div class="mini-header">Temps</div>
                     <div class="axis-fields">
                         <div class="axis-field">
-                            <label>Hotend</label>
-                            <input class="temp-input" type="number" value="@GetHotend(p.Id)" @oninput="(e)=> SetHotend(p.Id, ToDouble(e.Value))" />
-                            <span class="temp-readout" title="Current → Target">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15 14.76V5a3 3 0 10-6 0v9.76a5 5 0 106 0zM10 5a2 2 0 114 0v9.76l.2.2A3 3 0 1110 15l.2-.24V5z"/><path d="M12 17a1 1 0 001-1V8a1 1 0 10-2 0v8a1 1 0 001 1z"/></svg>
-                                @FmtTemp(p.HotendTemp)@(p.HotendTarget is double ht ? $" → {FmtTemp(ht)}" : "")
+                            <div class="temp-row">
+                                <span class="temp-label-external">Hotend</span>
+                                <div class="temp-input-wrapper">
+                                    <input class="temp-input" type="number" value="@GetHotend(p.Id)" @oninput="(e)=> SetHotend(p.Id, ToDouble(e.Value))" />
+                                    <span class="temp-unit-internal">°C</span>
+                                </div>
+                            </div>
+                            <span class="temp-readout-overlay" title="Current → Target">
+                                [@FmtTemp(p.HotendTemp)@(p.HotendTarget is double ht ? $" → {FmtTemp(ht)}" : "")]
                             </span>
                         </div>
                         <div class="axis-field">
-                            <label>Bed</label>
-                            <input class="temp-input" type="number" value="@GetBed(p.Id)" @oninput="(e)=> SetBed(p.Id, ToDouble(e.Value))" />
-                            <span class="temp-readout" title="Current → Target">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15 14.76V5a3 3 0 10-6 0v9.76a5 5 0 106 0zM10 5a2 2 0 114 0v9.76l.2.2A3 3 0 1110 15l.2-.24V5z"/><path d="M12 17a1 1 0 001-1V8a1 1 0 10-2 0v8a1 1 0 001 1z"/></svg>
-                                @FmtTemp(p.BedTemp)@(p.BedTarget is double bt ? $" → {FmtTemp(bt)}" : "")
+                            <div class="temp-row">
+                                <span class="temp-label-external">Bed</span>
+                                <div class="temp-input-wrapper">
+                                    <input class="temp-input" type="number" value="@GetBed(p.Id)" @oninput="(e)=> SetBed(p.Id, ToDouble(e.Value))" />
+                                    <span class="temp-unit-internal">°C</span>
+                                </div>
+                            </div>
+                            <span class="temp-readout-overlay" title="Current → Target">
+                                [@FmtTemp(p.BedTemp)@(p.BedTarget is double bt ? $" → {FmtTemp(bt)}" : "")]
                             </span>
                         </div>
                         <div class="axis-go">
                             <button class="btn btn-inline" @onclick="() => SetTemps(p.Id, GetHotend(p.Id), GetBed(p.Id))"><span class="caps-label">SET</span></button>
                         </div>
                     </div>
-                    <div class="preset-row">
+                    <div class="preset-row-spaced">
                         <button class="btn preset" style="background:#6b7280" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Abs)" @onclick="() => ApplyPresetAbs(p.Id)">ABS</button>
                         <button class="btn preset" style="background:#f59e0b" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Asa)" @onclick="() => ApplyPresetAsa(p.Id)">ASA</button>
                         <button class="btn preset" style="background:#10b981" disabled="@IsPrinting(p)" title="@PresetTip(presets?.Pla)" @onclick="() => ApplyPresetPla(p.Id)">PLA</button>
@@ -142,9 +260,9 @@ else
                             <div class="step-block">
                                 <div class="mini-header">Steps</div>
                                 <div class="step-group">
-                                    <button class=@StepBtnClass(p.Id,1) @onclick="() => SetStep(p.Id, 1)">1</button>
-                                    <button class=@StepBtnClass(p.Id,10) @onclick="() => SetStep(p.Id, 10)">10</button>
-                                    <button class=@StepBtnClass(p.Id,50) @onclick="() => SetStep(p.Id, 50)">50</button>
+                                    <button class="@StepBtnClass(p.Id,1) step-btn-compact" @onclick="() => SetStep(p.Id, 1)">1</button>
+                                    <button class="@StepBtnClass(p.Id,10) step-btn-compact" @onclick="() => SetStep(p.Id, 10)">10</button>
+                                    <button class="@StepBtnClass(p.Id,50) step-btn-compact" @onclick="() => SetStep(p.Id, 50)">50</button>
                                 </div>
                             </div>
                             
@@ -155,22 +273,28 @@ else
 
                         <div class="axis-fields">
                             <div class="axis-field">
-                                <span class="axis-inset">X</span>
-                                <input type="number" value="@GetMoveX(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveX(p.Id, ToDouble(e.Value))" title="Set X" />
-                                <span class="axis-value">[@FmtPos(p.X)]</span>
+                                <div class="axis-input-wrapper">
+                                    <span class="axis-label-left">X</span>
+                                    <input type="number" class="axis-input-compact" value="@GetMoveX(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveX(p.Id, ToDouble(e.Value))" title="Set X" />
+                                </div>
+                                <span class="axis-value-overlay">[@FmtPos(p.X)]</span>
                             </div>
                             <div class="axis-field">
-                                <span class="axis-inset">Y</span>
-                                <input type="number" value="@GetMoveY(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveY(p.Id, ToDouble(e.Value))" title="Set Y" />
-                                <span class="axis-value">[@FmtPos(p.Y)]</span>
+                                <div class="axis-input-wrapper">
+                                    <span class="axis-label-left">Y</span>
+                                    <input type="number" class="axis-input-compact" value="@GetMoveY(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveY(p.Id, ToDouble(e.Value))" title="Set Y" />
+                                </div>
+                                <span class="axis-value-overlay">[@FmtPos(p.Y)]</span>
                             </div>
                             <div class="axis-field">
-                                <span class="axis-inset">Z</span>
-                                <input type="number" value="@GetMoveZ(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveZ(p.Id, ToDouble(e.Value))" title="Set Z" />
-                                <span class="axis-value">[@FmtPos(p.Z)]</span>
+                                <div class="axis-input-wrapper">
+                                    <span class="axis-label-left">Z</span>
+                                    <input type="number" class="axis-input-compact" value="@GetMoveZ(p.Id)" disabled="@IsPrinting(p)" @oninput="(e)=> SetMoveZ(p.Id, ToDouble(e.Value))" title="Set Z" />
+                                </div>
+                                <span class="axis-value-overlay">[@FmtPos(p.Z)]</span>
                             </div>
                             <div class="axis-go">
-                                <button class="btn btn-inline" disabled="@IsPrinting(p)" @onclick="() => MoveTo(p.Id, GetMoveX(p.Id), GetMoveY(p.Id), GetMoveZ(p.Id))"><span class="caps-label">GO</span></button>
+                                <button class="btn btn-inline btn-go-compact" disabled="@IsPrinting(p)" @onclick="() => MoveTo(p.Id, GetMoveX(p.Id), GetMoveY(p.Id), GetMoveZ(p.Id))"><span class="caps-label">GO</span></button>
                             </div>
                         </div>
 
@@ -225,29 +349,51 @@ else
                             </button>
                         }
                 </div>
-            </div>
+                </div>
+            }
         }
     </div>
 }
 
 @code {
     private List<PrinterDto>? printers;
+    private Dictionary<Guid, PrinterStatusDto> printerStatuses = new();
+    private HashSet<Guid> loadingStatuses = new();
+    private HashSet<Guid> collapsedCards = new();
     // creation moved to /printers/new
 
     protected override async Task OnInitializedAsync()
     {
-        printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
-        if (printers is not null)
+        // First load basic printer info immediately (fast, no network calls to printers)
+        var basicPrinters = await Http.GetFromJsonAsync<List<PrinterBasicDto>>("api/printers/basic");
+        if (basicPrinters is not null)
         {
-            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            foreach (var pr in printers)
-            {
-                if (pr.IsOnline || !string.IsNullOrWhiteSpace(pr.CameraSnapshotUrl)) snapshotStamps[pr.Id] = now;
-            }
+            // Create PrinterDto instances with default offline status
+            printers = basicPrinters.Select(p => new PrinterDto(
+                Id: p.Id,
+                Name: p.Name,
+                ServerUrl: p.ServerUrl,
+                Notes: p.Notes,
+                IsOnline: false, // Default to offline until status loads
+                State: null,
+                ManufacturerName: p.ManufacturerName,
+                ModelName: p.ModelName,
+                Backend: p.Backend,
+                ApiKey: p.ApiKey,
+                OriginalServerUrl: p.OriginalServerUrl,
+                IpAddress: p.IpAddress
+            )).ToList();
+            
+            StateHasChanged(); // Show cards immediately
+            
+            // Now load status for each printer progressively
+            await LoadAllStatusesProgressively();
         }
-    // preload presets for tooltips
-    try { presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets"); } catch { presets = null; }
-    // Switch to SignalR push updates
+        
+        // preload presets for tooltips
+        try { presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets"); } catch { presets = null; }
+        
+        // Switch to SignalR push updates
         await realtime.EnsureConnectedAsync();
         // Subscribe to all updates (Guid.Empty wildcard) and merge into current list
         realtime.Subscribe(Guid.Empty, update =>
@@ -274,14 +420,93 @@ else
                     HotendTarget = update.HotendTarget ?? existing.HotendTarget,
                     BedTarget = update.BedTarget ?? existing.BedTarget,
                 };
-        // Invalidate snapshot cache for this printer so it refreshes on next tick when status changes
-        snapshotStamps[update.Id] = 0;
+                // Invalidate snapshot cache for this printer so it refreshes on next tick when status changes
+                snapshotStamps[update.Id] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 InvokeAsync(StateHasChanged);
             }
         });
         // Leave manual refresh available, but disable tight polling timer
-    _ = StartSnapshotTimerAsync();
+        _ = StartSnapshotTimerAsync();
     }
+    
+    private Task LoadAllStatusesProgressively()
+    {
+        if (printers is null) return Task.CompletedTask;
+        
+        // Load statuses in parallel but update UI as each one completes
+        var tasks = printers.Select(async p =>
+        {
+            loadingStatuses.Add(p.Id);
+            await InvokeAsync(StateHasChanged);
+            
+            try
+            {
+                var status = await Http.GetFromJsonAsync<PrinterStatusDto>($"api/printers/{p.Id}/status");
+                if (status is not null)
+                {
+                    printerStatuses[p.Id] = status;
+                    
+                    // Update the printer with the loaded status
+                    var idx = printers.FindIndex(pr => pr.Id == p.Id);
+                    if (idx >= 0)
+                    {
+                        printers[idx] = printers[idx] with
+                        {
+                            IsOnline = status.IsOnline,
+                            State = status.State,
+                            Progress = status.Progress,
+                            JobName = status.JobName,
+                            ThumbnailUrl = status.ThumbnailUrl,
+                            CameraStreamUrl = status.CameraStreamUrl,
+                            CameraSnapshotUrl = status.CameraSnapshotUrl,
+                            X = status.X,
+                            Y = status.Y,
+                            Z = status.Z,
+                            HotendTemp = status.HotendTemp,
+                            BedTemp = status.BedTemp,
+                            HotendTarget = status.HotendTarget,
+                            BedTarget = status.BedTarget
+                        };
+                        
+                        // Update snapshot stamps for online printers
+                        if (status.IsOnline || !string.IsNullOrWhiteSpace(status.CameraSnapshotUrl))
+                        {
+                            snapshotStamps[p.Id] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        }
+                        
+                        // Auto-show cameras for printers that have camera URLs
+                        if (!string.IsNullOrWhiteSpace(status.CameraSnapshotUrl) || !string.IsNullOrWhiteSpace(status.CameraStreamUrl))
+                        {
+                            cameraVisible.Add(p.Id);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Status loading failed, leave as offline
+            }
+            finally
+            {
+                loadingStatuses.Remove(p.Id);
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+        
+        // Don't await Task.WhenAll - let them complete individually  
+        return Task.Run(async () =>
+        {
+            try
+            {
+                await Task.WhenAll(tasks);
+            }
+            catch
+            {
+                // Individual tasks handle their own exceptions
+            }
+        });
+    }
+
     public void Dispose()
     {
         // Best-effort unsubscribe wildcard
@@ -295,10 +520,45 @@ else
         _refreshing = true;
         try
         {
-            printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
-            StateHasChanged();
+            // Use the progressive loading approach for refresh too
+            var basicPrinters = await Http.GetFromJsonAsync<List<PrinterBasicDto>>("api/printers/basic");
+            if (basicPrinters is not null)
+            {
+                printers = basicPrinters.Select(p => new PrinterDto(
+                    Id: p.Id,
+                    Name: p.Name,
+                    ServerUrl: p.ServerUrl,
+                    Notes: p.Notes,
+                    IsOnline: false,
+                    State: null,
+                    ManufacturerName: p.ManufacturerName,
+                    ModelName: p.ModelName,
+                    Backend: p.Backend,
+                    ApiKey: p.ApiKey,
+                    OriginalServerUrl: p.OriginalServerUrl,
+                    IpAddress: p.IpAddress
+                )).ToList();
+                
+                StateHasChanged();
+                await LoadAllStatusesProgressively();
+            }
         }
         finally { _refreshing = false; }
+    }
+
+    private bool IsCollapsed(Guid printerId) => collapsedCards.Contains(printerId);
+    
+    private void ToggleCard(Guid printerId)
+    {
+        if (collapsedCards.Contains(printerId))
+        {
+            collapsedCards.Remove(printerId);
+        }
+        else
+        {
+            collapsedCards.Add(printerId);
+        }
+        StateHasChanged();
     }
 
     // create removed; use /printers/new
@@ -448,14 +708,31 @@ else
     private CancellationTokenSource? snapshotCts;
     private readonly HashSet<Guid> cameraVisible = new();
     private string SnapshotUrl(PrinterDto p)
-        => $"{p.CameraSnapshotUrl}?t={snapshotStamps.GetValueOrDefault(p.Id, 0)}";
+    {
+        var timestamp = snapshotStamps.GetValueOrDefault(p.Id, 0);
+        var baseUrl = p.CameraSnapshotUrl?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(baseUrl)) return string.Empty;
+        
+        // Add cache-busting parameter
+        var separator = baseUrl.Contains('?') ? "&" : "?";
+        return $"{baseUrl}{separator}t={timestamp}";
+    }
+    
     private bool TryGetSnapshotUrl(PrinterDto p, out string url)
     {
         url = string.Empty;
         if (string.IsNullOrWhiteSpace(p.CameraSnapshotUrl)) return false;
         if (!snapshotStamps.TryGetValue(p.Id, out var ts) || ts == 0) return false;
-        url = SnapshotUrl(p);
-        return true;
+        
+        try
+        {
+            url = SnapshotUrl(p);
+            return !string.IsNullOrWhiteSpace(url);
+        }
+        catch
+        {
+            return false;
+        }
     }
     private bool IsCameraVisible(Guid id) => cameraVisible.Contains(id);
 
