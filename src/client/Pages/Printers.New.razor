@@ -17,6 +17,53 @@
         <InputText class="form-control" @bind-Value="printer.Name" />
     </div>
     <div class="form-group">
+        <label>Manufacturer</label>
+        <div class="row-inline" style="gap:.5rem; align-items:center;">
+            <select class="form-control" style="flex:1" @bind="selectedManufacturerId" @bind:after="OnManufacturerChanged">
+                <option value="">— Select —</option>
+                @foreach (var m in manufacturers)
+                {
+                    <option value="@m.Id">@m.Name</option>
+                }
+            </select>
+            <button class="btn" title="New Manufacturer" aria-label="New Manufacturer" @onclick="ToggleNewManufacturer" type="button">New</button>
+        </div>
+        @if (showNewManufacturer)
+        {
+            <div class="row-inline" style="gap:.5rem; align-items:center; margin-top:.5rem;">
+                <input class="form-control" placeholder="New manufacturer name" @bind="newManufacturerName" />
+            </div>
+        }
+    </div>
+
+    <div class="form-group">
+        <label>Model</label>
+        <div class="row-inline" style="gap:.5rem; align-items:center;">
+            <select class="form-control" style="flex:1" @bind="selectedModelId">
+                <option value="">— Select —</option>
+                @foreach (var m in models)
+                {
+                    <option value="@m.Id">@m.Name</option>
+                }
+            </select>
+            <button class="btn" title="@((selectedManufacturerId is null) ? "Select a manufacturer first" : "New Model")" aria-label="New Model" @onclick="ToggleNewModel" type="button" disabled="@(selectedManufacturerId is null)">New</button>
+        </div>
+        @if (showNewModel && selectedManufacturerId is Guid)
+        {
+            <div class="row-inline" style="gap:.5rem; align-items:center; margin-top:.5rem;">
+                <input class="form-control" placeholder="New model name" @bind="newModelName" />
+            </div>
+        }
+        @if (selectedModelId is Guid midSel)
+        {
+            var md = models.FirstOrDefault(x => x.Id == midSel);
+            if (md is not null)
+            {
+                <div class="hint">Max: X @(@md.MaxX?.ToString() ?? "—"), Y @(@md.MaxY?.ToString() ?? "—"), Z @(@md.MaxZ?.ToString() ?? "—")</div>
+            }
+        }
+    </div>
+    <div class="form-group">
         <label>Backend</label>
         <InputSelect class="form-control" TValue="PrinterBackend" @bind-Value="printer.Backend">
             <option value="@PrinterBackend.Moonraker">Moonraker</option>
@@ -60,14 +107,40 @@
     private CreatePrinterDto printer = new();
     private string? ipAddress;
     private ElementReference dateAcqAddRef;
+    private List<ManufacturerDto> manufacturers = new();
+    private List<ModelDto> models = new();
+    private Guid? selectedManufacturerId;
+    private Guid? selectedModelId;
+    private bool showNewManufacturer;
+    private bool showNewModel;
+    private string? newManufacturerName;
+    private string? newModelName;
 
     private async Task OpenDatePicker(ElementReference el)
     {
         await JS.InvokeVoidAsync("PF.openDatePicker", el);
     }
 
+    protected override async Task OnInitializedAsync()
+    {
+        // Load manufacturers for selection
+        manufacturers = await Http.GetFromJsonAsync<List<ManufacturerDto>>("api/catalog/manufacturers") ?? new();
+    }
+
     private async Task AddPrinter()
     {
+        // Wire selected or new manufacturer/model into the DTO
+        printer.ManufacturerId = selectedManufacturerId;
+        printer.ModelId = selectedModelId;
+        if (!string.IsNullOrWhiteSpace(newManufacturerName))
+        {
+            printer.NewManufacturerName = newManufacturerName!.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(newModelName))
+        {
+            printer.NewModelName = newModelName!.Trim();
+        }
+
         var resp = await Http.PostAsJsonAsync("api/printers", printer);
         if (resp.IsSuccessStatusCode)
         {
@@ -106,4 +179,31 @@
         }
         catch { toast.Error("Resolve failed"); }
     }
+
+    private async Task LoadModels()
+    {
+        if (selectedManufacturerId is Guid mid)
+        {
+            models = await Http.GetFromJsonAsync<List<ModelDto>>($"api/catalog/models?manufacturerId={mid}") ?? new();
+        }
+        else
+        {
+            models = new();
+        }
+        StateHasChanged();
+    }
+
+    private async Task OnManufacturerChanged()
+    {
+        // reset model when manufacturer changes
+        selectedModelId = null;
+        await LoadModels();
+        if (selectedManufacturerId is null)
+        {
+            showNewModel = false;
+        }
+    }
+
+    private void ToggleNewManufacturer() => showNewManufacturer = !showNewManufacturer;
+    private void ToggleNewModel() => showNewModel = !showNewModel;
 }

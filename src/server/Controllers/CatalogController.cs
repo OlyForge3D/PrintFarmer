@@ -43,20 +43,39 @@ public class CatalogController(AppDbContext db) : ControllerBase
         return Ok(list);
     }
 
-    public record CreateModelRequest(Guid ManufacturerId, string Name);
+    public record CreateModelRequest(Guid ManufacturerId, string Name, double? MaxX, double? MaxY, double? MaxZ);
 
     [HttpPost("models")]
     public async Task<ActionResult<ModelDto>> CreateModel([FromBody] CreateModelRequest req, CancellationToken ct)
     {
         if (req.ManufacturerId == Guid.Empty) return BadRequest("ManufacturerId is required");
         if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest("Name is required");
+        // Ensure the manufacturer exists to avoid FK violations
+        var mfgExists = await db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
+        if (!mfgExists) return NotFound("Manufacturer not found");
         var trimmed = req.Name.Trim();
         var existing = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == trimmed, ct);
         if (existing is not null)
             return Conflict(new ModelDto(existing.Id, existing.Name, existing.ManufacturerId));
-        var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = req.ManufacturerId, Name = trimmed };
+        var model = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            ManufacturerId = req.ManufacturerId,
+            Name = trimmed,
+            MaxX = req.MaxX,
+            MaxY = req.MaxY,
+            MaxZ = req.MaxZ
+        };
         db.Models.Add(model);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException se && se.SqliteErrorCode == 19)
+        {
+            // Likely a FK or unique constraint violation
+            return BadRequest("Invalid request: constraint failed (check ManufacturerId and uniqueness).");
+        }
         return CreatedAtAction(nameof(GetModels), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ));
     }
 
@@ -74,4 +93,5 @@ public class CatalogController(AppDbContext db) : ControllerBase
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
+
 }

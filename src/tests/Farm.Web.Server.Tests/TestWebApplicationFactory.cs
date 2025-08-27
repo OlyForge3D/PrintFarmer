@@ -22,7 +22,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
         {
             var dict = new Dictionary<string, string?>
             {
-                ["ConnectionStrings:Default"] = $"Data Source={_dbPath}"
+                ["ConnectionStrings:Default"] = $"Data Source={_dbPath}",
+                // Avoid running EF Core Migrate() in tests when using ad-hoc SQLite files; rely on startup safety + EnsureCreated
+                ["DISABLE_EF_MIGRATIONS"] = "true"
             };
             config.AddInMemoryCollection(dict!);
         });
