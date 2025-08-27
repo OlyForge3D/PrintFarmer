@@ -18,7 +18,7 @@
     </div>
     <div class="form-group">
         <label>Backend</label>
-        <InputSelect class="form-control" @bind-value="printer.Backend">
+        <InputSelect class="form-control" TValue="PrinterBackend" @bind-value="printer.Backend">
             <option value="@PrinterBackend.Moonraker">Moonraker</option>
             <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
         </InputSelect>

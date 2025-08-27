@@ -334,7 +334,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
         var status = await GetStatusAsync(baseUrl, ct);
         var job = await GetJobAsync(baseUrl, ct);
         // Try to read current position
-        double? x=null, y=null, z=null;
+        double? x = null, y = null, z = null;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -349,18 +349,18 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
                 if (root.TryGetProperty("result", out var result) &&
                     result.TryGetProperty("status", out var statusNode) &&
                     statusNode.TryGetProperty("toolhead", out var th) &&
-                    th.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength()>=3)
+                    th.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
                 {
-                    try { x = pos[0].GetDouble(); } catch {}
-                    try { y = pos[1].GetDouble(); } catch {}
-                    try { z = pos[2].GetDouble(); } catch {}
+                    try { x = pos[0].GetDouble(); } catch { }
+                    try { y = pos[1].GetDouble(); } catch { }
+                    try { z = pos[2].GetDouble(); } catch { }
                 }
             }
         }
         catch { }
         var state = job?.PrintState ?? status.State; // prefer print job state when available
         // Query temps
-        double? hotend=null, bed=null, hotendT=null, bedT=null;
+        double? hotend = null, bed = null, hotendT = null, bedT = null;
         try
         {
             using var cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -420,18 +420,18 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
 
     public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
     {
-        var parts = new List<string>{"G91","G0"};
+        var parts = new List<string> { "G91", "G0" };
         if (x is not null) parts.Add($"X{x:0.###}");
         if (y is not null) parts.Add($"Y{y:0.###}");
         if (z is not null) parts.Add($"Z{z:0.###}");
         if (f is not null) parts.Add($"F{f:0.###}");
-        var cmds = new []{ string.Join(' ', parts), "G90" };
+        var cmds = new[] { string.Join(' ', parts), "G90" };
         return await SendGcodeAsync(baseUrl, cmds, ct);
     }
 
     public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
     {
-        var parts = new List<string>{"G90","G0"};
+        var parts = new List<string> { "G90", "G0" };
         if (x is not null) parts.Add($"X{x:0.###}");
         if (y is not null) parts.Add($"Y{y:0.###}");
         if (z is not null) parts.Add($"Z{z:0.###}");
@@ -449,7 +449,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
         => await SendGcodeAsync(baseUrl, "M112", ct);
 
     private async Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, new []{ gcode }, ct);
+        => await SendGcodeAsync(baseUrl, new[] { gcode }, ct);
 
     private async Task<bool> SendGcodeAsync(string baseUrl, IEnumerable<string> gcodes, CancellationToken ct = default)
     {

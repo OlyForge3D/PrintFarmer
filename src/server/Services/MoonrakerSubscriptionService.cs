@@ -58,7 +58,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     private async Task RunAsync(CancellationToken ct)
     {
-    while (!ct.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
             try
             {
@@ -104,7 +104,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     private async Task SubscribePrinterLoop(Printer printer, CancellationToken ct)
     {
         var id = printer.Id;
-    while (!ct.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
             ClientWebSocket? ws = null;
             try
@@ -145,10 +145,10 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                         objects = new Dictionary<string, object>
                         {
                             ["toolhead"] = new { position = Array.Empty<object>() },
-                            ["display_status"] = new [] { "progress" },
-                            ["print_stats"] = new [] { "state", "filename" },
-                            ["extruder"] = new [] { "temperature", "target" },
-                            ["heater_bed"] = new [] { "temperature", "target" },
+                            ["display_status"] = new[] { "progress" },
+                            ["print_stats"] = new[] { "state", "filename" },
+                            ["extruder"] = new[] { "temperature", "target" },
+                            ["heater_bed"] = new[] { "temperature", "target" },
                         }
                     },
                     id = 1
