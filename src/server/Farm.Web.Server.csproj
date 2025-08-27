@@ -20,7 +20,8 @@
   
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\Shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\Client\Farm.Web.Client.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="Tests\**\*.cs" />

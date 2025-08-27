@@ -7,9 +7,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.8" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.8" PrivateAssets="all" />
-  <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\Shared\Farm.Web.Shared.csproj" />
   </ItemGroup>
 </Project>

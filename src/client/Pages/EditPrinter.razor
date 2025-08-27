@@ -17,7 +17,7 @@ else
   <div class="form">
     <label>Name</label>
     <div class="field">
-      <input class="@(string.IsNullOrWhiteSpace(form.Name) ? "invalid" : null)" @bind="form.Name" />
+  <InputText class="@(string.IsNullOrWhiteSpace(form.Name) ? "invalid" : null)" @bind-Value="form.Name" />
       @if (string.IsNullOrWhiteSpace(form.Name))
       {
         <div class="hint error">Name is required.</div>
@@ -36,7 +36,7 @@ else
     <label>Base URL</label>
     <div class="field">
       <div class="row-inline" style="gap:.5rem; align-items:center;">
-        <input class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind="form.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+  <InputText class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind-Value="form.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
         <button class="btn" type="button" title="Resolve to IP" @onclick="ResolveHostname">Resolve</button>
       </div>
       @if (string.IsNullOrWhiteSpace(form.ServerUrl))
@@ -57,12 +57,12 @@ else
     {
       <label>API Key</label>
       <div class="field">
-        <input class="form-control" @bind="form.ApiKey" />
+  <InputText class="form-control" @bind-Value="form.ApiKey" />
       </div>
     }
 
     <label>Notes</label>
-  <input @bind="form.Notes" />
+  <InputText @bind-Value="form.Notes" />
 
     <label>Manufacturer</label>
     <div class="field">

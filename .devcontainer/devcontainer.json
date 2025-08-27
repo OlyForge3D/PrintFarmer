@@ -1,0 +1,32 @@
+{
+  "name": "PrintFarmer (.NET 8 + Blazor WASM hosted)",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:8.0",
+  "features": {
+    "ghcr.io/devcontainers/features/sqlite:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "ms-dotnettools.csdevkit",
+        "ms-dotnettools.vscode-dotnet-runtime",
+        "eamodio.gitlens",
+        "editorconfig.editorconfig"
+      ],
+      "settings": {
+        "dotnet.defaultSolution": "src/farm-web.sln",
+        "dotnetAcquisitionExtension.enableTelemetry": false
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "dotnet restore ./src/farm-web.sln",
+  "forwardPorts": [5088],
+  "portsAttributes": {
+    "5088": { "label": "PrintFarmer Server/API" }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "notify"
+  },
+  "shutdownAction": "stopContainer"
+}

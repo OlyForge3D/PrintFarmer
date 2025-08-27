@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/node_modules/
+**/*.user
+**/*.suo
+**/*.swp
+**/*.DS_Store
+**/TestResults/
+**/*.db-shm
+**/*.db-wal
+**/*.db-journal

@@ -1,5 +1,5 @@
-/* Import a stylish, open-license font (Inter) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+/* Import open fonts: Inter (body) and Bebas Neue (headings/display) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Bebas+Neue&display=swap');
 
 :root{
   --bg-0:#0b1020; --bg-1:#0f172a; --bg-2:#111827; --panel:#0e1528; --border:#243145; --muted:#9ca3af; --accent:#10b981; --accent-2:#2563eb;
@@ -14,25 +14,16 @@ body {
 a { color:#93c5fd; }
 input, select, button { font-family: inherit; }
 
-@font-face {
-  font-family: 'Gerante';
-  src: url('/fonts/gerante.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Blackpast';
-  src: url('/fonts/blackpast.woff2') format('woff2');
-}
 
 body {
-  font-family: 'Gerante', sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
   font-size: 16px;
   line-height: 1.6;
   color: #1a1a1a;
 }
 
 .boxy-text {
-  font-family: 'Blackpast', sans-serif;
+  font-family: 'Bebas Neue', sans-serif;
   font-size: 20px;
   font-weight: bold;
   text-transform: uppercase;
@@ -41,13 +32,13 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Blackpast', sans-serif;
+  font-family: 'Bebas Neue', sans-serif;
   font-weight: bold;
   text-transform: uppercase;
 }
 
 p, li, span {
-  font-family: 'Gerante', sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
 }
 
 

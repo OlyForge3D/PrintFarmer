@@ -72,3 +72,52 @@ See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup, workflows, and
 ## Troubleshooting
 - Build/restore issues: try a clean restore and rebuild.
 - Locked files on Windows: close any running app instances that may hold `bin/`/`obj/` outputs.
+
+## Docker
+
+### Image build
+```powershell
+docker build -t printfarmer:latest .
+```
+
+### Run (single container)
+```powershell
+# Persist database to a host volume and expose port 8080
+docker run -d --name printfarmer -p 8080:8080 ^
+  -e ASPNETCORE_URLS=http://0.0.0.0:8080 ^
+  -e ASPNETCORE_ENVIRONMENT=Production ^
+  -e ConnectionStrings__Default=Data Source=/data/farm.db ^
+  -v printfarmer-data:/data ^
+  printfarmer:latest
+```
+
+### Docker Compose
+```yaml
+services:
+  printfarmer:
+    build: .
+    image: printfarmer:latest
+    container_name: printfarmer
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Default=Data Source=/data/farm.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - printfarmer-data:/data
+    restart: unless-stopped
+
+volumes:
+  printfarmer-data:
+```
+
+### Environment variables
+- ASPNETCORE_URLS: Listening URL inside the container (default set to http://0.0.0.0:8080).
+- ASPNETCORE_ENVIRONMENT: Development or Production (defaults to Production in compose sample).
+- ConnectionStrings__Default: EF Core connection string; use `Data Source=/data/farm.db` to persist under the mounted volume.
+
+### Volumes and data
+- The default appsettings uses `Data Source=farm.db` (relative), which lives in the working directory.
+- In containers, prefer mounting a volume and overriding the connection string to `/data/farm.db`.
+- Compose sample defines a named volume `printfarmer-data` mapped to `/data`.

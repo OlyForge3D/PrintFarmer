@@ -30,6 +30,12 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // Allow container/deployment scenarios to control DB init without EF migrations
+    var initMode = Environment.GetEnvironmentVariable("DB_INIT_MODE")
+                  ?? app.Configuration["Db:InitMode"]
+                  ?? string.Empty;
+    var disableEfMigrations = string.Equals(Environment.GetEnvironmentVariable("DISABLE_EF_MIGRATIONS"), "1", StringComparison.OrdinalIgnoreCase)
+                           || string.Equals(app.Configuration["DISABLE_EF_MIGRATIONS"], "true", StringComparison.OrdinalIgnoreCase);
     var provider = db.Database.ProviderName;
     if (provider != null && (provider.Contains("InMemory", StringComparison.OrdinalIgnoreCase) || app.Environment.IsEnvironment("Testing")))
     {
@@ -145,7 +151,15 @@ using (var scope = app.Services.CreateScope())
             }
         }
         conn.Close();
-        db.Database.Migrate();
+        // In containers or when requested, prefer EnsureCreated over Migrate
+        if (disableEfMigrations || string.Equals(initMode, "EnsureCreated", StringComparison.OrdinalIgnoreCase))
+        {
+            db.Database.EnsureCreated();
+        }
+        else
+        {
+            db.Database.Migrate();
+        }
     }
 }
 
