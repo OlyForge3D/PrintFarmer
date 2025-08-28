@@ -2,7 +2,7 @@
 # Uncomment the services you want to test with by running:
 # docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
 
-services:
+services: {}
   # Uncomment to add PostgreSQL for testing
   # postgres:
   #   image: postgres:15
