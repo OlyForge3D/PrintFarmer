@@ -10,6 +10,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__Default=Data Source=/data/farm.db
       - DB_INIT_MODE=EnsureCreated
+      # Restrict CORS origins (comma-separated). Example for local dev via Nginx HTTP/HTTPS
+      - ALLOWED_ORIGINS=http://localhost:8081,https://localhost:8443
     ports:
       - "5088:8080"
     volumes:
@@ -26,6 +28,7 @@ services:
       - api
     ports:
       - "8081:8080"
+      - "8443:8443"
     restart: unless-stopped
 
 volumes:

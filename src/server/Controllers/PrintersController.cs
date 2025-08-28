@@ -1150,7 +1150,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             {
                 JobTotals = new Farm.Web.Shared.JobTotals
                 {
-                    TotalJobs = moonrakerTotals.JobTotals.TotalJobs,
+                    TotalJobs = (int)moonrakerTotals.JobTotals.TotalJobs,
                     TotalTime = moonrakerTotals.JobTotals.TotalTime,
                     TotalPrintTime = moonrakerTotals.JobTotals.TotalPrintTime,
                     TotalFilamentUsed = moonrakerTotals.JobTotals.TotalFilamentUsed,

@@ -46,8 +46,29 @@ if (!builder.Environment.IsEnvironment("Testing"))
 builder.Services.AddSingleton<PresetService>();
 builder.Services.AddScoped<DatabaseSeeder>();
 
-builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy
-    .AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin()));
+// CORS: default to permissive in dev, restrict by env in prod
+var allowedOrigins = builder.Configuration["AllowedOrigins"] ?? Environment.GetEnvironmentVariable("ALLOWED_ORIGINS");
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Default", policy =>
+    {
+        if (!string.IsNullOrWhiteSpace(allowedOrigins))
+        {
+            var origins = allowedOrigins
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (origins.Length > 0)
+            {
+                policy.WithOrigins(origins)
+                      .AllowAnyHeader()
+                      .AllowAnyMethod()
+                      .AllowCredentials();
+                return;
+            }
+        }
+        // Fallback for development
+        policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin();
+    });
+});
 
 var app = builder.Build();
 
@@ -89,7 +110,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseCors();
+app.UseCors("Default");
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 
