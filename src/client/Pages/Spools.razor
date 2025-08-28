@@ -3,169 +3,283 @@
 @inject HttpClient Http
 @inject IJSRuntime JS
 
-<h2>Spools</h2>
-
-<div class="row">
-    <a class="btn" href="/settings">Open Settings</a>
-    <button class="btn" @onclick="RefreshFromSpoolman">Refresh</button>
-    <div class="row-inline">
-        <label>Page Size</label>
-        <select @onchange="OnPageSizeChanged" value="@pageSizeString">
-            <option value="10">10</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-            <option value="All">All</option>
-        </select>
-    </div>
-    <button class="btn ghost" title="Reset to default sort (ID ascending)" @onclick="ResetSortingAsync">Reset sorting</button>
-    @if (!string.IsNullOrWhiteSpace(spoolmanError))
-    {
-        <span class="hint error">@spoolmanError</span>
-    }
-</div>
-
-<div class="row row-inline" style="align-items:center; gap:1rem;">
-    <label>Filters</label>
-    <div class="row-inline">
-        <label>Material</label>
-        <select @onchange="OnMaterialChanged" value="@selectedMaterial">
-            <option value="">All</option>
-            @foreach (var m in MaterialOptions())
-            {
-                <option value="@m">@m</option>
-            }
-        </select>
-    </div>
-    <div class="row-inline">
-        <label>Vendor</label>
-        <select @onchange="OnVendorChanged" value="@selectedVendor">
-            <option value="">All</option>
-            @foreach (var v in VendorOptions())
-            {
-                <option value="@v">@v</option>
-            }
-        </select>
-    </div>
-    <div class="row-inline">
-        <label>Color</label>
-        <select @onchange="OnColorChanged" value="@selectedColor">
-            <option value="">All</option>
-            @foreach (var c in ColorOptions())
-            {
-                <option value="@c">@c</option>
-            }
-        </select>
-    </div>
-</div>
-
-<!-- Local spools removed; managed in Spoolman UI -->
-
-@if (spools is null)
-{
-    <p>Loading…</p>
-}
-else if (!spools.Any())
-{
-    <p>No spools found in Spoolman.</p>
-}
-else
-{
-    <table id="spools-table" class="table">
-    <thead>
-            <tr>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Id"))">ID @SortIndicator("Id")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',0)" ontouchstart="columnResizer.start(event,'spools-table',0)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Vendor"))">Vendor @SortIndicator("Vendor")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',1)" ontouchstart="columnResizer.start(event,'spools-table',1)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Filament"))">Filament @SortIndicator("Filament")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',2)" ontouchstart="columnResizer.start(event,'spools-table',2)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Material"))">Material @SortIndicator("Material")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',3)" ontouchstart="columnResizer.start(event,'spools-table',3)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Weight"))">Remaining Weight @SortIndicator("Weight")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',4)" ontouchstart="columnResizer.start(event,'spools-table',4)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Color"))">Color @SortIndicator("Color")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',5)" ontouchstart="columnResizer.start(event,'spools-table',5)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("Registered"))">Registered @SortIndicator("Registered")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',6)" ontouchstart="columnResizer.start(event,'spools-table',6)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("FirstUsed"))">First Used @SortIndicator("FirstUsed")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',7)" ontouchstart="columnResizer.start(event,'spools-table',7)"></span>
-                </th>
-                <th class="resizable">
-                    <button class="link-btn" @onclick="@(() => SortByAsync("LastUsed"))">Last Used @SortIndicator("LastUsed")</button>
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',8)" ontouchstart="columnResizer.start(event,'spools-table',8)"></span>
-                </th>
-                <th class="resizable">Actions
-                    <span class="col-resizer" onmousedown="columnResizer.start(event,'spools-table',9)" ontouchstart="columnResizer.start(event,'spools-table',9)"></span>
-                </th>
-            </tr>
-        </thead>
-        <tbody>
-    @foreach (var s in PagedSpools())
-            {
-                <tr>
-            <td>@s.Id</td>
-            <td>@(string.IsNullOrWhiteSpace(s.Vendor) ? "-" : s.Vendor)</td>
-            <td>@(string.IsNullOrWhiteSpace(s.FilamentName) ? "-" : s.FilamentName)</td>
-            <td>@s.Material</td>
-            <td>@(s.RemainingWeightG?.ToString("0") ?? "-")</td>
-            <td>
-                @if (!string.IsNullOrWhiteSpace(s.ColorHex))
-                {
-                    <span class="swatch" style="background-color:@s.ColorHex" title="@s.ColorHex" aria-label="Color swatch"></span>
-                }
-                else
-                {
-                    <span>-</span>
-                }
-            </td>
-            <td>@FormatDate(s.RegisteredAt)</td>
-            <td>@FormatDate(s.FirstUsedAt)</td>
-            <td>@FormatDate(s.LastUsedAt)</td>
-            <td>
-                @if (!string.IsNullOrWhiteSpace(spoolmanBase))
-                {
-                    <a class="icon-btn" href="@($"{spoolmanBase}/spool/edit/{s.Id}")" target="_blank" rel="noopener noreferrer" title="Edit in Spoolman" aria-label="Edit in Spoolman">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:middle;">
-                            <path d="M16.862 3.487a1.5 1.5 0 0 1 2.121 0l1.53 1.53a1.5 1.5 0 0 1 0 2.121l-9.9 9.9a1.5 1.5 0 0 1-.53.354l-4.243 1.414a.75.75 0 0 1-.948-.948l1.414-4.243a1.5 1.5 0 0 1 .354-.53l9.9-9.9zm-2.475 3.005l-9.193 9.193-.707 2.121 2.121-.707 9.193-9.193-1.414-1.414z" />
-                        </svg>
-                    </a>
-                }
-                else
-                {
-                    <a class="btn ghost" href="/settings" title="Configure Spoolman URL">Configure URL</a>
-                }
-            </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    <div class="row row-inline" style="justify-content: space-between; align-items:center;">
-        <div class="hint">@ShowingRange()</div>
-        @if (ShowPaging())
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-content">
+            <div class="title-section">
+                <h1>Filament Spools</h1>
+                <p class="subtitle">Manage your 3D printing filament inventory</p>
+            </div>
+            <div class="header-actions">
+                <a class="btn btn-secondary" href="/settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97c0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1c0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
+                    </svg>
+                    Settings
+                </a>
+                <button class="btn btn-primary" @onclick="RefreshFromSpoolman">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                    </svg>
+                    Refresh
+                </button>
+            </div>
+        </div>
+        
+        @if (!string.IsNullOrWhiteSpace(spoolmanError))
         {
-            <div class="row-inline">
-                <button class="btn" @onclick="PrevPage" disabled="@IsPrevDisabled()">Prev</button>
-                <span class="hint">Page @currentPage of @TotalPages</span>
-                <button class="btn" @onclick="NextPage" disabled="@IsNextDisabled()">Next</button>
+            <div class="alert alert-error">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M13 13h-2V7h2m0 10h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2z"/>
+                </svg>
+                <span>@spoolmanError</span>
             </div>
         }
     </div>
-}
+
+    <div class="controls-section">
+        <div class="controls-toolbar">
+            <div class="filters-container">
+                <div class="filter-group">
+                    <label class="filter-label">Material</label>
+                    <select @onchange="OnMaterialChanged" value="@selectedMaterial" class="filter-select">
+                        <option value="">All Materials</option>
+                        @foreach (var m in MaterialOptions())
+                        {
+                            <option value="@m">@m</option>
+                        }
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label class="filter-label">Vendor</label>
+                    <select @onchange="OnVendorChanged" value="@selectedVendor" class="filter-select">
+                        <option value="">All Vendors</option>
+                        @foreach (var v in VendorOptions())
+                        {
+                            <option value="@v">@v</option>
+                        }
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label class="filter-label">Color</label>
+                    <div class="color-filter-wrapper">
+                        <select @onchange="OnColorChanged" value="@selectedColor" class="filter-select">
+                            <option value="">All Colors</option>
+                            @foreach (var c in ColorOptions())
+                            {
+                                <option value="@c">@GetColorDisplayName(c)</option>
+                            }
+                        </select>
+                        @if (!string.IsNullOrWhiteSpace(selectedColor))
+                        {
+                            <div class="color-preview">
+                                <span class="swatch" style="background-color: @selectedColor" title="@selectedColor"></span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+            
+            <div class="action-controls">
+                <div class="filter-group">
+                    <label class="filter-label">Items per page</label>
+                    <select @onchange="OnPageSizeChanged" value="@pageSizeString" class="filter-select compact">
+                        <option value="10">10</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="All">All</option>
+                    </select>
+                </div>
+                
+                <button class="btn-icon" title="Reset to default sort" @onclick="ResetSortingAsync">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z"/>
+                    </svg>
+                </button>
+                
+                <button class="btn-icon" title="Clear all filters" @onclick="ClearFilters">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="content-section">
+        @if (spools is null)
+        {
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading spools...</p>
+            </div>
+        }
+        else if (!spools.Any())
+        {
+            <div class="empty-state">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
+                    <path d="M12,2C13.1,2 14,2.9 14,4C14,5.1 13.1,6 12,6C10.9,6 10,5.1 10,4C10,2.9 10.9,2 12,2M21,9V7L15,1H5C3.89,1 3,1.89 3,3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V9M19,9H14V4H15V7H19V9Z"/>
+                </svg>
+                <h3>No spools found</h3>
+                <p>No spools are currently available in Spoolman. Check your Spoolman configuration or add some spools.</p>
+                <button class="btn btn-primary" @onclick="RefreshFromSpoolman">Refresh Spools</button>
+            </div>
+        }
+        else
+        {
+            <div class="table-container">
+                <table class="spools-table">
+                    <thead>
+                        <tr>
+                            <th class="col-id">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Id"))">
+                                    ID @SortIndicator("Id")
+                                </button>
+                            </th>
+                            <th class="col-vendor">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Vendor"))">
+                                    Vendor @SortIndicator("Vendor")
+                                </button>
+                            </th>
+                            <th class="col-filament">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Filament"))">
+                                    Filament @SortIndicator("Filament")
+                                </button>
+                            </th>
+                            <th class="col-material">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Material"))">
+                                    Material @SortIndicator("Material")
+                                </button>
+                            </th>
+                            <th class="col-weight">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Weight"))">
+                                    Remaining @SortIndicator("Weight")
+                                </button>
+                            </th>
+                            <th class="col-color">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Color"))">
+                                    Color @SortIndicator("Color")
+                                </button>
+                            </th>
+                            <th class="col-date">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("Registered"))">
+                                    Registered @SortIndicator("Registered")
+                                </button>
+                            </th>
+                            <th class="col-date">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("FirstUsed"))">
+                                    First Used @SortIndicator("FirstUsed")
+                                </button>
+                            </th>
+                            <th class="col-date">
+                                <button class="sort-btn" @onclick="@(() => SortByAsync("LastUsed"))">
+                                    Last Used @SortIndicator("LastUsed")
+                                </button>
+                            </th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in PagedSpools())
+                        {
+                            <tr class="spool-row">
+                                <td class="col-id">
+                                    <span class="spool-id">#@s.Id</span>
+                                </td>
+                                <td class="col-vendor">
+                                    <span class="vendor-name">@(string.IsNullOrWhiteSpace(s.Vendor) ? "—" : s.Vendor)</span>
+                                </td>
+                                <td class="col-filament">
+                                    <span class="filament-name">@(string.IsNullOrWhiteSpace(s.FilamentName) ? "—" : s.FilamentName)</span>
+                                </td>
+                                <td class="col-material">
+                                    <span class="material-badge">@s.Material</span>
+                                </td>
+                                <td class="col-weight">
+                                    @if (s.RemainingWeightG.HasValue)
+                                    {
+                                        <span class="weight-value">@s.RemainingWeightG.Value.ToString("0")g</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="weight-unknown">—</span>
+                                    }
+                                </td>
+                                <td class="col-color">
+                                    @if (!string.IsNullOrWhiteSpace(s.ColorHex))
+                                    {
+                                        <div class="color-display">
+                                            <span class="swatch" style="background-color:@s.ColorHex" title="@s.ColorHex"></span>
+                                            <span class="color-name">@GetColorDisplayName(s.ColorHex)</span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="color-unknown">—</span>
+                                    }
+                                </td>
+                                <td class="col-date">
+                                    <span class="date-value">@FormatDate(s.RegisteredAt)</span>
+                                </td>
+                                <td class="col-date">
+                                    <span class="date-value">@FormatDate(s.FirstUsedAt)</span>
+                                </td>
+                                <td class="col-date">
+                                    <span class="date-value">@FormatDate(s.LastUsedAt)</span>
+                                </td>
+                                <td class="col-actions">
+                                    @if (!string.IsNullOrWhiteSpace(spoolmanBase))
+                                    {
+                                        <a class="action-btn" href="@($"{spoolmanBase}/spool/edit/{s.Id}")" target="_blank" rel="noopener noreferrer" title="Edit in Spoolman">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+                                            </svg>
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <a class="action-btn btn-ghost" href="/settings" title="Configure Spoolman URL">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                                            </svg>
+                                            Configure
+                                        </a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="table-footer">
+                <div class="results-info">
+                    <span>@ShowingRange()</span>
+                </div>
+                @if (ShowPaging())
+                {
+                    <div class="pagination">
+                        <button class="btn btn-ghost" @onclick="PrevPage" disabled="@IsPrevDisabled()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M15.41,16.58L10.83,12L15.41,7.41L14,6L8,12L14,18L15.41,16.58Z"/>
+                            </svg>
+                            Previous
+                        </button>
+                        <span class="page-info">Page @currentPage of @TotalPages</span>
+                        <button class="btn btn-ghost" @onclick="NextPage" disabled="@IsNextDisabled()">
+                            Next
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+                            </svg>
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
 
 @code {
     private List<SpoolmanSpoolDto>? spools;
@@ -434,6 +548,154 @@ else
     {
         selectedColor = e.Value?.ToString();
         currentPage = 1;
+    }
+
+    private static string GetColorDisplayName(string hexColor)
+    {
+        if (string.IsNullOrWhiteSpace(hexColor)) return "";
+        
+        // Common color name mappings
+        var colorNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Grayscale
+            {"#000000", "Black"},
+            {"#FFFFFF", "White"},
+            {"#808080", "Gray"},
+            {"#C0C0C0", "Silver"},
+            {"#696969", "Dark Gray"},
+            {"#DCDCDC", "Light Gray"},
+            {"#F5F5F5", "Off White"},
+            
+            // Primary Colors
+            {"#FF0000", "Red"},
+            {"#00FF00", "Lime"},
+            {"#0000FF", "Blue"},
+            {"#FFFF00", "Yellow"},
+            {"#FF00FF", "Magenta"},
+            {"#00FFFF", "Cyan"},
+            
+            // Common Colors
+            {"#800000", "Maroon"},
+            {"#008000", "Green"},
+            {"#000080", "Navy"},
+            {"#800080", "Purple"},
+            {"#808000", "Olive"},
+            {"#008080", "Teal"},
+            {"#FFA500", "Orange"},
+            {"#FFC0CB", "Pink"},
+            {"#A52A2A", "Brown"},
+            {"#D2691E", "Chocolate"},
+            {"#FF6347", "Tomato"},
+            {"#32CD32", "Lime Green"},
+            {"#87CEEB", "Sky Blue"},
+            {"#DA70D6", "Orchid"},
+            {"#EE82EE", "Violet"},
+            {"#98FB98", "Pale Green"},
+            {"#F0E68C", "Khaki"},
+            {"#DDA0DD", "Plum"},
+            {"#B0C4DE", "Light Steel Blue"},
+            {"#FFFFE0", "Light Yellow"},
+            {"#00FA9A", "Medium Spring Green"},
+            {"#48D1CC", "Medium Turquoise"},
+            {"#FFE4E1", "Misty Rose"},
+            {"#FFDEAD", "Navajo White"},
+            {"#F5DEB3", "Wheat"},
+            {"#FFFAF0", "Floral White"}
+        };
+
+        // Try to find an exact match first
+        if (colorNames.TryGetValue(hexColor, out var colorName))
+        {
+            return $"{colorName} ({hexColor})";
+        }
+
+        // If no exact match, try to find the closest common color by basic hue analysis
+        var simplified = GetSimplifiedColorName(hexColor);
+        return simplified != null ? $"{simplified} ({hexColor})" : hexColor;
+    }
+
+    private static string? GetSimplifiedColorName(string hexColor)
+    {
+        try
+        {
+            // Parse hex color
+            var hex = hexColor.TrimStart('#');
+            if (hex.Length != 6) return null;
+
+            var r = Convert.ToInt32(hex.Substring(0, 2), 16);
+            var g = Convert.ToInt32(hex.Substring(2, 2), 16);
+            var b = Convert.ToInt32(hex.Substring(4, 2), 16);
+
+            // Simple color classification based on dominant channel
+            var max = Math.Max(r, Math.Max(g, b));
+            var min = Math.Min(r, Math.Min(g, b));
+            
+            // Check if it's grayscale
+            if (max - min < 30)
+            {
+                if (max < 50) return "Dark";
+                if (max > 200) return "Light";
+                return "Gray";
+            }
+
+            // Determine dominant color
+            if (r > g && r > b)
+            {
+                if (g > b + 50) return "Orange/Yellow";
+                if (b > g + 30) return "Purple/Pink";
+                return "Red";
+            }
+            else if (g > r && g > b)
+            {
+                if (r > b + 30) return "Yellow/Green";
+                if (b > r + 30) return "Cyan/Teal";
+                return "Green";
+            }
+            else if (b > r && b > g)
+            {
+                if (r > g + 30) return "Purple/Magenta";
+                if (g > r + 30) return "Cyan/Blue";
+                return "Blue";
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetContrastTextColor(string hexColor)
+    {
+        try
+        {
+            var hex = hexColor.TrimStart('#');
+            if (hex.Length != 6) return "#000000";
+
+            var r = Convert.ToInt32(hex.Substring(0, 2), 16);
+            var g = Convert.ToInt32(hex.Substring(2, 2), 16);
+            var b = Convert.ToInt32(hex.Substring(4, 2), 16);
+
+            // Calculate luminance using standard formula
+            var luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+            // Return white text for dark colors, black text for light colors
+            return luminance > 0.5 ? "#000000" : "#FFFFFF";
+        }
+        catch
+        {
+            return "#000000";
+        }
+    }
+
+    private void ClearFilters()
+    {
+        selectedMaterial = string.Empty;
+        selectedVendor = string.Empty;
+        selectedColor = string.Empty;
+        currentPage = 1;
+        StateHasChanged();
     }
 }
 
