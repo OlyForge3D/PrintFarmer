@@ -466,6 +466,167 @@ p, li, span {
 }
 
 /* =============================================================================
+   Spool Information
+   ============================================================================= */
+.spool-info {
+  margin-top: 0.5rem;
+}
+
+.spool-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid #334155;
+  border-radius: 6px;
+}
+
+.spool-icon-container {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.filament-spool-icon {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.spool-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.spool-name {
+  font-weight: 600;
+  color: #e5e7eb;
+  font-size: 0.9rem;
+}
+
+.spool-material {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.375rem;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 4px;
+  color: #a7f3d0;
+  text-transform: uppercase;
+  font-weight: 600;
+  align-self: flex-start;
+  letter-spacing: 0.05em;
+}
+
+.spool-filament {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.spool-filament span:not(:last-child):after {
+  content: "•";
+  margin-left: 0.5rem;
+  color: #6b7280;
+}
+
+.spool-weight {
+  font-size: 0.8rem;
+  color: #d1d5db;
+  font-weight: 500;
+}
+
+.spool-status {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Legacy color swatch styles (kept for compatibility) */
+.color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+  cursor: help;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.spool-color {
+  display: flex;
+  align-items: center;
+}
+
+/* Compact spool info for collapsed cards */
+.spool-info-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  margin-top: 0.5rem;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid #334155;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.spool-icon-compact {
+  flex-shrink: 0;
+}
+
+.color-swatch-small {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.spool-compact-details {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+}
+
+.spool-material-compact {
+  background: rgba(16, 185, 129, 0.1);
+  color: #a7f3d0;
+  padding: 0.125rem 0.25rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.spool-weight-compact {
+  color: #d1d5db;
+  font-weight: 500;
+}
+
+.spool-name-compact {
+  color: #9ca3af;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spool-status-compact {
+  color: #ef4444;
+  font-style: italic;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =============================================================================
    Step Controls & Axis Movement
    ============================================================================= */
 .step-block {

@@ -107,6 +107,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             else // Moonraker
             {
                 var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
+                var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, ct);
                 return new PrinterDto(
                     Id: p.Id,
                     Name: p.Name,
@@ -131,7 +132,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress
+                    IpAddress: p.IpAddress,
+                    SpoolInfo: spoolInfo
                 );
             }
         }));
@@ -205,6 +207,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             else // Moonraker
             {
                 var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
+                var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, ct);
                 return new PrinterStatusDto(
                     Id: p.Id,
                     IsOnline: status.IsOnline,
@@ -220,7 +223,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     HotendTemp: status.HotendTemp,
                     BedTemp: status.BedTemp,
                     HotendTarget: status.HotendTarget,
-                    BedTarget: status.BedTarget
+                    BedTarget: status.BedTarget,
+                    SpoolInfo: spoolInfo
                 );
             }
         }
@@ -235,7 +239,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 JobName: null,
                 ThumbnailUrl: null,
                 CameraStreamUrl: null,
-                CameraSnapshotUrl: null
+                CameraSnapshotUrl: null,
+                SpoolInfo: null
             );
         }
     }
@@ -301,6 +306,7 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         else // Moonraker
         {
             var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
+            var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, ct);
             return new PrinterDto(
                 Id: p.Id,
                 Name: p.Name,
@@ -325,7 +331,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
                 ApiKey: p.ApiKey,
                 OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
+                IpAddress: p.IpAddress,
+                SpoolInfo: spoolInfo
             );
         }
     }
@@ -921,6 +928,80 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
 
     // Helper record for camera URL results
     public record CameraUrlResult(string? StreamUrl, string? SnapshotUrl);
+
+    // Helper method to get spool information for Moonraker printers
+    private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
+    {
+        try
+        {
+            // Get the active spool ID from Moonraker
+            var activeSpoolId = await moon.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
+            if (activeSpoolId == null)
+            {
+                return new PrinterSpoolInfoDto(HasActiveSpool: false);
+            }
+
+            // Get spool details from Spoolman via Moonraker
+            var spoolDetailsJson = await moon.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
+            if (string.IsNullOrWhiteSpace(spoolDetailsJson))
+            {
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId
+                );
+            }
+
+            // Parse the JSON response to extract spool information
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(spoolDetailsJson);
+                var root = doc.RootElement;
+                
+                var spoolName = root.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                var material = root.TryGetProperty("material", out var matEl) ? matEl.GetString() : null;
+                var colorHex = root.TryGetProperty("color_hex", out var colorEl) ? colorEl.GetString() : null;
+                var remainingWeight = root.TryGetProperty("remaining_weight", out var weightEl) && weightEl.ValueKind == System.Text.Json.JsonValueKind.Number 
+                    ? weightEl.GetDouble() : (double?)null;
+                
+                // Check if filament information is nested
+                string? filamentName = null;
+                string? vendor = null;
+                if (root.TryGetProperty("filament", out var filamentEl) && filamentEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    filamentName = filamentEl.TryGetProperty("name", out var fnameEl) ? fnameEl.GetString() : null;
+                    if (filamentEl.TryGetProperty("vendor", out var vendorEl) && vendorEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        vendor = vendorEl.TryGetProperty("name", out var vNameEl) ? vNameEl.GetString() : null;
+                    }
+                }
+
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId,
+                    SpoolName: spoolName,
+                    Material: material,
+                    ColorHex: colorHex,
+                    FilamentName: filamentName,
+                    Vendor: vendor,
+                    RemainingWeightG: remainingWeight,
+                    SpoolInUse: true
+                );
+            }
+            catch
+            {
+                // If JSON parsing fails, return basic info
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId
+                );
+            }
+        }
+        catch
+        {
+            // If any Spoolman operations fail, just return no spool info
+            return new PrinterSpoolInfoDto(HasActiveSpool: false);
+        }
+    }
 
     // Request models
     public record StartPrintRequest(string Filename);

@@ -31,7 +31,8 @@ public record PrinterDto(
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null);
+    string? IpAddress = null,
+    PrinterSpoolInfoDto? SpoolInfo = null);
 
 // Basic printer info without live status (for fast loading)
 public record PrinterBasicDto(
@@ -62,7 +63,8 @@ public record PrinterStatusDto(
     double? HotendTemp = null,
     double? BedTemp = null,
     double? HotendTarget = null,
-    double? BedTarget = null);
+    double? BedTarget = null,
+    PrinterSpoolInfoDto? SpoolInfo = null);
 
 // Real-time update payload for SignalR
 public record PrinterStatusUpdate(
@@ -79,7 +81,8 @@ public record PrinterStatusUpdate(
     double? HotendTemp,
     double? BedTemp,
     double? HotendTarget,
-    double? BedTarget);
+    double? BedTarget,
+    PrinterSpoolInfoDto? SpoolInfo);
 
 public class CreatePrinterDto
 {
@@ -131,6 +134,18 @@ public record SpoolmanSpoolDto(
     DateTime? RegisteredAt = null,
     DateTime? FirstUsedAt = null,
     DateTime? LastUsedAt = null);
+
+// Printer spool information for Moonraker printers
+public record PrinterSpoolInfoDto(
+    bool HasActiveSpool,
+    int? ActiveSpoolId = null,
+    string? SpoolName = null,
+    string? Material = null,
+    string? ColorHex = null,
+    string? FilamentName = null,
+    string? Vendor = null,
+    double? RemainingWeightG = null,
+    bool? SpoolInUse = null);
 
 // Catalog (Manufacturers / Models)
 public record ManufacturerDto(Guid Id, string Name);

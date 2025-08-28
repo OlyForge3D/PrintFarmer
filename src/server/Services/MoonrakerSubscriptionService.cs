@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Server.Services;
 
-public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
+public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, MoonrakerClient moonrakerClient, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
@@ -220,7 +220,8 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                                 if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number) { try { bedTarget = tt.GetDouble(); } catch { } }
                             }
 
-                            var update = new PrinterStatusUpdate(id, true, state, progress, jobName, ThumbnailUrl: null, CameraStreamUrl: null, X: x, Y: y, Z: z, HotendTemp: hotend, BedTemp: bed, HotendTarget: hotendTarget, BedTarget: bedTarget);
+                            var spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
+                            var update = new PrinterStatusUpdate(id, true, state, progress, jobName, ThumbnailUrl: null, CameraStreamUrl: null, X: x, Y: y, Z: z, HotendTemp: hotend, BedTemp: bed, HotendTarget: hotendTarget, BedTarget: bedTarget, SpoolInfo: spoolInfo);
                             await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
                         }
                         // Also handle the subscribe acknowledgement which carries current state: { id: 1, result: { status: { ... } } }
@@ -258,12 +259,13 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                                 if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number) { try { bedTarget = tt.GetDouble(); } catch { } }
                             }
 
-                            var update = new PrinterStatusUpdate(id, true, state, progress, jobName, null, null, x, y, z, hotend, bed, hotendTarget, bedTarget);
+                            var spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
+                            var update = new PrinterStatusUpdate(id, true, state, progress, jobName, null, null, x, y, z, hotend, bed, hotendTarget, bedTarget, SpoolInfo: spoolInfo);
                             await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
                         }
                         else if (root.TryGetProperty("method", out var m2) && m2.GetString() == "notify_klippy_disconnected")
                         {
-                            var update = new PrinterStatusUpdate(id, false, "Offline", null, null, null, null, null, null, null, null, null, null, null);
+                            var update = new PrinterStatusUpdate(id, false, "Offline", null, null, null, null, null, null, null, null, null, null, null, SpoolInfo: null);
                             await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
                         }
                     }
@@ -296,6 +298,80 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             {
                 break;
             }
+        }
+    }
+
+    // Helper method to get spool information for Moonraker printers
+    private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
+    {
+        try
+        {
+            // Get the active spool ID from Moonraker
+            var activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
+            if (activeSpoolId == null)
+            {
+                return new PrinterSpoolInfoDto(HasActiveSpool: false);
+            }
+
+            // Get spool details from Spoolman via Moonraker
+            var spoolDetailsJson = await moonrakerClient.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
+            if (string.IsNullOrWhiteSpace(spoolDetailsJson))
+            {
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId
+                );
+            }
+
+            // Parse the JSON response to extract spool information
+            try
+            {
+                using var doc = JsonDocument.Parse(spoolDetailsJson);
+                var root = doc.RootElement;
+                
+                var spoolName = root.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                var material = root.TryGetProperty("material", out var matEl) ? matEl.GetString() : null;
+                var colorHex = root.TryGetProperty("color_hex", out var colorEl) ? colorEl.GetString() : null;
+                var remainingWeight = root.TryGetProperty("remaining_weight", out var weightEl) && weightEl.ValueKind == JsonValueKind.Number 
+                    ? weightEl.GetDouble() : (double?)null;
+                
+                // Check if filament information is nested
+                string? filamentName = null;
+                string? vendor = null;
+                if (root.TryGetProperty("filament", out var filamentEl) && filamentEl.ValueKind == JsonValueKind.Object)
+                {
+                    filamentName = filamentEl.TryGetProperty("name", out var fnameEl) ? fnameEl.GetString() : null;
+                    if (filamentEl.TryGetProperty("vendor", out var vendorEl) && vendorEl.ValueKind == JsonValueKind.Object)
+                    {
+                        vendor = vendorEl.TryGetProperty("name", out var vNameEl) ? vNameEl.GetString() : null;
+                    }
+                }
+
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId,
+                    SpoolName: spoolName,
+                    Material: material,
+                    ColorHex: colorHex,
+                    FilamentName: filamentName,
+                    Vendor: vendor,
+                    RemainingWeightG: remainingWeight,
+                    SpoolInUse: true
+                );
+            }
+            catch
+            {
+                // If JSON parsing fails, return basic info
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId
+                );
+            }
+        }
+        catch
+        {
+            // If any Spoolman operations fail, just return no spool info
+            return new PrinterSpoolInfoDto(HasActiveSpool: false);
         }
     }
 }

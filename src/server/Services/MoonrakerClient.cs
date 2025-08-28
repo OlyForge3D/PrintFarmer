@@ -1008,4 +1008,326 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
             return null;
         }
     }
+
+    // ===== SPOOLMAN API OPERATIONS =====
+    
+    /// <summary>
+    /// Get Spoolman status and connection information
+    /// </summary>
+    public async Task<SpoolmanStatus?> GetSpoolmanStatusAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/status";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanStatus>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get the currently active spool ID
+    /// </summary>
+    public async Task<int?> GetSpoolmanActiveSpoolAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/spool_id";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanSpoolIdResponse>>(cancellationToken: cts.Token);
+            return response?.Result?.SpoolId;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Set the active spool ID in Spoolman
+    /// </summary>
+    public async Task<bool> SetSpoolmanActiveSpoolAsync(string baseUrl, int? spoolId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/spool_id";
+            var request = new SpoolmanSpoolIdRequest { SpoolId = spoolId };
+            using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Proxy a request to the Spoolman server
+    /// </summary>
+    public async Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path, 
+        string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for proxy requests
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/proxy";
+            var request = new SpoolmanProxyRequest
+            {
+                RequestMethod = method,
+                Path = path,
+                Query = query,
+                Body = body,
+                UseV2Response = useV2Response
+            };
+            
+            using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            return await resp.Content.ReadAsStringAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get all spools from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanSpoolsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/spool", ct: ct);
+    }
+
+    /// <summary>
+    /// Get a specific spool by ID from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/spool/{spoolId}", ct: ct);
+    }
+
+    /// <summary>
+    /// Create a new spool in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> CreateSpoolmanSpoolAsync(string baseUrl, object spoolData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/spool", body: spoolData, ct: ct);
+    }
+
+    /// <summary>
+    /// Update a spool in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> UpdateSpoolmanSpoolAsync(string baseUrl, int spoolId, object spoolData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: spoolData, ct: ct);
+    }
+
+    /// <summary>
+    /// Delete a spool from Spoolman via proxy
+    /// </summary>
+    public async Task<bool> DeleteSpoolmanSpoolAsync(string baseUrl, int spoolId, CancellationToken ct = default)
+    {
+        var result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/spool/{spoolId}", ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get all filaments from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanFilamentsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/filament", ct: ct);
+    }
+
+    /// <summary>
+    /// Get a specific filament by ID from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanFilamentByIdAsync(string baseUrl, int filamentId, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/filament/{filamentId}", ct: ct);
+    }
+
+    /// <summary>
+    /// Create a new filament in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> CreateSpoolmanFilamentAsync(string baseUrl, object filamentData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/filament", body: filamentData, ct: ct);
+    }
+
+    /// <summary>
+    /// Update a filament in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> UpdateSpoolmanFilamentAsync(string baseUrl, int filamentId, object filamentData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/filament/{filamentId}", body: filamentData, ct: ct);
+    }
+
+    /// <summary>
+    /// Delete a filament from Spoolman via proxy
+    /// </summary>
+    public async Task<bool> DeleteSpoolmanFilamentAsync(string baseUrl, int filamentId, CancellationToken ct = default)
+    {
+        var result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/filament/{filamentId}", ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get all vendors from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanVendorsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/vendor", ct: ct);
+    }
+
+    /// <summary>
+    /// Get a specific vendor by ID from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanVendorByIdAsync(string baseUrl, int vendorId, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/vendor/{vendorId}", ct: ct);
+    }
+
+    /// <summary>
+    /// Create a new vendor in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> CreateSpoolmanVendorAsync(string baseUrl, object vendorData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/vendor", body: vendorData, ct: ct);
+    }
+
+    /// <summary>
+    /// Update a vendor in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> UpdateSpoolmanVendorAsync(string baseUrl, int vendorId, object vendorData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/vendor/{vendorId}", body: vendorData, ct: ct);
+    }
+
+    /// <summary>
+    /// Delete a vendor from Spoolman via proxy
+    /// </summary>
+    public async Task<bool> DeleteSpoolmanVendorAsync(string baseUrl, int vendorId, CancellationToken ct = default)
+    {
+        var result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/vendor/{vendorId}", ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Use a specific amount of filament from the active spool
+    /// </summary>
+    public async Task<bool> UseSpoolmanFilamentAsync(string baseUrl, double length, CancellationToken ct = default)
+    {
+        var body = new { used_length = length };
+        var result = await SpoolmanProxyRequestAsync(baseUrl, "PUT", "/api/v1/spool/use", body: body, ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get Spoolman server information via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanInfoAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/info", ct: ct);
+    }
+
+    /// <summary>
+    /// Get Spoolman health status via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanHealthAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/health", ct: ct);
+    }
+
+    /// <summary>
+    /// Search spools in Spoolman with optional filters via proxy
+    /// </summary>
+    public async Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null, 
+        bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        var queryParams = new List<string>();
+        if (!string.IsNullOrEmpty(query))
+            queryParams.Add($"search={Uri.EscapeDataString(query)}");
+        if (allowArchived.HasValue)
+            queryParams.Add($"allow_archived={allowArchived.Value.ToString().ToLowerInvariant()}");
+        if (limit.HasValue)
+            queryParams.Add($"limit={limit.Value}");
+        if (offset.HasValue)
+            queryParams.Add($"offset={offset.Value}");
+
+        var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/spool", query: queryString, ct: ct);
+    }
+
+    /// <summary>
+    /// Search filaments in Spoolman with optional filters via proxy
+    /// </summary>
+    public async Task<string?> SearchSpoolmanFilamentsAsync(string baseUrl, string? query = null,
+        int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        var queryParams = new List<string>();
+        if (!string.IsNullOrEmpty(query))
+            queryParams.Add($"search={Uri.EscapeDataString(query)}");
+        if (limit.HasValue)
+            queryParams.Add($"limit={limit.Value}");
+        if (offset.HasValue)
+            queryParams.Add($"offset={offset.Value}");
+
+        var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/filament", query: queryString, ct: ct);
+    }
+
+    /// <summary>
+    /// Archive/unarchive a spool in Spoolman via proxy
+    /// </summary>
+    public async Task<bool> ArchiveSpoolmanSpoolAsync(string baseUrl, int spoolId, bool archived = true, CancellationToken ct = default)
+    {
+        var body = new { archived };
+        var result = await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: body, ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get statistics from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanStatsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/statistics", ct: ct);
+    }
+
+    /// <summary>
+    /// Backup Spoolman database via proxy
+    /// </summary>
+    public async Task<string?> BackupSpoolmanAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/backup", ct: ct);
+    }
+
+    /// <summary>
+    /// Get external database integrations status from Spoolman via proxy  
+    /// </summary>
+    public async Task<string?> GetSpoolmanIntegrationsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/external", ct: ct);
+    }
 }

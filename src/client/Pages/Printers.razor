@@ -107,6 +107,42 @@ else
                             Stop
                         </button>
                     </div>
+                    
+                    @if (p.Backend == Farm.Web.Shared.PrinterBackend.Moonraker)
+                    {
+                        <div class="spool-info-compact">
+                            <div class="spool-icon-compact">
+                                <FilamentSpoolIcon 
+                                    FilamentColor="@(p.SpoolInfo?.HasActiveSpool == true ? p.SpoolInfo.ColorHex : null)" 
+                                    RemainingPercentage="@(p.SpoolInfo?.HasActiveSpool == true ? CalculateRemainingPercentage(p.SpoolInfo.RemainingWeightG) : 0)"
+                                    HasSpoolLoaded="@(p.SpoolInfo?.HasActiveSpool == true)"
+                                    Width="32" 
+                                    Height="32"
+                                    Title="@GetSpoolTooltip(p.SpoolInfo)" />
+                            </div>
+                            <div class="spool-compact-details">
+                                @if (p.SpoolInfo?.HasActiveSpool == true)
+                                {
+                                    @if (!string.IsNullOrWhiteSpace(p.SpoolInfo.Material))
+                                    {
+                                        <span class="spool-material-compact">@p.SpoolInfo.Material</span>
+                                    }
+                                    @if (p.SpoolInfo.RemainingWeightG.HasValue)
+                                    {
+                                        <span class="spool-weight-compact">@($"{p.SpoolInfo.RemainingWeightG.Value:F0}g")</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(p.SpoolInfo.SpoolName))
+                                    {
+                                        <span class="spool-name-compact">@p.SpoolInfo.SpoolName</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="spool-status-compact">No spool loaded</span>
+                                }
+                            </div>
+                        </div>
+                    }
                 </div>
             }
             else
@@ -215,6 +251,92 @@ else
                         <button class="btn preset cooldown" style="background:#1fa2ff" disabled="@IsPrinting(p)" title="Cooldown (set all heaters to 0)" aria-label="Cooldown" @onclick="() => ApplyCooldown(p.Id)">❄</button>
                     </div>
                 </div>
+
+                @if (p.Backend == Farm.Web.Shared.PrinterBackend.Moonraker)
+                {
+                    <div class="section">
+                        <div class="mini-header">Filament</div>
+                        @if (p.SpoolInfo?.HasActiveSpool == true && !string.IsNullOrWhiteSpace(p.SpoolInfo.SpoolName))
+                        {
+                            <div class="spool-info">
+                                <div class="spool-row">
+                                    <div class="spool-icon-container">
+                                        <FilamentSpoolIcon 
+                                            FilamentColor="@p.SpoolInfo.ColorHex" 
+                                            RemainingPercentage="@CalculateRemainingPercentage(p.SpoolInfo.RemainingWeightG)"
+                                            HasSpoolLoaded="true"
+                                            Width="80" 
+                                            Height="80"
+                                            Title="@GetSpoolTooltip(p.SpoolInfo)" />
+                                    </div>
+                                    <div class="spool-details">
+                                        <div class="spool-name">@p.SpoolInfo.SpoolName</div>
+                                        @if (!string.IsNullOrWhiteSpace(p.SpoolInfo.Material))
+                                        {
+                                            <div class="spool-material">@p.SpoolInfo.Material</div>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(p.SpoolInfo.FilamentName) || !string.IsNullOrWhiteSpace(p.SpoolInfo.Vendor))
+                                        {
+                                            <div class="spool-filament">
+                                                @if (!string.IsNullOrWhiteSpace(p.SpoolInfo.Vendor))
+                                                {
+                                                    <span>@p.SpoolInfo.Vendor</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(p.SpoolInfo.FilamentName))
+                                                {
+                                                    <span>@p.SpoolInfo.FilamentName</span>
+                                                }
+                                            </div>
+                                        }
+                                        @if (p.SpoolInfo.RemainingWeightG.HasValue)
+                                        {
+                                            <div class="spool-weight">@($"{p.SpoolInfo.RemainingWeightG.Value:F0}g remaining ({CalculateRemainingPercentage(p.SpoolInfo.RemainingWeightG):F0}%)")</div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else if (p.SpoolInfo?.HasActiveSpool == true)
+                        {
+                            <div class="spool-info">
+                                <div class="spool-row">
+                                    <div class="spool-icon-container">
+                                        <FilamentSpoolIcon 
+                                            FilamentColor="@p.SpoolInfo.ColorHex" 
+                                            RemainingPercentage="50"
+                                            HasSpoolLoaded="true"
+                                            Width="80" 
+                                            Height="80"
+                                            Title="Active spool with limited information" />
+                                    </div>
+                                    <div class="spool-details">
+                                        <div class="spool-name">Spool #@p.SpoolInfo.ActiveSpoolId</div>
+                                        <div class="spool-status">No additional details available</div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="spool-info">
+                                <div class="spool-row">
+                                    <div class="spool-icon-container">
+                                        <FilamentSpoolIcon 
+                                            FilamentColor="@null" 
+                                            RemainingPercentage="0"
+                                            HasSpoolLoaded="false"
+                                            Width="80" 
+                                            Height="80"
+                                            Title="@GetSpoolTooltip(p.SpoolInfo)" />
+                                    </div>
+                                    <div class="spool-details">
+                                        <div class="spool-status">No active spool loaded</div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
 
                 <div class="section move-section">
                     <div class="mini-header">Move</div>
@@ -939,6 +1061,50 @@ else
         {
             toast.Error($"Upload error: {ex.Message}");
         }
+    }
+    
+    // Helper methods for spool information
+    private double CalculateRemainingPercentage(double? remainingWeightG)
+    {
+        if (!remainingWeightG.HasValue || remainingWeightG <= 0)
+            return 0;
+        
+        // Estimate percentage based on typical spool weights
+        // Most filament spools are 1kg (1000g), some smaller are 500g or 250g
+        // We'll use a reasonable default and cap at 100%
+        const double typicalSpoolWeight = 1000.0; // 1kg default
+        double percentage = (remainingWeightG.Value / typicalSpoolWeight) * 100.0;
+        
+        // Cap at 100% in case we have smaller spools or the weight is higher than expected
+        return Math.Min(100.0, Math.Max(0.0, percentage));
+    }
+    
+    private string GetSpoolTooltip(PrinterSpoolInfoDto? spoolInfo)
+    {
+        if (spoolInfo == null || !spoolInfo.HasActiveSpool)
+            return "No spool loaded";
+            
+        var parts = new List<string>();
+        
+        if (!string.IsNullOrWhiteSpace(spoolInfo.SpoolName))
+            parts.Add($"Name: {spoolInfo.SpoolName}");
+            
+        if (!string.IsNullOrWhiteSpace(spoolInfo.Material))
+            parts.Add($"Material: {spoolInfo.Material}");
+            
+        if (!string.IsNullOrWhiteSpace(spoolInfo.Vendor))
+            parts.Add($"Vendor: {spoolInfo.Vendor}");
+            
+        if (!string.IsNullOrWhiteSpace(spoolInfo.FilamentName))
+            parts.Add($"Filament: {spoolInfo.FilamentName}");
+            
+        if (spoolInfo.RemainingWeightG.HasValue)
+            parts.Add($"Remaining: {spoolInfo.RemainingWeightG.Value:F0}g ({CalculateRemainingPercentage(spoolInfo.RemainingWeightG):F0}%)");
+            
+        if (!string.IsNullOrWhiteSpace(spoolInfo.ColorHex))
+            parts.Add($"Color: {spoolInfo.ColorHex}");
+            
+        return string.Join("\n", parts);
     }
 }
 
