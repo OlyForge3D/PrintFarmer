@@ -26,26 +26,29 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
 });
 
-// Database provider selection: Sqlite (dev default), SqlServer, Postgres, MySql
+// Database provider selection: SqlServer (default), Sqlite, Postgres, MySql
 var dbProvider = builder.Configuration["Db:Provider"]
                ?? Environment.GetEnvironmentVariable("DB_PROVIDER")
-               ?? "Sqlite";
+               ?? "SqlServer";
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     switch (dbProvider)
     {
         case "SqlServer":
+        default:
             options.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer")
                                  ?? builder.Configuration.GetConnectionString("Default")
-                                 ?? "Server=localhost;Database=forgeiq;Trusted_Connection=True;TrustServerCertificate=True;");
+                                 ?? "Server=localhost,1433;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;",
+                                 x => x.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
             break;
         case "Postgres":
         case "PostgreSql":
         case "PostgreSQL":
             options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")
                                ?? builder.Configuration.GetConnectionString("Default")
-                               ?? "Host=localhost;Database=forgeiq;Username=postgres;Password=postgres");
+                               ?? "Host=localhost;Database=forgeiq;Username=postgres;Password=postgres",
+                               x => x.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
         case "MySQL":
@@ -53,14 +56,15 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                 var cs = builder.Configuration.GetConnectionString("MySql")
                          ?? builder.Configuration.GetConnectionString("Default")
                          ?? "Server=localhost;Database=forgeiq;User=root;Password=example;";
-                options.UseMySql(cs, ServerVersion.AutoDetect(cs));
+                options.UseMySql(cs, ServerVersion.AutoDetect(cs),
+                                 x => x.MigrationsHistoryTable("__EFMigrationsHistory"));
                 break;
             }
         case "Sqlite":
-        default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")
-                              ?? "Data Source=farm.db");
+                              ?? "Data Source=farm.db",
+                              x => x.MigrationsHistoryTable("__EFMigrationsHistory"));
             break;
     }
 });
@@ -125,24 +129,34 @@ using (var scope = app.Services.CreateScope())
     }
     else
     {
-        // Provider-aware initialization
+        // Provider-aware initialization with shared migrations
         var isSqlite = provider != null && provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+        var isPostgres = provider != null && provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
+        var isSqlServer = provider != null && provider.Contains("SqlServer", StringComparison.OrdinalIgnoreCase);
+        var isMySql = provider != null && provider.Contains("MySql", StringComparison.OrdinalIgnoreCase);
+        
         var forceEnsureCreated = disableEfMigrations || string.Equals(initMode, "EnsureCreated", StringComparison.OrdinalIgnoreCase);
 
         if (forceEnsureCreated)
         {
+            Console.WriteLine($"[DB] Provider '{provider}' selected; running EnsureCreated (migrations disabled).");
             db.Database.EnsureCreated();
-        }
-        else if (isSqlite)
-        {
-            // SQLite migrations are included in this assembly
-            db.Database.Migrate();
         }
         else
         {
-            // For non-SQLite providers, create schema if missing. Provider-specific migrations can be added later.
-            Console.WriteLine($"[DB] Provider '{provider}' selected; running EnsureCreated (no provider-specific migrations yet).");
-            db.Database.EnsureCreated();
+            try 
+            {
+                // Try to run migrations - works for all providers if migrations exist
+                Console.WriteLine($"[DB] Provider '{provider}' selected; applying migrations...");
+                db.Database.Migrate();
+                Console.WriteLine($"[DB] Migrations applied successfully for provider '{provider}'.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB] Migration failed for provider '{provider}': {ex.Message}");
+                Console.WriteLine($"[DB] Falling back to EnsureCreated for schema initialization.");
+                db.Database.EnsureCreated();
+            }
         }
 
         // EF-based seeding for catalog data (idempotent)

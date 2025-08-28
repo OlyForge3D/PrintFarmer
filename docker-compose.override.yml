@@ -1,0 +1,79 @@
+# Docker Compose override for development database testing
+# Uncomment the services you want to test with by running:
+# docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+
+services:
+  # Uncomment to add PostgreSQL for testing
+  # postgres:
+  #   image: postgres:15
+  #   container_name: printfarmer-postgres
+  #   environment:
+  #     POSTGRES_DB: forgeiq
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Uncomment to add MySQL for testing  
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: printfarmer-mysql
+  #   environment:
+  #     MYSQL_DATABASE: forgeiq
+  #     MYSQL_ROOT_PASSWORD: example
+  #     MYSQL_USER: forgeiq
+  #     MYSQL_PASSWORD: forgeiq
+  #   ports:
+  #     - "3306:3306"
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Uncomment to add SQL Server for testing
+  # sqlserver:
+  #   image: mcr.microsoft.com/mssql/server:2022-latest
+  #   container_name: printfarmer-sqlserver
+  #   environment:
+  #     ACCEPT_EULA: Y
+  #     SA_PASSWORD: Your_password123
+  #     MSSQL_PID: Developer
+  #   ports:
+  #     - "1433:1433"
+  #   volumes:
+  #     - sqlserver-data:/var/opt/mssql
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P 'Your_password123' -Q 'SELECT 1'"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Override api service to depend on database services when testing
+  # api:
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     # OR uncomment for MySQL:
+  #     # mysql:
+  #     #   condition: service_healthy
+  #     # OR uncomment for SQL Server:
+  #     # sqlserver:
+  #     #   condition: service_healthy
+
+volumes:
+  postgres-data:
+  mysql-data:
+  sqlserver-data:

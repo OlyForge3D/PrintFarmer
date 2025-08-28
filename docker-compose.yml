@@ -42,3 +42,6 @@ services:
 
 volumes:
   printfarmer-data:
+  postgres-data:
+  mysql-data:
+  sqlserver-data:

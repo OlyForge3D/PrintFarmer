@@ -1,0 +1,75 @@
+# Database services for testing different providers with PrintFarmer
+# Usage examples:
+#
+# Test with PostgreSQL:
+#   docker compose -f docker-compose.databases.yml up postgres -d
+#   docker compose up api web -d --env DB_PROVIDER=Postgres --env ConnectionStrings__Postgres=Host=localhost;Database=forgeiq;Username=postgres;Password=postgres
+#
+# Test with MySQL:
+#   docker compose -f docker-compose.databases.yml up mysql -d  
+#   docker compose up api web -d --env DB_PROVIDER=MySql --env ConnectionStrings__MySql=Server=localhost;Database=forgeiq;User=root;Password=example
+#
+# Test with SQL Server:
+#   docker compose -f docker-compose.databases.yml up sqlserver -d
+#   docker compose up api web -d --env DB_PROVIDER=SqlServer --env "ConnectionStrings__SqlServer=Server=localhost;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: printfarmer-postgres
+    environment:
+      POSTGRES_DB: forgeiq
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql:
+    image: mysql:8.0
+    container_name: printfarmer-mysql
+    environment:
+      MYSQL_DATABASE: forgeiq
+      MYSQL_ROOT_PASSWORD: example
+      MYSQL_USER: forgeiq
+      MYSQL_PASSWORD: forgeiq
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: printfarmer-sqlserver
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: Your_password123
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P 'Your_password123' -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  mysql-data:
+  sqlserver-data:

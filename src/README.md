@@ -1,6 +1,11 @@
-# ForgeIQ Web (Blazor + ASP.NET Core)
+# ForgeIQ Web (Blazor + ASP.NET C### Database Configuration
 
-Hosted solution to manage a Klipper/Moonraker-based print farm:
+The application supports multiple database providers with **SQL Server as the default**:
+
+- **SQL Server (default)** - Production-ready, enterprise database
+- **SQLite** - Lightweight, file-based database for development
+- **PostgreSQL** - Advanced open-source database
+- **MySQL** - Popular open-source databaseed solution to manage a Klipper/Moonraker-based print farm:
 - Add/remove printers and spools
 - Live status via SignalR
 - History totals and thumbnails
@@ -42,15 +47,46 @@ Selection order:
 
 Connection strings come from appsettings.json (ConnectionStrings) and can be overridden by env vars, e.g. ConnectionStrings__Postgres.
 
+### Provider-agnostic migrations
+
+The server uses shared EF Core migrations that work across all supported providers. The migration system:
+- Tries to run `Database.Migrate()` for all providers first
+- Falls back to `Database.EnsureCreated()` if migrations fail
+- Can be forced to use `EnsureCreated` with DB_INIT_MODE=EnsureCreated or DISABLE_EF_MIGRATIONS=1
+
 Examples:
 - DB_PROVIDER=Sqlite, ConnectionStrings__Default=Data Source=farm.db
 - DB_PROVIDER=Postgres, ConnectionStrings__Postgres=Host=localhost;Database=forgeiq;Username=postgres;Password=postgres
 - DB_PROVIDER=SqlServer, ConnectionStrings__SqlServer=Server=localhost;Database=forgeiq;Trusted_Connection=True;TrustServerCertificate=True;
 - DB_PROVIDER=MySql, ConnectionStrings__MySql=Server=localhost;Database=forgeiq;User=root;Password=example;
 
-Init mode (optional):
-- DB_INIT_MODE=EnsureCreated to skip EF migrations and create schema if missing.
-- Otherwise, Sqlite runs migrations; other providers currently call EnsureCreated.
+### Testing different providers
+
+For local testing with different database providers:
+
+1. **Using Docker databases:**
+   ```bash
+   # Start a PostgreSQL instance
+   docker compose -f docker-compose.databases.yml up postgres -d
+   
+   # Test with PostgreSQL
+   cd src
+   export DB_PROVIDER=Postgres
+   export ConnectionStrings__Postgres="Host=localhost;Database=forgeiq;Username=postgres;Password=postgres"
+   dotnet run --project ./server/Farm.Web.Server.csproj
+   ```
+
+2. **Automated testing script:**
+   ```bash
+   # Test all providers automatically
+   ./test-providers.sh
+   ```
+
+3. **With compose override:**
+   ```bash
+   # Edit docker-compose.override.yml to uncomment desired database services
+   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+   ```
 
 ## Docker Compose (2 containers)
 

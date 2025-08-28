@@ -126,13 +126,34 @@ Web will be available at http://localhost:8081 and https://localhost:8443. API i
 
 The server supports Sqlite (default), SqlServer, Postgres, and MySql. Select with DB_PROVIDER and matching ConnectionStrings__ variables.
 
+**Shared migrations:** The system uses provider-agnostic EF Core migrations that work across all supported databases. Migrations are attempted first, with fallback to EnsureCreated if they fail.
+
+**Testing different providers:**
+
+1. **Using provided database services:**
+   ```bash
+   # Start PostgreSQL for testing
+   docker compose -f docker-compose.databases.yml up postgres -d
+   
+   # Run API with PostgreSQL  
+   docker compose up api web -d \
+     -e DB_PROVIDER=Postgres \
+     -e ConnectionStrings__Postgres="Host=localhost;Database=forgeiq;Username=postgres;Password=postgres"
+   ```
+
+2. **Automated testing:**
+   ```bash  
+   # Test all providers with the included script
+   ./test-providers.sh
+   ```
+
 Examples:
 - DB_PROVIDER=Sqlite and ConnectionStrings__Default=Data Source=/data/farm.db
 - DB_PROVIDER=Postgres and ConnectionStrings__Postgres=Host=postgres;Database=forgeiq;Username=postgres;Password=postgres
 - DB_PROVIDER=SqlServer and ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True;
 - DB_PROVIDER=MySql and ConnectionStrings__MySql=Server=mysql;Database=forgeiq;User=root;Password=example;
 
-Note: Sqlite applies EF migrations by default. Other providers currently use EnsureCreated unless DB_INIT_MODE=EnsureCreated is explicitly set.
+Note: All providers now use shared migrations that are applied automatically on startup.
 
 ### Environment variables
 - ASPNETCORE_URLS: Listening URL inside the container (default set to http://0.0.0.0:8080).
