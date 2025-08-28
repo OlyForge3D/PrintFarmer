@@ -135,6 +135,16 @@ else
                                     {
                                         <span class="spool-name-compact">@p.SpoolInfo.SpoolName</span>
                                     }
+                                    @if (p.SpoolInfo.ActiveSpoolId.HasValue && GetSpoolmanUrl(p.SpoolInfo.ActiveSpoolId) != null)
+                                    {
+                                        <a class="icon-btn spool-link-compact" href="@GetSpoolmanUrl(p.SpoolInfo.ActiveSpoolId)" target="_blank" rel="noopener" title="Open spool in Spoolman" aria-label="Open spool in Spoolman">
+                                            <!-- External link icon -->
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                                <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                            </svg>
+                                        </a>
+                                    }
                                 }
                                 else
                                 {
@@ -292,6 +302,19 @@ else
                                         {
                                             <div class="spool-weight">@($"{p.SpoolInfo.RemainingWeightG.Value:F0}g remaining ({CalculateRemainingPercentage(p.SpoolInfo.RemainingWeightG):F0}%)")</div>
                                         }
+                                        @if (p.SpoolInfo.ActiveSpoolId.HasValue && GetSpoolmanUrl(p.SpoolInfo.ActiveSpoolId) != null)
+                                        {
+                                            <div class="spool-link">
+                                                <a class="icon-btn" href="@GetSpoolmanUrl(p.SpoolInfo.ActiveSpoolId)" target="_blank" rel="noopener" title="Open spool in Spoolman" aria-label="Open spool in Spoolman">
+                                                    <!-- External link icon -->
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                        <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                                        <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                                    </svg>
+                                                    View in Spoolman
+                                                </a>
+                                            </div>
+                                        }
                                     </div>
                                 </div>
                             </div>
@@ -312,6 +335,19 @@ else
                                     <div class="spool-details">
                                         <div class="spool-name">Spool #@p.SpoolInfo.ActiveSpoolId</div>
                                         <div class="spool-status">No additional details available</div>
+                                        @if (p.SpoolInfo.ActiveSpoolId.HasValue && GetSpoolmanUrl(p.SpoolInfo.ActiveSpoolId) != null)
+                                        {
+                                            <div class="spool-link">
+                                                <a class="icon-btn" href="@GetSpoolmanUrl(p.SpoolInfo.ActiveSpoolId)" target="_blank" rel="noopener" title="Open spool in Spoolman" aria-label="Open spool in Spoolman">
+                                                    <!-- External link icon -->
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                        <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                                                        <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                                                    </svg>
+                                                    View in Spoolman
+                                                </a>
+                                            </div>
+                                        }
                                     </div>
                                 </div>
                             </div>
@@ -567,6 +603,9 @@ else
             // Now load status for each printer progressively
             await LoadAllStatusesProgressively();
         }
+        
+        // Load Spoolman configuration for spool links
+        await LoadSpoolmanConfigAsync();
         
         // preload presets for tooltips
         try { presets = await Http.GetFromJsonAsync<FilamentPresetsDto>("/api/presets"); } catch { presets = null; }
@@ -1106,6 +1145,31 @@ else
             parts.Add($"Color: {spoolInfo.ColorHex}");
             
         return string.Join("\n", parts);
+    }
+    
+    // Spoolman configuration
+    private SpoolmanConfigDto? spoolmanConfig;
+    
+    private async Task LoadSpoolmanConfigAsync()
+    {
+        try
+        {
+            spoolmanConfig = await Http.GetFromJsonAsync<SpoolmanConfigDto?>("/api/spoolman/config");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load Spoolman config: {ex.Message}");
+            spoolmanConfig = null;
+        }
+    }
+    
+    private string? GetSpoolmanUrl(int? spoolId)
+    {
+        if (!spoolId.HasValue || spoolmanConfig == null || string.IsNullOrWhiteSpace(spoolmanConfig.BaseUrl))
+            return null;
+            
+        var baseUrl = spoolmanConfig.BaseUrl.TrimEnd('/');
+        return $"{baseUrl}/spools/{spoolId.Value}";
     }
 }
 
