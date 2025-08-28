@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text;
 
 namespace Farm.Web.Server.Services;
 
@@ -634,6 +635,377 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
         catch
         {
             return Array.Empty<string>();
+        }
+    }
+
+    // ===== FILE OPERATIONS API =====
+    
+    /// <summary>
+    /// Get list of available file roots
+    /// </summary>
+    public async Task<FileRoot[]> GetFileRootsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/roots";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return Array.Empty<FileRoot>();
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileRoot[]>>(cancellationToken: cts.Token);
+            return response?.Result ?? Array.Empty<FileRoot>();
+        }
+        catch
+        {
+            return Array.Empty<FileRoot>();
+        }
+    }
+
+    /// <summary>
+    /// Get directory information with optional filtering
+    /// </summary>
+    public async Task<DirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var encodedPath = Uri.EscapeDataString(path);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Create a new directory
+    /// </summary>
+    public async Task<DirectoryCreateResponse?> CreateDirectoryAsync(string baseUrl, string path, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory";
+            var request = new DirectoryCreateRequest { Path = path };
+            using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryCreateResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Delete a file or directory
+    /// </summary>
+    public async Task<bool> DeleteFileOrDirectoryAsync(string baseUrl, string path, bool force = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var encodedPath = Uri.EscapeDataString(path);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory?path={encodedPath}&force={force.ToString().ToLowerInvariant()}";
+            using var resp = await http.DeleteAsync(url, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Move or rename a file/directory
+    /// </summary>
+    public async Task<bool> MoveFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/move";
+            var request = new FileMoveRequest { Source = source, Dest = dest };
+            using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Copy a file
+    /// </summary>
+    public async Task<bool> CopyFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/copy";
+            var request = new FileCopyRequest { Source = source, Dest = dest };
+            using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get file metadata for G-Code files
+    /// </summary>
+    public async Task<GCodeMetadata?> GetFileMetadataAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var encodedFilename = Uri.EscapeDataString(filename);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/metadata?filename={encodedFilename}";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<GCodeMetadata>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Start a metadata scan for a file
+    /// </summary>
+    public async Task<bool> StartMetadataScanAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/metascan";
+            var request = new MetadataScanRequest { Filename = filename };
+            using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get a file thumbnail
+    /// </summary>
+    public async Task<byte[]?> GetFileThumbnailAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var encodedFilename = Uri.EscapeDataString(filename);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/thumbs/{encodedFilename}";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Download a file
+    /// </summary>
+    public async Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for downloads
+            
+            var encodedFilename = Uri.EscapeDataString(filename);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedFilename}";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Upload a file to a specific root directory
+    /// </summary>
+    public async Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content, 
+        bool print = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for uploads
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/upload";
+            
+            using var formContent = new MultipartFormDataContent();
+            using var streamContent = new StreamContent(content);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            formContent.Add(streamContent, "file", filename);
+            formContent.Add(new StringContent(root), "root");
+            
+            if (print)
+                formContent.Add(new StringContent("true"), "print");
+            
+            using var resp = await http.PostAsync(url, formContent, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Upload a file with path (can create subdirectories)
+    /// </summary>
+    public async Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content, 
+        bool print = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/upload";
+            
+            using var formContent = new MultipartFormDataContent();
+            using var streamContent = new StreamContent(content);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            
+            var filename = System.IO.Path.GetFileName(path);
+            formContent.Add(streamContent, "file", filename);
+            formContent.Add(new StringContent(path), "path");
+            
+            if (print)
+                formContent.Add(new StringContent("true"), "print");
+            
+            using var resp = await http.PostAsync(url, formContent, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get detailed file list with extended information
+    /// </summary>
+    public async Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(string baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/list?root={Uri.EscapeDataString(root)}&extended=true";
+            if (!string.IsNullOrEmpty(path))
+                url += $"&path={Uri.EscapeDataString(path)}";
+            
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return Array.Empty<MoonrakerFileInfo>();
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerFileInfo[]>>(cancellationToken: cts.Token);
+            return response?.Result ?? Array.Empty<MoonrakerFileInfo>();
+        }
+        catch
+        {
+            return Array.Empty<MoonrakerFileInfo>();
+        }
+    }
+
+    /// <summary>
+    /// Delete a specific file
+    /// </summary>
+    public async Task<bool> DeleteFileAsync(string baseUrl, string path, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var encodedPath = Uri.EscapeDataString(path);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedPath}";
+            using var resp = await http.DeleteAsync(url, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get file contents as stream
+    /// </summary>
+    public async Task<Stream?> GetFileStreamAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+            
+            var encodedFilename = Uri.EscapeDataString(filename);
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedFilename}";
+            var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                resp.Dispose();
+                return null;
+            }
+            
+            return await resp.Content.ReadAsStreamAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
         }
     }
 }
