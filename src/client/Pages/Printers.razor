@@ -597,6 +597,7 @@ else
                     BedTemp = update.BedTemp ?? existing.BedTemp,
                     HotendTarget = update.HotendTarget ?? existing.HotendTarget,
                     BedTarget = update.BedTarget ?? existing.BedTarget,
+                    SpoolInfo = update.SpoolInfo ?? existing.SpoolInfo
                 };
                 // Invalidate snapshot cache for this printer so it refreshes on next tick when status changes
                 snapshotStamps[update.Id] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

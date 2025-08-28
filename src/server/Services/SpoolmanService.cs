@@ -107,6 +107,39 @@ public class SpoolmanService
         }
     }
 
+    public async Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct)
+    {
+        var cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl)) return null;
+
+        // Official Spoolman endpoint for getting a specific spool
+        var baseUrl = cfg.BaseUrl.TrimEnd('/');
+        var url = $"{baseUrl}/api/v1/spool/{spoolId}";
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Accept.ParseAdd("application/json");
+            using var resp = await http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            // Skip clearly-non-JSON payloads
+            var mediaType = resp.Content.Headers.ContentType?.MediaType;
+            if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            using var doc = await TryParseJsonAsync(resp.Content, ct);
+            if (doc is null) return null;
+            
+            return ParseSpool(doc.RootElement);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static async Task<JsonDocument?> TryParseJsonAsync(HttpContent content, CancellationToken ct)
     {
         try

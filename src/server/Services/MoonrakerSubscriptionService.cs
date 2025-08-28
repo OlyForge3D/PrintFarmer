@@ -306,71 +306,43 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     {
         try
         {
-            // Get the active spool ID from Moonraker
+            // Step 1: Get the active spool ID from Moonraker
             var activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
             if (activeSpoolId == null)
             {
                 return new PrinterSpoolInfoDto(HasActiveSpool: false);
             }
 
-            // Get spool details from Spoolman via Moonraker
-            var spoolDetailsJson = await moonrakerClient.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
-            if (string.IsNullOrWhiteSpace(spoolDetailsJson))
+            // Step 2: Get spool details directly from Spoolman using the ID
+            using var scope = scopeFactory.CreateScope();
+            var spoolmanService = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
+            var spoolDetails = await spoolmanService.GetSpoolByIdAsync(activeSpoolId.Value, ct);
+            if (spoolDetails == null)
             {
+                // Return basic info if detail fetch fails but we know there's an active spool
                 return new PrinterSpoolInfoDto(
                     HasActiveSpool: true,
                     ActiveSpoolId: activeSpoolId
                 );
             }
 
-            // Parse the JSON response to extract spool information
-            try
-            {
-                using var doc = JsonDocument.Parse(spoolDetailsJson);
-                var root = doc.RootElement;
-                
-                var spoolName = root.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
-                var material = root.TryGetProperty("material", out var matEl) ? matEl.GetString() : null;
-                var colorHex = root.TryGetProperty("color_hex", out var colorEl) ? colorEl.GetString() : null;
-                var remainingWeight = root.TryGetProperty("remaining_weight", out var weightEl) && weightEl.ValueKind == JsonValueKind.Number 
-                    ? weightEl.GetDouble() : (double?)null;
-                
-                // Check if filament information is nested
-                string? filamentName = null;
-                string? vendor = null;
-                if (root.TryGetProperty("filament", out var filamentEl) && filamentEl.ValueKind == JsonValueKind.Object)
-                {
-                    filamentName = filamentEl.TryGetProperty("name", out var fnameEl) ? fnameEl.GetString() : null;
-                    if (filamentEl.TryGetProperty("vendor", out var vendorEl) && vendorEl.ValueKind == JsonValueKind.Object)
-                    {
-                        vendor = vendorEl.TryGetProperty("name", out var vNameEl) ? vNameEl.GetString() : null;
-                    }
-                }
-
-                return new PrinterSpoolInfoDto(
-                    HasActiveSpool: true,
-                    ActiveSpoolId: activeSpoolId,
-                    SpoolName: spoolName,
-                    Material: material,
-                    ColorHex: colorHex,
-                    FilamentName: filamentName,
-                    Vendor: vendor,
-                    RemainingWeightG: remainingWeight,
-                    SpoolInUse: true
-                );
-            }
-            catch
-            {
-                // If JSON parsing fails, return basic info
-                return new PrinterSpoolInfoDto(
-                    HasActiveSpool: true,
-                    ActiveSpoolId: activeSpoolId
-                );
-            }
+            // Convert SpoolmanSpoolDto to PrinterSpoolInfoDto
+            return new PrinterSpoolInfoDto(
+                HasActiveSpool: true,
+                ActiveSpoolId: activeSpoolId,
+                SpoolName: spoolDetails.Name,
+                Material: spoolDetails.Material,
+                ColorHex: spoolDetails.ColorHex,
+                FilamentName: spoolDetails.FilamentName,
+                Vendor: spoolDetails.Vendor,
+                RemainingWeightG: spoolDetails.RemainingWeightG,
+                SpoolInUse: spoolDetails.InUse
+            );
         }
-        catch
+        catch (Exception ex)
         {
-            // If any Spoolman operations fail, just return no spool info
+            logger.LogError(ex, "GetSpoolInfoAsync: Exception occurred during spool detection for {ServerUrl}", serverUrl);
+            // If any operations fail, just return no spool info
             return new PrinterSpoolInfoDto(HasActiveSpool: false);
         }
     }
