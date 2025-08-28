@@ -3,7 +3,8 @@ namespace Farm.Web.Shared;
 public enum PrinterBackend
 {
     Moonraker = 0,
-    PrusaLink = 1
+    PrusaLink = 1,
+    SDCP = 2
 }
 
 public record PrinterDto(
@@ -133,7 +134,7 @@ public record SpoolmanSpoolDto(
 
 // Catalog (Manufacturers / Models)
 public record ManufacturerDto(Guid Id, string Name);
-public record ModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null);
+public record ModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null);
 
 // Printer details for edit page
 public record PrinterDetailsDto(

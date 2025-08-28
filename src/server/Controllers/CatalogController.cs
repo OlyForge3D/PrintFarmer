@@ -39,11 +39,12 @@ public class CatalogController(AppDbContext db) : ControllerBase
         if (manufacturerId is Guid mid)
             q = q.Where(m => m.ManufacturerId == mid);
         var list = await q.OrderBy(m => m.Name)
-            .Select(m => new ModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ)).ToListAsync(ct);
+            .Select(m => new ModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ, 
+                m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null)).ToListAsync(ct);
         return Ok(list);
     }
 
-    public record CreateModelRequest(Guid ManufacturerId, string Name, double? MaxX, double? MaxY, double? MaxZ);
+    public record CreateModelRequest(Guid ManufacturerId, string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
 
     [HttpPost("models")]
     public async Task<ActionResult<ModelDto>> CreateModel([FromBody] CreateModelRequest req, CancellationToken ct)
@@ -56,7 +57,8 @@ public class CatalogController(AppDbContext db) : ControllerBase
         var trimmed = req.Name.Trim();
         var existing = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == trimmed, ct);
         if (existing is not null)
-            return Conflict(new ModelDto(existing.Id, existing.Name, existing.ManufacturerId));
+            return Conflict(new ModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MaxX, existing.MaxY, existing.MaxZ,
+                existing.DefaultBackend.HasValue ? (PrinterBackend)existing.DefaultBackend.Value : (PrinterBackend?)null));
         var model = new PrinterModel
         {
             Id = Guid.NewGuid(),
@@ -64,7 +66,8 @@ public class CatalogController(AppDbContext db) : ControllerBase
             Name = trimmed,
             MaxX = req.MaxX,
             MaxY = req.MaxY,
-            MaxZ = req.MaxZ
+            MaxZ = req.MaxZ,
+            DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null
         };
         db.Models.Add(model);
         try
@@ -76,10 +79,11 @@ public class CatalogController(AppDbContext db) : ControllerBase
             // Likely a FK or unique constraint violation
             return BadRequest("Invalid request: constraint failed (check ManufacturerId and uniqueness).");
         }
-        return CreatedAtAction(nameof(GetModels), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ));
+        return CreatedAtAction(nameof(GetModels), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+            model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null));
     }
 
-    public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ);
+    public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
 
     [HttpPut("models/{id:guid}")]
     public async Task<IActionResult> UpdateModel(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
@@ -90,6 +94,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
         model.MaxX = req.MaxX;
         model.MaxY = req.MaxY;
         model.MaxZ = req.MaxZ;
+        model.DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null;
         await db.SaveChangesAsync(ct);
         return NoContent();
     }

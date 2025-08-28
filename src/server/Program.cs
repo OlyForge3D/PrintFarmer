@@ -37,6 +37,7 @@ builder.Services.AddHttpClient<PrusaLinkClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 builder.Services.AddHttpClient<SpoolmanService>();
+builder.Services.AddScoped<SdcpClient>();
 builder.Services.AddSignalR();
 if (!builder.Environment.IsEnvironment("Testing"))
 {

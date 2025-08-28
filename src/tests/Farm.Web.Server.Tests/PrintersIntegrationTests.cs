@@ -88,5 +88,38 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         del.IsSuccessStatusCode.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task Create_SDCP_printer_then_test_endpoints()
+    {
+        var client = _factory.CreateClient();
+
+        var createDto = new Farm.Web.Shared.CreatePrinterDto
+        {
+            Name = "itest-sdcp",
+            ServerUrl = "http://192.168.1.100",
+            Backend = Farm.Web.Shared.PrinterBackend.SDCP,
+            Notes = "Test SDCP printer"
+        };
+
+        var created = await client.PostAsJsonAsync("/api/printers", createDto);
+        created.IsSuccessStatusCode.Should().BeTrue();
+
+        var dto = await created.Content.ReadFromJsonAsync<Farm.Web.Shared.PrinterDto>();
+        dto.Should().NotBeNull();
+        dto!.Name.Should().Be("itest-sdcp");
+        dto.Backend.Should().Be(Farm.Web.Shared.PrinterBackend.SDCP);
+
+        // Test camera URL endpoint (should not fail even if camera is not available)
+        var cameraUrl = await client.GetAsync($"/api/printers/{dto.Id}/camera/url");
+        cameraUrl.IsSuccessStatusCode.Should().BeTrue();
+
+        // Test print control endpoints (will fail to connect but should not crash)
+        var pauseResult = await client.PostAsync($"/api/printers/{dto.Id}/pause", null);
+        pauseResult.IsSuccessStatusCode.Should().BeTrue(); // Should return CommandResult even if operation fails
+
+        var del = await client.DeleteAsync($"/api/printers/{dto.Id}");
+        del.IsSuccessStatusCode.Should().BeTrue();
+    }
+
     private record HealthzDto(string status);
 }

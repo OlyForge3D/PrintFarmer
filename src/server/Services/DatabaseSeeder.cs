@@ -23,6 +23,7 @@ public class DatabaseSeeder
                 "Prusa",
                 "Elegoo",
                 "Eryone",
+                "FlashForge",
                 "Sovol",
                 "RatRig",
                 "VoronDesign",
@@ -42,31 +43,33 @@ public class DatabaseSeeder
                 manufacturers[name] = existing;
             }
 
-            // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ)
-            var modelSeeds = new (string Name, string Mfg, double X, double Y, double Z)[]
+            // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend)
+            var modelSeeds = new (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend)[]
             {
-                ("AD5X", "Eryone", 220, 220, 220),
-                ("SV08", "Sovol", 350, 350, 350),
-                ("Thinker X400", "Eryone", 400, 400, 400),
-                ("Centauri Carbon", "Elegoo", 256, 256, 256),
-                ("Micron 120", "PrintersForAnts", 120, 120, 120),
-                ("Micron 180", "PrintersForAnts", 180, 180, 165),
-                ("Voron Trident 250", "VoronDesign", 250, 250, 250),
-                ("Voron Trident 300", "VoronDesign", 300, 300, 250),
-                ("Voron Trident 300 Cube", "VoronDesign", 300, 300, 300),
-                ("Voron Trident 350", "VoronDesign", 350, 350, 250),
-                ("Voron v0", "VoronDesign", 120, 120, 120),
-                ("Voron v2.4 300", "VoronDesign", 300, 300, 300),
-                ("Voron v2.4 350", "VoronDesign", 350, 350, 350),
-                ("vCore4 400", "RatRig", 400, 400, 400),
-                ("vCore4 500", "RatRig", 500, 500, 500),
-                ("Original Prusa Mini+", "Prusa", 180, 180, 180),
-                ("Original Prusa MK4S", "Prusa", 250, 210, 220),
-                ("Original Prusa Core One", "Prusa", 250, 220, 270),
-                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210)
+                ("AD5X", "FlashForge", 220, 220, 220, 0), // Moonraker (Klipper)
+                ("SV08", "Sovol", 350, 350, 350, 0), // Moonraker (Klipper)
+                ("SV08 Max", "Sovol", 500, 500, 500, 0), // Moonraker (Klipper)
+                ("Zero", "Sovol", 150, 150, 150, 0), // Moonraker (Klipper)
+                ("Thinker X400", "Eryone", 400, 400, 400, 0), // Moonraker (Klipper)
+                ("Centauri Carbon", "Elegoo", 256, 256, 256, 2), // SDCP
+                ("Micron 120", "PrintersForAnts", 120, 120, 120, 0), // Moonraker (Klipper)
+                ("Micron 180", "PrintersForAnts", 180, 180, 165, 0), // Moonraker (Klipper)
+                ("Voron Trident 250", "VoronDesign", 250, 250, 250, 0), // Moonraker (Klipper)
+                ("Voron Trident 300", "VoronDesign", 300, 300, 250, 0), // Moonraker (Klipper)
+                ("Voron Trident 300 Cube", "VoronDesign", 300, 300, 300, 0), // Moonraker (Klipper)
+                ("Voron Trident 350", "VoronDesign", 350, 350, 250, 0), // Moonraker (Klipper)
+                ("Voron v0", "VoronDesign", 120, 120, 120, 0), // Moonraker (Klipper)
+                ("Voron v2.4 300", "VoronDesign", 300, 300, 300, 0), // Moonraker (Klipper)
+                ("Voron v2.4 350", "VoronDesign", 350, 350, 350, 0), // Moonraker (Klipper)
+                ("vCore4 400", "RatRig", 400, 400, 400, 0), // Moonraker (Klipper)
+                ("vCore4 500", "RatRig", 500, 500, 500, 0), // Moonraker (Klipper)
+                ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1), // PrusaLink
+                ("Original Prusa MK4S", "Prusa", 250, 210, 220, 1), // PrusaLink
+                ("Original Prusa Core One", "Prusa", 250, 220, 270, 1), // PrusaLink
+                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1) // PrusaLink
             };
 
-            foreach (var (name, mfg, x, y, z) in modelSeeds)
+            foreach (var (name, mfg, x, y, z, defaultBackend) in modelSeeds)
             {
                 if (!manufacturers.TryGetValue(mfg, out var m))
                 {
@@ -84,7 +87,8 @@ public class DatabaseSeeder
                         ManufacturerId = m.Id,
                         MaxX = x,
                         MaxY = y,
-                        MaxZ = z
+                        MaxZ = z,
+                        DefaultBackend = defaultBackend
                     });
                 }
             }

@@ -43,7 +43,7 @@
     <div class="form-label">Model</div>
     <div class="form-group">
         <div class="input-with-button">
-            <select class="form-control flex-input" @bind="selectedModelId">
+            <select class="form-control flex-input" @bind="selectedModelId" @bind:after="OnModelChanged">
                 <option value="">— Select —</option>
                 @foreach (var m in models)
                 {
@@ -63,7 +63,13 @@
             var md = models.FirstOrDefault(x => x.Id == midSel);
             if (md is not null)
             {
-                <div class="hint">Max: X @(@md.MaxX?.ToString() ?? "—"), Y @(@md.MaxY?.ToString() ?? "—"), Z @(@md.MaxZ?.ToString() ?? "—")</div>
+                <div class="hint">
+                    Max: X @(@md.MaxX?.ToString() ?? "—"), Y @(@md.MaxY?.ToString() ?? "—"), Z @(@md.MaxZ?.ToString() ?? "—")
+                    @if (md.DefaultBackend.HasValue)
+                    {
+                        <text>, Default Backend: @md.DefaultBackend</text>
+                    }
+                </div>
             }
         }
         else
@@ -77,14 +83,15 @@
         <InputSelect class="form-control" TValue="PrinterBackend" @bind-Value="printer.Backend">
             <option value="@PrinterBackend.Moonraker">Moonraker</option>
             <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
+            <option value="@PrinterBackend.SDCP">SDCP</option>
         </InputSelect>
-        <div class="hint">Select the printer firmware type</div>
+        <div class="hint">Moonraker (Klipper), PrusaLink (Prusa), or SDCP (Elegoo Centauri Carbon)</div>
     </div>
     
     <div class="form-label">Base URL</div>
     <div class="form-group">
         <div class="input-with-button">
-            <InputText class="form-control flex-input" @bind-Value="printer.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+            <InputText class="form-control flex-input" @bind-Value="printer.ServerUrl" placeholder="http://printer-ip or hostname" />
             <button class="btn-standard" type="button" @onclick="ResolveHostname">Resolve</button>
         </div>
         @if (!string.IsNullOrWhiteSpace(ipAddress))
@@ -93,7 +100,24 @@
         }
         else
         {
-            <div class="hint">Full URL including protocol and port</div>
+            <div class="hint">
+                @if (printer.Backend == PrinterBackend.Moonraker)
+                {
+                    <text>Moonraker URL (default port 7125)</text>
+                }
+                else if (printer.Backend == PrinterBackend.PrusaLink)
+                {
+                    <text>PrusaLink URL (default port 80)</text>
+                }
+                else if (printer.Backend == PrinterBackend.SDCP)
+                {
+                    <text>SDCP printer URL (default port 80)</text>
+                }
+                else
+                {
+                    <text>Full URL including protocol and port</text>
+                }
+            </div>
         }
     </div>
     
@@ -225,6 +249,20 @@
         if (selectedManufacturerId is null)
         {
             showNewModel = false;
+        }
+    }
+
+    private void OnModelChanged()
+    {
+        // Auto-select the default backend when a model is selected
+        if (selectedModelId is Guid modelId)
+        {
+            var selectedModel = models.FirstOrDefault(m => m.Id == modelId);
+            if (selectedModel?.DefaultBackend is PrinterBackend defaultBackend)
+            {
+                printer.Backend = defaultBackend;
+                StateHasChanged();
+            }
         }
     }
 

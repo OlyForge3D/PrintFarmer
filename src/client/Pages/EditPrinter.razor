@@ -30,13 +30,14 @@ else
       <InputSelect class="form-control" TValue="PrinterBackend" @bind-Value="form.Backend">
         <option value="@PrinterBackend.Moonraker">Moonraker</option>
         <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
+        <option value="@PrinterBackend.SDCP">SDCP</option>
       </InputSelect>
     </div>
 
     <label>Base URL</label>
     <div class="field">
       <div class="row-inline" style="gap:.5rem; align-items:center;">
-  <InputText class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind-Value="form.ServerUrl" placeholder="http://printer:7125 or http://prusalink:80" />
+  <InputText class="@(string.IsNullOrWhiteSpace(form.ServerUrl) ? "invalid" : null)" @bind-Value="form.ServerUrl" placeholder="http://printer-ip or hostname" />
         <button class="btn" type="button" title="Resolve to IP" @onclick="ResolveHostname">Resolve</button>
       </div>
       @if (string.IsNullOrWhiteSpace(form.ServerUrl))

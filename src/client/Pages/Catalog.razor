@@ -59,7 +59,7 @@
                 @foreach (var model in models)
                 {
                     var edit = GetEdit(model);
-                    bool isDirty = (edit.MaxX != model.MaxX) || (edit.MaxY != model.MaxY) || (edit.MaxZ != model.MaxZ);
+                    bool isDirty = (edit.MaxX != model.MaxX) || (edit.MaxY != model.MaxY) || (edit.MaxZ != model.MaxZ) || (edit.DefaultBackend != model.DefaultBackend);
                     <div class="model-card">
                         <div class="model-header">
                             <h4 class="model-name">@model.Name</h4>
@@ -81,6 +81,15 @@
                             <div class="dimension-group">
                                 <label class="dimension-label">Max Z (mm)</label>
                                 <InputNumber TValue="double?" @bind-Value="edit.MaxZ" class="dimension-input" placeholder="—" />
+                            </div>
+                            <div class="dimension-group">
+                                <label class="dimension-label">Default Backend</label>
+                                <InputSelect TValue="PrinterBackend?" @bind-Value="edit.DefaultBackend" class="form-control">
+                                    <option value="">— None —</option>
+                                    <option value="@PrinterBackend.Moonraker">Moonraker</option>
+                                    <option value="@PrinterBackend.PrusaLink">PrusaLink</option>
+                                    <option value="@PrinterBackend.SDCP">SDCP</option>
+                                </InputSelect>
                             </div>
                         </div>
                     </div>
@@ -197,7 +206,7 @@
     edit.Clear();
     foreach (var m in models)
     {
-      edit[m.Id] = new EditModel { MaxX = m.MaxX, MaxY = m.MaxY, MaxZ = m.MaxZ };
+      edit[m.Id] = new EditModel { MaxX = m.MaxX, MaxY = m.MaxY, MaxZ = m.MaxZ, DefaultBackend = m.DefaultBackend };
     }
   }
 
@@ -205,7 +214,7 @@
   {
     if (!edit.TryGetValue(m.Id, out var e))
     {
-      e = new EditModel { MaxX = m.MaxX, MaxY = m.MaxY, MaxZ = m.MaxZ };
+      e = new EditModel { MaxX = m.MaxX, MaxY = m.MaxY, MaxZ = m.MaxZ, DefaultBackend = m.DefaultBackend };
       edit[m.Id] = e;
     }
     return e;
@@ -221,7 +230,7 @@
       return;
     }
 
-    var resp = await Http.PutAsJsonAsync($"api/catalog/models/{m.Id}", new { Name = m.Name, ed.MaxX, ed.MaxY, ed.MaxZ });
+    var resp = await Http.PutAsJsonAsync($"api/catalog/models/{m.Id}", new { Name = m.Name, ed.MaxX, ed.MaxY, ed.MaxZ, ed.DefaultBackend });
     if (resp.IsSuccessStatusCode)
     {
       // Refresh source of truth to keep lists in sync
@@ -240,7 +249,7 @@
 
   private void ResetModel(ModelDto m)
   {
-    edit[m.Id] = new EditModel { MaxX = m.MaxX, MaxY = m.MaxY, MaxZ = m.MaxZ };
+    edit[m.Id] = new EditModel { MaxX = m.MaxX, MaxY = m.MaxY, MaxZ = m.MaxZ, DefaultBackend = m.DefaultBackend };
   }
 
   private class EditModel
@@ -248,5 +257,6 @@
     public double? MaxX { get; set; }
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
+    public PrinterBackend? DefaultBackend { get; set; }
   }
 }

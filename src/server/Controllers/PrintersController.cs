@@ -10,7 +10,7 @@ namespace Farm.Web.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa) : ControllerBase
+public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
     {
@@ -74,6 +74,36 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     IpAddress: p.IpAddress
                 );
             }
+            else if (p.Backend == 2) // SDCP
+            {
+                var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
+                return new PrinterDto(
+                    Id: p.Id,
+                    Name: p.Name,
+                    ServerUrl: p.ServerUrl,
+                    Notes: p.Notes,
+                    IsOnline: status.IsOnline,
+                    State: status.State,
+                    ManufacturerName: p.Manufacturer?.Name,
+                    ModelName: p.Model?.Name,
+                    Progress: status.Progress,
+                    JobName: status.JobName,
+                    ThumbnailUrl: status.ThumbnailUrl,
+                    CameraStreamUrl: status.CameraStreamUrl,
+                    CameraSnapshotUrl: status.CameraSnapshotUrl,
+                    X: status.X,
+                    Y: status.Y,
+                    Z: status.Z,
+                    HotendTemp: status.HotendTemp,
+                    BedTemp: status.BedTemp,
+                    HotendTarget: status.HotendTarget,
+                    BedTarget: status.BedTarget,
+                    Backend: Farm.Web.Shared.PrinterBackend.SDCP,
+                    ApiKey: p.ApiKey,
+                    OriginalServerUrl: p.OriginalServerUrl,
+                    IpAddress: p.IpAddress
+                );
+            }
             else // Moonraker
             {
                 var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
@@ -119,7 +149,9 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             Notes: p.Notes,
             ManufacturerName: p.Manufacturer?.Name,
             ModelName: p.Model?.Name,
-            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : Farm.Web.Shared.PrinterBackend.Moonraker,
+            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : 
+                     p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP : 
+                     Farm.Web.Shared.PrinterBackend.Moonraker,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress
@@ -147,6 +179,27 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                     ThumbnailUrl: status.ThumbnailUrl,
                     CameraStreamUrl: status.CameraStreamUrl,
                     CameraSnapshotUrl: status.CameraSnapshotUrl
+                );
+            }
+            else if (p.Backend == 2) // SDCP
+            {
+                var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
+                return new PrinterStatusDto(
+                    Id: p.Id,
+                    IsOnline: status.IsOnline,
+                    State: status.State,
+                    Progress: status.Progress,
+                    JobName: status.JobName,
+                    ThumbnailUrl: status.ThumbnailUrl,
+                    CameraStreamUrl: status.CameraStreamUrl,
+                    CameraSnapshotUrl: status.CameraSnapshotUrl,
+                    X: status.X,
+                    Y: status.Y,
+                    Z: status.Z,
+                    HotendTemp: status.HotendTemp,
+                    BedTemp: status.BedTemp,
+                    HotendTarget: status.HotendTarget,
+                    BedTarget: status.BedTarget
                 );
             }
             else // Moonraker
@@ -210,6 +263,36 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 CameraStreamUrl: status.CameraStreamUrl,
                 CameraSnapshotUrl: status.CameraSnapshotUrl,
                 Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
+                ApiKey: p.ApiKey,
+                OriginalServerUrl: p.OriginalServerUrl,
+                IpAddress: p.IpAddress
+            );
+        }
+        else if (p.Backend == 2) // SDCP
+        {
+            var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
+            return new PrinterDto(
+                Id: p.Id,
+                Name: p.Name,
+                ServerUrl: p.ServerUrl,
+                Notes: p.Notes,
+                IsOnline: status.IsOnline,
+                State: status.State,
+                ManufacturerName: p.Manufacturer?.Name,
+                ModelName: p.Model?.Name,
+                Progress: status.Progress,
+                JobName: status.JobName,
+                ThumbnailUrl: status.ThumbnailUrl,
+                CameraStreamUrl: status.CameraStreamUrl,
+                CameraSnapshotUrl: status.CameraSnapshotUrl,
+                X: status.X,
+                Y: status.Y,
+                Z: status.Z,
+                HotendTemp: status.HotendTemp,
+                BedTemp: status.BedTemp,
+                HotendTarget: status.HotendTarget,
+                BedTarget: status.BedTarget,
+                Backend: Farm.Web.Shared.PrinterBackend.SDCP,
                 ApiKey: p.ApiKey,
                 OriginalServerUrl: p.OriginalServerUrl,
                 IpAddress: p.IpAddress
@@ -305,7 +388,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         }
 
         // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
-        var defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : 7125;
+        var defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : 
+                         dto.Backend == PrinterBackend.SDCP ? 80 : 7125;
         var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
         string resolvedBase = normalizedInput;
         string? resolvedIp = null;
@@ -373,7 +457,37 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 IpAddress: p.IpAddress
             ));
         }
-        else
+        else if (p.Backend == 2) // SDCP
+        {
+            var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
+            return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
+                Id: p.Id,
+                Name: p.Name,
+                ServerUrl: p.ServerUrl,
+                Notes: p.Notes,
+                IsOnline: status.IsOnline,
+                State: status.State,
+                ManufacturerName: null,
+                ModelName: null,
+                Progress: status.Progress,
+                JobName: status.JobName,
+                ThumbnailUrl: status.ThumbnailUrl,
+                CameraStreamUrl: status.CameraStreamUrl,
+                CameraSnapshotUrl: status.CameraSnapshotUrl,
+                X: status.X,
+                Y: status.Y,
+                Z: status.Z,
+                HotendTemp: status.HotendTemp,
+                BedTemp: status.BedTemp,
+                HotendTarget: status.HotendTarget,
+                BedTarget: status.BedTarget,
+                Backend: Farm.Web.Shared.PrinterBackend.SDCP,
+                ApiKey: p.ApiKey,
+                OriginalServerUrl: p.OriginalServerUrl,
+                IpAddress: p.IpAddress
+            ));
+        }
+        else // Moonraker
         {
             var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
             return CreatedAtAction(nameof(Get), new { id = p.Id }, new PrinterDto(
@@ -440,7 +554,10 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         }
 
         p.Name = dto.Name;
-        var defaultPort = dto.Backend.HasValue ? (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 : 7125) : (p.Backend == 1 ? 80 : 7125);
+        var defaultPort = dto.Backend.HasValue ? 
+            (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 : 
+             dto.Backend.Value == PrinterBackend.SDCP ? 80 : 7125) : 
+            (p.Backend == 1 ? 80 : p.Backend == 2 ? 80 : 7125);
         var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
         string resolvedBase = normalizedInput;
         string? resolvedIp = null;
@@ -486,7 +603,8 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     [HttpPost("resolve")]
     public async Task<ActionResult<Farm.Web.Shared.ResolveHostnameResponse>> ResolveHost([FromBody] Farm.Web.Shared.ResolveHostnameRequest body, CancellationToken ct)
     {
-        var defaultPort = body.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 7125;
+        var defaultPort = body.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 
+                         body.Backend == Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125;
         var normalized = NormalizeServerUrl(body.ServerUrl, defaultPort);
         try
         {
@@ -601,7 +719,17 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.PauseAsync(p.ServerUrl, ct);
+        
+        bool ok;
+        if (p.Backend == 2) // SDCP
+        {
+            ok = await sdcp.PausePrintAsync(p.ServerUrl, ct);
+        }
+        else // Moonraker (and PrusaLink for now)
+        {
+            ok = await moon.PauseAsync(p.ServerUrl, ct);
+        }
+        
         return new CommandResult(ok, ok ? null : "Failed to pause");
     }
 
@@ -610,7 +738,17 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.ResumeAsync(p.ServerUrl, ct);
+        
+        bool ok;
+        if (p.Backend == 2) // SDCP
+        {
+            ok = await sdcp.ResumePrintAsync(p.ServerUrl, ct);
+        }
+        else // Moonraker (and PrusaLink for now)
+        {
+            ok = await moon.ResumeAsync(p.ServerUrl, ct);
+        }
+        
         return new CommandResult(ok, ok ? null : "Failed to resume");
     }
 
@@ -619,7 +757,86 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     {
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null) return NotFound();
-        var ok = await moon.EmergencyStopAsync(p.ServerUrl, ct);
+        
+        bool ok;
+        if (p.Backend == 2) // SDCP
+        {
+            ok = await sdcp.CancelPrintAsync(p.ServerUrl, ct);
+        }
+        else // Moonraker (and PrusaLink for now)
+        {
+            ok = await moon.EmergencyStopAsync(p.ServerUrl, ct);
+        }
+        
         return new CommandResult(ok, ok ? null : "Failed to emergency stop");
     }
+
+    // Print job control
+    [HttpPost("{id:guid}/print/start")]
+    public async Task<ActionResult<CommandResult>> StartPrint(Guid id, StartPrintRequest request, CancellationToken ct)
+    {
+        var p = await db.Printers.FindAsync([id], ct);
+        if (p is null) return NotFound();
+        
+        if (p.Backend == 2) // SDCP
+        {
+            var ok = await sdcp.StartPrintAsync(p.ServerUrl, request.Filename, ct);
+            return new CommandResult(ok, ok ? null : "Failed to start print");
+        }
+        
+        return new CommandResult(false, "Start print not implemented for this printer type");
+    }
+
+    // Camera control endpoints
+    [HttpPost("{id:guid}/camera/enable")]
+    public async Task<ActionResult<CommandResult>> EnableCamera(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FindAsync([id], ct);
+        if (p is null) return NotFound();
+        
+        if (p.Backend == 2) // SDCP
+        {
+            var ok = await sdcp.EnableCameraAsync(p.ServerUrl, ct);
+            return new CommandResult(ok, ok ? null : "Failed to enable camera");
+        }
+        
+        return new CommandResult(false, "Camera control not supported for this printer type");
+    }
+
+    [HttpPost("{id:guid}/camera/disable")]
+    public async Task<ActionResult<CommandResult>> DisableCamera(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FindAsync([id], ct);
+        if (p is null) return NotFound();
+        
+        if (p.Backend == 2) // SDCP
+        {
+            var ok = await sdcp.DisableCameraAsync(p.ServerUrl, ct);
+            return new CommandResult(ok, ok ? null : "Failed to disable camera");
+        }
+        
+        return new CommandResult(false, "Camera control not supported for this printer type");
+    }
+
+    [HttpGet("{id:guid}/camera/url")]
+    public async Task<ActionResult<CameraUrlResult>> GetCameraUrl(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FindAsync([id], ct);
+        if (p is null) return NotFound();
+        
+        if (p.Backend == 2) // SDCP
+        {
+            var streamUrl = await sdcp.GetCameraUrlAsync(p.ServerUrl, ct);
+            var snapshotUrl = await sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct);
+            return new CameraUrlResult(streamUrl, snapshotUrl);
+        }
+        
+        return new CameraUrlResult(null, null);
+    }
+
+    // Helper record for camera URL results
+    public record CameraUrlResult(string? StreamUrl, string? SnapshotUrl);
+
+    // Request models
+    public record StartPrintRequest(string Filename);
 }

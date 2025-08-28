@@ -47,6 +47,7 @@ public class PrinterModel
     public double? MaxX { get; set; }
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
+    public int? DefaultBackend { get; set; } // Default backend for this model: 0=Moonraker, 1=PrusaLink, 2=SDCP
 }
 
 public class SpoolmanConfig
