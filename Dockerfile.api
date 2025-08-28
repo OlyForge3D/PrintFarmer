@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+# API container for ForgeIQ (PrintFarmer) - ASP.NET Core server only
+
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+EXPOSE 8080
+
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy solution and projects (server references shared and client; that's okay)
+COPY src/farm-web.sln ./
+COPY src/server/ ./server/
+COPY src/shared/ ./shared/
+COPY src/client/ ./client/
+
+RUN dotnet restore ./server/Farm.Web.Server.csproj
+
+WORKDIR /src/server
+RUN dotnet publish Farm.Web.Server.csproj -c Release -o /app/publish --no-restore
+
+FROM base AS final
+WORKDIR /app
+COPY --from=build /app/publish .
+
+ENTRYPOINT ["dotnet", "Farm.Web.Server.dll"]

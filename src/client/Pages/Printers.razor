@@ -5,6 +5,7 @@
 @inject HttpClient Http
 @inject Farm.Web.Client.ToastService toast
 @inject Farm.Web.Client.RealtimeService realtime
+@inject IJSRuntime JS
 
 <h2>Printers</h2>
 
@@ -72,6 +73,13 @@ else
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                     <path d="M3 3h18v18H3V3zm2 2v14h14V5H5z"/>
                                     <path d="M7 7h10v10H7V7z"/>
+                                </svg>
+                            </button>
+                            <button class="icon-btn" @onclick="() => OpenHistoryPopup(p.Id)" title="View print history" aria-label="View print history">
+                                <!-- History/Clock icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                                    <path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
                                 </svg>
                             </button>
                             <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
@@ -208,6 +216,13 @@ else
                                 <!-- Minimize/Collapse icon -->
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                     <path d="M5 12h14v2H5z"/>
+                                </svg>
+                            </button>
+                            <button class="icon-btn" @onclick="() => OpenHistoryPopup(p.Id)" title="View print history" aria-label="View print history">
+                                <!-- History/Clock icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                                    <path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
                                 </svg>
                             </button>
                             <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
@@ -1170,6 +1185,21 @@ else
             
         var baseUrl = spoolmanConfig.BaseUrl.TrimEnd('/');
         return $"{baseUrl}/spools/{spoolId.Value}";
+    }
+    
+    // History popup functionality
+    private async Task OpenHistoryPopup(Guid printerId)
+    {
+        try
+        {
+            var url = $"/printers/{printerId}/history";
+            await JS.InvokeVoidAsync("window.open", url, "_blank", "width=1200,height=800,scrollbars=yes,resizable=yes,toolbar=no,location=no,status=no");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to open history popup: {ex.Message}");
+            toast.Error("Failed to open history window");
+        }
     }
 }
 

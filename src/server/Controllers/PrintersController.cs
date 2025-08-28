@@ -1003,6 +1003,245 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         }
     }
 
+    // ===== HISTORY ENDPOINTS =====
+    
+    [HttpGet("{id}/history")]
+    public async Task<ActionResult<Farm.Web.Shared.HistoryListResponse>> GetHistory(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
+    {
+        var printer = await db.Printers.FindAsync(id);
+        if (printer == null) return NotFound();
+
+        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        {
+            // For non-Moonraker printers, return empty history for now
+            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+        }
+
+        try
+        {
+            var moonrakerResponse = await moon.GetHistoryListAsync(printer.ServerUrl, limit, start, since, before, order, ct);
+            if (moonrakerResponse == null)
+            {
+                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+            }
+
+            // Convert from Moonraker models to shared models
+            var jobs = moonrakerResponse.Jobs.Select(j => new Farm.Web.Shared.HistoryJob
+            {
+                JobId = j.JobId,
+                Exists = j.Exists,
+                EndTime = j.EndTime,
+                FilamentUsed = j.FilamentUsed,
+                Filename = j.Filename,
+                Metadata = j.Metadata,
+                PrintDuration = j.PrintDuration,
+                Status = j.Status,
+                StartTime = j.StartTime,
+                TotalDuration = j.TotalDuration,
+                User = j.User,
+                AuxiliaryData = j.AuxiliaryData?.Select(a => new Farm.Web.Shared.AuxiliaryData
+                {
+                    Provider = a.Provider,
+                    Name = a.Name,
+                    Value = a.Value,
+                    Description = a.Description,
+                    Units = a.Units
+                }).ToArray(),
+                ThumbnailUrl = ExtractThumbnailUrl(j.Metadata, printer.ServerUrl)
+            }).ToArray();
+
+            return new Farm.Web.Shared.HistoryListResponse
+            {
+                Count = moonrakerResponse.Count,
+                Jobs = jobs
+            };
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get history for printer {id}: {ex.Message}");
+            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+        }
+    }
+
+    [HttpGet("{id}/history/{jobId}")]
+    public async Task<ActionResult<Farm.Web.Shared.HistoryJob>> GetHistoryJob(Guid id, string jobId, CancellationToken ct = default)
+    {
+        var printer = await db.Printers.FindAsync(id);
+        if (printer == null) return NotFound();
+
+        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        {
+            return NotFound("History is only available for Moonraker printers");
+        }
+
+        try
+        {
+            var moonrakerJob = await moon.GetHistoryJobAsync(printer.ServerUrl, jobId, ct);
+            if (moonrakerJob == null)
+            {
+                return NotFound();
+            }
+
+            // Convert from Moonraker model to shared model
+            var job = new Farm.Web.Shared.HistoryJob
+            {
+                JobId = moonrakerJob.JobId,
+                Exists = moonrakerJob.Exists,
+                EndTime = moonrakerJob.EndTime,
+                FilamentUsed = moonrakerJob.FilamentUsed,
+                Filename = moonrakerJob.Filename,
+                Metadata = moonrakerJob.Metadata,
+                PrintDuration = moonrakerJob.PrintDuration,
+                Status = moonrakerJob.Status,
+                StartTime = moonrakerJob.StartTime,
+                TotalDuration = moonrakerJob.TotalDuration,
+                User = moonrakerJob.User,
+                AuxiliaryData = moonrakerJob.AuxiliaryData?.Select(a => new Farm.Web.Shared.AuxiliaryData
+                {
+                    Provider = a.Provider,
+                    Name = a.Name,
+                    Value = a.Value,
+                    Description = a.Description,
+                    Units = a.Units
+                }).ToArray()
+            };
+
+            return job;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get history job {jobId} for printer {id}: {ex.Message}");
+            return StatusCode(500, "Failed to retrieve history job");
+        }
+    }
+
+    [HttpGet("{id}/history/totals")]
+    public async Task<ActionResult<Farm.Web.Shared.HistoryTotals>> GetHistoryTotals(Guid id, CancellationToken ct = default)
+    {
+        var printer = await db.Printers.FindAsync(id);
+        if (printer == null) return NotFound();
+
+        Console.WriteLine($"GetHistoryTotals called for printer {id} ({printer.Name}), backend: {printer.Backend}");
+
+        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        {
+            Console.WriteLine($"Printer {id} is not Moonraker backend, returning empty totals");
+            // Return empty totals for non-Moonraker printers
+            return new Farm.Web.Shared.HistoryTotals
+            {
+                JobTotals = new Farm.Web.Shared.JobTotals()
+            };
+        }
+
+        try
+        {
+            Console.WriteLine($"Calling Moonraker API for totals at: {printer.ServerUrl}");
+            var moonrakerTotals = await moon.GetHistoryTotalsAsync(printer.ServerUrl, ct);
+            if (moonrakerTotals == null)
+            {
+                Console.WriteLine("Moonraker API returned null totals");
+                return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
+            }
+
+            Console.WriteLine($"Moonraker totals received - Jobs: {moonrakerTotals.JobTotals.TotalJobs}, PrintTime: {moonrakerTotals.JobTotals.TotalPrintTime}, FilamentUsed: {moonrakerTotals.JobTotals.TotalFilamentUsed}");
+
+            // Convert from Moonraker model to shared model
+            var totals = new Farm.Web.Shared.HistoryTotals
+            {
+                JobTotals = new Farm.Web.Shared.JobTotals
+                {
+                    TotalJobs = moonrakerTotals.JobTotals.TotalJobs,
+                    TotalTime = moonrakerTotals.JobTotals.TotalTime,
+                    TotalPrintTime = moonrakerTotals.JobTotals.TotalPrintTime,
+                    TotalFilamentUsed = moonrakerTotals.JobTotals.TotalFilamentUsed,
+                    LongestJob = moonrakerTotals.JobTotals.LongestJob,
+                    LongestPrint = moonrakerTotals.JobTotals.LongestPrint
+                },
+                AuxiliaryTotals = moonrakerTotals.AuxiliaryTotals?.Select(a => new Farm.Web.Shared.AuxiliaryTotals
+                {
+                    Provider = a.Provider,
+                    Field = a.Field,
+                    Maximum = a.Maximum,
+                    Total = a.Total
+                }).ToArray()
+            };
+
+            Console.WriteLine($"Returning converted totals - Jobs: {totals.JobTotals.TotalJobs}, PrintTime: {totals.JobTotals.TotalPrintTime}, FilamentUsed: {totals.JobTotals.TotalFilamentUsed}");
+            return totals;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get history totals for printer {id}: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
+        }
+    }
+
+    [HttpDelete("{id}/history/{jobId}")]
+    public async Task<ActionResult> DeleteHistoryJob(Guid id, string jobId, CancellationToken ct = default)
+    {
+        var printer = await db.Printers.FindAsync(id);
+        if (printer == null) return NotFound();
+
+        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        {
+            return BadRequest("History deletion is only available for Moonraker printers");
+        }
+
+        try
+        {
+            var success = await moon.DeleteHistoryJobAsync(printer.ServerUrl, jobId, ct);
+            return success ? Ok() : StatusCode(500, "Failed to delete history job");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to delete history job {jobId} for printer {id}: {ex.Message}");
+            return StatusCode(500, "Failed to delete history job");
+        }
+    }
+
+    // Helper method to extract thumbnail URL from metadata
+    private static string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
+    {
+        if (metadata == null) return null;
+        
+        // Look for thumbnail in common metadata keys
+        var thumbnailKeys = new[] { "thumbnail", "thumbnails", "gcode_thumbnail" };
+        
+        foreach (var key in thumbnailKeys)
+        {
+            if (metadata.TryGetValue(key, out var thumbnailValue))
+            {
+                // Handle different thumbnail formats
+                if (thumbnailValue is string thumbnailStr && !string.IsNullOrEmpty(thumbnailStr))
+                {
+                    // If it's already a full URL, return it
+                    if (thumbnailStr.StartsWith("http://") || thumbnailStr.StartsWith("https://"))
+                        return thumbnailStr;
+                    
+                    // Otherwise, construct the full URL
+                    return $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailStr}";
+                }
+                
+                // Handle array of thumbnails - take the first one
+                if (thumbnailValue is System.Text.Json.JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    var array = jsonElement.EnumerateArray().ToList();
+                    if (array.Count > 0 && array[0].ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var thumbnailPath = array[0].GetString();
+                        if (!string.IsNullOrEmpty(thumbnailPath))
+                        {
+                            return thumbnailPath.StartsWith("http") ? thumbnailPath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailPath}";
+                        }
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
     // Request models
     public record StartPrintRequest(string Filename);
     

@@ -1009,6 +1009,138 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
         }
     }
 
+    // ===== HISTORY API OPERATIONS =====
+    
+    /// <summary>
+    /// List print history jobs with optional filtering parameters
+    /// </summary>
+    public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/list";
+            var queryParams = new List<string>();
+            
+            if (limit.HasValue)
+                queryParams.Add($"limit={limit.Value}");
+            if (start.HasValue)
+                queryParams.Add($"start={start.Value}");
+            if (since.HasValue)
+                queryParams.Add($"since={((DateTimeOffset)since.Value).ToUnixTimeSeconds()}");
+            if (before.HasValue)
+                queryParams.Add($"before={((DateTimeOffset)before.Value).ToUnixTimeSeconds()}");
+            if (!string.IsNullOrWhiteSpace(order))
+                queryParams.Add($"order={Uri.EscapeDataString(order)}");
+                
+            if (queryParams.Any())
+                url += "?" + string.Join("&", queryParams);
+
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get history list from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Get a specific history job by job ID
+    /// </summary>
+    public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/job?uid={Uri.EscapeDataString(jobId)}";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get history job {jobId} from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Delete a specific history job by job ID
+    /// </summary>
+    public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/job?uid={Uri.EscapeDataString(jobId)}";
+            using var resp = await http.DeleteAsync(url, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to delete history job {jobId} from {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// Get history totals and statistics
+    /// </summary>
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/totals";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            
+            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryTotals>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get history totals from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Reset history totals (clears all statistics)
+    /// </summary>
+    public async Task<bool> ResetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/reset_totals";
+            using var resp = await http.PostAsync(url, null, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to reset history totals from {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
     // ===== SPOOLMAN API OPERATIONS =====
     
     /// <summary>
@@ -1329,5 +1461,83 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
     public async Task<string?> GetSpoolmanIntegrationsAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/external", ct: ct);
+    }
+}
+
+/// <summary>
+/// Extension methods for history-related data conversion
+/// </summary>
+public static class HistoryExtensions
+{
+    /// <summary>
+    /// Convert Unix timestamp (seconds) to DateTime
+    /// </summary>
+    public static DateTime ToDateTime(this double unixTimestamp)
+    {
+        return DateTimeOffset.FromUnixTimeSeconds((long)unixTimestamp).UtcDateTime;
+    }
+    
+    /// <summary>
+    /// Convert Unix timestamp (seconds) to DateTime, handling null values
+    /// </summary>
+    public static DateTime? ToDateTime(this double? unixTimestamp)
+    {
+        return unixTimestamp?.ToDateTime();
+    }
+    
+    /// <summary>
+    /// Get the start time as DateTime
+    /// </summary>
+    public static DateTime GetStartTimeAsDateTime(this HistoryJob job)
+    {
+        return job.StartTime.ToDateTime();
+    }
+    
+    /// <summary>
+    /// Get the end time as DateTime, if available
+    /// </summary>
+    public static DateTime? GetEndTimeAsDateTime(this HistoryJob job)
+    {
+        return job.EndTime?.ToDateTime();
+    }
+    
+    /// <summary>
+    /// Get print duration as TimeSpan
+    /// </summary>
+    public static TimeSpan GetPrintDuration(this HistoryJob job)
+    {
+        return TimeSpan.FromSeconds(job.PrintDuration);
+    }
+    
+    /// <summary>
+    /// Get total duration as TimeSpan
+    /// </summary>
+    public static TimeSpan GetTotalDuration(this HistoryJob job)
+    {
+        return TimeSpan.FromSeconds(job.TotalDuration);
+    }
+    
+    /// <summary>
+    /// Check if the job was completed successfully
+    /// </summary>
+    public static bool IsCompleted(this HistoryJob job)
+    {
+        return string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase);
+    }
+    
+    /// <summary>
+    /// Check if the job was cancelled
+    /// </summary>
+    public static bool IsCancelled(this HistoryJob job)
+    {
+        return string.Equals(job.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+    }
+    
+    /// <summary>
+    /// Check if the job had an error
+    /// </summary>
+    public static bool IsError(this HistoryJob job)
+    {
+        return string.Equals(job.Status, "error", StringComparison.OrdinalIgnoreCase);
     }
 }

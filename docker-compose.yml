@@ -1,22 +1,31 @@
 services:
-  printfarmer:
-    build: .
-    image: printfarmer:latest
-    container_name: printfarmer
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: printfarmer-api:latest
+    container_name: printfarmer-api
     environment:
-      # Bind Kestrel to all interfaces on port 8080 inside the container
       - ASPNETCORE_URLS=http://0.0.0.0:8080
-      # Set environment as needed (Development/Production)
       - ASPNETCORE_ENVIRONMENT=Production
-      # Override the SQLite connection string to store DB under /data
       - ConnectionStrings__Default=Data Source=/data/farm.db
-      # Use EnsureCreated for clean .NET 9 database initialization
       - DB_INIT_MODE=EnsureCreated
     ports:
-      - "8081:8080"
+      - "5088:8080"
     volumes:
-      # Named volume for persistent DB storage
       - printfarmer-data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: printfarmer-web:latest
+    container_name: printfarmer-web
+    depends_on:
+      - api
+    ports:
+      - "8081:8080"
     restart: unless-stopped
 
 volumes:

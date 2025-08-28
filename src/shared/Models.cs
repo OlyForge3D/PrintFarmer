@@ -182,3 +182,60 @@ public record FilamentPresetsDto(
 // Resolve hostname/IP utility
 public record ResolveHostnameRequest(string ServerUrl, PrinterBackend Backend);
 public record ResolveHostnameResponse(string NormalizedInputUrl, string? ResolvedIp, string ResolvedBaseUrl);
+
+// History Models (matching Moonraker structure)
+public class HistoryListResponse
+{
+    public int Count { get; set; }
+    public HistoryJob[] Jobs { get; set; } = Array.Empty<HistoryJob>();
+}
+
+public class HistoryJob
+{
+    public string JobId { get; set; } = string.Empty;
+    public bool Exists { get; set; }
+    public double? EndTime { get; set; }
+    public double FilamentUsed { get; set; }
+    public string Filename { get; set; } = string.Empty;
+    public Dictionary<string, object> Metadata { get; set; } = new();
+    public double PrintDuration { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public double StartTime { get; set; }
+    public double TotalDuration { get; set; }
+    public string User { get; set; } = string.Empty;
+    public AuxiliaryData[]? AuxiliaryData { get; set; }
+    public string? ThumbnailUrl { get; set; }
+}
+
+public class AuxiliaryData
+{
+    public string Provider { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public object Value { get; set; } = new();
+    public string Description { get; set; } = string.Empty;
+    public string? Units { get; set; }
+}
+
+public class HistoryTotals
+{
+    public JobTotals JobTotals { get; set; } = new();
+    public AuxiliaryTotals[]? AuxiliaryTotals { get; set; }
+}
+
+public class JobTotals
+{
+    public int TotalJobs { get; set; }
+    public double TotalTime { get; set; }
+    public double TotalPrintTime { get; set; }
+    public double TotalFilamentUsed { get; set; }
+    public double LongestJob { get; set; }
+    public double LongestPrint { get; set; }
+}
+
+public class AuxiliaryTotals
+{
+    public string Provider { get; set; } = string.Empty;
+    public string Field { get; set; } = string.Empty;
+    public double Maximum { get; set; }
+    public double Total { get; set; }
+}
