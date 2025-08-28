@@ -6,8 +6,11 @@ using System.Net;
 
 namespace Farm.Web.Server.Services;
 
-public class PrusaLinkClient(HttpClient http) : PrinterClientBase
+public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null) : PrinterClientBase
 {
+    private readonly PrusaLinkApiClient apiClient = new(http);
+    private readonly ILogger? _logger = logger;
+    
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 80);
 
     private static void AddApiKey(HttpRequestMessage req, string? apiKey)
@@ -18,80 +21,109 @@ public class PrusaLinkClient(HttpClient http) : PrinterClientBase
 
     public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
     {
-        var status = await GetStatusAsync(baseUrl, apiKey, ct);
-        var job = await GetJobAsync(baseUrl, apiKey, ct);
-        // PrusaLink does not expose position/temps in the same way; stub for now
-        return new PrusaCompositeStatus(
-            status.IsOnline,
-            status.State,
-            job?.Progress,
-            job?.JobName,
-            job?.ThumbnailUrl,
-            job?.CameraStreamUrl,
-            job?.CameraSnapshotUrl
-        );
+        try
+        {
+            var status = await apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            var job = await apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            
+            return new PrusaCompositeStatus(
+                status?.Printer != null,
+                status?.Printer?.State,
+                job?.Progress,
+                job?.File?.Name,
+                null, // Thumbnail handling would need additional endpoint
+                null, // Camera stream URL would need camera configuration
+                null  // Camera snapshot URL would need camera configuration
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to get composite status from {BaseUrl}", baseUrl);
+            return new PrusaCompositeStatus(false, null, null, null, null, null, null);
+        }
     }
 
     public async Task<PrusaStatus> GetStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var url = $"{NormalizeBaseUrl(baseUrl)}/api/v1/status";
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            AddApiKey(req, apiKey);
-            using var resp = await http.SendAsync(req, cts.Token);
-            if (!resp.IsSuccessStatusCode) return new PrusaStatus(false, null);
-            var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
-            string? state = null;
-            if (doc.TryGetProperty("printer", out var printer) && printer.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String)
-                state = st.GetString();
-            return new PrusaStatus(true, state);
+            var status = await apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            return new PrusaStatus(status?.Printer != null, status?.Printer?.State);
         }
-        catch { return new PrusaStatus(false, null); }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to get status from {BaseUrl}", baseUrl);
+            return new PrusaStatus(false, null);
+        }
     }
 
     public async Task<PrusaJob?> GetJobAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var url = $"{NormalizeBaseUrl(baseUrl)}/api/v1/job";
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            AddApiKey(req, apiKey);
-            using var resp = await http.SendAsync(req, cts.Token);
-            if (!resp.IsSuccessStatusCode) return null;
-            var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
-            string? jobName = null;
-            double? progress = null;
-            string? thumb = null;
-            string? stream = null;
-            string? snap = null;
-            if (doc.TryGetProperty("job", out var job))
-            {
-                if (job.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
-                    jobName = fn.GetString();
-                if (job.TryGetProperty("progress", out var prog) && prog.ValueKind == JsonValueKind.Number)
-                    progress = prog.GetDouble();
-                if (job.TryGetProperty("thumbnail", out var th) && th.ValueKind == JsonValueKind.String)
-                    thumb = NormalizeCameraUrl(th.GetString(), NormalizeBaseUrl(baseUrl));
-            }
-            // Camera URLs
-            if (doc.TryGetProperty("webcam", out var cam))
-            {
-                if (cam.TryGetProperty("stream", out var s) && s.ValueKind == JsonValueKind.String)
-                    stream = NormalizeCameraUrl(s.GetString(), NormalizeBaseUrl(baseUrl));
-                if (cam.TryGetProperty("snapshot", out var sn) && sn.ValueKind == JsonValueKind.String)
-                    snap = NormalizeCameraUrl(sn.GetString(), NormalizeBaseUrl(baseUrl));
-            }
-            return new PrusaJob(null, progress, jobName, thumb, stream, snap);
+            var job = await apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            if (job == null) return null;
+            
+            return new PrusaJob(
+                job.State,
+                job.Progress,
+                job.File?.Name,
+                null, // Thumbnail handling would need additional logic
+                null, // Camera stream URL would need camera configuration  
+                null  // Camera snapshot URL would need camera configuration
+            );
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to get job from {BaseUrl}", baseUrl);
+            return null;
+        }
     }
 
-    // Add more methods for movement, temps, etc. as needed
+    // File upload and management methods - Using comprehensive API client
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            return await apiClient.UploadGcodeAsync(baseUrl, fileName, fileContent, apiKey, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to upload G-code file {FileName} to {BaseUrl}", fileName, baseUrl);
+            return false;
+        }
+    }
+
+    public async Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            return await apiClient.StartPrintAsync(baseUrl, fileName, apiKey, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to start print of {FileName} on {BaseUrl}", fileName, baseUrl);
+            return false;
+        }
+    }
+
+    public async Task<string[]> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            return await apiClient.GetGcodeFilesAsync(baseUrl, apiKey, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to get file list from {BaseUrl}", baseUrl);
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>
+    /// Access the underlying comprehensive API client for advanced operations
+    /// </summary>
+    public PrusaLinkApiClient ApiClient => apiClient;
 }
 
 public record PrusaStatus(bool IsOnline, string? State);

@@ -552,4 +552,88 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase
         catch { }
         return (stream, snapshot);
     }
+
+    // File upload and management methods
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for file uploads
+
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/upload";
+            
+            using var formContent = new MultipartFormDataContent();
+            using var streamContent = new StreamContent(fileContent);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            formContent.Add(streamContent, "file", fileName);
+            formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
+            
+            using var resp = await http.PostAsync(url, formContent, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> StartPrintAsync(string baseUrl, string fileName, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/printer/print/start";
+            var payload = new { filename = fileName };
+            
+            using var resp = await http.PostAsJsonAsync(url, payload, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/list?root=gcodes";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return Array.Empty<string>();
+            
+            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            var root = doc.RootElement;
+            
+            if (!root.TryGetProperty("result", out var result) || 
+                result.ValueKind != JsonValueKind.Array) 
+                return Array.Empty<string>();
+            
+            var files = new List<string>();
+            foreach (var file in result.EnumerateArray())
+            {
+                if (file.TryGetProperty("path", out var path) && 
+                    path.ValueKind == JsonValueKind.String)
+                {
+                    var fileName = path.GetString();
+                    if (!string.IsNullOrEmpty(fileName) && fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        files.Add(fileName);
+                    }
+                }
+            }
+            return files.ToArray();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
 }

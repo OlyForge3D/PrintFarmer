@@ -834,9 +834,96 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         return new CameraUrlResult(null, null);
     }
 
+    [HttpPost("{id:guid}/files/upload")]
+    public async Task<ActionResult> UploadGcode(Guid id, IFormFile file, CancellationToken ct)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file provided");
+
+        if (!file.FileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("File must be a .gcode file");
+
+        var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p == null) return NotFound();
+
+        try
+        {
+            await using var fileStream = file.OpenReadStream();
+            bool success = ((PrinterBackend)p.Backend) switch
+            {
+                PrinterBackend.Moonraker => await moon.UploadGcodeAsync(p.ServerUrl, file.FileName, fileStream, ct),
+                PrinterBackend.PrusaLink => await prusa.UploadGcodeAsync(p.ServerUrl, file.FileName, fileStream, p.ApiKey, ct),
+                PrinterBackend.SDCP => await sdcp.UploadGcodeAsync(p.ServerUrl, file.FileName, fileStream, ct),
+                _ => false
+            };
+
+            if (success)
+                return Ok(new { message = "File uploaded successfully", filename = file.FileName });
+            else
+                return StatusCode(500, "Failed to upload file to printer");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Upload failed: {ex.Message}");
+        }
+    }
+
+    [HttpGet("{id:guid}/files")]
+    public async Task<ActionResult<string[]>> GetFileList(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p == null) return NotFound();
+
+        try
+        {
+            string[] files = ((PrinterBackend)p.Backend) switch
+            {
+                PrinterBackend.Moonraker => await moon.GetFileListAsync(p.ServerUrl, ct),
+                PrinterBackend.PrusaLink => await prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct),
+                PrinterBackend.SDCP => await sdcp.GetFileListAsync(p.ServerUrl, ct),
+                _ => Array.Empty<string>()
+            };
+
+            return Ok(files);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Failed to get file list: {ex.Message}");
+        }
+    }
+
+    [HttpPost("{id:guid}/files/{fileName}/print")]
+    public async Task<ActionResult> StartPrintFromFile(Guid id, string fileName, CancellationToken ct)
+    {
+        var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p == null) return NotFound();
+
+        try
+        {
+            bool success = ((PrinterBackend)p.Backend) switch
+            {
+                PrinterBackend.Moonraker => await moon.StartPrintAsync(p.ServerUrl, fileName, ct),
+                PrinterBackend.PrusaLink => await prusa.StartPrintAsync(p.ServerUrl, fileName, p.ApiKey, ct),
+                PrinterBackend.SDCP => await sdcp.StartPrintAsync(p.ServerUrl, fileName, ct),
+                _ => false
+            };
+
+            if (success)
+                return Ok(new { message = "Print started successfully", filename = fileName });
+            else
+                return StatusCode(500, "Failed to start print");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Failed to start print: {ex.Message}");
+        }
+    }
+
     // Helper record for camera URL results
     public record CameraUrlResult(string? StreamUrl, string? SnapshotUrl);
 
     // Request models
     public record StartPrintRequest(string Filename);
+    
+    public record UploadGcodeRequest(IFormFile File);
 }

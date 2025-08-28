@@ -1,5 +1,6 @@
 @page "/"
 @using Farm.Web.Shared
+@using Microsoft.AspNetCore.Components.Forms
 @implements IDisposable
 @inject HttpClient Http
 @inject Farm.Web.Client.ToastService toast
@@ -299,6 +300,61 @@ else
                         </div>
 
                     </div>
+                </div>
+
+                <div class="section">
+                    <div class="mini-header">Files</div>
+                    <div class="file-controls">
+                        <div class="file-upload-area">
+                            <InputFile OnChange="@(e => HandleFileUpload(e, p.Id))" 
+                                      accept=".gcode" 
+                                      disabled="@IsPrinting(p)"
+                                      class="file-input" />
+                            <div class="file-upload-label">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/>
+                                </svg>
+                                Upload G-code
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" 
+                               @onclick="() => LoadFileList(p.Id)" 
+                               disabled="@(!p.IsOnline)"
+                               title="Refresh file list">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.74 0 6.85-2.57 7.7-6h-2.05A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                            </svg>
+                            Refresh
+                        </button>
+                    </div>
+                    @if (GetFileList(p.Id)?.Any() == true)
+                    {
+                        <div class="file-list">
+                            @foreach (var file in GetFileList(p.Id)!)
+                            {
+                                <div class="file-item">
+                                    <span class="file-name">@file</span>
+                                    <button class="btn btn-sm btn-success" 
+                                           @onclick="() => StartPrintFromFile(p.Id, file)" 
+                                           disabled="@(IsPrinting(p) || !p.IsOnline)"
+                                           title="Start print">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M8 5v14l11-7z"/>
+                                        </svg>
+                                        Print
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (IsLoadingFiles(p.Id))
+                    {
+                        <div class="loading-files">Loading files...</div>
+                    }
+                    else if (HasTriedLoadingFiles(p.Id))
+                    {
+                        <div class="no-files">No files available</div>
+                    }
                 </div>
 
                 @if (p.IsOnline && string.Equals(p.State, "printing", StringComparison.OrdinalIgnoreCase))
@@ -776,6 +832,113 @@ else
             }
         }
         StateHasChanged();
+    }
+
+    // File management
+    private readonly Dictionary<Guid, List<string>?> printerFiles = new();
+    private readonly Dictionary<Guid, bool> loadingFiles = new();
+
+    private string[]? GetFileList(Guid printerId) => printerFiles.TryGetValue(printerId, out var files) ? files?.ToArray() : null;
+    
+    private bool IsLoadingFiles(Guid printerId) => loadingFiles.TryGetValue(printerId, out var loading) && loading;
+    
+    private bool HasTriedLoadingFiles(Guid printerId) => printerFiles.ContainsKey(printerId);
+
+    private async Task LoadFileList(Guid printerId)
+    {
+        loadingFiles[printerId] = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.GetAsync($"/printers/{printerId}/files");
+            if (response.IsSuccessStatusCode)
+            {
+                var files = await response.Content.ReadFromJsonAsync<string[]>();
+                printerFiles[printerId] = files?.ToList() ?? new List<string>();
+            }
+            else
+            {
+                printerFiles[printerId] = new List<string>();
+                toast.Error("Failed to load file list");
+            }
+        }
+        catch (Exception ex)
+        {
+            printerFiles[printerId] = new List<string>();
+            toast.Error($"Error loading files: {ex.Message}");
+        }
+        finally
+        {
+            loadingFiles[printerId] = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartPrintFromFile(Guid printerId, string fileName)
+    {
+        try
+        {
+            var response = await Http.PostAsync($"/printers/{printerId}/files/{Uri.EscapeDataString(fileName)}/print", null);
+            if (response.IsSuccessStatusCode)
+            {
+                toast.Success($"Started printing {fileName}");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                toast.Error($"Failed to start print: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            toast.Error($"Error starting print: {ex.Message}");
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e, Guid printerId)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        if (!file.Name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
+        {
+            toast.Error("Please select a .gcode file");
+            return;
+        }
+
+        const long maxFileSize = 100 * 1024 * 1024; // 100 MB
+        if (file.Size > maxFileSize)
+        {
+            toast.Error("File is too large. Maximum size is 100 MB");
+            return;
+        }
+
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            using var stream = file.OpenReadStream(maxFileSize);
+            using var streamContent = new StreamContent(stream);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            content.Add(streamContent, "file", file.Name);
+
+            var response = await Http.PostAsync($"/printers/{printerId}/files/upload", content);
+            if (response.IsSuccessStatusCode)
+            {
+                toast.Success($"Uploaded {file.Name} successfully");
+                // Refresh file list
+                await LoadFileList(printerId);
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                toast.Error($"Upload failed: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            toast.Error($"Upload error: {ex.Message}");
+        }
     }
 }
 
