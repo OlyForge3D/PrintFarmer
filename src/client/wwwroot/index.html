@@ -15,7 +15,12 @@
   <script defer src="js/date-picker.js"></script>
 </head>
 <body>
-  <div id="app">Loading...</div>
+  <div id="app">
+    <div class="loading-state">
+      <div class="spinner"></div>
+      <p>Loading ForgeIQ...</p>
+    </div>
+  </div>
   <script src="_framework/blazor.webassembly.js" autostart="false"></script>
   <script>
     Blazor.start();
