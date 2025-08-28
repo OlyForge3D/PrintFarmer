@@ -37,14 +37,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Manufacturer>(b =>
         {
             b.HasKey(m => m.Id);
-            b.Property(m => m.Name).IsRequired().HasMaxLength(128).UseCollation("NOCASE");
+            var isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+            var nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
+            if (isSqlite)
+            {
+                nameProp.UseCollation("NOCASE");
+            }
             b.HasIndex(m => m.Name).IsUnique();
         });
 
         modelBuilder.Entity<PrinterModel>(b =>
         {
             b.HasKey(m => m.Id);
-            b.Property(m => m.Name).IsRequired().HasMaxLength(128).UseCollation("NOCASE");
+            var isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+            var nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
+            if (isSqlite)
+            {
+                nameProp.UseCollation("NOCASE");
+            }
             b.HasOne(m => m.Manufacturer)
              .WithMany(x => x.Models)
              .HasForeignKey(m => m.ManufacturerId)

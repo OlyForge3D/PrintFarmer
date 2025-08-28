@@ -26,7 +26,44 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
 });
 
-builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=farm.db"));
+// Database provider selection: Sqlite (dev default), SqlServer, Postgres, MySql
+var dbProvider = builder.Configuration["Db:Provider"]
+               ?? Environment.GetEnvironmentVariable("DB_PROVIDER")
+               ?? "Sqlite";
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+{
+    switch (dbProvider)
+    {
+        case "SqlServer":
+            options.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer")
+                                 ?? builder.Configuration.GetConnectionString("Default")
+                                 ?? "Server=localhost;Database=forgeiq;Trusted_Connection=True;TrustServerCertificate=True;");
+            break;
+        case "Postgres":
+        case "PostgreSql":
+        case "PostgreSQL":
+            options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")
+                               ?? builder.Configuration.GetConnectionString("Default")
+                               ?? "Host=localhost;Database=forgeiq;Username=postgres;Password=postgres");
+            break;
+        case "MySql":
+        case "MySQL":
+            {
+                var cs = builder.Configuration.GetConnectionString("MySql")
+                         ?? builder.Configuration.GetConnectionString("Default")
+                         ?? "Server=localhost;Database=forgeiq;User=root;Password=example;";
+                options.UseMySql(cs, ServerVersion.AutoDetect(cs));
+                break;
+            }
+        case "Sqlite":
+        default:
+            options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
+                              ?? builder.Configuration.GetConnectionString("Default")
+                              ?? "Data Source=farm.db");
+            break;
+    }
+});
 
 builder.Services.AddHttpClient<MoonrakerClient>(client =>
 {
@@ -88,14 +125,24 @@ using (var scope = app.Services.CreateScope())
     }
     else
     {
-        // Use standard EF migrations for all databases (including SQLite)
-        if (disableEfMigrations || string.Equals(initMode, "EnsureCreated", StringComparison.OrdinalIgnoreCase))
+        // Provider-aware initialization
+        var isSqlite = provider != null && provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+        var forceEnsureCreated = disableEfMigrations || string.Equals(initMode, "EnsureCreated", StringComparison.OrdinalIgnoreCase);
+
+        if (forceEnsureCreated)
         {
             db.Database.EnsureCreated();
         }
+        else if (isSqlite)
+        {
+            // SQLite migrations are included in this assembly
+            db.Database.Migrate();
+        }
         else
         {
-            db.Database.Migrate();
+            // For non-SQLite providers, create schema if missing. Provider-specific migrations can be added later.
+            Console.WriteLine($"[DB] Provider '{provider}' selected; running EnsureCreated (no provider-specific migrations yet).");
+            db.Database.EnsureCreated();
         }
 
         // EF-based seeding for catalog data (idempotent)

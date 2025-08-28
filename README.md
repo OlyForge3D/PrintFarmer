@@ -75,6 +75,8 @@ See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup, workflows, and
 
 ## Docker
 
+Two-container setup is provided: web (Nginx + HTTPS serving the WASM client and reverse proxy) and api (ASP.NET Core).
+
 ### Image build
 ```powershell
 docker build -t printfarmer:latest .
@@ -111,6 +113,26 @@ services:
 volumes:
   printfarmer-data:
 ```
+
+For the 2-container setup and HTTPS, use the provided docker-compose.yml at repo root:
+
+```
+docker compose up -d --build
+```
+
+Web will be available at http://localhost:8081 and https://localhost:8443. API is proxied at /api.
+
+### Database providers
+
+The server supports Sqlite (default), SqlServer, Postgres, and MySql. Select with DB_PROVIDER and matching ConnectionStrings__ variables.
+
+Examples:
+- DB_PROVIDER=Sqlite and ConnectionStrings__Default=Data Source=/data/farm.db
+- DB_PROVIDER=Postgres and ConnectionStrings__Postgres=Host=postgres;Database=forgeiq;Username=postgres;Password=postgres
+- DB_PROVIDER=SqlServer and ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True;
+- DB_PROVIDER=MySql and ConnectionStrings__MySql=Server=mysql;Database=forgeiq;User=root;Password=example;
+
+Note: Sqlite applies EF migrations by default. Other providers currently use EnsureCreated unless DB_INIT_MODE=EnsureCreated is explicitly set.
 
 ### Environment variables
 - ASPNETCORE_URLS: Listening URL inside the container (default set to http://0.0.0.0:8080).
