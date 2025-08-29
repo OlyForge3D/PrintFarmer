@@ -2,7 +2,14 @@ using Farm.Web.Server.Data;
 using Farm.Web.Server.Services;
 using Farm.Web.Server.Services.Interfaces;
 using Farm.Web.Server.Hubs;
+using Farm.Web.Server.Configuration;
+using Farm.Web.Server.Health;
+using Farm.Web.Server.Infrastructure;
+using Farm.Web.Server.Middleware;
+using Farm.Web.Server.Validators;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using FluentValidation;
 using Farm.Web.Shared;
 using System.Text.Json;
 
@@ -100,6 +107,26 @@ builder.Services.AddSingleton<IPresetService>(provider => provider.GetRequiredSe
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddScoped<IDatabaseSeeder>(provider => provider.GetRequiredService<DatabaseSeeder>());
 
+// === NEW INFRASTRUCTURE COMPONENTS ===
+
+// Configuration validation
+builder.Services.Configure<AppSettings>(builder.Configuration.GetSection(AppSettings.SectionName));
+builder.Services.Configure<DatabaseSettings>(builder.Configuration.GetSection(DatabaseSettings.SectionName));
+builder.Services.AddSingleton<ConfigurationValidator>();
+
+// FluentValidation
+builder.Services.AddScoped<IValidator<CreatePrinterDto>, CreatePrinterValidator>();
+
+// Health checks
+builder.Services.AddHealthChecks()
+    .AddCheck<ComprehensiveHealthCheck>("comprehensive")
+    .AddDbContextCheck<AppDbContext>("database");
+
+// Circuit breaker for resilience
+builder.Services.AddSingleton<ICircuitBreakerService, CircuitBreakerService>();
+
+// === END NEW INFRASTRUCTURE ===
+
 // CORS: default to permissive in dev, restrict by env in prod
 var allowedOrigins = builder.Configuration["AllowedOrigins"] ?? Environment.GetEnvironmentVariable("ALLOWED_ORIGINS");
 builder.Services.AddCors(options =>
@@ -176,7 +203,26 @@ using (var scope = app.Services.CreateScope())
         var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
         await seeder.SeedAllAsync();
     }
+    
+    // Validate configuration after services are built
+    try
+    {
+        var configValidator = app.Services.GetRequiredService<ConfigurationValidator>();
+        configValidator.ValidateConfiguration();
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogCritical(ex, "Application startup failed due to configuration validation errors");
+        throw;
+    }
 }
+
+// === MIDDLEWARE PIPELINE ===
+// Order matters - exception handling must be first
+
+// Global exception handling (must be first)
+app.UseMiddleware<GlobalExceptionMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -190,6 +236,32 @@ app.UseStaticFiles();
 
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
+
+// Health checks
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var result = JsonSerializer.Serialize(new
+        {
+            Status = report.Status.ToString(),
+            TotalChecksDuration = report.TotalDuration,
+            Results = report.Entries.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new
+                {
+                    Status = kvp.Value.Status.ToString(),
+                    Duration = kvp.Value.Duration,
+                    Description = kvp.Value.Description,
+                    Data = kvp.Value.Data
+                })
+        }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        
+        await context.Response.WriteAsync(result);
+    }
+});
+
 // Minimal API for presets
 app.MapGet("/api/presets", (PresetService svc) => Results.Ok(svc.GetPresets()));
 app.MapPost("/api/presets", (PresetService svc, FilamentPresetsDto body) => { svc.SavePresets(body); return Results.NoContent(); });

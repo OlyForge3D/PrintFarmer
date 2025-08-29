@@ -1,16 +1,18 @@
 using Farm.Web.Server.Data;
 using Farm.Web.Server.Domain;
 using Farm.Web.Server.Services;
+using Farm.Web.Server.Middleware;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 using static Farm.Web.Server.Controllers.CatalogController;
 
 namespace Farm.Web.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp) : ControllerBase
+public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
     {
@@ -365,6 +367,22 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     [HttpPost]
     public async Task<ActionResult<PrinterDto>> Create(CreatePrinterDto dto, CancellationToken ct)
     {
+        // Validate input using FluentValidation
+        var validationResult = await validator.ValidateAsync(dto, ct);
+        if (!validationResult.IsValid)
+        {
+            logger.LogWarning("Printer creation validation failed: {Errors}", 
+                string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage)));
+            
+            foreach (var error in validationResult.Errors)
+            {
+                ModelState.AddModelError(error.PropertyName, error.ErrorMessage);
+            }
+            return BadRequest(ModelState);
+        }
+
+        logger.LogInformation("Creating new printer: {Name} ({Backend})", dto.Name, dto.Backend);
+
         // resolve or create manufacturer/model
         Guid? manufacturerId = dto.ManufacturerId;
         if (manufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -1066,20 +1084,37 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     [HttpGet("{id}/history/{jobId}")]
     public async Task<ActionResult<Farm.Web.Shared.HistoryJob>> GetHistoryJob(Guid id, string jobId, CancellationToken ct = default)
     {
-        var printer = await db.Printers.FindAsync(id);
-        if (printer == null) return NotFound();
+        // Input validation
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            logger.LogWarning("GetHistoryJob called with null or empty jobId for printer {PrinterId}", id);
+            return BadRequest("Job ID is required");
+        }
+
+        var printer = await db.Printers.FindAsync(id, ct);
+        if (printer == null) 
+        {
+            logger.LogWarning("Printer {PrinterId} not found for history job request", id);
+            throw new PrinterNotFoundException($"Printer {id} not found");
+        }
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
-            return NotFound("History is only available for Moonraker printers");
+            logger.LogWarning("History requested for non-Moonraker printer {PrinterId} (Backend={Backend})", 
+                id, printer.Backend);
+            return BadRequest("History is only available for Moonraker printers");
         }
+
+        logger.LogDebug("Fetching history job {JobId} for printer {PrinterId} ({PrinterName})", 
+            jobId, id, printer.Name);
 
         try
         {
             var moonrakerJob = await moon.GetHistoryJobAsync(printer.ServerUrl, jobId, ct);
             if (moonrakerJob == null)
             {
-                return NotFound();
+                logger.LogInformation("History job {JobId} not found for printer {PrinterId}", jobId, id);
+                return NotFound($"History job {jobId} not found");
             }
 
             // Convert from Moonraker model to shared model
@@ -1106,13 +1141,21 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 }).ToArray()
             };
 
+            logger.LogDebug("Successfully retrieved history job {JobId} for printer {PrinterId}", jobId, id);
             return job;
         }
-        catch (Exception ex)
+        catch (HttpRequestException ex)
         {
-            Console.WriteLine($"Failed to get history job {jobId} for printer {id}: {ex.Message}");
-            return StatusCode(500, "Failed to retrieve history job");
+            logger.LogError(ex, "Network error retrieving history job {JobId} for printer {PrinterId} from {ServerUrl}", 
+                jobId, id, printer.ServerUrl);
+            return StatusCode(502, "Unable to connect to printer");
         }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            logger.LogWarning(ex, "Timeout retrieving history job {JobId} for printer {PrinterId}", jobId, id);
+            return StatusCode(408, "Request timeout");
+        }
+        // Let global exception handler catch other exceptions for consistent error responses
     }
 
     [HttpGet("{id}/history/totals")]
