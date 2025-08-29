@@ -183,6 +183,34 @@ public record FilamentPresetsDto(
 public record ResolveHostnameRequest(string ServerUrl, PrinterBackend Backend);
 public record ResolveHostnameResponse(string NormalizedInputUrl, string? ResolvedIp, string ResolvedBaseUrl);
 
+// Network discovery
+public class DiscoveredPrinterDto
+{
+    public string IpAddress { get; set; } = string.Empty;
+    public int Port { get; set; }
+    public string ServerUrl { get; set; } = string.Empty;
+    public PrinterBackend Backend { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Manufacturer { get; set; }
+    public string? Model { get; set; }
+    public string? Firmware { get; set; }
+    public string? Version { get; set; }
+    public bool IsReachable { get; set; }
+    public DateTime DiscoveredAt { get; set; }
+}
+
+// Network discovery configuration
+public record NetworkDiscoverySettingsDto(
+    List<string> NetworkRanges,
+    int TimeoutMs = 3000,
+    int MaxConcurrentScans = 20,
+    List<int> Ports = null!)
+{
+    public NetworkDiscoverySettingsDto() : this(new List<string>(), 3000, 20, new List<int> { 80, 7125 })
+    {
+    }
+}
+
 // History Models (matching Moonraker structure)
 public class HistoryListResponse
 {

@@ -13,6 +13,21 @@
     <p>Edit printer details, import or export printer configurations.</p>
     
     <div class="row" style="margin-bottom: 1rem;">
+      <button class="btn btn-primary" @onclick="DiscoverPrinters" disabled="@isDiscovering">
+        @if (isDiscovering)
+        {
+          <div class="spinner-sm" style="margin-right: 0.5rem;"></div>
+          <span>Discovering...</span>
+        }
+        else
+        {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M16.2,17.2L15,16C14.7,16.6 14.1,17 13.5,17C12.7,17 12,16.3 12,15.5C12,14.7 12.7,14 13.5,14C14.3,14 15,14.7 15,15.5C15,15.9 14.8,16.2 14.5,16.4L15.8,17.8C16.3,17.2 16.5,16.4 16.5,15.5C16.5,13.8 15.2,12.5 13.5,12.5C11.8,12.5 10.5,13.8 10.5,15.5C10.5,17.2 11.8,18.5 13.5,18.5C14.4,18.5 15.2,18.1 15.8,17.6L16.2,17.2M18.5,15.5C18.5,18.3 16.3,20.5 13.5,20.5C10.7,20.5 8.5,18.3 8.5,15.5C8.5,12.7 10.7,10.5 13.5,10.5C16.3,10.5 18.5,12.7 18.5,15.5Z"/>
+          </svg>
+          <span>Discover Printers</span>
+        }
+      </button>
+      
       <button class="btn btn-secondary" @onclick="ExportPrinters" disabled="@isExporting">
         @if (isExporting)
         {
@@ -48,6 +63,55 @@
     {
       <div class="alert @(importSuccess ? "alert-success" : "alert-error")" style="margin-bottom: 1rem;">
         @importMessage
+      </div>
+    }
+
+    @if (!string.IsNullOrEmpty(discoveryMessage))
+    {
+      <div class="alert @(discoverySuccess ? "alert-success" : "alert-error")" style="margin-bottom: 1rem;">
+        @discoveryMessage
+      </div>
+    }
+
+    @if (discoveredPrinters?.Any() == true)
+    {
+      <div class="discovery-section" style="margin-bottom: 2rem;">
+        <h4 style="margin-bottom: 1rem;">Discovered Printers (@discoveredPrinters.Count found)</h4>
+        <div class="discovery-grid">
+          @foreach (var discovered in discoveredPrinters)
+          {
+            <div class="discovery-card">
+              <div class="discovery-header">
+                <div class="discovery-info">
+                  <div class="discovery-name">@discovered.Name</div>
+                  <div class="discovery-details">
+                    @if (!string.IsNullOrEmpty(discovered.Manufacturer) || !string.IsNullOrEmpty(discovered.Model))
+                    {
+                      <div class="discovery-model">@($"{discovered.Manufacturer} {discovered.Model}".Trim())</div>
+                    }
+                    <div class="discovery-url">@discovered.ServerUrl</div>
+                    <div class="discovery-backend">@discovered.Backend</div>
+                  </div>
+                </div>
+                <div class="discovery-actions">
+                  <button class="btn btn-sm btn-primary" @onclick="() => AddDiscoveredPrinter(discovered)" disabled="@isAddingPrinter">
+                    @if (isAddingPrinter && selectedDiscoveredPrinter?.ServerUrl == discovered.ServerUrl)
+                    {
+                      <div class="spinner-sm"></div>
+                    }
+                    else
+                    {
+                      <span>Add</span>
+                    }
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+        <button class="btn btn-secondary btn-sm" @onclick="ClearDiscoveredPrinters" style="margin-top: 1rem;">
+          Clear Discovery Results
+        </button>
       </div>
     }
 
@@ -124,6 +188,14 @@
   private bool importSuccess = false;
   private readonly string fileInputId = Guid.NewGuid().ToString();
   private string fileInputElementId => $"file-input-{fileInputId}";
+  
+  // Discovery-related fields
+  private List<DiscoveredPrinterDto>? discoveredPrinters;
+  private bool isDiscovering = false;
+  private string discoveryMessage = string.Empty;
+  private bool discoverySuccess = false;
+  private bool isAddingPrinter = false;
+  private DiscoveredPrinterDto? selectedDiscoveredPrinter;
 
   protected override async Task OnInitializedAsync()
   {
@@ -288,6 +360,119 @@
         await InvokeAsync(StateHasChanged);
       });
     }
+  }
+
+  private async Task DiscoverPrinters()
+  {
+    try
+    {
+      isDiscovering = true;
+      discoveryMessage = string.Empty;
+      StateHasChanged();
+
+      var response = await Http.GetAsync("api/printers/discover");
+      if (response.IsSuccessStatusCode)
+      {
+        var responseContent = await response.Content.ReadAsStringAsync();
+        discoveredPrinters = System.Text.Json.JsonSerializer.Deserialize<List<DiscoveredPrinterDto>>(responseContent, new System.Text.Json.JsonSerializerOptions
+        {
+          PropertyNameCaseInsensitive = true
+        });
+
+        if (discoveredPrinters?.Any() == true)
+        {
+          discoveryMessage = $"Discovery completed! Found {discoveredPrinters.Count} printer(s) on the network.";
+          discoverySuccess = true;
+        }
+        else
+        {
+          discoveryMessage = "Discovery completed, but no printers were found on the network.";
+          discoverySuccess = false;
+        }
+      }
+      else
+      {
+        var errorContent = await response.Content.ReadAsStringAsync();
+        discoveryMessage = $"Discovery failed: {errorContent}";
+        discoverySuccess = false;
+      }
+    }
+    catch (Exception ex)
+    {
+      discoveryMessage = $"Discovery error: {ex.Message}";
+      discoverySuccess = false;
+    }
+    finally
+    {
+      isDiscovering = false;
+      StateHasChanged();
+      
+      // Clear message after 8 seconds
+      _ = Task.Run(async () =>
+      {
+        await Task.Delay(8000);
+        discoveryMessage = string.Empty;
+        await InvokeAsync(StateHasChanged);
+      });
+    }
+  }
+
+  private async Task AddDiscoveredPrinter(DiscoveredPrinterDto discovered)
+  {
+    try
+    {
+      isAddingPrinter = true;
+      selectedDiscoveredPrinter = discovered;
+      StateHasChanged();
+
+      // Create a URL with pre-filled data for the add printer page
+      var queryParams = new List<string>
+      {
+        $"name={Uri.EscapeDataString(discovered.Name)}",
+        $"serverUrl={Uri.EscapeDataString(discovered.ServerUrl)}",
+        $"backend={discovered.Backend}",
+        $"ipAddress={Uri.EscapeDataString(discovered.IpAddress)}"
+      };
+
+      if (!string.IsNullOrEmpty(discovered.Manufacturer))
+      {
+        queryParams.Add($"manufacturer={Uri.EscapeDataString(discovered.Manufacturer)}");
+      }
+      
+      if (!string.IsNullOrEmpty(discovered.Model))
+      {
+        queryParams.Add($"model={Uri.EscapeDataString(discovered.Model)}");
+      }
+
+      var url = $"/printers/new?{string.Join("&", queryParams)}";
+      
+      // Use JavaScript to navigate to preserve the pre-filled data
+      await JS.InvokeVoidAsync("window.open", url, "_blank");
+      
+      // Remove from discovered list after a short delay
+      await Task.Delay(1000);
+      discoveredPrinters?.Remove(discovered);
+      StateHasChanged();
+    }
+    catch (Exception ex)
+    {
+      discoveryMessage = $"Failed to add printer: {ex.Message}";
+      discoverySuccess = false;
+      StateHasChanged();
+    }
+    finally
+    {
+      isAddingPrinter = false;
+      selectedDiscoveredPrinter = null;
+      StateHasChanged();
+    }
+  }
+
+  private void ClearDiscoveredPrinters()
+  {
+    discoveredPrinters = null;
+    discoveryMessage = string.Empty;
+    StateHasChanged();
   }
 
   // DTO for import result

@@ -2163,3 +2163,140 @@ select option {
         text-align: center;
     }
 }
+
+/* =============================================================================
+   Discovery Styles
+   ============================================================================= */
+.discovery-section {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.discovery-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.discovery-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+}
+
+.discovery-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.discovery-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.discovery-name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: 0.25rem;
+    word-break: break-word;
+}
+
+.discovery-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.discovery-model {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.discovery-url {
+    font-size: 0.75rem;
+    color: var(--color-text-tertiary);
+    font-family: monospace;
+    word-break: break-all;
+}
+
+.discovery-backend {
+    font-size: 0.75rem;
+    color: var(--color-primary);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.discovery-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: 4px;
+}
+
+/* Small spinner for discovery buttons */
+.spinner-sm {
+    width: 16px;
+    height: 16px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Network discovery settings styles */
+.network-ranges {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.network-range-input {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.network-range-input input {
+    flex: 1;
+}
+
+.network-range-input .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.9rem;
+    min-width: auto;
+    height: auto;
+}
+
+/* Responsive discovery grid */
+@media (max-width: 768px) {
+    .discovery-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .discovery-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+    
+    .discovery-actions {
+        justify-content: flex-end;
+    }
+}

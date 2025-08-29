@@ -95,6 +95,8 @@ builder.Services.AddScoped<ISpoolmanService>(provider => provider.GetRequiredSer
 builder.Services.AddScoped<SdcpClient>();
 builder.Services.AddScoped<ISdcpClient>(provider => provider.GetRequiredService<SdcpClient>());
 
+builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
+
 builder.Services.AddSignalR();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -103,6 +105,10 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
 builder.Services.AddSingleton<PresetService>();
 builder.Services.AddSingleton<IPresetService>(provider => provider.GetRequiredService<PresetService>());
+
+// Network discovery settings service
+builder.Services.AddSingleton<NetworkDiscoverySettingsService>();
+builder.Services.AddSingleton<INetworkDiscoverySettingsService>(provider => provider.GetRequiredService<NetworkDiscoverySettingsService>());
 
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddScoped<IDatabaseSeeder>(provider => provider.GetRequiredService<DatabaseSeeder>());
@@ -265,6 +271,12 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
 // Minimal API for presets
 app.MapGet("/api/presets", (PresetService svc) => Results.Ok(svc.GetPresets()));
 app.MapPost("/api/presets", (PresetService svc, FilamentPresetsDto body) => { svc.SavePresets(body); return Results.NoContent(); });
+
+// Minimal API for network discovery settings
+app.MapGet("/api/network-discovery/settings", (NetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
+app.MapPost("/api/network-discovery/settings", (NetworkDiscoverySettingsService svc, NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
+app.MapGet("/api/network-discovery/dynamic-ranges", (NetworkDiscoverySettingsService svc) => Results.Ok(svc.GetDynamicNetworkRanges()));
+
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 app.MapFallbackToFile("index.html");

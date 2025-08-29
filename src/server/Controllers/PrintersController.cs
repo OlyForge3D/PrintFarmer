@@ -13,7 +13,7 @@ namespace Farm.Web.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
+public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
     {
@@ -1686,6 +1686,28 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         }
         
         return null;
+    }
+
+    [HttpGet("discover")]
+    public async Task<ActionResult<IEnumerable<DiscoveredPrinterDto>>> DiscoverPrinters(CancellationToken ct)
+    {
+        try
+        {
+            logger.LogInformation("Starting network printer discovery...");
+            var discovered = await networkDiscovery.DiscoverPrintersAsync(ct);
+            logger.LogInformation("Discovery completed. Found {Count} printers", discovered.Count);
+            return Ok(discovered);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogWarning("Printer discovery was cancelled");
+            return StatusCode(408, "Discovery operation timed out");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to discover printers on network");
+            return StatusCode(500, "Failed to discover printers. Please try again.");
+        }
     }
 
     // Request models
