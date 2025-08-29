@@ -157,9 +157,6 @@
                       </a>
                     </div>
                   </div>
-                  <div class="status @(p.IsOnline ? "online" : "offline")">
-                    @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
-                  </div>
                 </div>
                 <div class="card-header-actions">
                   <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
@@ -169,6 +166,12 @@
                       <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
                     </svg>
                   </a>
+                  <button class="icon-btn danger" title="Delete printer" aria-label="Delete printer" @onclick="() => ConfirmDelete(p.Id, p.Name)">
+                    <!-- Delete icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -199,7 +202,38 @@
 
   protected override async Task OnInitializedAsync()
   {
-    printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+    // Use fast endpoint for immediate display without waiting for status checks
+    try
+    {
+      printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers/fast");
+      StateHasChanged(); // Show printers immediately, all offline initially
+    }
+    catch (Exception ex)
+    {
+      Console.WriteLine($"Failed to load printers: {ex.Message}");
+      // Fallback to basic endpoint
+      var basicPrinters = await Http.GetFromJsonAsync<List<PrinterBasicDto>>("api/printers/basic");
+      if (basicPrinters is not null)
+      {
+        // Create PrinterDto instances with default offline status
+        printers = basicPrinters.Select(p => new PrinterDto(
+          Id: p.Id,
+          Name: p.Name,
+          ServerUrl: p.ServerUrl,
+          Notes: p.Notes,
+          IsOnline: false, // Default to offline until status loads
+          State: null,
+          ManufacturerName: p.ManufacturerName,
+          ModelName: p.ModelName,
+          Backend: p.Backend,
+          ApiKey: p.ApiKey,
+          OriginalServerUrl: p.OriginalServerUrl,
+          IpAddress: p.IpAddress
+        )).ToList();
+        
+        StateHasChanged(); // Show cards immediately
+      }
+    }
   }
 
   private static string ToPort80(string? url)
@@ -482,5 +516,55 @@
     public int SkippedCount { get; set; }
     public List<object>? Results { get; set; }
     public List<string>? Errors { get; set; }
+  }
+
+  private async Task ConfirmDelete(Guid printerId, string printerName)
+  {
+    var confirmed = await JS.InvokeAsync<bool>("confirm", $"Are you sure you want to delete the printer '{printerName}'? This action cannot be undone.");
+    if (confirmed)
+    {
+      await DeletePrinter(printerId, printerName);
+    }
+  }
+
+  private async Task DeletePrinter(Guid printerId, string printerName)
+  {
+    try
+    {
+      var response = await Http.DeleteAsync($"api/printers/{printerId}");
+      if (response.IsSuccessStatusCode)
+      {
+        // Remove printer from local list
+        printers?.RemoveAll(p => p.Id == printerId);
+        StateHasChanged();
+        
+        // Show success message
+        importMessage = $"Printer '{printerName}' deleted successfully.";
+        importSuccess = true;
+      }
+      else
+      {
+        importMessage = $"Failed to delete printer '{printerName}'. Server returned: {(int)response.StatusCode}";
+        importSuccess = false;
+      }
+    }
+    catch (Exception ex)
+    {
+      importMessage = $"Error deleting printer '{printerName}': {ex.Message}";
+      importSuccess = false;
+    }
+    
+    StateHasChanged();
+    
+    // Clear message after 5 seconds
+    _ = Task.Run(async () =>
+    {
+      await Task.Delay(5000);
+      importMessage = string.Empty;
+      if (InvokeAsync(() => StateHasChanged()).IsCompleted == false)
+      {
+        // Component might be disposed, ignore
+      }
+    });
   }
 }
