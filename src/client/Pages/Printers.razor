@@ -603,30 +603,43 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // First load basic printer info immediately (fast, no network calls to printers)
-        var basicPrinters = await Http.GetFromJsonAsync<List<PrinterBasicDto>>("api/printers/basic");
-        if (basicPrinters is not null)
+        // Use fast endpoint for immediate display with progressive loading
+        try
         {
-            // Create PrinterDto instances with default offline status
-            printers = basicPrinters.Select(p => new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: false, // Default to offline until status loads
-                State: null,
-                ManufacturerName: p.ManufacturerName,
-                ModelName: p.ModelName,
-                Backend: p.Backend,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            )).ToList();
-            
-            StateHasChanged(); // Show cards immediately
+            printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers/fast");
+            StateHasChanged(); // Show printers immediately, all offline initially
             
             // Now load status for each printer progressively
             await LoadAllStatusesProgressively();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load printers: {ex.Message}");
+            // Fallback to basic endpoint
+            var basicPrinters = await Http.GetFromJsonAsync<List<PrinterBasicDto>>("api/printers/basic");
+            if (basicPrinters is not null)
+            {
+                // Create PrinterDto instances with default offline status
+                printers = basicPrinters.Select(p => new PrinterDto(
+                    Id: p.Id,
+                    Name: p.Name,
+                    ServerUrl: p.ServerUrl,
+                    Notes: p.Notes,
+                    IsOnline: false, // Default to offline until status loads
+                    State: null,
+                    ManufacturerName: p.ManufacturerName,
+                    ModelName: p.ModelName,
+                    Backend: p.Backend,
+                    ApiKey: p.ApiKey,
+                    OriginalServerUrl: p.OriginalServerUrl,
+                    IpAddress: p.IpAddress
+                )).ToList();
+                
+                StateHasChanged(); // Show cards immediately
+                
+                // Now load status for each printer progressively
+                await LoadAllStatusesProgressively();
+            }
         }
         
         // Load Spoolman configuration for spool links
@@ -684,50 +697,71 @@ else
             
             try
             {
-                var status = await Http.GetFromJsonAsync<PrinterStatusDto>($"api/printers/{p.Id}/status");
-                if (status is not null)
+                // Use HttpClient timeout override for faster response to offline printers
+                using var httpClient = new HttpClient();
+                httpClient.BaseAddress = Http.BaseAddress;
+                httpClient.Timeout = TimeSpan.FromSeconds(3); // Fast timeout for progressive loading
+                
+                var response = await httpClient.GetAsync($"api/printers/{p.Id}/status");
+                if (response.IsSuccessStatusCode)
                 {
-                    printerStatuses[p.Id] = status;
-                    
-                    // Update the printer with the loaded status
-                    var idx = printers.FindIndex(pr => pr.Id == p.Id);
-                    if (idx >= 0)
+                    var status = await response.Content.ReadFromJsonAsync<PrinterStatusDto>();
+                    if (status is not null)
                     {
-                        printers[idx] = printers[idx] with
-                        {
-                            IsOnline = status.IsOnline,
-                            State = status.State,
-                            Progress = status.Progress,
-                            JobName = status.JobName,
-                            ThumbnailUrl = status.ThumbnailUrl,
-                            CameraStreamUrl = status.CameraStreamUrl,
-                            CameraSnapshotUrl = status.CameraSnapshotUrl,
-                            X = status.X,
-                            Y = status.Y,
-                            Z = status.Z,
-                            HotendTemp = status.HotendTemp,
-                            BedTemp = status.BedTemp,
-                            HotendTarget = status.HotendTarget,
-                            BedTarget = status.BedTarget
-                        };
+                        printerStatuses[p.Id] = status;
                         
-                        // Update snapshot stamps for online printers
-                        if (status.IsOnline || !string.IsNullOrWhiteSpace(status.CameraSnapshotUrl))
+                        // Update the printer with the loaded status
+                        var idx = printers.FindIndex(pr => pr.Id == p.Id);
+                        if (idx >= 0)
                         {
-                            snapshotStamps[p.Id] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        }
-                        
-                        // Auto-show cameras for printers that have camera URLs
-                        if (!string.IsNullOrWhiteSpace(status.CameraSnapshotUrl) || !string.IsNullOrWhiteSpace(status.CameraStreamUrl))
-                        {
-                            cameraVisible.Add(p.Id);
+                            printers[idx] = printers[idx] with
+                            {
+                                IsOnline = status.IsOnline,
+                                State = status.State,
+                                Progress = status.Progress,
+                                JobName = status.JobName,
+                                ThumbnailUrl = status.ThumbnailUrl,
+                                CameraStreamUrl = status.CameraStreamUrl,
+                                CameraSnapshotUrl = status.CameraSnapshotUrl,
+                                SpoolInfo = status.SpoolInfo,
+                                X = status.X,
+                                Y = status.Y,
+                                Z = status.Z,
+                                HotendTemp = status.HotendTemp,
+                                BedTemp = status.BedTemp,
+                                HotendTarget = status.HotendTarget,
+                                BedTarget = status.BedTarget
+                            };
+                            
+                            // Update snapshot stamps for online printers
+                            if (status.IsOnline || !string.IsNullOrWhiteSpace(status.CameraSnapshotUrl))
+                            {
+                                snapshotStamps[p.Id] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                            }
+                            
+                            // Auto-show cameras for printers that have camera URLs
+                            if (!string.IsNullOrWhiteSpace(status.CameraSnapshotUrl) || !string.IsNullOrWhiteSpace(status.CameraStreamUrl))
+                            {
+                                cameraVisible.Add(p.Id);
+                            }
                         }
                     }
                 }
             }
-            catch
+            catch (TaskCanceledException)
             {
-                // Status loading failed, leave as offline
+                // Timeout - leave as offline, which is the default
+                Console.WriteLine($"Status timeout for printer {p.Name}");
+            }
+            catch (HttpRequestException ex)
+            {
+                // Network error - leave as offline
+                Console.WriteLine($"Network error for printer {p.Name}: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                // Any other error - leave as offline
+                Console.WriteLine($"Error loading status for printer {p.Name}: {ex.Message}");
             }
             finally
             {
@@ -736,7 +770,7 @@ else
             }
         });
         
-        // Don't await Task.WhenAll - let them complete individually  
+        // Don't await Task.WhenAll - let them complete individually with fire-and-forget
         return Task.Run(async () =>
         {
             try

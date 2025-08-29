@@ -2,6 +2,7 @@ using Farm.Web.Server.Data;
 using Farm.Web.Server.Domain;
 using Farm.Web.Server.Services;
 using Farm.Web.Server.Middleware;
+using Farm.Web.Server.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ namespace Farm.Web.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator) : ControllerBase
+public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
     {
@@ -51,95 +52,141 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
     public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAll(CancellationToken ct)
     {
         var items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
+        
+        // Use aggressive timeouts and circuit breaker patterns for bulk status loading
+        using var fastTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        fastTimeoutCts.CancelAfter(TimeSpan.FromSeconds(2)); // Aggressive 2-second timeout for bulk operations
+        
         var dtos = await Task.WhenAll(items.Select(async p =>
         {
-            if (p.Backend == 1) // PrusaLink
+            try
             {
-                var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
-                return new PrinterDto(
-                    Id: p.Id,
-                    Name: p.Name,
-                    ServerUrl: p.ServerUrl,
-                    Notes: p.Notes,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    ManufacturerName: p.Manufacturer?.Name,
-                    ModelName: p.Model?.Name,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl,
-                    Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-                    ApiKey: p.ApiKey,
-                    OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress
-                );
+                if (p.Backend == 1) // PrusaLink
+                {
+                    var breaker = circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
+                    var status = await breaker.ExecuteAsync(async ct => 
+                        await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), fastTimeoutCts.Token);
+                    return new PrinterDto(
+                        Id: p.Id,
+                        Name: p.Name,
+                        ServerUrl: p.ServerUrl,
+                        Notes: p.Notes,
+                        IsOnline: status.IsOnline,
+                        State: status.State,
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        CameraSnapshotUrl: status.CameraSnapshotUrl,
+                        Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress
+                    );
+                }
+                else if (p.Backend == 2) // SDCP
+                {
+                    var breaker = circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
+                    var status = await breaker.ExecuteAsync(async ct => 
+                        await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), fastTimeoutCts.Token);
+                    return new PrinterDto(
+                        Id: p.Id,
+                        Name: p.Name,
+                        ServerUrl: p.ServerUrl,
+                        Notes: p.Notes,
+                        IsOnline: status.IsOnline,
+                        State: status.State,
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        CameraSnapshotUrl: status.CameraSnapshotUrl,
+                        X: status.X,
+                        Y: status.Y,
+                        Z: status.Z,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        Backend: Farm.Web.Shared.PrinterBackend.SDCP,
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress
+                    );
+                }
+                else // Moonraker
+                {
+                    var breaker = circuitBreaker.GetCircuitBreaker($"moonraker-{p.Id}");
+                    var status = await breaker.ExecuteAsync(async ct => 
+                        await moon.GetCompositeStatusAsync(p.ServerUrl, ct), fastTimeoutCts.Token);
+                    var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, fastTimeoutCts.Token);
+                    return new PrinterDto(
+                        Id: p.Id,
+                        Name: p.Name,
+                        ServerUrl: p.ServerUrl,
+                        Notes: p.Notes,
+                        IsOnline: status.IsOnline,
+                        State: status.State,
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        CameraSnapshotUrl: status.CameraSnapshotUrl,
+                        X: status.X,
+                        Y: status.Y,
+                        Z: status.Z,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress,
+                        SpoolInfo: spoolInfo
+                    );
+                }
             }
-            else if (p.Backend == 2) // SDCP
+            catch (OperationCanceledException) when (fastTimeoutCts.Token.IsCancellationRequested)
             {
-                var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
-                return new PrinterDto(
-                    Id: p.Id,
-                    Name: p.Name,
-                    ServerUrl: p.ServerUrl,
-                    Notes: p.Notes,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    ManufacturerName: p.Manufacturer?.Name,
-                    ModelName: p.Model?.Name,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl,
-                    X: status.X,
-                    Y: status.Y,
-                    Z: status.Z,
-                    HotendTemp: status.HotendTemp,
-                    BedTemp: status.BedTemp,
-                    HotendTarget: status.HotendTarget,
-                    BedTarget: status.BedTarget,
-                    Backend: Farm.Web.Shared.PrinterBackend.SDCP,
-                    ApiKey: p.ApiKey,
-                    OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress
-                );
+                logger.LogDebug("Fast timeout for printer {PrinterName} ({PrinterId})", p.Name, p.Id);
+                // Return offline printer for timeout cases
+                return CreateOfflinePrinterDto(p);
             }
-            else // Moonraker
+            catch (Exception ex)
             {
-                var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
-                var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, ct);
-                return new PrinterDto(
-                    Id: p.Id,
-                    Name: p.Name,
-                    ServerUrl: p.ServerUrl,
-                    Notes: p.Notes,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    ManufacturerName: p.Manufacturer?.Name,
-                    ModelName: p.Model?.Name,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl,
-                    X: status.X,
-                    Y: status.Y,
-                    Z: status.Z,
-                    HotendTemp: status.HotendTemp,
-                    BedTemp: status.BedTemp,
-                    HotendTarget: status.HotendTarget,
-                    BedTarget: status.BedTarget,
-                    Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-                    ApiKey: p.ApiKey,
-                    OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
-                    SpoolInfo: spoolInfo
-                );
+                logger.LogWarning(ex, "Error getting status for printer {PrinterName} ({PrinterId})", p.Name, p.Id);
+                // Return offline printer for any error
+                return CreateOfflinePrinterDto(p);
             }
         }));
         return Ok(dtos);
+    }
+
+    private PrinterDto CreateOfflinePrinterDto(Domain.Printer p)
+    {
+        return new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            IsOnline: false,
+            State: null,
+            ManufacturerName: p.Manufacturer?.Name,
+            ModelName: p.Model?.Name,
+            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink :
+                     p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP :
+                     Farm.Web.Shared.PrinterBackend.Moonraker,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
+        );
     }
 
     [HttpGet("basic")]
@@ -163,17 +210,49 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         return Ok(dtos);
     }
 
+    [HttpGet("fast")]
+    public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAllFast(CancellationToken ct)
+    {
+        var items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
+        
+        // Return all printers as offline initially - let the client load statuses progressively
+        var dtos = items.Select(p => new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            IsOnline: false, // Default to offline, client will update via individual status calls
+            State: null,
+            ManufacturerName: p.Manufacturer?.Name,
+            ModelName: p.Model?.Name,
+            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : 
+                     p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP : 
+                     Farm.Web.Shared.PrinterBackend.Moonraker,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
+        )).ToList();
+        
+        return Ok(dtos);
+    }
+
     [HttpGet("{id:guid}/status")]
     public async Task<ActionResult<PrinterStatusDto>> GetStatus(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) return NotFound();
         
+        // Use moderate timeout for individual status checks (balance between responsiveness and accuracy)
+        using var statusCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        statusCts.CancelAfter(TimeSpan.FromSeconds(3)); // 3-second timeout for individual status
+        
         try
         {
             if (p.Backend == 1) // PrusaLink
             {
-                var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
+                var breaker = circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
+                var status = await breaker.ExecuteAsync(async ct => 
+                    await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), statusCts.Token);
                 return new PrinterStatusDto(
                     Id: p.Id,
                     IsOnline: status.IsOnline,
@@ -187,7 +266,9 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             }
             else if (p.Backend == 2) // SDCP
             {
-                var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
+                var breaker = circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
+                var status = await breaker.ExecuteAsync(async ct => 
+                    await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
                 return new PrinterStatusDto(
                     Id: p.Id,
                     IsOnline: status.IsOnline,
@@ -208,8 +289,10 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
             }
             else // Moonraker
             {
-                var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
-                var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, ct);
+                var breaker = circuitBreaker.GetCircuitBreaker($"moonraker-{p.Id}");
+                var status = await breaker.ExecuteAsync(async ct => 
+                    await moon.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
+                var spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, statusCts.Token);
                 return new PrinterStatusDto(
                     Id: p.Id,
                     IsOnline: status.IsOnline,
@@ -230,8 +313,25 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
                 );
             }
         }
-        catch
+        catch (OperationCanceledException) when (statusCts.Token.IsCancellationRequested)
         {
+            logger.LogDebug("Status timeout for printer {PrinterId}", p.Id);
+            // Return offline status for timeout cases
+            return new PrinterStatusDto(
+                Id: p.Id,
+                IsOnline: false,
+                State: null,
+                Progress: null,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null,
+                SpoolInfo: null
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Error getting status for printer {PrinterId}", p.Id);
             // Return offline status if there's any error
             return new PrinterStatusDto(
                 Id: p.Id,
