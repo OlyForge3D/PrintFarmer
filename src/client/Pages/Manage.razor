@@ -1,19 +1,56 @@
 @page "/manage"
 @using Farm.Web.Shared
+@using Microsoft.AspNetCore.Components.Forms
 @inject HttpClient Http
+@inject IJSRuntime JS
 
 <h2>Management</h2>
 
 <div class="manage-grid">
-  <div class="manage-card">
-    <h3>Catalog</h3>
-    <p>Manage Manufacturers and Models.</p>
-    <a class="btn" href="/catalog">Open Catalog</a>
-  </div>
 
   <div class="manage-card">
     <h3>Printers</h3>
-    <p>Edit printer details.</p>
+    <p>Edit printer details, import or export printer configurations.</p>
+    
+    <div class="row" style="margin-bottom: 1rem;">
+      <button class="btn btn-secondary" @onclick="ExportPrinters" disabled="@isExporting">
+        @if (isExporting)
+        {
+          <span>Exporting...</span>
+        }
+        else
+        {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M19,9H15V3H9V9H5L12,16L19,9M5,18V20H19V18H5Z"/>
+          </svg>
+          <span>Export CSV</span>
+        }
+      </button>
+      
+      <button class="btn btn-secondary" @onclick="TriggerFileInput" disabled="@isImporting">
+        @if (isImporting)
+        {
+          <span>Importing...</span>
+        }
+        else
+        {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M5,4H19V6H5V4M12,8L5,15H9V21H15V15H19L12,8Z"/>
+          </svg>
+          <span>Import CSV</span>
+        }
+      </button>
+    </div>
+
+    <InputFile @ref="fileInput" OnChange="OnFileSelected" accept=".csv" style="display: none;" id="@fileInputElementId" />
+
+    @if (!string.IsNullOrEmpty(importMessage))
+    {
+      <div class="alert @(importSuccess ? "alert-success" : "alert-error")" style="margin-bottom: 1rem;">
+        @importMessage
+      </div>
+    }
+
     <ul>
       @if (printers is null)
       {
@@ -33,10 +70,46 @@
       }
       else
       {
-        @foreach (var p in printers)
-        {
-          <li><a href="/printers/@p.Id/edit">@p.Name</a></li>
-        }
+        <div class="cards">
+          @foreach (var p in printers)
+          {
+            <div class="card">
+              <div class="card-header-unified">
+                <div class="card-header-main">
+                  <div class="printer-identity">
+                    <div class="name caps-font">@p.Name</div>
+                    @if (!string.IsNullOrWhiteSpace(p.ManufacturerName) || !string.IsNullOrWhiteSpace(p.ModelName))
+                    {
+                      <div class="model mini-header">@($"{p.ManufacturerName} {p.ModelName}".Trim())</div>
+                    }
+                    <div class="url-row">
+                      <div class="url mini-header">@p.ServerUrl</div>
+                      <a class="icon-btn" href="@ToPort80(p.ServerUrl)" target="_blank" rel="noopener" title="Open printer (port 80)" aria-label="Open printer on port 80">
+                        <!-- External link icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"/>
+                          <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
+                        </svg>
+                      </a>
+                    </div>
+                  </div>
+                  <div class="status @(p.IsOnline ? "online" : "offline")">
+                    @(p.IsOnline ? (string.IsNullOrWhiteSpace(p.State) ? "Online" : p.State) : "Offline")
+                  </div>
+                </div>
+                <div class="card-header-actions">
+                  <a class="icon-btn" href="/printers/@p.Id/edit" title="Edit details" aria-label="Edit details">
+                    <!-- Edit icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M3 17.25V21h3.75L20.81 6.94l-3.75-3.75L3 17.25zm2.92 1.33l-.5-1.99 9.9-9.9 1.99 1.99-9.9 9.9z"/>
+                      <path d="M18.37 3.87a1.25 1.25 0 011.77 1.77l-1.06 1.06-1.77-1.77 1.06-1.06z"/>
+                    </svg>
+                  </a>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
       }
     </ul>
   </div>
@@ -44,8 +117,185 @@
 
 @code {
   private List<PrinterDto>? printers;
+  private InputFile? fileInput;
+  private bool isExporting = false;
+  private bool isImporting = false;
+  private string importMessage = string.Empty;
+  private bool importSuccess = false;
+  private readonly string fileInputId = Guid.NewGuid().ToString();
+  private string fileInputElementId => $"file-input-{fileInputId}";
+
   protected override async Task OnInitializedAsync()
   {
     printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+  }
+
+  private static string ToPort80(string? url)
+  {
+    if (string.IsNullOrWhiteSpace(url)) return "#";
+    try
+    {
+      var uri = new Uri(url);
+      var builder = new UriBuilder(uri)
+      {
+        Scheme = Uri.UriSchemeHttp,
+        Port = 80
+      };
+      return builder.Uri.ToString();
+    }
+    catch
+    {
+      // Fallback: if it's not a valid URI, prepend http:// and :80
+      var trimmed = url.Trim();
+      if (!trimmed.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        trimmed = "http://" + trimmed;
+      return trimmed.EndsWith(":80", StringComparison.Ordinal) ? trimmed : trimmed.TrimEnd('/') + ":80";
+    }
+  }
+
+  private async Task TriggerFileInput()
+  {
+    await JS.InvokeVoidAsync("clickElement", fileInputElementId);
+  }
+
+  private async Task ExportPrinters()
+  {
+    try
+    {
+      isExporting = true;
+      StateHasChanged();
+
+      var response = await Http.GetAsync("api/printers/export");
+      if (response.IsSuccessStatusCode)
+      {
+        var content = await response.Content.ReadAsByteArrayAsync();
+        var fileName = $"printers-export-{DateTime.Now:yyyy-MM-dd-HHmm}.csv";
+        
+        // Download the file using JavaScript
+        await JS.InvokeVoidAsync("downloadFile", fileName, "text/csv", content);
+        
+        importMessage = "Printers exported successfully!";
+        importSuccess = true;
+      }
+      else
+      {
+        importMessage = "Failed to export printers. Please try again.";
+        importSuccess = false;
+      }
+    }
+    catch (Exception ex)
+    {
+      importMessage = $"Export error: {ex.Message}";
+      importSuccess = false;
+    }
+    finally
+    {
+      isExporting = false;
+      StateHasChanged();
+      
+      // Clear message after 5 seconds
+      _ = Task.Run(async () =>
+      {
+        await Task.Delay(5000);
+        importMessage = string.Empty;
+        await InvokeAsync(StateHasChanged);
+      });
+    }
+  }
+
+  private async Task OnFileSelected(InputFileChangeEventArgs e)
+  {
+    var file = e.File;
+    if (file == null) return;
+
+    if (!file.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+    {
+      importMessage = "Please select a valid CSV file.";
+      importSuccess = false;
+      StateHasChanged();
+      return;
+    }
+
+    try
+    {
+      isImporting = true;
+      importMessage = string.Empty;
+      StateHasChanged();
+
+      var content = new MultipartFormDataContent();
+      var fileContent = new StreamContent(file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024)); // 5MB max
+      fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv");
+      content.Add(fileContent, "file", file.Name);
+
+      var response = await Http.PostAsync("api/printers/import", content);
+      var responseContent = await response.Content.ReadAsStringAsync();
+
+      if (response.IsSuccessStatusCode)
+      {
+        var result = System.Text.Json.JsonSerializer.Deserialize<ImportResult>(responseContent, new System.Text.Json.JsonSerializerOptions
+        {
+          PropertyNameCaseInsensitive = true
+        });
+
+        if (result != null)
+        {
+          var messages = new List<string>();
+          messages.Add($"Import completed: {result.ImportedCount} imported, {result.SkippedCount} skipped");
+          
+          if (result.Errors?.Any() == true)
+          {
+            messages.Add($"Errors: {string.Join(", ", result.Errors.Take(3))}");
+            if (result.Errors.Count > 3)
+              messages.Add($"... and {result.Errors.Count - 3} more errors");
+          }
+
+          importMessage = string.Join(". ", messages);
+          importSuccess = result.ImportedCount > 0 || result.Errors?.Any() != true;
+
+          // Refresh the printers list if any were imported
+          if (result.ImportedCount > 0)
+          {
+            printers = await Http.GetFromJsonAsync<List<PrinterDto>>("api/printers");
+          }
+        }
+        else
+        {
+          importMessage = "Import completed, but response format was unexpected.";
+          importSuccess = false;
+        }
+      }
+      else
+      {
+        importMessage = $"Import failed: {responseContent}";
+        importSuccess = false;
+      }
+    }
+    catch (Exception ex)
+    {
+      importMessage = $"Import error: {ex.Message}";
+      importSuccess = false;
+    }
+    finally
+    {
+      isImporting = false;
+      StateHasChanged();
+      
+      // Clear message after 10 seconds for import (longer due to potentially more info)
+      _ = Task.Run(async () =>
+      {
+        await Task.Delay(10000);
+        importMessage = string.Empty;
+        await InvokeAsync(StateHasChanged);
+      });
+    }
+  }
+
+  // DTO for import result
+  public class ImportResult
+  {
+    public int ImportedCount { get; set; }
+    public int SkippedCount { get; set; }
+    public List<object>? Results { get; set; }
+    public List<string>? Errors { get; set; }
   }
 }

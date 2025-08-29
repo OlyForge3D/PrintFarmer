@@ -1200,6 +1200,309 @@ public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLink
         }
     }
 
+    [HttpGet("export")]
+    public async Task<IActionResult> ExportPrinters(CancellationToken ct)
+    {
+        var printers = await db.Printers
+            .Include(p => p.Manufacturer)
+            .Include(p => p.Model)
+            .Select(p => new
+            {
+                p.Name,
+                p.ServerUrl,
+                p.OriginalServerUrl,
+                p.Notes,
+                ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : "",
+                ModelName = p.Model != null ? p.Model.Name : "",
+                Backend = p.Backend.ToString(),
+                p.ApiKey,
+                p.DateAcquired
+            })
+            .ToListAsync(ct);
+
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("Name,ServerUrl,OriginalServerUrl,Notes,ManufacturerName,ModelName,Backend,ApiKey,DateAcquired");
+
+        foreach (var printer in printers)
+        {
+            csv.AppendLine($"{EscapeCsvValue(printer.Name)}," +
+                          $"{EscapeCsvValue(printer.ServerUrl)}," +
+                          $"{EscapeCsvValue(printer.OriginalServerUrl)}," +
+                          $"{EscapeCsvValue(printer.Notes)}," +
+                          $"{EscapeCsvValue(printer.ManufacturerName)}," +
+                          $"{EscapeCsvValue(printer.ModelName)}," +
+                          $"{EscapeCsvValue(printer.Backend)}," +
+                          $"{EscapeCsvValue(printer.ApiKey)}," +
+                          $"{EscapeCsvValue(printer.DateAcquired?.ToString("yyyy-MM-dd"))}");
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
+        return File(bytes, "text/csv", $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv");
+    }
+
+    [HttpPost("import")]
+    public async Task<IActionResult> ImportPrinters(IFormFile file, CancellationToken ct)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file provided");
+
+        if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("File must be a CSV file");
+
+        var results = new List<object>();
+        var errors = new List<string>();
+
+        try
+        {
+            using var reader = new StreamReader(file.OpenReadStream());
+            var csvContent = await reader.ReadToEndAsync();
+            var lines = csvContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            if (lines.Length < 2)
+            {
+                return BadRequest("CSV file must contain at least a header row and one data row");
+            }
+
+            var header = lines[0].Split(',');
+            var expectedHeaders = new[] { "Name", "ServerUrl", "OriginalServerUrl", "Notes", "ManufacturerName", "ModelName", "Backend", "ApiKey", "DateAcquired" };
+
+            // Validate header
+            for (int i = 0; i < expectedHeaders.Length; i++)
+            {
+                if (i >= header.Length || !header[i].Trim().Equals(expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Invalid header format. Expected: {string.Join(",", expectedHeaders)}");
+                    break;
+                }
+            }
+
+            if (errors.Count == 0)
+            {
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    try
+                    {
+                        var values = ParseCsvLine(lines[i]);
+                        if (values.Length >= 9)
+                        {
+                            var createDto = new CreatePrinterDto
+                            {
+                                Name = values[0]?.Trim() ?? "",
+                                ServerUrl = values[1]?.Trim() ?? "",
+                                OriginalServerUrl = string.IsNullOrWhiteSpace(values[2]) ? null : values[2].Trim(),
+                                Notes = string.IsNullOrWhiteSpace(values[3]) ? null : values[3].Trim(),
+                                NewManufacturerName = string.IsNullOrWhiteSpace(values[4]) ? null : values[4].Trim(),
+                                NewModelName = string.IsNullOrWhiteSpace(values[5]) ? null : values[5].Trim(),
+                                Backend = Enum.TryParse<PrinterBackend>(values[6]?.Trim(), true, out var backend) ? backend : PrinterBackend.Moonraker,
+                                ApiKey = string.IsNullOrWhiteSpace(values[7]) ? null : values[7].Trim(),
+                                DateAcquired = DateTime.TryParse(values[8]?.Trim(), out var date) ? date : null
+                            };
+
+                            // Validate required fields
+                            if (string.IsNullOrWhiteSpace(createDto.Name))
+                            {
+                                errors.Add($"Row {i + 1}: Name is required");
+                                continue;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(createDto.ServerUrl))
+                            {
+                                errors.Add($"Row {i + 1}: ServerUrl is required");
+                                continue;
+                            }
+
+                            // Check if printer already exists
+                            var existingPrinter = await db.Printers
+                                .FirstOrDefaultAsync(p => p.Name == createDto.Name, ct);
+
+                            if (existingPrinter != null)
+                            {
+                                results.Add(new { Row = i + 1, Name = createDto.Name, Status = "Skipped", Reason = "Printer already exists" });
+                                continue;
+                            }
+
+                            // Create the printer using existing logic
+                            var result = await CreatePrinterFromDto(createDto, ct);
+                            results.Add(new { Row = i + 1, Name = createDto.Name, Status = "Imported", Id = result.Id });
+                        }
+                        else
+                        {
+                            errors.Add($"Row {i + 1}: Invalid number of columns");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add($"Row {i + 1}: {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Error processing file: {ex.Message}");
+        }
+
+        return Ok(new { 
+            ImportedCount = results.Count(r => ((dynamic)r).Status == "Imported"),
+            SkippedCount = results.Count(r => ((dynamic)r).Status == "Skipped"),
+            Results = results,
+            Errors = errors
+        });
+    }
+
+    private static string EscapeCsvValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        if (value.Contains('"'))
+            value = value.Replace("\"", "\"\"");
+
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+            value = $"\"{value}\"";
+
+        return value;
+    }
+
+    private static string[] ParseCsvLine(string line)
+    {
+        var result = new List<string>();
+        var current = new System.Text.StringBuilder();
+        bool inQuotes = false;
+        
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            
+            if (c == '"')
+            {
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    // Escaped quote
+                    current.Append('"');
+                    i++; // Skip next quote
+                }
+                else
+                {
+                    // Toggle quote state
+                    inQuotes = !inQuotes;
+                }
+            }
+            else if (c == ',' && !inQuotes)
+            {
+                // End of field
+                result.Add(current.ToString());
+                current.Clear();
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+        
+        // Add the last field
+        result.Add(current.ToString());
+        
+        return result.ToArray();
+    }
+
+    private async Task<PrinterDto> CreatePrinterFromDto(CreatePrinterDto dto, CancellationToken ct)
+    {
+        // resolve or create manufacturer/model
+        Guid? manufacturerId = dto.ManufacturerId;
+        if (manufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        {
+            var name = dto.NewManufacturerName!.Trim();
+            var existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
+            if (existing is null)
+            {
+                existing = new Manufacturer { Id = Guid.NewGuid(), Name = name };
+                db.Manufacturers.Add(existing);
+                await db.SaveChangesAsync(ct);
+            }
+            manufacturerId = existing.Id;
+        }
+
+        Guid? modelId = dto.ModelId;
+        if (modelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId is Guid mid)
+        {
+            var mname = dto.NewModelName!.Trim();
+            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == mid && m.Name == mname, ct);
+            if (existingModel is null)
+            {
+                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mid, Name = mname };
+                db.Models.Add(existingModel);
+                await db.SaveChangesAsync(ct);
+            }
+            modelId = existingModel.Id;
+        }
+
+        // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
+        var defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : 
+                         dto.Backend == PrinterBackend.SDCP ? 80 : 7125;
+        var normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
+        string resolvedBase = normalizedInput;
+        string? resolvedIp = null;
+        try
+        {
+            var uri = new Uri(normalizedInput);
+            if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+            {
+                var hostToResolve = EnsureLocalSuffix(uri.Host);
+                var addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
+                var firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
+                if (firstIp is not null)
+                {
+                    var ub = new UriBuilder(uri)
+                    {
+                        Host = firstIp.ToString()
+                    };
+                    resolvedBase = ub.Uri.ToString().TrimEnd('/');
+                    resolvedIp = firstIp.ToString();
+                }
+            }
+            else
+            {
+                resolvedIp = uri.Host;
+            }
+        }
+        catch { }
+
+        var p = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = dto.Name,
+            ServerUrl = resolvedBase,
+            OriginalServerUrl = normalizedInput,
+            IpAddress = resolvedIp,
+            Notes = dto.Notes,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId,
+            DateAcquired = dto.DateAcquired,
+            Backend = (int)dto.Backend,
+            ApiKey = dto.ApiKey
+        };
+        db.Printers.Add(p);
+        await db.SaveChangesAsync(ct);
+
+        // For import, we'll return a simplified PrinterDto without live status to avoid network delays
+        return new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            IsOnline: false, // Will be updated by background service
+            State: null,
+            ManufacturerName: null,
+            ModelName: null,
+            Backend: dto.Backend,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
+        );
+    }
+
     // Helper method to extract thumbnail URL from metadata
     private static string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
     {
