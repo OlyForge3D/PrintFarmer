@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Web.Server.Services.Interfaces;
 
 namespace Farm.Web.Server.Services;
 
@@ -108,7 +109,7 @@ public class SdcpAckResult
     public int Ack { get; set; }
 }
 
-public class SdcpClient : PrinterClientBase, IDisposable
+public class SdcpClient : PrinterClientBase, ISdcpClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

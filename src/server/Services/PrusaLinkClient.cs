@@ -3,10 +3,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net;
+using Farm.Web.Server.Services.Interfaces;
 
 namespace Farm.Web.Server.Services;
 
-public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null) : PrinterClientBase
+public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null) : PrinterClientBase, IPrusaLinkClient
 {
     private readonly PrusaLinkApiClient apiClient = new(http);
     private readonly ILogger? _logger = logger;

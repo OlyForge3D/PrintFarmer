@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text;
+using Farm.Web.Server.Services.Interfaces;
 
 namespace Farm.Web.Server.Services;
 
@@ -22,7 +23,7 @@ public record PrinterCompositeStatus(
     double? HotendTarget = null,
     double? BedTarget = null);
 
-public class MoonrakerClient(HttpClient http) : PrinterClientBase
+public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerClient
 {
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 7125);
 

@@ -1,9 +1,10 @@
 using System.Text.Json;
 using Farm.Web.Shared;
+using Farm.Web.Server.Services.Interfaces;
 
 namespace Farm.Web.Server.Services;
 
-public class PresetService
+public class PresetService : IPresetService
 {
     private FilamentPresetsDto? _presets;
     private readonly string _path = Path.Combine(AppContext.BaseDirectory, "filament.presets.json");

@@ -1,5 +1,6 @@
 using Farm.Web.Server.Data;
 using Farm.Web.Server.Services;
+using Farm.Web.Server.Services.Interfaces;
 using Farm.Web.Server.Hubs;
 using Microsoft.EntityFrameworkCore;
 using Farm.Web.Shared;
@@ -73,19 +74,31 @@ builder.Services.AddHttpClient<MoonrakerClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
 });
+builder.Services.AddScoped<IMoonrakerClient>(provider => provider.GetRequiredService<MoonrakerClient>());
+
 builder.Services.AddHttpClient<PrusaLinkClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
 });
+builder.Services.AddScoped<IPrusaLinkClient>(provider => provider.GetRequiredService<PrusaLinkClient>());
+
 builder.Services.AddHttpClient<SpoolmanService>();
+builder.Services.AddScoped<ISpoolmanService>(provider => provider.GetRequiredService<SpoolmanService>());
+
 builder.Services.AddScoped<SdcpClient>();
+builder.Services.AddScoped<ISdcpClient>(provider => provider.GetRequiredService<SdcpClient>());
+
 builder.Services.AddSignalR();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 }
+
 builder.Services.AddSingleton<PresetService>();
+builder.Services.AddSingleton<IPresetService>(provider => provider.GetRequiredService<PresetService>());
+
 builder.Services.AddScoped<DatabaseSeeder>();
+builder.Services.AddScoped<IDatabaseSeeder>(provider => provider.GetRequiredService<DatabaseSeeder>());
 
 // CORS: default to permissive in dev, restrict by env in prod
 var allowedOrigins = builder.Configuration["AllowedOrigins"] ?? Environment.GetEnvironmentVariable("ALLOWED_ORIGINS");

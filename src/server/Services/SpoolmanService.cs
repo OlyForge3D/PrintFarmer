@@ -3,10 +3,11 @@ using System.Text.Json;
 using Farm.Web.Server.Data;
 using Farm.Web.Server.Domain;
 using Farm.Web.Shared;
+using Farm.Web.Server.Services.Interfaces;
 
 namespace Farm.Web.Server.Services;
 
-public class SpoolmanService
+public class SpoolmanService : ISpoolmanService
 {
     private readonly HttpClient http;
     private readonly AppDbContext db;

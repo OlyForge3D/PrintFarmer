@@ -1,10 +1,11 @@
 using Farm.Web.Server.Data;
 using Farm.Web.Server.Domain;
 using Microsoft.EntityFrameworkCore;
+using Farm.Web.Server.Services.Interfaces;
 
 namespace Farm.Web.Server.Services;
 
-public class DatabaseSeeder
+public class DatabaseSeeder : IDatabaseSeeder
 {
     private readonly AppDbContext _context;
 
