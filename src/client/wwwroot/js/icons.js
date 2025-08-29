@@ -54,3 +54,19 @@ window.Icons = {
         <path d="M12 17a1 1 0 001-1V8a1 1 0 10-2 0v8a1 1 0 001 1z"/>
     </svg>`
 };
+
+// Simple helper: render all [data-icon] placeholders with matching SVG from window.Icons
+window.Icons.renderAll = function(){
+    try {
+        var nodes = document.querySelectorAll('[data-icon]');
+        nodes.forEach(function(el){
+            var name = el.getAttribute('data-icon');
+            if (name && window.Icons[name]) {
+                // Only render if empty or different to avoid thrashing
+                if (el.innerHTML.trim() !== window.Icons[name].trim()) {
+                    el.innerHTML = window.Icons[name];
+                }
+            }
+        });
+    } catch {}
+};

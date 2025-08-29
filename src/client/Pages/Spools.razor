@@ -130,74 +130,56 @@
         else
         {
             <div class="table-container">
-                <table class="spools-table">
+                <table id="spools-table" class="spools-table">
                     <thead>
                         <tr>
-                            <th class="col-id">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Id"))">
-                                    ID @SortIndicator("Id")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Id"))">
+                                ID @SortIndicator("Id")
                             </th>
-                            <th class="col-vendor">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Vendor"))">
-                                    Vendor @SortIndicator("Vendor")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Vendor"))">
+                                Vendor @SortIndicator("Vendor")
                             </th>
-                            <th class="col-filament">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Filament"))">
-                                    Filament @SortIndicator("Filament")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Filament"))">
+                                Filament @SortIndicator("Filament")
                             </th>
-                            <th class="col-material">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Material"))">
-                                    Material @SortIndicator("Material")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Material"))">
+                                Material @SortIndicator("Material")
                             </th>
-                            <th class="col-weight">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Weight"))">
-                                    Remaining @SortIndicator("Weight")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Weight"))">
+                                Remaining @SortIndicator("Weight")
                             </th>
-                            <th class="col-color">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Color"))">
-                                    Color @SortIndicator("Color")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Color"))">
+                                Color @SortIndicator("Color")
                             </th>
-                            <th class="col-date">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("Registered"))">
-                                    Registered @SortIndicator("Registered")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("Registered"))">
+                                Registered @SortIndicator("Registered")
                             </th>
-                            <th class="col-date">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("FirstUsed"))">
-                                    First Used @SortIndicator("FirstUsed")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("FirstUsed"))">
+                                First Used @SortIndicator("FirstUsed")
                             </th>
-                            <th class="col-date">
-                                <button class="sort-btn" @onclick="@(() => SortByAsync("LastUsed"))">
-                                    Last Used @SortIndicator("LastUsed")
-                                </button>
+                            <th class="sortable-header" @onclick="@(() => SortByAsync("LastUsed"))">
+                                Last Used @SortIndicator("LastUsed")
                             </th>
-                            <th class="col-actions">Actions</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach (var s in PagedSpools())
                         {
                             <tr class="spool-row">
-                                <td class="col-id">
+                                <td>
                                     <span class="spool-id">#@s.Id</span>
                                 </td>
-                                <td class="col-vendor">
+                                <td>
                                     <span class="vendor-name">@(string.IsNullOrWhiteSpace(s.Vendor) ? "—" : s.Vendor)</span>
                                 </td>
-                                <td class="col-filament">
+                                <td>
                                     <span class="filament-name">@(string.IsNullOrWhiteSpace(s.FilamentName) ? "—" : s.FilamentName)</span>
                                 </td>
-                                <td class="col-material">
+                                <td>
                                     <span class="material-badge">@s.Material</span>
                                 </td>
-                                <td class="col-weight">
+                                <td>
                                     @if (s.RemainingWeightG.HasValue)
                                     {
                                         <span class="weight-value">@s.RemainingWeightG.Value.ToString("0")g</span>
@@ -207,7 +189,7 @@
                                         <span class="weight-unknown">—</span>
                                     }
                                 </td>
-                                <td class="col-color">
+                                <td>
                                     @if (!string.IsNullOrWhiteSpace(s.ColorHex))
                                     {
                                         <div class="color-display">
@@ -220,19 +202,19 @@
                                         <span class="color-unknown">—</span>
                                     }
                                 </td>
-                                <td class="col-date">
+                                <td>
                                     <span class="date-value">@FormatDate(s.RegisteredAt)</span>
                                 </td>
-                                <td class="col-date">
+                                <td>
                                     <span class="date-value">@FormatDate(s.FirstUsedAt)</span>
                                 </td>
-                                <td class="col-date">
+                                <td>
                                     <span class="date-value">@FormatDate(s.LastUsedAt)</span>
                                 </td>
-                                <td class="col-actions">
+                                <td>
                                     @if (!string.IsNullOrWhiteSpace(spoolmanBase))
                                     {
-                                        <a class="action-btn" href="@($"{spoolmanBase}/spool/edit/{s.Id}")" target="_blank" rel="noopener noreferrer" title="Edit in Spoolman">
+                                        <a class="edit-icon" href="@($"{spoolmanBase}/spool/edit/{s.Id}")" target="_blank" rel="noopener noreferrer" title="Edit in Spoolman">
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                                 <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
                                             </svg>
@@ -240,11 +222,10 @@
                                     }
                                     else
                                     {
-                                        <a class="action-btn btn-ghost" href="/settings" title="Configure Spoolman URL">
+                                        <a class="edit-icon configure-icon" href="/settings" title="Configure Spoolman URL">
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                                 <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
                                             </svg>
-                                            Configure
                                         </a>
                                     }
                                 </td>
@@ -306,8 +287,12 @@
     {
         if (firstRender)
         {
-            try { await JS.InvokeVoidAsync("columnResizer.applySaved", "spools-table"); } catch { }
-        }
+            try
+            {
+                await JS.InvokeVoidAsync("Icons.renderAll");
+            }
+            catch { }
+        } 
     }
 
     private async Task Refresh()
@@ -532,7 +517,7 @@
                 .OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
 
     private static string FormatDate(DateTime? dt)
-        => dt.HasValue ? dt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-";
+        => dt.HasValue ? dt.Value.ToLocalTime().ToString("yyyy-MM-dd") : "-";
 
     private void OnMaterialChanged(ChangeEventArgs e)
     {
