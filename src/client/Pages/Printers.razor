@@ -16,11 +16,21 @@
 
 @if (printers is null)
 {
-    <p>Loading…</p>
+    <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Loading printers...</p>
+    </div>
 }
 else if (!printers.Any())
 {
-    <p>No printers yet.</p>
+    <div class="empty-state">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
+            <path d="M20,8H4V6C4,4.89 4.89,4 6,4H18A2,2 0 0,1 20,6V8M20,20H4C2.89,20 2,19.1 2,18V10A2,2 0 0,1 4,10H20A2,2 0 0,1 22,10V18C22,19.1 21.1,20 20,20Z"/>
+        </svg>
+        <h3>No printers found</h3>
+        <p>Add your first 3D printer to get started with monitoring and management.</p>
+        <a href="/printers/new" class="btn btn-primary">Add Printer</a>
+    </div>
 }
 else
 {

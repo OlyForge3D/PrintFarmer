@@ -6,25 +6,43 @@ services:
     image: printfarmer-api:latest
     container_name: printfarmer-api
     environment:
-      # Database provider selection: Sqlite (default), SqlServer, Postgres, MySql
-      - DB_PROVIDER=Sqlite
+      # Database provider selection: SqlServer (default), Sqlite, Postgres, MySql
+      - DB_PROVIDER=SqlServer
       - ASPNETCORE_URLS=http://0.0.0.0:8080
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__Default=Data Source=/data/farm.db
+      # SQL Server connection string for containerized SQL Server
+      - ConnectionStrings__Default=Server=sqlserver;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+      - ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
       - DB_INIT_MODE=EnsureCreated
       # Restrict CORS origins (comma-separated). Example for local dev via Nginx HTTP/HTTPS
       - ALLOWED_ORIGINS=http://localhost:8081,https://localhost:8443
       # Examples to use a different RDBMS (uncomment and update as needed):
+      # - DB_PROVIDER=Sqlite
+      # - ConnectionStrings__Sqlite=Data Source=/data/farm.db
       # - DB_PROVIDER=Postgres
       # - ConnectionStrings__Postgres=Host=postgres;Database=forgeiq;Username=postgres;Password=postgres
-      # - DB_PROVIDER=SqlServer
-      # - ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True;
       # - DB_PROVIDER=MySql
       # - ConnectionStrings__MySql=Server=mysql;Database=forgeiq;User=root;Password=example;
     ports:
       - "5088:8080"
     volumes:
+      # Persistent storage for application data
       - printfarmer-data:/data
+    depends_on:
+      - sqlserver
+    restart: unless-stopped
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: printfarmer-sqlserver
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: PrintFarm123!
+      MSSQL_PID: Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
     restart: unless-stopped
 
   web:
@@ -41,7 +59,15 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Persistent volume for application data  
   printfarmer-data:
-  postgres-data:
-  mysql-data:
+    driver: local
+  # Persistent volume for SQL Server database
+  # This ensures database survives container rebuilds and restarts
   sqlserver-data:
+    driver: local
+  # Volumes for optional database services (used with docker-compose.override.yml)
+  postgres-data:
+    driver: local
+  mysql-data:
+    driver: local

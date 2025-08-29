@@ -17,11 +17,19 @@
     <ul>
       @if (printers is null)
       {
-        <li>Loading…</li>
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Loading printers...</p>
+        </div>
       }
       else if (printers.Count == 0)
       {
-        <li>No printers.</li>
+        <div class="empty-state">
+          <div class="empty-icon">🖨️</div>
+          <h3>No Printers Found</h3>
+          <p>Add your first printer to get started with print management.</p>
+          <a href="/printers/new" class="btn btn-primary">Add Printer</a>
+        </div>
       }
       else
       {

@@ -112,7 +112,7 @@ public class DatabaseSeeder
             {
                 _context.SpoolmanConfigs.Add(new SpoolmanConfig
                 {
-                    Id = 1,
+                    // Remove explicit Id assignment - let SQL Server auto-generate it
                     BaseUrl = "http://spoolman.local:7912"
                 });
                 await _context.SaveChangesAsync();
