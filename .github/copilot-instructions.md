@@ -2,9 +2,9 @@
 
 ## Repository Summary
 
-**ForgeIQ** (also called "PrintFarmer") is a Blazor WebAssembly (hosted) dashboard for managing multiple 3D printers. It supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and provides live printer status via SignalR real-time updates.
+**PrintFarmer** is a Blazor WebAssembly (hosted) dashboard for managing multiple 3D printers. It supports Moonraker and PrusaLink, and SDCP backends, normalizes camera URLs, resolves hostnames to IPs, and provides live printer status via SignalR real-time updates.
 
-- **Language**: C# with .NET 8
+- **Language**: C# with .NET 9
 - **Framework**: ASP.NET Core backend + Blazor WebAssembly frontend
 - **Database**: SQLite with Entity Framework Core
 - **Real-time**: SignalR hubs for live printer status
