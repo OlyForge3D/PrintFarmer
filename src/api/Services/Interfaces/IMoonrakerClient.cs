@@ -19,6 +19,14 @@ public interface IMoonrakerClient
     Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default);
     
     /// <summary>
+    /// Gets the printer information including hostname from a Moonraker printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server (e.g., http://printer-ip)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing printer information including hostname, or null if not available</returns>
+    Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(string baseUrl, CancellationToken ct = default);
+    
+    /// <summary>
     /// Gets the current print job information from a Moonraker printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>

@@ -53,6 +53,32 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         }
     }
 
+    public async Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            var url = $"{NormalizeBaseUrl(baseUrl)}/printer/info";
+            using var resp = await http.GetAsync(url, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            var root = doc.RootElement;
+            
+            // Handle both direct response and wrapped response
+            var infoElement = root;
+            if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object)
+                infoElement = result;
+            
+            return JsonSerializer.Deserialize<MoonrakerPrinterInfo>(infoElement.GetRawText());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default)
     {
         try

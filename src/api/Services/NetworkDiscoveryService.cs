@@ -218,17 +218,17 @@ public class NetworkDiscoveryService(
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(timeoutMs);
 
-            // Try to get status from Moonraker to check if it's online
-            var status = await moonrakerClient.GetStatusAsync(baseUrl, cts.Token);
-            if (status != null && status.IsOnline)
+            // Try to get printer info from Moonraker to get hostname and check if it's online
+            var printerInfo = await moonrakerClient.GetPrinterInfoAsync(baseUrl, cts.Token);
+            if (printerInfo != null && !string.IsNullOrEmpty(printerInfo.State))
             {
                 return new PrinterInfo
                 {
-                    Name = ExtractHostnameFromUrl(baseUrl),
+                    Name = !string.IsNullOrEmpty(printerInfo.Hostname) ? printerInfo.Hostname : ExtractHostnameFromUrl(baseUrl),
                     Manufacturer = "Unknown",
                     Model = "Klipper Printer",
                     Firmware = "Klipper/Moonraker",
-                    Version = status.State ?? "Connected"
+                    Version = printerInfo.SoftwareVersion ?? printerInfo.State ?? "Connected"
                 };
             }
         }
