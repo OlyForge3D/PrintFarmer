@@ -1699,13 +1699,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return Ok(new { message = "Simple test works!", timestamp = DateTime.UtcNow });
     }
 
-    [HttpGet("test-discovery-unique-endpoint")]
+    [HttpGet("discover")]
     public async Task<ActionResult<IEnumerable<DiscoveredPrinterDto>>> DiscoverPrinters(CancellationToken ct)
     {
         try
         {
-            Console.WriteLine("=== UNIQUE DISCOVERY ENDPOINT CALLED ===");
-            logger.LogCritical("=== UNIQUE DISCOVERY ENDPOINT CALLED ===");
             logger.LogInformation("Starting network printer discovery...");
             
             // Set a reasonable timeout for HTTP requests
@@ -1714,7 +1712,6 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             
             var discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
             logger.LogInformation("Discovery completed. Found {Count} printers", discovered.Count);
-            Console.WriteLine($"=== DISCOVERY FOUND {discovered.Count} PRINTERS ===");
             return Ok(discovered);
         }
         catch (OperationCanceledException)
