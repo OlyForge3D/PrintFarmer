@@ -12,7 +12,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
 {
     private readonly PrusaLinkApiClient apiClient = new(http);
     private readonly ILogger? _logger = logger;
-    
+
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 80);
 
     private static void AddApiKey(HttpRequestMessage req, string? apiKey)
@@ -27,7 +27,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
         {
             var status = await apiClient.GetStatusAsync(baseUrl, apiKey, ct);
             var job = await apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            
+
             return new PrusaCompositeStatus(
                 status?.Printer != null,
                 status?.Printer?.State,
@@ -65,7 +65,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
         {
             var job = await apiClient.GetJobAsync(baseUrl, apiKey, ct);
             if (job == null) return null;
-            
+
             return new PrusaJob(
                 job.State,
                 job.Progress,

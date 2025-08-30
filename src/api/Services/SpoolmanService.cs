@@ -74,11 +74,11 @@ public class SpoolmanService : ISpoolmanService
 
     public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
     {
-    var cfg = GetConfig();
-    if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl)) return [];
+        var cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl)) return [];
 
-    // Official Spoolman endpoint for listing spools
-    var baseUrl = cfg.BaseUrl.TrimEnd('/');
+        // Official Spoolman endpoint for listing spools
+        var baseUrl = cfg.BaseUrl.TrimEnd('/');
         var url = $"{baseUrl}/api/v1/spool";
         try
         {
@@ -122,7 +122,7 @@ public class SpoolmanService : ISpoolmanService
             req.Headers.Accept.ParseAdd("application/json");
             using var resp = await http.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             // Skip clearly-non-JSON payloads
             var mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
@@ -132,7 +132,7 @@ public class SpoolmanService : ISpoolmanService
 
             using var doc = await TryParseJsonAsync(resp.Content, ct);
             if (doc is null) return null;
-            
+
             return ParseSpool(doc.RootElement);
         }
         catch

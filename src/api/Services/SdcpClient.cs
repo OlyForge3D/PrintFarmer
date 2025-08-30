@@ -137,9 +137,9 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
 
             var wsUrl = GetWebSocketUrl(baseUrl);
             using var ws = new ClientWebSocket();
-            
+
             await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-            
+
             // Send status request (Cmd: 0)
             var requestId = Guid.NewGuid().ToString("N");
             var statusRequest = new SdcpMessage<object>(
@@ -161,11 +161,11 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             // Read response
             var buffer = new byte[8192];
             var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-            
+
             if (result.MessageType == WebSocketMessageType.Text)
             {
                 var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                
+
                 // Try to parse as status response
                 try
                 {
@@ -201,9 +201,9 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
 
             var wsUrl = GetWebSocketUrl(baseUrl);
             using var ws = new ClientWebSocket();
-            
+
             await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-            
+
             // Send status request to get print info
             var requestId = Guid.NewGuid().ToString("N");
             var statusRequest = new SdcpMessage<object>(
@@ -225,18 +225,18 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             // Read response
             var buffer = new byte[8192];
             var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-            
+
             if (result.MessageType == WebSocketMessageType.Text)
             {
                 var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 var statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
-                
+
                 if (statusResponse?.Status?.PrintInfo != null)
                 {
                     var printInfo = statusResponse.Status.PrintInfo;
                     var state = StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown");
                     var progress = printInfo.Progress / 100.0; // Convert percentage to decimal
-                    var jobName = string.IsNullOrWhiteSpace(printInfo.Filename) ? null : 
+                    var jobName = string.IsNullOrWhiteSpace(printInfo.Filename) ? null :
                                  Path.GetFileName(printInfo.Filename);
 
                     await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
@@ -262,9 +262,9 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
 
             var wsUrl = GetWebSocketUrl(baseUrl);
             using var ws = new ClientWebSocket();
-            
+
             await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-            
+
             // Send status request
             var requestId = Guid.NewGuid().ToString("N");
             var statusRequest = new SdcpMessage<object>(
@@ -286,22 +286,22 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             // Read response
             var buffer = new byte[8192];
             var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-            
+
             if (result.MessageType == WebSocketMessageType.Text)
             {
                 var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 var statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
-                
+
                 if (statusResponse?.Status != null)
                 {
                     var status = statusResponse.Status;
                     var printInfo = status.PrintInfo;
-                    
+
                     var state = printInfo != null ? StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown") : "online";
                     var progress = printInfo?.Progress / 100.0;
-                    var jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null : 
+                    var jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null :
                                  Path.GetFileName(printInfo.Filename);
-                    
+
                     // Parse coordinates
                     double? x = null, y = null, z = null;
                     if (!string.IsNullOrWhiteSpace(status.CurrenCoord))
@@ -316,11 +316,11 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
                     }
 
                     await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
-                    
+
                     // Get camera URLs if available
                     var cameraStreamUrl = await GetCameraUrlAsync(baseUrl, ct);
                     var cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(baseUrl, ct);
-                    
+
                     return new PrinterCompositeStatus(
                         IsOnline: true,
                         State: state,
@@ -377,11 +377,11 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
         {
             // SDCP cameras are typically accessible via HTTP streaming
             var cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:8080/video";
-            
+
             // Test if camera stream is available
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(5);
-            
+
             try
             {
                 var response = await httpClient.GetAsync(cameraUrl, ct);
@@ -414,11 +414,11 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
         {
             // SDCP camera snapshots are typically available via HTTP
             var snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:8080/snapshot";
-            
+
             // Test if snapshot endpoint is available
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(5);
-            
+
             try
             {
                 var response = await httpClient.GetAsync(snapshotUrl, ct);
@@ -465,9 +465,9 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
 
             var wsUrl = GetWebSocketUrl(baseUrl);
             using var ws = new ClientWebSocket();
-            
+
             await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-            
+
             // Send file list request (Cmd: 258)
             var requestId = Guid.NewGuid().ToString("N");
             var fileListRequest = new SdcpMessage<object>(
@@ -489,7 +489,7 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             // Read response
             var buffer = new byte[8192];
             var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-            
+
             if (result.MessageType == WebSocketMessageType.Text)
             {
                 var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
@@ -516,9 +516,9 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
 
             var wsUrl = GetWebSocketUrl(baseUrl);
             using var ws = new ClientWebSocket();
-            
+
             await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-            
+
             var requestId = Guid.NewGuid().ToString("N");
             var command = new SdcpMessage<T>(
                 "",
@@ -539,14 +539,14 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             // Read ACK response
             var buffer = new byte[4096];
             var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-            
+
             if (result.MessageType == WebSocketMessageType.Text)
             {
                 var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 var ackResponse = JsonSerializer.Deserialize<SdcpAckResponse>(responseJson, JsonOptions);
-                
+
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
-                
+
                 // ACK code 0 = success, anything else is error
                 return ackResponse?.Data?.Data?.Ack == 0;
             }
@@ -577,20 +577,20 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for file uploads
-            
+
             // SDCP file upload is typically done via HTTP POST to a specific endpoint
             // This implementation assumes a standard HTTP file upload endpoint
             var host = GetHostFromUrl(baseUrl);
             var uploadUrl = $"http://{host}/api/upload"; // Common SDCP upload endpoint
-            
+
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(60);
-            
+
             using var formContent = new MultipartFormDataContent();
             using var streamContent = new StreamContent(fileContent);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
-            
+
             using var resp = await httpClient.PostAsync(uploadUrl, formContent, cts.Token);
             return resp.IsSuccessStatusCode;
         }

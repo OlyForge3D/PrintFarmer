@@ -14,14 +14,14 @@ public interface IDatabaseSeeder
     /// </summary>
     /// <returns>A task that completes when the catalog data seeding is finished</returns>
     Task SeedCatalogDataAsync();
-    
+
     /// <summary>
     /// Seeds the database with default Spoolman configuration if none exists.
     /// Creates initial configuration entries for filament spool management integration.
     /// </summary>
     /// <returns>A task that completes when the Spoolman configuration seeding is finished</returns>
     Task SeedSpoolmanConfigAsync();
-    
+
     /// <summary>
     /// Performs complete database seeding including both catalog data and Spoolman configuration.
     /// This is a convenience method that calls both SeedCatalogDataAsync and SeedSpoolmanConfigAsync.

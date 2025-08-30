@@ -23,13 +23,13 @@ public class NetworkDiscoveryService(
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)
     {
         logger.LogInformation("Starting printer network discovery...");
-        
+
         var settings = settingsService.GetSettings();
-        logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}", 
+        logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}",
             string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
-        
+
         var discovered = new List<DiscoveredPrinterDto>();
-        
+
         foreach (var network in settings.NetworkRanges)
         {
             logger.LogInformation("Scanning network: {Network}", network);
@@ -37,7 +37,7 @@ public class NetworkDiscoveryService(
             logger.LogInformation("Network {Network} scan completed. Found {Count} printers", network, networkPrinters.Count);
             discovered.AddRange(networkPrinters);
         }
-        
+
         logger.LogInformation("Network discovery completed. Found {Count} printers", discovered.Count);
         return discovered.OrderBy(p => p.IpAddress).ToList();
     }
@@ -45,13 +45,13 @@ public class NetworkDiscoveryService(
     private async Task<List<DiscoveredPrinterDto>> ScanNetworkAsync(string network, NetworkDiscoverySettingsDto settings, CancellationToken cancellationToken)
     {
         var discovered = new List<DiscoveredPrinterDto>();
-        
+
         try
         {
             var (networkAddr, cidr) = ParseCidr(network);
             var hosts = GetHostsInRange(networkAddr, cidr);
             logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
-            
+
             using var semaphore = new SemaphoreSlim(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
             var tasks = hosts.Select(async host =>
             {
@@ -62,7 +62,7 @@ public class NetworkDiscoveryService(
                     var result = await ScanHostAsync(host, settings, cancellationToken);
                     if (result != null)
                     {
-                        logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})", 
+                        logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})",
                             result.IpAddress, result.Port, result.Name, result.Backend);
                     }
                     return result;
@@ -95,17 +95,17 @@ public class NetworkDiscoveryService(
     private static List<string> GetHostsInRange(IPAddress network, int cidr)
     {
         var hosts = new List<string>();
-        
+
         try
         {
             var networkBytes = network.GetAddressBytes();
             var hostBits = 32 - cidr;
             var hostCount = Math.Min((int)Math.Pow(2, hostBits) - 2, 254); // Limit to reasonable size
-            
+
             for (int i = 1; i <= hostCount; i++)
             {
                 var hostBytes = (byte[])networkBytes.Clone();
-                
+
                 // For /24 networks, just increment the last octet
                 if (cidr == 24)
                 {
@@ -116,7 +116,7 @@ public class NetworkDiscoveryService(
                     // For other CIDR ranges, implement more complex logic if needed
                     hostBytes[3] = (byte)i;
                 }
-                
+
                 hosts.Add(new IPAddress(hostBytes).ToString());
             }
         }
@@ -156,7 +156,7 @@ public class NetworkDiscoveryService(
     private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int port, int timeoutMs, CancellationToken cancellationToken)
     {
         var baseUrl = $"http://{ipAddress}:{port}";
-        
+
         try
         {
             logger.LogDebug("Attempting discovery at {BaseUrl}", baseUrl);
@@ -187,7 +187,7 @@ public class NetworkDiscoveryService(
                 else
                 {
                     logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
-                    
+
                     // Also test if this might be a Moonraker on port 80
                     logger.LogInformation("Testing Moonraker on port 80 at {BaseUrl}", baseUrl);
                     var moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
@@ -272,7 +272,7 @@ public class NetworkDiscoveryService(
     private static DiscoveredPrinterDto CreateDiscoveredPrinter(string ipAddress, int port, PrinterBackend backend, PrinterInfo info)
     {
         var serverUrl = $"http://{ipAddress}:{port}";
-        
+
         return new DiscoveredPrinterDto
         {
             IpAddress = ipAddress,

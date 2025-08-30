@@ -23,7 +23,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         {
             var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
             checks["Database"] = new { Status = canConnect ? "Healthy" : "Unhealthy", Provider = dbContext.Database.ProviderName };
-            
+
             if (!canConnect)
             {
                 overallHealthy = false;
@@ -44,7 +44,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             var memoryUsed = GC.GetTotalMemory(false);
             var memoryMB = memoryUsed / (1024 * 1024);
             checks["Memory"] = new { Status = memoryMB < 500 ? "Healthy" : "Warning", UsageMB = memoryMB };
-            
+
             if (memoryMB > 1000) // Warning threshold
             {
                 issues.Add($"High memory usage: {memoryMB}MB");
@@ -83,14 +83,14 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 }
             }
 
-            var serviceStatus = failedServices == 0 ? "Healthy" : 
+            var serviceStatus = failedServices == 0 ? "Healthy" :
                               failedServices < externalServiceCount ? "Degraded" : "Unhealthy";
-            
-            checks["ExternalServices"] = new 
-            { 
-                Status = serviceStatus, 
-                CheckedCount = externalServiceCount, 
-                FailedCount = failedServices 
+
+            checks["ExternalServices"] = new
+            {
+                Status = serviceStatus,
+                CheckedCount = externalServiceCount,
+                FailedCount = failedServices
             };
 
             if (serviceStatus == "Unhealthy")

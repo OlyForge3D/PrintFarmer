@@ -35,7 +35,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
     private static bool BeValidUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return false;
-        
+
         try
         {
             var uri = new Uri(url);
@@ -50,7 +50,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
     private static bool NotContainSqlInjectionPatterns(string input)
     {
         if (string.IsNullOrEmpty(input)) return true;
-        
+
         var dangerousPatterns = new[]
         {
             "script", "javascript:", "vbscript:", "onload", "onerror",
@@ -58,7 +58,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
             "union select", "exec(", "execute("
         };
 
-        return !dangerousPatterns.Any(pattern => 
+        return !dangerousPatterns.Any(pattern =>
             input.Contains(pattern, StringComparison.OrdinalIgnoreCase));
     }
 }

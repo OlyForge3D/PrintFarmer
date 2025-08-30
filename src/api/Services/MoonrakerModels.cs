@@ -1478,8 +1478,8 @@ namespace Farm.Web.Api.Services
 
     public class JobTotals
     {
-    [JsonPropertyName("total_jobs")]
-    public double TotalJobs { get; set; }
+        [JsonPropertyName("total_jobs")]
+        public double TotalJobs { get; set; }
 
         [JsonPropertyName("total_time")]
         public double TotalTime { get; set; }

@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Services.Interfaces;
 public interface IMoonrakerClient
 {
     #region Status and Job Information
-    
+
     /// <summary>
     /// Gets the basic status information from a Moonraker printer.
     /// </summary>
@@ -17,7 +17,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing printer status information including online status and state</returns>
     Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets the printer information including hostname from a Moonraker printer.
     /// </summary>
@@ -25,7 +25,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing printer information including hostname, or null if not available</returns>
     Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets the current print job information from a Moonraker printer.
     /// </summary>
@@ -33,7 +33,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing current job information, or null if no job is active</returns>
     Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets comprehensive status information combining printer state, job progress, and position data.
     /// </summary>
@@ -41,11 +41,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed printer status including temperatures, position, and job progress</returns>
     Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Camera Operations
-    
+
     /// <summary>
     /// Captures a snapshot from the printer's camera.
     /// </summary>
@@ -53,11 +53,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the camera snapshot as byte array, or null if no camera is available</returns>
     Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Printer Control Operations
-    
+
     /// <summary>
     /// Homes all axes of the printer (X, Y, and Z).
     /// </summary>
@@ -65,7 +65,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the home command was successfully sent</returns>
     Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Homes only the X and Y axes of the printer.
     /// </summary>
@@ -73,7 +73,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the XY home command was successfully sent</returns>
     Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Homes only the Z axis of the printer.
     /// </summary>
@@ -81,7 +81,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the Z home command was successfully sent</returns>
     Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Sets the target temperatures for the hotend and/or bed.
     /// </summary>
@@ -91,7 +91,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the temperature commands were successfully sent</returns>
     Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Moves the printer head by relative distances.
     /// </summary>
@@ -103,7 +103,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the move command was successfully sent</returns>
     Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Moves the printer head to absolute positions.
     /// </summary>
@@ -115,11 +115,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the move command was successfully sent</returns>
     Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Print Job Control
-    
+
     /// <summary>
     /// Pauses the current print job.
     /// </summary>
@@ -127,7 +127,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the pause command was successfully sent</returns>
     Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Resumes a paused print job.
     /// </summary>
@@ -135,7 +135,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the resume command was successfully sent</returns>
     Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Performs an emergency stop, immediately halting all printer operations.
     /// </summary>
@@ -143,7 +143,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the emergency stop command was successfully sent</returns>
     Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Starts printing a G-code file by name.
     /// </summary>
@@ -152,11 +152,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the print start command was successfully sent</returns>
     Task<bool> StartPrintAsync(string baseUrl, string fileName, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region File Operations
-    
+
     /// <summary>
     /// Gets a simple list of G-code file names available on the printer.
     /// </summary>
@@ -164,7 +164,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing an array of G-code file names</returns>
     Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets information about available file storage roots on the printer.
     /// </summary>
@@ -172,7 +172,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing file root information</returns>
     Task<FileRoot[]> GetFileRootsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets detailed information about files and directories at a specific path.
     /// </summary>
@@ -182,7 +182,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing directory information, or null if the directory doesn't exist</returns>
     Task<DirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Creates a new directory at the specified path.
     /// </summary>
@@ -191,7 +191,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the create directory response, or null if creation failed</returns>
     Task<DirectoryCreateResponse?> CreateDirectoryAsync(string baseUrl, string path, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Deletes a file or directory at the specified path.
     /// </summary>
@@ -201,7 +201,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the deletion was successful</returns>
     Task<bool> DeleteFileOrDirectoryAsync(string baseUrl, string path, bool force = false, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Moves a file from one location to another.
     /// </summary>
@@ -211,7 +211,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the move operation was successful</returns>
     Task<bool> MoveFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Copies a file from one location to another.
     /// </summary>
@@ -221,7 +221,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the copy operation was successful</returns>
     Task<bool> CopyFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Deletes a specific file.
     /// </summary>
@@ -230,7 +230,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the file deletion was successful</returns>
     Task<bool> DeleteFileAsync(string baseUrl, string path, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets a stream for reading file contents.
     /// </summary>
@@ -239,11 +239,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing a stream for reading the file, or null if the file doesn't exist</returns>
     Task<Stream?> GetFileStreamAsync(string baseUrl, string filename, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region File Metadata and Content
-    
+
     /// <summary>
     /// Gets metadata for a G-code file including print time estimates, layer information, and slicer settings.
     /// </summary>
@@ -252,7 +252,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing G-code metadata, or null if metadata is not available</returns>
     Task<GCodeMetadata?> GetFileMetadataAsync(string baseUrl, string filename, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Starts a metadata scan for a G-code file to extract print information.
     /// </summary>
@@ -261,7 +261,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the metadata scan was successfully started</returns>
     Task<bool> StartMetadataScanAsync(string baseUrl, string filename, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets a thumbnail image embedded in a G-code file.
     /// </summary>
@@ -270,7 +270,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the thumbnail image as byte array, or null if no thumbnail is available</returns>
     Task<byte[]?> GetFileThumbnailAsync(string baseUrl, string filename, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Downloads the complete contents of a file.
     /// </summary>
@@ -279,7 +279,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the file contents as byte array, or null if the file doesn't exist</returns>
     Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets detailed file information including metadata for files in a specific directory.
     /// </summary>
@@ -289,11 +289,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed file information</returns>
     Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(string baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region File Uploads
-    
+
     /// <summary>
     /// Uploads a G-code file to the printer's storage.
     /// </summary>
@@ -303,7 +303,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the upload was successful</returns>
     Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Uploads a file to a specific storage root on the printer.
     /// </summary>
@@ -314,9 +314,9 @@ public interface IMoonrakerClient
     /// <param name="print">Whether to start printing the file immediately after upload</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the upload response, or null if upload failed</returns>
-    Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content, 
+    Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content,
         bool print = false, CancellationToken ct = default);
-        
+
     /// <summary>
     /// Uploads a file using a full path specification.
     /// </summary>
@@ -326,13 +326,13 @@ public interface IMoonrakerClient
     /// <param name="print">Whether to start printing the file immediately after upload</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the upload response, or null if upload failed</returns>
-    Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content, 
+    Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content,
         bool print = false, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region History Operations
-    
+
     /// <summary>
     /// Gets a list of completed print jobs from the printer's history.
     /// </summary>
@@ -345,7 +345,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the history list response, or null if history is unavailable</returns>
     Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets detailed information about a specific print job from history.
     /// </summary>
@@ -354,7 +354,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed job information, or null if the job doesn't exist</returns>
     Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Deletes a specific print job from the history.
     /// </summary>
@@ -363,7 +363,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the job deletion was successful</returns>
     Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets aggregate statistics for all print jobs in history.
     /// </summary>
@@ -371,7 +371,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing history totals and statistics, or null if unavailable</returns>
     Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Resets all history totals and statistics to zero.
     /// </summary>
@@ -379,11 +379,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the history reset was successful</returns>
     Task<bool> ResetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Spoolman Integration
-    
+
     /// <summary>
     /// Gets the current status of Spoolman integration on the printer.
     /// </summary>
@@ -391,7 +391,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing Spoolman status information, or null if Spoolman is not configured</returns>
     Task<SpoolmanStatus?> GetSpoolmanStatusAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets the ID of the currently active filament spool.
     /// </summary>
@@ -399,7 +399,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the active spool ID, or null if no spool is active</returns>
     Task<int?> GetSpoolmanActiveSpoolAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Sets the active filament spool for the printer.
     /// </summary>
@@ -408,7 +408,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the spool activation was successful</returns>
     Task<bool> SetSpoolmanActiveSpoolAsync(string baseUrl, int? spoolId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Makes a proxy request to the Spoolman server through Moonraker.
     /// </summary>
@@ -420,13 +420,13 @@ public interface IMoonrakerClient
     /// <param name="useV2Response">Whether to use v2 response format</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the Spoolman API response as JSON string, or null if the request failed</returns>
-    Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path, 
+    Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path,
         string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Spoolman Spool Operations
-    
+
     /// <summary>
     /// Gets a list of all filament spools from Spoolman.
     /// </summary>
@@ -434,7 +434,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the spools list as JSON string, or null if the request failed</returns>
     Task<string?> GetSpoolmanSpoolsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets detailed information about a specific filament spool.
     /// </summary>
@@ -443,7 +443,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing spool information as JSON string, or null if the spool doesn't exist</returns>
     Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Creates a new filament spool in Spoolman.
     /// </summary>
@@ -452,7 +452,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the created spool information as JSON string, or null if creation failed</returns>
     Task<string?> CreateSpoolmanSpoolAsync(string baseUrl, object spoolData, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Updates an existing filament spool in Spoolman.
     /// </summary>
@@ -462,7 +462,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the updated spool information as JSON string, or null if update failed</returns>
     Task<string?> UpdateSpoolmanSpoolAsync(string baseUrl, int spoolId, object spoolData, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Deletes a filament spool from Spoolman.
     /// </summary>
@@ -471,11 +471,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the spool deletion was successful</returns>
     Task<bool> DeleteSpoolmanSpoolAsync(string baseUrl, int spoolId, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Spoolman Filament Operations
-    
+
     /// <summary>
     /// Gets a list of all filament types from Spoolman.
     /// </summary>
@@ -483,7 +483,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the filaments list as JSON string, or null if the request failed</returns>
     Task<string?> GetSpoolmanFilamentsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets detailed information about a specific filament type.
     /// </summary>
@@ -492,7 +492,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing filament information as JSON string, or null if the filament doesn't exist</returns>
     Task<string?> GetSpoolmanFilamentByIdAsync(string baseUrl, int filamentId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Creates a new filament type in Spoolman.
     /// </summary>
@@ -501,7 +501,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the created filament information as JSON string, or null if creation failed</returns>
     Task<string?> CreateSpoolmanFilamentAsync(string baseUrl, object filamentData, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Updates an existing filament type in Spoolman.
     /// </summary>
@@ -511,7 +511,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the updated filament information as JSON string, or null if update failed</returns>
     Task<string?> UpdateSpoolmanFilamentAsync(string baseUrl, int filamentId, object filamentData, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Deletes a filament type from Spoolman.
     /// </summary>
@@ -520,11 +520,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the filament deletion was successful</returns>
     Task<bool> DeleteSpoolmanFilamentAsync(string baseUrl, int filamentId, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Spoolman Vendor Operations
-    
+
     /// <summary>
     /// Gets a list of all filament vendors from Spoolman.
     /// </summary>
@@ -532,7 +532,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the vendors list as JSON string, or null if the request failed</returns>
     Task<string?> GetSpoolmanVendorsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets detailed information about a specific filament vendor.
     /// </summary>
@@ -541,7 +541,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing vendor information as JSON string, or null if the vendor doesn't exist</returns>
     Task<string?> GetSpoolmanVendorByIdAsync(string baseUrl, int vendorId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Creates a new filament vendor in Spoolman.
     /// </summary>
@@ -550,7 +550,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the created vendor information as JSON string, or null if creation failed</returns>
     Task<string?> CreateSpoolmanVendorAsync(string baseUrl, object vendorData, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Updates an existing filament vendor in Spoolman.
     /// </summary>
@@ -560,7 +560,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the updated vendor information as JSON string, or null if update failed</returns>
     Task<string?> UpdateSpoolmanVendorAsync(string baseUrl, int vendorId, object vendorData, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Deletes a filament vendor from Spoolman.
     /// </summary>
@@ -569,11 +569,11 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the vendor deletion was successful</returns>
     Task<bool> DeleteSpoolmanVendorAsync(string baseUrl, int vendorId, CancellationToken ct = default);
-    
+
     #endregion
-    
+
     #region Spoolman Utility and Advanced Operations
-    
+
     /// <summary>
     /// Records filament usage for the currently active spool.
     /// </summary>
@@ -582,7 +582,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the filament usage was successfully recorded</returns>
     Task<bool> UseSpoolmanFilamentAsync(string baseUrl, double length, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets general information about the Spoolman server.
     /// </summary>
@@ -590,7 +590,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing Spoolman server information as JSON string, or null if unavailable</returns>
     Task<string?> GetSpoolmanInfoAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Checks the health status of the Spoolman server.
     /// </summary>
@@ -598,7 +598,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing Spoolman health information as JSON string, or null if health check failed</returns>
     Task<string?> GetSpoolmanHealthAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Searches for spools matching specific criteria.
     /// </summary>
@@ -609,9 +609,9 @@ public interface IMoonrakerClient
     /// <param name="offset">Number of results to skip for pagination</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing search results as JSON string, or null if search failed</returns>
-    Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null, 
+    Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null,
         bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default);
-        
+
     /// <summary>
     /// Searches for filaments matching specific criteria.
     /// </summary>
@@ -623,7 +623,7 @@ public interface IMoonrakerClient
     /// <returns>A task containing search results as JSON string, or null if search failed</returns>
     Task<string?> SearchSpoolmanFilamentsAsync(string baseUrl, string? query = null,
         int? limit = null, int? offset = null, CancellationToken ct = default);
-        
+
     /// <summary>
     /// Archives or unarchives a filament spool.
     /// </summary>
@@ -633,7 +633,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the archive operation was successful</returns>
     Task<bool> ArchiveSpoolmanSpoolAsync(string baseUrl, int spoolId, bool archived = true, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets aggregate statistics from Spoolman about filament usage.
     /// </summary>
@@ -641,7 +641,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing statistics as JSON string, or null if unavailable</returns>
     Task<string?> GetSpoolmanStatsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Creates a backup of the Spoolman database.
     /// </summary>
@@ -649,7 +649,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing backup information as JSON string, or null if backup failed</returns>
     Task<string?> BackupSpoolmanAsync(string baseUrl, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets information about available Spoolman integrations and their status.
     /// </summary>
@@ -657,6 +657,6 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing integration information as JSON string, or null if unavailable</returns>
     Task<string?> GetSpoolmanIntegrationsAsync(string baseUrl, CancellationToken ct = default);
-    
+
     #endregion
 }

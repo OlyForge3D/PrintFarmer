@@ -20,7 +20,7 @@ public class ServiceInterfaceExampleTests
         // Arrange
         var mockMoonraker = new Mock<IMoonrakerClient>();
         var expectedStatus = new PrinterStatus(IsOnline: true, State: "ready");
-        
+
         mockMoonraker
             .Setup(m => m.GetStatusAsync("http://test-printer", It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedStatus);
@@ -31,7 +31,7 @@ public class ServiceInterfaceExampleTests
         // Assert
         Assert.True(result.IsOnline);
         Assert.Equal("ready", result.State);
-        
+
         // Verify the method was called
         mockMoonraker.Verify(m => m.GetStatusAsync("http://test-printer", It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -195,7 +195,7 @@ public class ServiceInterfaceExampleTests
     {
         // Arrange
         var mockSeeder = new Mock<IDatabaseSeeder>();
-        
+
         mockSeeder
             .Setup(s => s.SeedCatalogDataAsync())
             .Returns(Task.CompletedTask);

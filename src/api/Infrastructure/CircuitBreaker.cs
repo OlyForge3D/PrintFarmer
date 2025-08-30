@@ -58,9 +58,9 @@ public class CircuitBreaker
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(_timeout);
-            
+
             var result = await operation(timeoutCts.Token);
-            
+
             OnSuccess();
             return result;
         }
@@ -104,13 +104,13 @@ public class CircuitBreaker
             _failureCount++;
             _lastFailureTime = DateTime.UtcNow;
 
-            _logger.LogWarning(ex, "Circuit breaker {Name} recorded failure {FailureCount}/{Threshold}", 
+            _logger.LogWarning(ex, "Circuit breaker {Name} recorded failure {FailureCount}/{Threshold}",
                 Name, _failureCount, _failureThreshold);
 
             if (_failureCount >= _failureThreshold)
             {
                 _state = CircuitState.Open;
-                _logger.LogError("Circuit breaker {Name} is now OPEN after {FailureCount} consecutive failures", 
+                _logger.LogError("Circuit breaker {Name} is now OPEN after {FailureCount} consecutive failures",
                     Name, _failureCount);
             }
         }
@@ -200,7 +200,7 @@ public class CircuitBreakerService : ICircuitBreakerService
 
     public CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null)
     {
-        return _circuitBreakers.GetOrAdd(name, _ => 
+        return _circuitBreakers.GetOrAdd(name, _ =>
         {
             var cb = new CircuitBreaker(
                 failureThreshold ?? 5,
