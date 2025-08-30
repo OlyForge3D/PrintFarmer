@@ -1,9 +1,9 @@
-using Farm.Web.Server.Services.Interfaces;
-using Farm.Web.Server.Services;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services;
 using Farm.Web.Shared;
 using Moq;
 
-namespace Farm.Web.Server.Tests.Examples;
+namespace Farm.Web.Api.Tests.Examples;
 
 /// <summary>
 /// Example test class demonstrating how to use the service interfaces with mock implementations.

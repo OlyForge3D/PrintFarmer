@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\server\Farm.Web.Server.csproj" />
+    <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\..\shared\Farm.Web.Shared.csproj" />
   </ItemGroup>
 </Project>

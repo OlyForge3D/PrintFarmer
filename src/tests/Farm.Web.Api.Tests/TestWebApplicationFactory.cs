@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
-namespace Farm.Web.Server.Tests;
+namespace Farm.Web.Api.Tests;
 
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisposable
 {

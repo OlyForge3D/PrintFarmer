@@ -1,7 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 
-namespace Farm.Web.Server.Tests;
+namespace Farm.Web.Api.Tests;
 
 public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
