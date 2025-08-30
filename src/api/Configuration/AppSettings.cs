@@ -2,7 +2,7 @@ using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Server.Configuration;
+namespace Farm.Web.Api.Configuration;
 
 /// <summary>
 /// Application configuration settings with validation

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Server.Infrastructure;
+namespace Farm.Web.Api.Infrastructure;
 
 /// <summary>
 /// Circuit breaker implementation for external service calls

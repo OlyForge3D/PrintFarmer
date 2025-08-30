@@ -1,21 +1,22 @@
-using Farm.Web.Server.Data;
-using Farm.Web.Server.Domain;
-using Farm.Web.Server.Services;
-using Farm.Web.Server.Middleware;
-using Farm.Web.Server.Infrastructure;
+using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
+using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Middleware;
+using Farm.Web.Api.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
-using static Farm.Web.Server.Controllers.CatalogController;
+using static Farm.Web.Api.Controllers.CatalogController;
 
-namespace Farm.Web.Server.Controllers;
+namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrintersController(AppDbContext db, MoonrakerClient moon, PrusaLinkClient prusa, SdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
+public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
     {

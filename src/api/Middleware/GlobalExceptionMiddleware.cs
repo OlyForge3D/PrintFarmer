@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Server.Middleware;
+namespace Farm.Web.Api.Middleware;
 
 /// <summary>
 /// Global exception handling middleware that provides consistent error responses
@@ -80,7 +80,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
                 (HttpStatusCode.ServiceUnavailable, "Database service unavailable", null),
             
             // Circuit breaker
-            Farm.Web.Server.Infrastructure.CircuitBreakerOpenException => 
+            Farm.Web.Api.Infrastructure.CircuitBreakerOpenException => 
                 (HttpStatusCode.ServiceUnavailable, "Service temporarily unavailable", ex.Message),
             
             // Default for all other exceptions

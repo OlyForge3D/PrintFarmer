@@ -3,11 +3,11 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
-using Farm.Web.Server.Services.Interfaces;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Server.Services;
+namespace Farm.Web.Api.Services;
 
 public interface INetworkDiscoveryService
 {

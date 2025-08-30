@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Farm.Web.Server", "server\Farm.Web.Server.csproj", "{A6E5F9A7-2E8E-4D3F-9A8E-1E3B5E8E463C}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Farm.Web.Api", "api\Farm.Web.Api.csproj", "{A6E5F9A7-2E8E-4D3F-9A8E-1E3B5E8E463C}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Farm.Web.Client", "client\Farm.Web.Client.csproj", "{8A3B1C3B-2E0E-4FBE-9B7A-0FCE2A2CF5E1}"
 EndProject

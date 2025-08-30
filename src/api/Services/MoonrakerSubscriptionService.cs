@@ -2,9 +2,10 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Farm.Web.Server.Data;
-using Farm.Web.Server.Domain;
-using Farm.Web.Server.Hubs;
+using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
+using Farm.Web.Api.Hubs;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -12,9 +13,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Server.Services;
+namespace Farm.Web.Api.Services;
 
-public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, MoonrakerClient moonrakerClient, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
+public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
@@ -570,6 +571,10 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     {
         try
         {
+            // Create scope to get moonraker client
+            using var scope = scopeFactory.CreateScope();
+            var moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
+            
             // Step 1: Get the active spool ID from Moonraker
             var activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
             if (activeSpoolId == null)
@@ -578,7 +583,6 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             }
 
             // Step 2: Get spool details directly from Spoolman using the ID
-            using var scope = scopeFactory.CreateScope();
             var spoolmanService = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
             var spoolDetails = await spoolmanService.GetSpoolByIdAsync(activeSpoolId.Value, ct);
             if (spoolDetails == null)

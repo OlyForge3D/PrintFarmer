@@ -1,10 +1,10 @@
-using Farm.Web.Server.Data;
+using Farm.Web.Api.Data;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
-namespace Farm.Web.Server.Health;
+namespace Farm.Web.Api.Health;
 
 /// <summary>
 /// Comprehensive health check that validates database connectivity,

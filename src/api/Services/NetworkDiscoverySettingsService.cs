@@ -2,11 +2,11 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text.Json;
-using Farm.Web.Server.Services.Interfaces;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Server.Services;
+namespace Farm.Web.Api.Services;
 
 public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
 {

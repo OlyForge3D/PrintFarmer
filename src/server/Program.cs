@@ -9,6 +9,13 @@ using Farm.Web.Server.Middleware;
 using Farm.Web.Server.Validators;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using FluentValidation;
 using Farm.Web.Shared;
 using System.Text.Json;
@@ -232,14 +239,14 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    // Temporarily disable to test if Swagger is serving HTML
+    //app.UseSwagger();
+    //app.UseSwaggerUI();
 }
 
 app.UseCors("Default");
-app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
 
+// Configure API routing and SignalR hubs
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 
@@ -279,7 +286,6 @@ app.MapGet("/api/network-discovery/dynamic-ranges", (NetworkDiscoverySettingsSer
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
-app.MapFallbackToFile("index.html");
 
 app.Run();
 
