@@ -43,7 +43,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         var dynamicRanges = GetDynamicNetworkRanges();
         return new NetworkDiscoverySettingsDto(
             dynamicRanges.Count > 0 ? dynamicRanges : GetFallbackNetworkRanges(),
-            _settings?.TimeoutMs ?? 3000,
+            _settings?.TimeoutMs ?? 100,
             _settings?.MaxConcurrentScans ?? 20,
             _settings?.Ports ?? new List<int> { 80, 7125 }
         );
@@ -182,9 +182,9 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
     {
         return new List<string>
         {
+            "10.0.0.0/24",
             "192.168.1.0/24",
             "192.168.0.0/24", 
-            "10.0.0.0/24",
             "192.168.2.0/24"
         };
     }

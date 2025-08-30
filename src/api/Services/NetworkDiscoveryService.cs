@@ -53,7 +53,7 @@ public class NetworkDiscoveryService(
             logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
             
             using var semaphore = new SemaphoreSlim(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
-            var tasks = hosts.Take(50).Select(async host => // Limit to first 50 IPs for faster discovery
+            var tasks = hosts.Select(async host =>
             {
                 await semaphore.WaitAsync(cancellationToken);
                 try
@@ -163,22 +163,43 @@ public class NetworkDiscoveryService(
             // Test Moonraker first (port 7125) or PrusaLink (port 80)
             if (port == 7125)
             {
-                logger.LogDebug("Testing Moonraker at {BaseUrl}", baseUrl);
+                logger.LogInformation("Testing Moonraker at {BaseUrl}", baseUrl);
                 var moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (moonrakerInfo != null)
                 {
                     logger.LogInformation("Successfully discovered Moonraker printer at {BaseUrl}", baseUrl);
                     return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
                 }
+                else
+                {
+                    logger.LogDebug("No Moonraker response from {BaseUrl}", baseUrl);
+                }
             }
             else if (port == 80)
             {
-                logger.LogDebug("Testing PrusaLink at {BaseUrl}", baseUrl);
+                logger.LogInformation("Testing PrusaLink at {BaseUrl}", baseUrl);
                 var prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (prusaInfo != null)
                 {
                     logger.LogInformation("Successfully discovered PrusaLink printer at {BaseUrl}", baseUrl);
                     return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.PrusaLink, prusaInfo);
+                }
+                else
+                {
+                    logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
+                    
+                    // Also test if this might be a Moonraker on port 80
+                    logger.LogInformation("Testing Moonraker on port 80 at {BaseUrl}", baseUrl);
+                    var moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
+                    if (moonrakerInfo != null)
+                    {
+                        logger.LogInformation("Successfully discovered Moonraker printer on port 80 at {BaseUrl}", baseUrl);
+                        return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
+                    }
+                    else
+                    {
+                        logger.LogDebug("No Moonraker response on port 80 from {BaseUrl}", baseUrl);
+                    }
                 }
             }
         }

@@ -2,18 +2,21 @@ using System.Collections.Concurrent;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Client;
 
 public class RealtimeService : IAsyncDisposable
 {
     private readonly NavigationManager _nav;
+    private readonly IConfiguration _config;
     private HubConnection? _hub;
     private readonly ConcurrentDictionary<Guid, Action<PrinterStatusUpdate>> _subs = new();
 
-    public RealtimeService(NavigationManager nav)
+    public RealtimeService(NavigationManager nav, IConfiguration config)
     {
         _nav = nav;
+        _config = config;
     }
 
     public async Task EnsureConnectedAsync()
@@ -21,7 +24,8 @@ public class RealtimeService : IAsyncDisposable
         if (_hub != null && _hub.State == HubConnectionState.Connected) return;
         if (_hub == null)
         {
-            var baseUri = new Uri(_nav.BaseUri);
+            var apiBaseUrl = _config["ApiBaseUrl"] ?? _nav.BaseUri;
+            var baseUri = new Uri(apiBaseUrl);
             var hubUri = new Uri(baseUri, "/hubs/printers");
             _hub = new HubConnectionBuilder()
                 .WithUrl(hubUri)
