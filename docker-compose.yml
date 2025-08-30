@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile.api
     image: printfarmer-api:latest
-    network_mode: host
     container_name: printfarmer-api
     environment:
       # Database provider selection: SqlServer (default), Sqlite, Postgres, MySql
@@ -56,6 +55,9 @@ services:
       dockerfile: Dockerfile.web
     image: printfarmer-web:latest
     container_name: printfarmer-web
+    environment:
+      # Configure API base URL for Blazor client
+      - API_BASE_URL=http://localhost:8081
     depends_on:
       - api
     ports:

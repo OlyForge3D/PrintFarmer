@@ -1,3 +1,4 @@
+using System;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
@@ -6,10 +7,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
+/// <summary>
+/// Provides endpoints for managing printer manufacturer and model catalog data.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class CatalogController(AppDbContext db) : ControllerBase
 {
+    /// <summary>
+    /// Gets all available printer manufacturers.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>List of all printer manufacturers ordered by name</returns>
+    /// <response code="200">Returns the list of manufacturers</response>
     [HttpGet("manufacturers")]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturers(CancellationToken ct)
     {
@@ -18,6 +28,15 @@ public class CatalogController(AppDbContext db) : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>
+    /// Creates a new printer manufacturer.
+    /// </summary>
+    /// <param name="name">The name of the manufacturer to create</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The created manufacturer</returns>
+    /// <response code="201">Returns the newly created manufacturer</response>
+    /// <response code="400">If the manufacturer name is invalid or empty</response>
+    /// <response code="409">If a manufacturer with the same name already exists</response>
     [HttpPost("manufacturers")]
     public async Task<ActionResult<ManufacturerDto>> CreateManufacturer([FromBody] string name, CancellationToken ct)
     {

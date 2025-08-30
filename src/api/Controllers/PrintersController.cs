@@ -1,3 +1,4 @@
+using System;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services;
@@ -14,6 +15,10 @@ using static Farm.Web.Api.Controllers.CatalogController;
 
 namespace Farm.Web.Api.Controllers;
 
+/// <summary>
+/// Provides endpoints for managing 3D printers and their operations.
+/// Supports Moonraker, PrusaLink, and SDCP printer backends.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
@@ -51,6 +56,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
+    /// <summary>
+    /// Retrieves all printers with their current status information.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A list of all printers with their current status, including online/offline state, print progress, and temperatures</returns>
+    /// <response code="200">Returns the list of printers with status information</response>
+    /// <response code="500">If there was an internal server error</response>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAll(CancellationToken ct)
     {
@@ -192,6 +204,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         );
     }
 
+    /// <summary>
+    /// Retrieves basic information for all printers without detailed status.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A lightweight list of all printers with basic information only</returns>
+    /// <response code="200">Returns the list of printers with basic information</response>
     [HttpGet("basic")]
     public async Task<ActionResult<IEnumerable<PrinterBasicDto>>> GetBasic(CancellationToken ct)
     {
@@ -213,6 +231,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return Ok(dtos);
     }
 
+    /// <summary>
+    /// Retrieves all printers with cached information for fast loading.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A list of all printers with cached information without real-time status</returns>
+    /// <response code="200">Returns the list of printers with cached information</response>
     [HttpGet("fast")]
     public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAllFast(CancellationToken ct)
     {
@@ -239,6 +263,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return Ok(dtos);
     }
 
+    /// <summary>
+    /// Gets the current status of a specific printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The current status of the specified printer including print progress, temperatures, and position</returns>
+    /// <response code="200">Returns the printer's current status</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error communicating with the printer</response>
     [HttpGet("{id:guid}/status")]
     public async Task<ActionResult<PrinterStatusDto>> GetStatus(Guid id, CancellationToken ct)
     {
@@ -350,6 +383,14 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
+    /// <summary>
+    /// Gets basic information about a specific printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Basic printer information including name, backend, connection status, and current state</returns>
+    /// <response code="200">Returns basic printer information</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<PrinterDto>> Get(Guid id, CancellationToken ct)
     {
@@ -442,6 +483,14 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
+    /// <summary>
+    /// Gets detailed information about a specific printer including manufacturer, model, and configuration.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings</returns>
+    /// <response code="200">Returns detailed printer information</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
     [HttpGet("{id:guid}/details")]
     public async Task<ActionResult<PrinterDetailsDto>> GetDetails(Guid id, CancellationToken ct)
     {
@@ -467,6 +516,16 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     );
     }
 
+    /// <summary>
+    /// Creates a new printer configuration.
+    /// </summary>
+    /// <param name="dto">The printer data transfer object containing printer details</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The created printer with its assigned unique identifier</returns>
+    /// <response code="201">Returns the newly created printer</response>
+    /// <response code="400">If the printer data is invalid or validation fails</response>
+    /// <response code="409">If a printer with the same name and URL already exists</response>
+    /// <response code="500">If there was an error creating the printer</response>
     [HttpPost]
     public async Task<ActionResult<PrinterDto>> Create(CreatePrinterDto dto, CancellationToken ct)
     {
@@ -647,6 +706,17 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
+    /// <summary>
+    /// Updates an existing printer configuration.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer to update</param>
+    /// <param name="dto">The updated printer data</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>No content if successful</returns>
+    /// <response code="204">If the printer was successfully updated</response>
+    /// <response code="400">If the update data is invalid</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error updating the printer</response>
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, UpdatePrinterDto dto, CancellationToken ct)
     {
@@ -728,6 +798,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return NoContent();
     }
 
+    /// <summary>
+    /// Resolves a hostname to an IP address for printer configuration.
+    /// </summary>
+    /// <param name="body">The hostname resolution request containing the server URL and backend type</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The resolved IP address and normalized URL</returns>
+    /// <response code="200">Returns the resolved hostname information</response>
+    /// <response code="400">If the hostname resolution fails or URL is invalid</response>
+    /// <response code="500">If there was an error during hostname resolution</response>
     [HttpPost("resolve")]
     public async Task<ActionResult<Farm.Web.Shared.ResolveHostnameResponse>> ResolveHost([FromBody] Farm.Web.Shared.ResolveHostnameRequest body, CancellationToken ct)
     {
@@ -768,6 +847,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
+    /// <summary>
+    /// Deletes a printer configuration.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer to delete</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>No content if successful</returns>
+    /// <response code="204">If the printer was successfully deleted</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error deleting the printer</response>
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -778,6 +866,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return NoContent();
     }
 
+    /// <summary>
+    /// Gets a camera snapshot image from the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The camera snapshot as an image file</returns>
+    /// <response code="200">Returns the snapshot image</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="503">If the camera is not available or configured</response>
     [HttpGet("{id:guid}/snapshot")]
     public async Task<IActionResult> GetSnapshot(Guid id, CancellationToken ct)
     {
@@ -788,6 +885,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return File(bytes, "image/jpeg");
     }
 
+    /// <summary>
+    /// Homes all axes of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the homing operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the homing command</response>
     [HttpPost("{id:guid}/home")]
     public async Task<ActionResult<CommandResult>> Home(Guid id, CancellationToken ct)
     {
@@ -797,6 +903,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return new CommandResult(ok, ok ? null : "Failed to send home command");
     }
 
+    /// <summary>
+    /// Homes the X and Y axes of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the homing operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the homing command</response>
     [HttpPost("{id:guid}/homexy")]
     public async Task<ActionResult<CommandResult>> HomeXY(Guid id, CancellationToken ct)
     {

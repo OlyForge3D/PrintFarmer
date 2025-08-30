@@ -29,12 +29,27 @@ COPY --from=build /out/wwwroot .
 COPY deploy/nginx/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Self-signed certificate generation for development if none provided
-RUN apk add --no-cache openssl && \
+RUN apk add --no-cache openssl jq && \
 		mkdir -p /etc/nginx/certs && \
 		if [ ! -f /etc/nginx/certs/tls.crt ] || [ ! -f /etc/nginx/certs/tls.key ]; then \
 			openssl req -x509 -nodes -days 3650 -subj "/CN=localhost" -newkey rsa:2048 \
 				-keyout /etc/nginx/certs/tls.key -out /etc/nginx/certs/tls.crt; \
 		fi
 
+# Create entrypoint script to handle environment variable substitution
+RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo 'set -e' >> /docker-entrypoint.sh && \
+    echo 'if [ -n "$API_BASE_URL" ]; then' >> /docker-entrypoint.sh && \
+    echo '  echo "Setting ApiBaseUrl to: $API_BASE_URL"' >> /docker-entrypoint.sh && \
+    echo '  jq --arg url "$API_BASE_URL" '"'"'.ApiBaseUrl = $url'"'"' /usr/share/nginx/html/appsettings.json > /tmp/appsettings.json.tmp' >> /docker-entrypoint.sh && \
+    echo '  mv /tmp/appsettings.json.tmp /usr/share/nginx/html/appsettings.json' >> /docker-entrypoint.sh && \
+    echo '  if [ -f /usr/share/nginx/html/appsettings.Development.json ]; then' >> /docker-entrypoint.sh && \
+    echo '    jq --arg url "$API_BASE_URL" '"'"'.ApiBaseUrl = $url'"'"' /usr/share/nginx/html/appsettings.Development.json > /tmp/appsettings.Development.json.tmp' >> /docker-entrypoint.sh && \
+    echo '    mv /tmp/appsettings.Development.json.tmp /usr/share/nginx/html/appsettings.Development.json' >> /docker-entrypoint.sh && \
+    echo '  fi' >> /docker-entrypoint.sh && \
+    echo 'fi' >> /docker-entrypoint.sh && \
+    echo 'exec nginx -g "daemon off;"' >> /docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh
+
 EXPOSE 8080 8443
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
