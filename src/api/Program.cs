@@ -268,6 +268,10 @@ using (var scope = app.Services.CreateScope())
         throw;
     }
     
+    // EF-based seeding for catalog data (idempotent)
+    var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
+    await seeder.SeedAllAsync();
+
     // Validate configuration after services are built
     try
     {
