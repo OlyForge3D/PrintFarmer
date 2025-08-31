@@ -161,7 +161,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     switch (dbProvider)
     {
         case "SqlServer":
-        default:
             options.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer")
                                  ?? builder.Configuration.GetConnectionString("Default")
                                  ?? "Server=localhost,1433;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;",
@@ -183,6 +182,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                 break;
             }
         case "Sqlite":
+        default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")
                               ?? "Data Source=farm.db");
@@ -218,6 +218,7 @@ builder.Services.AddScoped<ISpoolmanService, SpoolmanService>();
 builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
 builder.Services.AddScoped<DatabaseSeeder>();
+builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
@@ -239,29 +240,34 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 var app = builder.Build();
 
-// Database initialization and seeding
+// Database initialization with retry logic for resilient startup
 using (var scope = app.Services.CreateScope())
 {
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    logger.LogInformation("[DB] Starting database initialization for provider: {DbProvider}", dbProvider);
-
+    var dbInitializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
+    
+    // Get retry configuration from environment variables (lower defaults for development)
+    var retryCount = int.TryParse(app.Configuration["DB_CONNECTION_RETRY_COUNT"], out var rc) ? rc : 3;
+    var retryDelay = int.TryParse(app.Configuration["DB_CONNECTION_RETRY_DELAY"], out var rd) ? rd : 2;
+    
     try
     {
-        await db.Database.MigrateAsync();
-        logger.LogInformation("[DB] Database migration completed successfully.");
+        await dbInitializer.InitializeAsync(dbProvider, retryCount, retryDelay);
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "[DB] Migration failed for provider '{Provider}': {Message}. Falling back to EnsureCreated.", dbProvider, ex.Message);
-        db.Database.EnsureCreated();
+        logger.LogCritical(ex, "[DB] Failed to initialize database after all retry attempts. Application cannot start.");
+        if (dbProvider != "Sqlite")
+        {
+            logger.LogInformation("[DB] If using external database (SQL Server, PostgreSQL, MySQL), ensure:");
+            logger.LogInformation("[DB] 1. Database server is running and accessible");
+            logger.LogInformation("[DB] 2. Connection string is correct");
+            logger.LogInformation("[DB] 3. Database server is ready to accept connections");
+            logger.LogInformation("[DB] 4. Network connectivity allows database access");
+        }
+        throw;
     }
-
-    // EF-based seeding for catalog data (idempotent)
-    var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
-    await seeder.SeedAllAsync();
-
+    
     // Validate configuration after services are built
     try
     {
