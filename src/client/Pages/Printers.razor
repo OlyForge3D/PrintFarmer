@@ -202,6 +202,14 @@ else
                                             <path d="M5 5h6V3H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-6h-2v6H5V5z"/>
                                         </svg>
                                     </a>
+                                    @if (HasCamera(p))
+                                    {
+                                        <button class="icon-btn" title="@CameraBtnTitle(p.Id)" aria-label="Toggle camera" @onclick="() => ToggleCamera(p.Id)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                <path d="M17 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3.5l4 4v-11l-4 4z"/>
+                                            </svg>
+                                        </button>
+                                    }
                                 </div>
                                 @if (IsCameraVisible(p.Id) && TryGetSnapshotUrl(p, out var snapUrl))
                                 {
