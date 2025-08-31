@@ -1,0 +1,31 @@
+# Production override for host network access
+# Usage: docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+
+services:
+  api:
+    # Use host network for direct access to host interfaces
+    # Note: This makes port mapping and container-to-container communication more complex
+    network_mode: host
+    ports: []  # Remove port mapping when using host network
+    environment:
+      # CORS Configuration for production - Choose one approach:
+      # Option 1: Allow any origin (for development/local networks)
+      - ALLOW_LOCAL_NETWORK=true
+      # Option 2: Specific origins (comment out ALLOW_LOCAL_NETWORK above)
+      # - ALLOWED_ORIGINS=http://10.0.0.75:8081,https://10.0.0.75:8443
+      # Option 3: Network ranges (comment out ALLOW_LOCAL_NETWORK above)
+      # - ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
+      # API listens on all interfaces on port 8080
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
+      # Update database connection to use localhost (host network)
+      - ConnectionStrings__SqlServer=Server=localhost,1433;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+
+  web:
+    # Web container still uses bridge network to access API via host
+    environment:
+      - API_BASE_URL=http://10.0.0.75:8080  # Direct to API on host network
+    
+  sqlserver:
+    # Expose SQL Server on host network for API access
+    ports:
+      - "1433:1433"

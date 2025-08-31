@@ -49,12 +49,107 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("Default", policy =>
     {
-        policy.WithOrigins("http://localhost:8081", "https://localhost:8443", "http://localhost:5000", "http://localhost:5001")
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+        // Get allowed origins from environment variable or use defaults
+        var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+                           ?? "http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
+        
+        // Check if wildcard network access is enabled
+        var allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
+        var networkRanges = Environment.GetEnvironmentVariable("ALLOWED_NETWORK_RANGES")
+                           ?? "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12";
+        
+        if (allowLocalNetwork)
+        {
+            // Allow any origin for local network development
+            policy.AllowAnyOrigin()
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+        else
+        {
+            policy.SetIsOriginAllowed(origin =>
+            {
+                // Always allow configured origins
+                var configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                                     .Select(o => o.Trim())
+                                                     .ToArray();
+                
+                if (configuredOrigins.Contains(origin))
+                    return true;
+                
+                // Check if origin matches allowed network ranges
+                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return IsIpInAllowedRanges(uri.Host, networkRanges);
+                }
+                
+                return false;
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+        }
     });
 });
+
+// Helper method to check if IP is in allowed network ranges
+static bool IsIpInAllowedRanges(string host, string networkRanges)
+{
+    try
+    {
+        if (!System.Net.IPAddress.TryParse(host, out var ipAddress))
+            return false;
+            
+        var ranges = networkRanges.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        
+        foreach (var range in ranges)
+        {
+            var parts = range.Trim().Split('/');
+            if (parts.Length != 2) continue;
+            
+            if (System.Net.IPAddress.TryParse(parts[0], out var networkAddress) && 
+                int.TryParse(parts[1], out var prefixLength))
+            {
+                if (IsIpInNetwork(ipAddress, networkAddress, prefixLength))
+                    return true;
+            }
+        }
+        
+        return false;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+// Helper method to check if IP is in network range
+static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress networkAddress, int prefixLength)
+{
+    var ipBytes = ipAddress.GetAddressBytes();
+    var networkBytes = networkAddress.GetAddressBytes();
+    
+    if (ipBytes.Length != networkBytes.Length)
+        return false;
+        
+    var bytesToCheck = prefixLength / 8;
+    var bitsToCheck = prefixLength % 8;
+    
+    for (int i = 0; i < bytesToCheck; i++)
+    {
+        if (ipBytes[i] != networkBytes[i])
+            return false;
+    }
+    
+    if (bitsToCheck > 0 && bytesToCheck < ipBytes.Length)
+    {
+        var mask = (byte)(0xFF << (8 - bitsToCheck));
+        if ((ipBytes[bytesToCheck] & mask) != (networkBytes[bytesToCheck] & mask))
+            return false;
+    }
+    
+    return true;
+}
 
 // Database provider selection: Sqlite (default), SqlServer, Postgres, MySql
 var dbProvider = builder.Configuration["Db:Provider"]

@@ -14,8 +14,13 @@ services:
       - ConnectionStrings__Default=Server=sqlserver;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
       - ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
       - DB_INIT_MODE=EnsureCreated
-      # Restrict CORS origins (comma-separated). Example for local dev via Nginx HTTP/HTTPS
-      - ALLOWED_ORIGINS=http://localhost:8081,https://localhost:8443
+      # CORS Configuration - Choose one approach:
+      # Option 1: Allow any origin (for development/local networks)
+      - ALLOW_LOCAL_NETWORK=true
+      # Option 2: Specific origins (comment out ALLOW_LOCAL_NETWORK above)
+      # - ALLOWED_ORIGINS=http://YOUR_REMOTE_IP:8081,https://YOUR_REMOTE_IP:8443
+      # Option 3: Network ranges (comment out ALLOW_LOCAL_NETWORK above)
+      # - ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
       # Examples to use a different RDBMS (uncomment and update as needed):
       # - DB_PROVIDER=Sqlite
       # - ConnectionStrings__Sqlite=Data Source=/data/farm.db
@@ -56,7 +61,7 @@ services:
     image: printfarmer-web:latest
     container_name: printfarmer-web
     environment:
-      # Configure API base URL for Blazor client
+      # Configure API base URL for Blazor client - update for remote deployment
       - API_BASE_URL=http://localhost:8081
     depends_on:
       - api
