@@ -280,6 +280,12 @@ public class NetworkDiscoveryService(
         var manufacturer = IsUnknownValue(info.Manufacturer) ? null : info.Manufacturer;
         var model = IsUnknownValue(info.Model) ? null : info.Model;
 
+        // If manufacturer is null, also set model to null
+        if (manufacturer == null)
+        {
+            model = null;
+        }
+
         return new DiscoveredPrinterDto
         {
             IpAddress = ipAddress,

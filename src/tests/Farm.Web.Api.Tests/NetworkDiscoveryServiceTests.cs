@@ -93,7 +93,7 @@ public class NetworkDiscoveryServiceTests
 
         // Assert
         result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().Be("Test Model", "because model is not Unknown");
+        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     [Fact]
@@ -232,6 +232,40 @@ public class NetworkDiscoveryServiceTests
         result.Model.Should().BeNull("because Unknown Prusa should not be set");
     }
 
+    [Fact]
+    public void CreateDiscoveredPrinter_NullManufacturerValidModel_SetsBothToNull()
+    {
+        // Arrange - When manufacturer is null, model should also be set to null
+        var ipAddress = "192.168.1.100";
+        var port = 7125;
+        var backend = PrinterBackend.Moonraker;
+        var printerInfo = CreatePrinterInfoWithNullManufacturer("Test Printer");
+
+        // Act
+        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+
+        // Assert
+        result.Manufacturer.Should().BeNull("because manufacturer is null");
+        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+    }
+
+    [Fact]
+    public void CreateDiscoveredPrinter_UnknownManufacturerValidModel_SetsBothToNull()
+    {
+        // Arrange - When manufacturer is "Unknown" (filtered to null) and model is valid, both should be null
+        var ipAddress = "192.168.1.100";
+        var port = 7125;
+        var backend = PrinterBackend.Moonraker;
+        var printerInfo = CreatePrinterInfoWithUnknownManufacturerValidModel("Test Printer");
+
+        // Act
+        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+
+        // Assert
+        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+    }
+
     private static object CreatePrinterInfoWithUnknownPrusa(string name)
     {
         // Use reflection to create an instance of the private PrinterInfo class
@@ -244,6 +278,40 @@ public class NetworkDiscoveryServiceTests
         printerInfoType.GetProperty("Manufacturer")!.SetValue(printerInfo, "Prusa Research");
         printerInfoType.GetProperty("Model")!.SetValue(printerInfo, "Unknown Prusa");
         printerInfoType.GetProperty("Firmware")!.SetValue(printerInfo, "PrusaLink");
+        printerInfoType.GetProperty("Version")!.SetValue(printerInfo, "1.0.0");
+
+        return printerInfo;
+    }
+
+    private static object CreatePrinterInfoWithNullManufacturer(string name)
+    {
+        // Use reflection to create an instance of the private PrinterInfo class
+        var networkDiscoveryServiceType = typeof(NetworkDiscoveryService);
+        var printerInfoType = networkDiscoveryServiceType.GetNestedType("PrinterInfo", BindingFlags.NonPublic);
+        var printerInfo = Activator.CreateInstance(printerInfoType!)
+            ?? throw new InvalidOperationException("Failed to create PrinterInfo instance");
+
+        printerInfoType!.GetProperty("Name")!.SetValue(printerInfo, name);
+        printerInfoType.GetProperty("Manufacturer")!.SetValue(printerInfo, null);
+        printerInfoType.GetProperty("Model")!.SetValue(printerInfo, "Valid Model");
+        printerInfoType.GetProperty("Firmware")!.SetValue(printerInfo, "Test Firmware");
+        printerInfoType.GetProperty("Version")!.SetValue(printerInfo, "1.0.0");
+
+        return printerInfo;
+    }
+
+    private static object CreatePrinterInfoWithUnknownManufacturerValidModel(string name)
+    {
+        // Use reflection to create an instance of the private PrinterInfo class
+        var networkDiscoveryServiceType = typeof(NetworkDiscoveryService);
+        var printerInfoType = networkDiscoveryServiceType.GetNestedType("PrinterInfo", BindingFlags.NonPublic);
+        var printerInfo = Activator.CreateInstance(printerInfoType!)
+            ?? throw new InvalidOperationException("Failed to create PrinterInfo instance");
+
+        printerInfoType!.GetProperty("Name")!.SetValue(printerInfo, name);
+        printerInfoType.GetProperty("Manufacturer")!.SetValue(printerInfo, "Unknown");
+        printerInfoType.GetProperty("Model")!.SetValue(printerInfo, "Valid Model Name");
+        printerInfoType.GetProperty("Firmware")!.SetValue(printerInfo, "Test Firmware");
         printerInfoType.GetProperty("Version")!.SetValue(printerInfo, "1.0.0");
 
         return printerInfo;
