@@ -190,12 +190,12 @@ echo "SQLite test completed."
 echo ""
 
 # Test PostgreSQL
-test_provider "Postgres" "Host=localhost;Database=forgeiq;Username=postgres;Password=postgres" "postgres"
+test_provider "Postgres" "Host=localhost;Database=printfarmer;Username=postgres;Password=postgres" "postgres"
 
 # Test MySQL  
-test_provider "MySql" "Server=localhost;Database=forgeiq;User=root;Password=example" "mysql"
+test_provider "MySql" "Server=localhost;Database=printfarmer;User=root;Password=example" "mysql"
 
 # Test SQL Server
-test_provider "SqlServer" "Server=localhost;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True" "sqlserver"
+test_provider "SqlServer" "Server=localhost;Database=printfarmer;User Id=sa;Password=Your_password123;TrustServerCertificate=True" "sqlserver"
 
 echo "=== All provider tests completed ==="

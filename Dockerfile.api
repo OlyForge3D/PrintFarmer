@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# API container for ForgeIQ (PrintFarmer) - ASP.NET Core API server only
+# API container for PrintFarmer - ASP.NET Core API server only
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app

@@ -163,20 +163,20 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         case "SqlServer":
             options.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer")
                                  ?? builder.Configuration.GetConnectionString("Default")
-                                 ?? "Server=localhost,1433;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;",
+                                 ?? "Server=localhost,1433;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;",
                                  o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
             break;
         case "Postgres":
             options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")
                                ?? builder.Configuration.GetConnectionString("Default")
-                               ?? "Host=localhost;Database=forgeiq;Username=forgeiq;Password=PrintFarm123!",
+                               ?? "Host=localhost;Database=printfarmer;Username=printfarmer;Password=PrintFarm123!",
                                o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
             {
                 var cs = builder.Configuration.GetConnectionString("MySql")
                          ?? builder.Configuration.GetConnectionString("Default")
-                         ?? "Server=localhost;Database=forgeiq;User=forgeiq;Password=PrintFarm123!;";
+                         ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
                 var serverVersion = ServerVersion.AutoDetect(cs);
                 options.UseMySql(cs, serverVersion);
                 break;

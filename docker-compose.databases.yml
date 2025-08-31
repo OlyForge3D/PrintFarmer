@@ -3,22 +3,22 @@
 #
 # Test with PostgreSQL:
 #   docker compose -f docker-compose.databases.yml up postgres -d
-#   docker compose up api web -d --env DB_PROVIDER=Postgres --env ConnectionStrings__Postgres=Host=localhost;Database=forgeiq;Username=postgres;Password=postgres
+#   docker compose up api web -d --env DB_PROVIDER=Postgres --env ConnectionStrings__Postgres=Host=localhost;Database=printfarmer;Username=postgres;Password=postgres
 #
 # Test with MySQL:
 #   docker compose -f docker-compose.databases.yml up mysql -d  
-#   docker compose up api web -d --env DB_PROVIDER=MySql --env ConnectionStrings__MySql=Server=localhost;Database=forgeiq;User=root;Password=example
+#   docker compose up api web -d --env DB_PROVIDER=MySql --env ConnectionStrings__MySql=Server=localhost;Database=printfarmer;User=root;Password=example
 #
 # Test with SQL Server:
 #   docker compose -f docker-compose.databases.yml up sqlserver -d
-#   docker compose up api web -d --env DB_PROVIDER=SqlServer --env "ConnectionStrings__SqlServer=Server=localhost;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True"
+#   docker compose up api web -d --env DB_PROVIDER=SqlServer --env "ConnectionStrings__SqlServer=Server=localhost;Database=printfarmer;User Id=sa;Password=Your_password123;TrustServerCertificate=True"
 
 services:
   postgres:
     image: postgres:15
     container_name: printfarmer-postgres
     environment:
-      POSTGRES_DB: forgeiq
+      POSTGRES_DB: printfarmer
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -36,10 +36,10 @@ services:
     image: mysql:8.0
     container_name: printfarmer-mysql
     environment:
-      MYSQL_DATABASE: forgeiq
+      MYSQL_DATABASE: printfarmer
       MYSQL_ROOT_PASSWORD: example
-      MYSQL_USER: forgeiq
-      MYSQL_PASSWORD: forgeiq
+      MYSQL_USER: printfarmer
+      MYSQL_PASSWORD: printfarmer
     ports:
       - "3306:3306"
     volumes:

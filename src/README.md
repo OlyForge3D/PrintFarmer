@@ -1,4 +1,6 @@
-# ForgeIQ Web (Blazor + ASP.NET C### Database Configuration
+# PrintFarmer Web (Blazor + ASP.NET Core)
+
+## Database Configuration
 
 The application supports multiple database providers with **SQL Server as the default**:
 
@@ -56,9 +58,9 @@ The server uses shared EF Core migrations that work across all supported provide
 
 Examples:
 - DB_PROVIDER=Sqlite, ConnectionStrings__Default=Data Source=farm.db
-- DB_PROVIDER=Postgres, ConnectionStrings__Postgres=Host=localhost;Database=forgeiq;Username=postgres;Password=postgres
-- DB_PROVIDER=SqlServer, ConnectionStrings__SqlServer=Server=localhost;Database=forgeiq;Trusted_Connection=True;TrustServerCertificate=True;
-- DB_PROVIDER=MySql, ConnectionStrings__MySql=Server=localhost;Database=forgeiq;User=root;Password=example;
+- DB_PROVIDER=Postgres, ConnectionStrings__Postgres=Host=localhost;Database=printfarmer;Username=postgres;Password=postgres
+- DB_PROVIDER=SqlServer, ConnectionStrings__SqlServer=Server=localhost;Database=printfarmer;Trusted_Connection=True;TrustServerCertificate=True;
+- DB_PROVIDER=MySql, ConnectionStrings__MySql=Server=localhost;Database=printfarmer;User=root;Password=example;
 
 ### Testing different providers
 
@@ -72,7 +74,7 @@ For local testing with different database providers:
    # Test with PostgreSQL
    cd src
    export DB_PROVIDER=Postgres
-   export ConnectionStrings__Postgres="Host=localhost;Database=forgeiq;Username=postgres;Password=postgres"
+   export ConnectionStrings__Postgres="Host=localhost;Database=printfarmer;Username=postgres;Password=postgres"
    dotnet run --project ./server/Farm.Web.Server.csproj
    ```
 

@@ -28,7 +28,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     private static readonly int MaxReconnectAttempts = 10;
 
     // Client identification for Moonraker
-    private static readonly string ClientName = "ForgeIQ";
+    private static readonly string ClientName = "PrintFarmer";
     private static readonly string ClientVersion = "1.0.0";
 
     public Task StartAsync(CancellationToken cancellationToken)

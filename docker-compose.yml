@@ -11,8 +11,8 @@ services:
       - ASPNETCORE_URLS=http://0.0.0.0:8080
       - ASPNETCORE_ENVIRONMENT=Production
       # SQL Server connection string for containerized SQL Server
-      - ConnectionStrings__Default=Server=sqlserver;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
-      - ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+      - ConnectionStrings__Default=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+      - ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
       - DB_INIT_MODE=EnsureCreated
       # CORS Configuration - Choose one approach:
       # Option 1: Allow any origin (for development/local networks)
@@ -25,9 +25,9 @@ services:
       # - DB_PROVIDER=Sqlite
       # - ConnectionStrings__Sqlite=Data Source=/data/farm.db
       # - DB_PROVIDER=Postgres
-      # - ConnectionStrings__Postgres=Host=postgres;Database=forgeiq;Username=postgres;Password=postgres
+      # - ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
       # - DB_PROVIDER=MySql
-      # - ConnectionStrings__MySql=Server=mysql;Database=forgeiq;User=root;Password=example;
+      # - ConnectionStrings__MySql=Server=mysql;Database=printfarmer;User=root;Password=example;
     ports:
       - "5088:8080"
     extra_hosts:

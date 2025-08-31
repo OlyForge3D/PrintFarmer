@@ -138,7 +138,7 @@ The server supports Sqlite (default), SqlServer, Postgres, and MySql. Select wit
    # Run API with PostgreSQL  
    docker compose up api web -d \
      -e DB_PROVIDER=Postgres \
-     -e ConnectionStrings__Postgres="Host=localhost;Database=forgeiq;Username=postgres;Password=postgres"
+     -e ConnectionStrings__Postgres="Host=localhost;Database=printfarmer;Username=postgres;Password=postgres"
    ```
 
 2. **Automated testing:**
@@ -149,9 +149,9 @@ The server supports Sqlite (default), SqlServer, Postgres, and MySql. Select wit
 
 Examples:
 - DB_PROVIDER=Sqlite and ConnectionStrings__Default=Data Source=/data/farm.db
-- DB_PROVIDER=Postgres and ConnectionStrings__Postgres=Host=postgres;Database=forgeiq;Username=postgres;Password=postgres
-- DB_PROVIDER=SqlServer and ConnectionStrings__SqlServer=Server=sqlserver;Database=forgeiq;User Id=sa;Password=Your_password123;TrustServerCertificate=True;
-- DB_PROVIDER=MySql and ConnectionStrings__MySql=Server=mysql;Database=forgeiq;User=root;Password=example;
+- DB_PROVIDER=Postgres and ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
+- DB_PROVIDER=SqlServer and ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Password=Your_password123;TrustServerCertificate=True;
+- DB_PROVIDER=MySql and ConnectionStrings__MySql=Server=mysql;Database=printfarmer;User=root;Password=example;
 
 Note: All providers now use shared migrations that are applied automatically on startup.
 

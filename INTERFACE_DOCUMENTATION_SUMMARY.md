@@ -1,6 +1,6 @@
 # Service Interfaces Documentation Summary
 
-This document summarizes the comprehensive XML documentation that has been added to all service interfaces in the ForgeIQ/PrintFarmer project.
+This document summarizes the comprehensive XML documentation that has been added to all service interfaces in the PrintFarmer project.
 
 ## Documentation Completed
 
@@ -107,4 +107,4 @@ With comprehensive interface documentation in place, developers can:
 4. Onboard new developers more effectively with self-documenting code
 5. Extend interfaces with confidence in maintaining documentation standards
 
-The interfaces now serve as a complete contract specification for all printer communication protocols supported by ForgeIQ/PrintFarmer.
+The interfaces now serve as a complete contract specification for all printer communication protocols supported by PrintFarmer.
