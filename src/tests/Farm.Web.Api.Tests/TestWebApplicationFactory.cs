@@ -22,13 +22,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
         var dbFile = $"farm_test_{Guid.NewGuid():N}.db";
         _dbPath = Path.Combine(Path.GetTempPath(), dbFile);
         TryDelete();
-        
+
         // Initialize mocks
         MockNetworkDiscoveryService = new Mock<INetworkDiscoveryService>();
         MockMoonrakerClient = new Mock<IMoonrakerClient>();
         MockPrusaLinkClient = new Mock<IPrusaLinkClient>();
         MockSdcpClient = new Mock<ISdcpClient>();
-        
+
         // Set up default mock behaviors
         SetupDefaultMockBehaviors();
     }
@@ -46,62 +46,62 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
             };
             config.AddInMemoryCollection(dict!);
         });
-        
+
         builder.ConfigureServices(services =>
         {
             // Remove existing service registrations
             var networkDiscoveryDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(INetworkDiscoveryService));
             if (networkDiscoveryDescriptor != null) services.Remove(networkDiscoveryDescriptor);
-            
+
             var moonrakerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMoonrakerClient));
             if (moonrakerDescriptor != null) services.Remove(moonrakerDescriptor);
-            
+
             var prusaDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPrusaLinkClient));
             if (prusaDescriptor != null) services.Remove(prusaDescriptor);
-            
+
             var sdcpDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISdcpClient));
             if (sdcpDescriptor != null) services.Remove(sdcpDescriptor);
-            
-        // Register mocked services
-        services.AddSingleton(MockNetworkDiscoveryService.Object);
-        services.AddSingleton(MockMoonrakerClient.Object);
-        services.AddSingleton(MockPrusaLinkClient.Object);
-        services.AddSingleton(MockSdcpClient.Object);
-    });
-    
-    // Set up default mock behaviors
-    MockPrusaLinkClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync(new Farm.Web.Api.Services.PrusaCompositeStatus(
-            IsOnline: true,
-            State: "Idle",
-            Progress: 0,
-            JobName: null,
-            ThumbnailUrl: null,
-            CameraStreamUrl: null,
-            CameraSnapshotUrl: null
-        ));
-        
-    MockMoonrakerClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync(new Farm.Web.Api.Services.PrinterCompositeStatus(
-            IsOnline: true,
-            State: "Idle",
-            Progress: 0,
-            JobName: null,
-            ThumbnailUrl: null,
-            CameraStreamUrl: null,
-            CameraSnapshotUrl: null
-        ));
-        
-    MockSdcpClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync(new Farm.Web.Api.Services.PrinterCompositeStatus(
-            IsOnline: true,
-            State: "Idle",
-            Progress: 0,
-            JobName: null,
-            ThumbnailUrl: null,
-            CameraStreamUrl: null,
-            CameraSnapshotUrl: null
-        ));        return base.CreateHost(builder);
+
+            // Register mocked services
+            services.AddSingleton(MockNetworkDiscoveryService.Object);
+            services.AddSingleton(MockMoonrakerClient.Object);
+            services.AddSingleton(MockPrusaLinkClient.Object);
+            services.AddSingleton(MockSdcpClient.Object);
+        });
+
+        // Set up default mock behaviors
+        MockPrusaLinkClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Web.Api.Services.PrusaCompositeStatus(
+                IsOnline: true,
+                State: "Idle",
+                Progress: 0,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null
+            ));
+
+        MockMoonrakerClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Web.Api.Services.PrinterCompositeStatus(
+                IsOnline: true,
+                State: "Idle",
+                Progress: 0,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null
+            ));
+
+        MockSdcpClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Web.Api.Services.PrinterCompositeStatus(
+                IsOnline: true,
+                State: "Idle",
+                Progress: 0,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null
+            )); return base.CreateHost(builder);
     }
 
     private void SetupDefaultMockBehaviors()
