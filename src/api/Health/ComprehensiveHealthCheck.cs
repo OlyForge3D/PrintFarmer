@@ -18,16 +18,34 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         var overallHealthy = true;
         var issues = new List<string>();
 
-        // Database connectivity
+        // Database connectivity and initialization
         try
         {
             var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
-            checks["Database"] = new { Status = canConnect ? "Healthy" : "Unhealthy", Provider = dbContext.Database.ProviderName };
-
             if (!canConnect)
             {
+                checks["Database"] = new { Status = "Unhealthy", Provider = dbContext.Database.ProviderName, Error = "Cannot connect" };
                 overallHealthy = false;
                 issues.Add("Database connection failed");
+            }
+            else
+            {
+                // Check if database is initialized by verifying manufacturers exist
+                var manufacturerCount = await dbContext.Manufacturers.CountAsync(cancellationToken);
+                var isInitialized = manufacturerCount > 0;
+                
+                checks["Database"] = new { 
+                    Status = isInitialized ? "Healthy" : "Unhealthy", 
+                    Provider = dbContext.Database.ProviderName,
+                    ManufacturerCount = manufacturerCount,
+                    Initialized = isInitialized
+                };
+
+                if (!isInitialized)
+                {
+                    overallHealthy = false;
+                    issues.Add("Database not initialized - no manufacturers found");
+                }
             }
         }
         catch (Exception ex)
