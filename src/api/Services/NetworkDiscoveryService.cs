@@ -271,8 +271,11 @@ public class NetworkDiscoveryService(
 
     private static DiscoveredPrinterDto CreateDiscoveredPrinter(string ipAddress, int port, PrinterBackend backend, PrinterInfo info)
     {
-        var serverUrl = $"http://{ipAddress}:{port}";
-
+        // For Moonraker printers on port 80, omit the port number from the URL for cleaner URLs
+        var serverUrl = backend == PrinterBackend.Moonraker && port == 80 
+            ? $"http://{ipAddress}" 
+            : $"http://{ipAddress}:{port}";
+        
         return new DiscoveredPrinterDto
         {
             IpAddress = ipAddress,
