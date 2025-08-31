@@ -61,14 +61,12 @@ else
                                     @if (HasCamera(p))
                                     {
                                         <button class="icon-btn" title="@CameraBtnTitle(p.Id)" aria-label="Toggle camera" @onclick="() => ToggleCamera(p.Id)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                <path d="M17 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3.5l4 4v-11l-4 4z"/>
-                                            </svg>
+                                            <span data-icon="@(IsCameraVisible(p.Id) ? "cameraHide" : "camera")"></span>
                                         </button>
                                     }
                                 </div>
                             </div>
-                            <div class="status @(loadingStatuses.Contains(p.Id) ? "loading" : p.IsOnline ? "online" : "offline")">
+                            <div class="status @(loadingStatuses.Contains(p.Id) ? "loading" : p.IsOnline ? "online" : "offline")">>
                                 @if (loadingStatuses.Contains(p.Id))
                                 {
                                     <span class="status-loading">
@@ -205,9 +203,7 @@ else
                                     @if (HasCamera(p))
                                     {
                                         <button class="icon-btn" title="@CameraBtnTitle(p.Id)" aria-label="Toggle camera" @onclick="() => ToggleCamera(p.Id)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                <path d="M17 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3.5l4 4v-11l-4 4z"/>
-                                            </svg>
+                                            <span data-icon="@(IsCameraVisible(p.Id) ? "cameraHide" : "camera")"></span>
                                         </button>
                                     }
                                 </div>

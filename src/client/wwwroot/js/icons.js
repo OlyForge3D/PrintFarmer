@@ -43,6 +43,11 @@ window.Icons = {
         <path d="M17 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3.5l4 4v-11l-4 4z"/>
     </svg>`,
     
+    // Hide camera icon (eye-slash)
+    cameraHide: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l18 18a.75.75 0 1 0 1.06-1.06l-18-18ZM9.88 14.12a2 2 0 0 1-2.83 0 1.65 1.65 0 0 1 0-2.34l2.83-2.83a2 2 0 0 1 2.83 0 1.65 1.65 0 0 1 0 2.34L9.88 14.12ZM12 5.5c4.14 0 7.5 3.36 7.5 7.5 0 .85-.15 1.66-.41 2.42l1.49 1.49C21.35 15.73 22 14.41 22 12.5 22 6.98 17.52 2.5 12 2.5c-1.41 0-2.73.59-3.91 1.42l1.49 1.49C10.34 5.65 11.15 5.5 12 5.5ZM2 3.77l1.27-1.27L20.23 19.46 19 20.73l-2.68-2.68C15.06 19.83 13.5 20.5 12 20.5c-5.52 0-10-4.48-10-10 0-2.21 1.56-4.17 3.18-5.55L2 3.77Z"/>
+    </svg>`,
+    
     // Delete/trash icon
     delete: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
