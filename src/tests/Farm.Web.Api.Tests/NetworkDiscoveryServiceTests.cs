@@ -67,7 +67,8 @@ public class NetworkDiscoveryServiceTests
         // Use reflection to create an instance of the private PrinterInfo class
         var networkDiscoveryServiceType = typeof(NetworkDiscoveryService);
         var printerInfoType = networkDiscoveryServiceType.GetNestedType("PrinterInfo", BindingFlags.NonPublic);
-        var printerInfo = Activator.CreateInstance(printerInfoType!);
+        var printerInfo = Activator.CreateInstance(printerInfoType!) 
+            ?? throw new InvalidOperationException("Failed to create PrinterInfo instance");
         
         printerInfoType!.GetProperty("Name")!.SetValue(printerInfo, name);
         printerInfoType.GetProperty("Manufacturer")!.SetValue(printerInfo, "Test Manufacturer");
