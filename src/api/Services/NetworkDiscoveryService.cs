@@ -272,10 +272,14 @@ public class NetworkDiscoveryService(
     private static DiscoveredPrinterDto CreateDiscoveredPrinter(string ipAddress, int port, PrinterBackend backend, PrinterInfo info)
     {
         // For Moonraker printers on port 80, omit the port number from the URL for cleaner URLs
-        var serverUrl = backend == PrinterBackend.Moonraker && port == 80 
-            ? $"http://{ipAddress}" 
+        var serverUrl = backend == PrinterBackend.Moonraker && port == 80
+            ? $"http://{ipAddress}"
             : $"http://{ipAddress}:{port}";
-        
+
+        // Filter out "Unknown" values for manufacturer and model
+        var manufacturer = IsUnknownValue(info.Manufacturer) ? null : info.Manufacturer;
+        var model = IsUnknownValue(info.Model) ? null : info.Model;
+
         return new DiscoveredPrinterDto
         {
             IpAddress = ipAddress,
@@ -283,13 +287,19 @@ public class NetworkDiscoveryService(
             ServerUrl = serverUrl,
             Backend = backend,
             Name = info.Name ?? $"Printer-{ipAddress}",
-            Manufacturer = info.Manufacturer,
-            Model = info.Model,
+            Manufacturer = manufacturer,
+            Model = model,
             Firmware = info.Firmware,
             Version = info.Version,
             IsReachable = true,
             DiscoveredAt = DateTime.UtcNow
         };
+    }
+
+    private static bool IsUnknownValue(string? value)
+    {
+        return !string.IsNullOrEmpty(value) &&
+               value.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ExtractHostnameFromUrl(string url)

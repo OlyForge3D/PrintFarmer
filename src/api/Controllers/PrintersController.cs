@@ -1810,7 +1810,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                             // Look for the largest thumbnail (prefer 400x300, then 300x300, then others)
                             var thumbnailObj = array
                                 .Where(t => t.TryGetProperty("relative_path", out _))
-                                .OrderByDescending(t => 
+                                .OrderByDescending(t =>
                                 {
                                     var width = t.TryGetProperty("width", out var w) ? w.GetInt32() : 0;
                                     var height = t.TryGetProperty("height", out var h) ? h.GetInt32() : 0;
@@ -1818,7 +1818,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                                 })
                                 .FirstOrDefault();
 
-                            if (thumbnailObj.ValueKind == System.Text.Json.JsonValueKind.Object && 
+                            if (thumbnailObj.ValueKind == System.Text.Json.JsonValueKind.Object &&
                                 thumbnailObj.TryGetProperty("relative_path", out var relativePathProp))
                             {
                                 var relativePath = relativePathProp.GetString();
@@ -1856,26 +1856,26 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(30)); // 30 second total timeout
 
             var discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
-            
+
             // Get existing printer ServerUrls to filter out duplicates
             var existingUrls = await db.Printers
                 .AsNoTracking()
                 .Select(p => p.ServerUrl)
                 .ToListAsync(ct);
-            
+
             // Normalize both existing and discovered URLs for proper comparison
             var normalizedExistingUrls = existingUrls
                 .Select(url => NormalizeServerUrl(url, 80))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            
+
             // Filter out printers that already exist in the database
             var newPrinters = discovered
                 .Where(d => !normalizedExistingUrls.Contains(NormalizeServerUrl(d.ServerUrl, 80)))
                 .ToList();
-            
-            logger.LogInformation("Discovery completed. Found {TotalCount} printers, {NewCount} are new", 
+
+            logger.LogInformation("Discovery completed. Found {TotalCount} printers, {NewCount} are new",
                 discovered.Count, newPrinters.Count);
-            
+
             return Ok(newPrinters);
         }
         catch (OperationCanceledException)

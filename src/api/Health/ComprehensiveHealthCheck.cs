@@ -33,9 +33,10 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 // Check if database is initialized by verifying manufacturers exist
                 var manufacturerCount = await dbContext.Manufacturers.CountAsync(cancellationToken);
                 var isInitialized = manufacturerCount > 0;
-                
-                checks["Database"] = new { 
-                    Status = isInitialized ? "Healthy" : "Unhealthy", 
+
+                checks["Database"] = new
+                {
+                    Status = isInitialized ? "Healthy" : "Unhealthy",
                     Provider = dbContext.Database.ProviderName,
                     ManufacturerCount = manufacturerCount,
                     Initialized = isInitialized
