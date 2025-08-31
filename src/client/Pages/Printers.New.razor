@@ -154,6 +154,7 @@
 @code {
     private CreatePrinterDto printer = new();
     private string? ipAddress;
+    private string? returnTo;
     private ElementReference dateAcqAddRef;
     private List<ManufacturerDto> manufacturers = new();
     private List<ModelDto> models = new();
@@ -197,6 +198,11 @@
         if (queryParams.TryGetValue("ipAddress", out var ipValue))
         {
             ipAddress = ipValue;
+        }
+        
+        if (queryParams.TryGetValue("returnTo", out var returnToValue))
+        {
+            returnTo = returnToValue;
         }
 
         // Auto-select manufacturer if provided
@@ -282,7 +288,22 @@
         if (resp.IsSuccessStatusCode)
         {
             toast.Success("Printer added");
-            Nav.NavigateTo("/printers");
+            
+            // If this printer was added from discovery, remove it from session storage
+            if (!string.IsNullOrEmpty(printer.ServerUrl))
+            {
+                await RemoveFromDiscoveredPrinters(printer.ServerUrl);
+            }
+            
+            // Navigate back to the appropriate page
+            if (!string.IsNullOrEmpty(returnTo))
+            {
+                Nav.NavigateTo($"/{returnTo}");
+            }
+            else
+            {
+                Nav.NavigateTo("/");
+            }
         }
         else
         {
@@ -357,4 +378,41 @@
 
     private void ToggleNewManufacturer() => showNewManufacturer = !showNewManufacturer;
     private void ToggleNewModel() => showNewModel = !showNewModel;
+    
+    private async Task RemoveFromDiscoveredPrinters(string serverUrl)
+    {
+        try
+        {
+            var discoveredJson = await JS.InvokeAsync<string>("sessionStorage.getItem", "discoveredPrinters");
+            if (!string.IsNullOrEmpty(discoveredJson))
+            {
+                var discoveredPrinters = System.Text.Json.JsonSerializer.Deserialize<List<DiscoveredPrinterDto>>(discoveredJson, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                
+                if (discoveredPrinters != null)
+                {
+                    // Remove the printer that was just added
+                    var updatedList = discoveredPrinters.Where(p => p.ServerUrl != serverUrl).ToList();
+                    
+                    if (updatedList.Any())
+                    {
+                        // Save the updated list
+                        var updatedJson = System.Text.Json.JsonSerializer.Serialize(updatedList);
+                        await JS.InvokeVoidAsync("sessionStorage.setItem", "discoveredPrinters", updatedJson);
+                    }
+                    else
+                    {
+                        // Remove the entire item if no printers remain
+                        await JS.InvokeVoidAsync("sessionStorage.removeItem", "discoveredPrinters");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to update discovered printers in session storage: {ex.Message}");
+        }
+    }
 }
