@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using System.Net.Http.Json;
+using Moq;
 
 namespace Farm.Web.Api.Tests;
 
@@ -119,6 +121,89 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
 
         var del = await client.DeleteAsync($"/api/printers/{dto.Id}");
         del.IsSuccessStatusCode.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Discovery_should_filter_existing_printers()
+    {
+        var client = _factory.CreateClient();
+        
+        // Set up mock discovery service to return some test printers
+        var mockDiscoveredPrinters = new List<Farm.Web.Shared.DiscoveredPrinterDto>
+        {
+            new() 
+            {
+                IpAddress = "192.168.1.100",
+                Port = 80,
+                ServerUrl = "http://192.168.1.100:80",
+                Backend = Farm.Web.Shared.PrinterBackend.PrusaLink,
+                Name = "Test Printer 1",
+                IsReachable = true,
+                DiscoveredAt = DateTime.UtcNow
+            },
+            new() 
+            {
+                IpAddress = "192.168.1.101", 
+                Port = 7125,
+                ServerUrl = "http://192.168.1.101:7125",
+                Backend = Farm.Web.Shared.PrinterBackend.Moonraker,
+                Name = "Test Printer 2",
+                IsReachable = true,
+                DiscoveredAt = DateTime.UtcNow
+            }
+        };
+        
+        _factory.MockNetworkDiscoveryService
+            .Setup(x => x.DiscoverPrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockDiscoveredPrinters);
+        
+        // First, create a test printer with one of the URLs that will be discovered
+        var createDto = new Farm.Web.Shared.CreatePrinterDto
+        {
+            Name = "existing-printer",
+            ServerUrl = "http://192.168.1.100:80", 
+            Backend = Farm.Web.Shared.PrinterBackend.PrusaLink,
+            Notes = "Test existing printer"
+        };
+
+        var created = await client.PostAsJsonAsync("/api/printers", createDto);
+        created.IsSuccessStatusCode.Should().BeTrue();
+        
+        var existingPrinter = await created.Content.ReadFromJsonAsync<Farm.Web.Shared.PrinterDto>();
+        existingPrinter.Should().NotBeNull();
+
+        try
+        {
+            // Now test the discovery endpoint
+            var discoveryResponse = await client.GetAsync("/api/printers/discover");
+            discoveryResponse.IsSuccessStatusCode.Should().BeTrue();
+            
+            var discoveredPrinters = await discoveryResponse.Content.ReadFromJsonAsync<Farm.Web.Shared.DiscoveredPrinterDto[]>();
+            discoveredPrinters.Should().NotBeNull();
+            
+            // Should only return one printer (the second one) since the first matches existing printer
+            discoveredPrinters!.Length.Should().Be(1);
+            discoveredPrinters[0].ServerUrl.Should().Be("http://192.168.1.101:7125");
+            discoveredPrinters[0].Name.Should().Be("Test Printer 2");
+            
+            // Verify that the existing printer is NOT in the discovered results
+            var duplicatePrinter = discoveredPrinters!.FirstOrDefault(d => d.ServerUrl == existingPrinter!.ServerUrl);
+            duplicatePrinter.Should().BeNull("because existing printers should be filtered out");
+            
+            // Debug: log what we got vs what we expected
+            Console.WriteLine($"Expected existing URL: {existingPrinter!.ServerUrl}");
+            Console.WriteLine($"Discovery returned {discoveredPrinters.Length} printers:");
+            foreach (var printer in discoveredPrinters)
+            {
+                Console.WriteLine($"  - {printer.Name}: {printer.ServerUrl}");
+            }
+        }
+        finally
+        {
+            // Clean up - delete the test printer
+            var del = await client.DeleteAsync($"/api/printers/{existingPrinter!.Id}");
+            del.IsSuccessStatusCode.Should().BeTrue();
+        }
     }
 
     private record HealthzDto(string status);

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services;
@@ -1855,8 +1856,27 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(30)); // 30 second total timeout
 
             var discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
-            logger.LogInformation("Discovery completed. Found {Count} printers", discovered.Count);
-            return Ok(discovered);
+            
+            // Get existing printer ServerUrls to filter out duplicates
+            var existingUrls = await db.Printers
+                .AsNoTracking()
+                .Select(p => p.ServerUrl)
+                .ToListAsync(ct);
+            
+            // Normalize both existing and discovered URLs for proper comparison
+            var normalizedExistingUrls = existingUrls
+                .Select(url => NormalizeServerUrl(url, 80))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            
+            // Filter out printers that already exist in the database
+            var newPrinters = discovered
+                .Where(d => !normalizedExistingUrls.Contains(NormalizeServerUrl(d.ServerUrl, 80)))
+                .ToList();
+            
+            logger.LogInformation("Discovery completed. Found {TotalCount} printers, {NewCount} are new", 
+                discovered.Count, newPrinters.Count);
+            
+            return Ok(newPrinters);
         }
         catch (OperationCanceledException)
         {
