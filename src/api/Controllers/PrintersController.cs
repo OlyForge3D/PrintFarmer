@@ -1792,12 +1792,40 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 if (thumbnailValue is System.Text.Json.JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
                     var array = jsonElement.EnumerateArray().ToList();
-                    if (array.Count > 0 && array[0].ValueKind == System.Text.Json.JsonValueKind.String)
+                    if (array.Count > 0)
                     {
-                        var thumbnailPath = array[0].GetString();
-                        if (!string.IsNullOrEmpty(thumbnailPath))
+                        // Handle array of strings (legacy format)
+                        if (array[0].ValueKind == System.Text.Json.JsonValueKind.String)
                         {
-                            return thumbnailPath.StartsWith("http") ? thumbnailPath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailPath}";
+                            var thumbnailPath = array[0].GetString();
+                            if (!string.IsNullOrEmpty(thumbnailPath))
+                            {
+                                return thumbnailPath.StartsWith("http") ? thumbnailPath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailPath}";
+                            }
+                        }
+                        // Handle array of thumbnail objects with relative_path property
+                        else if (array[0].ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            // Look for the largest thumbnail (prefer 400x300, then 300x300, then others)
+                            var thumbnailObj = array
+                                .Where(t => t.TryGetProperty("relative_path", out _))
+                                .OrderByDescending(t => 
+                                {
+                                    var width = t.TryGetProperty("width", out var w) ? w.GetInt32() : 0;
+                                    var height = t.TryGetProperty("height", out var h) ? h.GetInt32() : 0;
+                                    return width * height; // Prefer larger thumbnails
+                                })
+                                .FirstOrDefault();
+
+                            if (thumbnailObj.ValueKind == System.Text.Json.JsonValueKind.Object && 
+                                thumbnailObj.TryGetProperty("relative_path", out var relativePathProp))
+                            {
+                                var relativePath = relativePathProp.GetString();
+                                if (!string.IsNullOrEmpty(relativePath))
+                                {
+                                    return relativePath.StartsWith("http") ? relativePath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{relativePath}";
+                                }
+                            }
                         }
                     }
                 }
