@@ -3,6 +3,7 @@ using System;
 using Farm.Web.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,98 +11,14 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Web.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250831173301_AddGcodeLibraryAndJobQueue")]
+    partial class AddGcodeLibraryAndJobQueue
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
-
-            modelBuilder.Entity("Farm.Web.Api.Domain.DiscoveredGcodeFile", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("AlreadyInLibrary")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ExistingLibraryFileId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<double?>("ExtractedFilamentLength")
-                        .HasColumnType("REAL");
-
-                    b.Property<string>("ExtractedInfill")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ExtractedLayerHeight")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ExtractedMaterial")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<double?>("ExtractedNozzleDiameter")
-                        .HasColumnType("REAL");
-
-                    b.Property<double?>("ExtractedPrintTime")
-                        .HasColumnType("REAL");
-
-                    b.Property<string>("ExtractedSlicerName")
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ExtractedSlicerVersion")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FileHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<long>("FileSizeBytes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("HarvestOperationId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsSelected")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("ModifiedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PrinterPath")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("ProcessingFailed")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AlreadyInLibrary");
-
-                    b.HasIndex("FileHash");
-
-                    b.HasIndex("HarvestOperationId");
-
-                    b.HasIndex("IsSelected");
-
-                    b.ToTable("DiscoveredGcodeFiles");
-                });
 
             modelBuilder.Entity("Farm.Web.Api.Domain.GcodeFile", b =>
                 {
@@ -109,13 +26,7 @@ namespace Farm.Web.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<double?>("BedTemperature")
-                        .HasColumnType("REAL");
-
                     b.Property<string>("CompatibleMaterials")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -148,28 +59,9 @@ namespace Farm.Web.Api.Migrations
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("INTEGER");
 
-                    b.Property<double?>("InfillPercentage")
-                        .HasColumnType("REAL");
-
-                    b.Property<DateTime?>("LastSeenOnPrinter")
-                        .HasColumnType("TEXT");
-
-                    b.Property<double?>("LayerHeight")
-                        .HasColumnType("REAL");
-
                     b.Property<string>("OriginalFileName")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OriginalPrinterPath")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<double?>("PrintSpeed")
-                        .HasColumnType("REAL");
-
-                    b.Property<string>("PrintTemperatures")
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("RequiredBuildVolumeX")
@@ -196,12 +88,6 @@ namespace Farm.Web.Api.Migrations
                     b.Property<string>("SlicerVersion")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("Source")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid?>("SourcePrinterId")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("Tags")
                         .HasColumnType("TEXT");
 
@@ -211,13 +97,7 @@ namespace Farm.Web.Api.Migrations
                     b.Property<Guid?>("TargetPrinterId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("TargetPrinterModels")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("ThumbnailPath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UploadedAt")
@@ -232,10 +112,6 @@ namespace Farm.Web.Api.Migrations
 
                     b.HasIndex("RequiredNozzleDiameter");
 
-                    b.HasIndex("Source");
-
-                    b.HasIndex("SourcePrinterId");
-
                     b.HasIndex("TargetModelId");
 
                     b.HasIndex("TargetPrinterId");
@@ -243,62 +119,6 @@ namespace Farm.Web.Api.Migrations
                     b.HasIndex("UploadedAt");
 
                     b.ToTable("GcodeFiles");
-                });
-
-            modelBuilder.Entity("Farm.Web.Api.Domain.GcodeHarvestOperation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("FilesAdded")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("FilesErrored")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("FilesFound")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("FilesSkipped")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("IncludeSubdirectories")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long?>("MaxFileSizeBytes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("ModifiedAfter")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long>("TotalBytesProcessed")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("StartedAt");
-
-                    b.HasIndex("Status");
-
-                    b.ToTable("GcodeHarvestOperations");
                 });
 
             modelBuilder.Entity("Farm.Web.Api.Domain.Manufacturer", b =>
@@ -327,38 +147,32 @@ namespace Farm.Web.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime?>("ActualEndTime")
-                        .HasColumnType("TEXT");
-
-                    b.Property<double?>("ActualFilamentUsage")
-                        .HasColumnType("REAL");
-
-                    b.Property<TimeSpan?>("ActualPrintTime")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ActualStartTime")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("AssignedPrinterId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<bool>("AutoAssign")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<double?>("EstimatedFilamentUsage")
+                    b.Property<double?>("BedTemperature")
                         .HasColumnType("REAL");
 
-                    b.Property<TimeSpan?>("EstimatedPrintTime")
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentState")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExcludedPrinterIds")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("FailureReason")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid>("GcodeFileId")
                         .HasColumnType("TEXT");
+
+                    b.Property<double?>("HotendTemperature")
+                        .HasColumnType("REAL");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -371,8 +185,8 @@ namespace Farm.Web.Api.Migrations
                     b.Property<int>("Priority")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("QueuePosition")
-                        .HasColumnType("INTEGER");
+                    b.Property<double?>("ProgressPercentage")
+                        .HasColumnType("REAL");
 
                     b.Property<DateTime>("QueuedAt")
                         .HasColumnType("TEXT");
@@ -380,17 +194,14 @@ namespace Farm.Web.Api.Migrations
                     b.Property<string>("RequiredCapabilities")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("RequiredMaterialType")
-                        .HasColumnType("TEXT");
+                    b.Property<int?>("SpoolId")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<decimal?>("RequiredNozzleDiameter")
+                    b.Property<DateTime?>("StartedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -466,9 +277,6 @@ namespace Farm.Web.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("TEXT");
 
@@ -502,9 +310,6 @@ namespace Farm.Web.Api.Migrations
                     b.Property<int?>("MaxHotendTemp")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("MaxPrintSpeed")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int?>("MinBedTemp")
                         .HasColumnType("INTEGER");
 
@@ -524,12 +329,6 @@ namespace Farm.Web.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SupportedMaterials")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("SupportsAutoLeveling")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -627,24 +426,8 @@ namespace Farm.Web.Api.Migrations
                     b.ToTable("SpoolmanConfigs");
                 });
 
-            modelBuilder.Entity("Farm.Web.Api.Domain.DiscoveredGcodeFile", b =>
-                {
-                    b.HasOne("Farm.Web.Api.Domain.GcodeHarvestOperation", "HarvestOperation")
-                        .WithMany()
-                        .HasForeignKey("HarvestOperationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("HarvestOperation");
-                });
-
             modelBuilder.Entity("Farm.Web.Api.Domain.GcodeFile", b =>
                 {
-                    b.HasOne("Farm.Web.Api.Domain.Printer", "SourcePrinter")
-                        .WithMany()
-                        .HasForeignKey("SourcePrinterId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Farm.Web.Api.Domain.PrinterModel", "TargetModel")
                         .WithMany()
                         .HasForeignKey("TargetModelId")
@@ -655,22 +438,9 @@ namespace Farm.Web.Api.Migrations
                         .HasForeignKey("TargetPrinterId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.Navigation("SourcePrinter");
-
                     b.Navigation("TargetModel");
 
                     b.Navigation("TargetPrinter");
-                });
-
-            modelBuilder.Entity("Farm.Web.Api.Domain.GcodeHarvestOperation", b =>
-                {
-                    b.HasOne("Farm.Web.Api.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Printer");
                 });
 
             modelBuilder.Entity("Farm.Web.Api.Domain.PrintJob", b =>
@@ -711,8 +481,8 @@ namespace Farm.Web.Api.Migrations
             modelBuilder.Entity("Farm.Web.Api.Domain.PrinterCapabilities", b =>
                 {
                     b.HasOne("Farm.Web.Api.Domain.Printer", "Printer")
-                        .WithOne("Capabilities")
-                        .HasForeignKey("Farm.Web.Api.Domain.PrinterCapabilities", "PrinterId")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -741,11 +511,6 @@ namespace Farm.Web.Api.Migrations
             modelBuilder.Entity("Farm.Web.Api.Domain.Manufacturer", b =>
                 {
                     b.Navigation("Models");
-                });
-
-            modelBuilder.Entity("Farm.Web.Api.Domain.Printer", b =>
-                {
-                    b.Navigation("Capabilities");
                 });
 #pragma warning restore 612, 618
         }

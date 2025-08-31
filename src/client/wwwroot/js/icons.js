@@ -57,6 +57,101 @@ window.Icons = {
     temperature: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M15 14.76V5a3 3 0 10-6 0v9.76a5 5 0 106 0zM10 5a2 2 0 114 0v9.76l.2.2A3 3 0 1110 15l.2-.24V5z"/>
         <path d="M12 17a1 1 0 001-1V8a1 1 0 10-2 0v8a1 1 0 001 1z"/>
+    </svg>`,
+
+    sprout: `<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <rect width="64" height="64" fill="#1E1B18"/>
+    <g transform="translate(16, 16)">
+        <!-- Soil mound -->
+        <ellipse cx="16" cy="32" rx="12" ry="6" fill="#6DBE45"/>
+        
+        <!-- Stem -->
+        <rect x="15" y="20" width="2" height="12" fill="#6DBE45"/>
+        
+        <!-- Left leaf -->
+        <path d="M15 20 C10 15, 5 20, 10 25" fill="#6DBE45"/>
+        
+        <!-- Right leaf -->
+        <path d="M17 20 C22 15, 27 20, 22 25" fill="#6DBE45"/>
+    </g>
+    </svg>`,
+    sproutAnimated: `<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <style>
+        .sprout {
+        transform-origin: center;
+        animation: growPulse 2s ease-in-out infinite;
+        }
+
+        @keyframes growPulse {
+        0%   { transform: scale(1); opacity: 1; }
+        50%  { transform: scale(1.1); opacity: 0.85; }
+        100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+
+    <rect width="64" height="64" fill="#1E1B18"/>
+    <g class="sprout" transform="translate(16, 16)">
+        <!-- Soil mound -->
+        <ellipse cx="16" cy="32" rx="12" ry="6" fill="#6DBE45"/>
+        
+        <!-- Stem -->
+        <rect x="15" y="20" width="2" height="12" fill="#6DBE45"/>
+        
+        <!-- Left leaf -->
+        <path d="M15 20 C10 15, 5 20, 10 25" fill="#6DBE45"/>
+        
+        <!-- Right leaf -->
+        <path d="M17 20 C22 15, 27 20, 22 25" fill="#6DBE45"/>
+    </g>
+    </svg>`,
+    barnPrinter: `<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background Soil -->
+    <rect width="64" height="64" fill="#1E1B18"/>
+
+    <!-- Barn-style printer node -->
+    <g transform="translate(16, 16)">
+        <!-- Barn frame -->
+        <path d="M16,0 L0,10 L0,27 H32 V10 L16,0 Z" fill="#6DBE45"/>
+
+        <!-- Printer gantry -->
+        <rect x="8" y="8" width="16" height="2" fill="#4A4A4A"/>
+        <rect x="14" y="10" width="4" height="4" fill="#4A4A4A"/>
+
+        <!-- Printed cube -->
+        <path d="M12,18 L12,22 H20 L20,18 Z" fill="#6DBE45"/>
+    </g>
+    </svg>`
+    barnPrinterAnimated: `<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <style>
+        .cube {
+        animation: pulseCube 2s ease-in-out infinite;
+        transform-origin: center;
+        }
+
+        @keyframes pulseCube {
+        0%   { transform: scale(1); opacity: 1; }
+        50%  { transform: scale(1.1); opacity: 0.85; }
+        100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+
+    <!-- Background -->
+    <rect width="64" height="64" fill="#1E1B18"/>
+
+    <!-- Barn-style printer -->
+    <g transform="translate(16, 16)">
+        <!-- Barn frame -->
+        <path d="M16,0 L0,10 L0,27 H32 V10 L16,0 Z" fill="#6DBE45"/>
+
+        <!-- Printer gantry -->
+        <rect x="8" y="8" width="16" height="2" fill="#4A4A4A"/>
+        <rect x="14" y="10" width="4" height="4" fill="#4A4A4A"/>
+
+        <!-- Glowing cube (animated) -->
+        <g class="cube">
+        <path d="M12,18 L12,22 H20 L20,18 Z" fill="#6DBE45"/>
+        </g>
+    </g>
     </svg>`
 };
 

@@ -1,0 +1,317 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
+
+namespace Farm.Web.Api.Controllers;
+
+/// <summary>
+/// Manages the print job queue and printer assignment
+/// </summary>
+[ApiController]
+[Route("api/[controller]")]
+public class JobQueueController(AppDbContext db, ILogger<JobQueueController> logger) : ControllerBase
+{
+    /// <summary>
+    /// Get all jobs in the queue
+    /// </summary>
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<JobQueuePrintJobDto>>> GetQueue()
+    {
+        try
+        {
+            var jobs = await db.PrintJobs
+                .Include(j => j.GcodeFile)
+                .Include(j => j.AssignedPrinter)
+                .OrderBy(j => j.QueuePosition)
+                .ThenBy(j => j.CreatedAt)
+                .ToListAsync();
+
+            return Ok(jobs.Select(job => new JobQueuePrintJobDto
+            {
+                Id = job.Id,
+                GcodeFileId = job.GcodeFileId,
+                GcodeFileName = job.GcodeFile.OriginalFileName,
+                AssignedPrinterId = job.AssignedPrinterId,
+                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
+                Status = (PrintJobStatusDto)(int)job.Status,
+                Priority = (int)job.Priority,
+                QueuePosition = job.QueuePosition,
+                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                RequiredMaterialType = job.RequiredMaterialType,
+                EstimatedPrintTime = job.EstimatedPrintTime,
+                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                ActualStartTime = job.ActualStartTime,
+                ActualEndTime = job.ActualEndTime,
+                ActualPrintTime = job.ActualPrintTime,
+                ActualFilamentUsage = job.ActualFilamentUsage,
+                FailureReason = job.FailureReason,
+                CreatedAt = job.CreatedAt,
+                UpdatedAt = job.UpdatedAt
+            }));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error retrieving print job queue");
+            return Problem("An error occurred while retrieving the queue", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Add a new job to the queue
+    /// </summary>
+    [HttpPost]
+    public async Task<ActionResult<JobQueuePrintJobDto>> QueueJob([FromBody] QueuePrintJobDto request)
+    {
+        try
+        {
+            // Validate the gcode file exists
+            var gcodeFile = await db.GcodeFiles.FindAsync(request.GcodeFileId);
+            if (gcodeFile == null)
+            {
+                return NotFound($"G-code file with ID {request.GcodeFileId} not found");
+            }
+
+            // Create the job
+            var job = new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = gcodeFile.OriginalFileName,
+                GcodeFileId = request.GcodeFileId,
+                AssignedPrinterId = request.AssignedPrinterId,
+                Status = PrintJobStatus.Queued,
+                Priority = (int)request.Priority,
+                RequiredNozzleDiameter = request.RequiredNozzleDiameter,
+                RequiredMaterialType = request.RequiredMaterialType,
+                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue ? 
+                    TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value) : null,
+                EstimatedFilamentUsage = gcodeFile.EstimatedFilamentLengthMm,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                QueuedAt = DateTime.UtcNow
+            };
+
+            // Set queue position
+            var maxPosition = await db.PrintJobs
+                .Where(j => j.Status == PrintJobStatus.Queued)
+                .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
+            job.QueuePosition = maxPosition + 1;
+
+            db.PrintJobs.Add(job);
+            await db.SaveChangesAsync();
+
+            // Load related entities for response
+            await db.Entry(job)
+                .Reference(j => j.GcodeFile)
+                .LoadAsync();
+            
+            if (job.AssignedPrinterId.HasValue)
+            {
+                await db.Entry(job)
+                    .Reference(j => j.AssignedPrinter)
+                    .LoadAsync();
+            }
+
+            return CreatedAtAction(nameof(GetJob), new { id = job.Id }, new JobQueuePrintJobDto
+            {
+                Id = job.Id,
+                GcodeFileId = job.GcodeFileId,
+                GcodeFileName = job.GcodeFile.OriginalFileName,
+                AssignedPrinterId = job.AssignedPrinterId,
+                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
+                Status = (PrintJobStatusDto)(int)job.Status,
+                Priority = job.Priority,
+                QueuePosition = job.QueuePosition,
+                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                RequiredMaterialType = job.RequiredMaterialType,
+                EstimatedPrintTime = job.EstimatedPrintTime,
+                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                ActualStartTime = job.ActualStartTime,
+                ActualEndTime = job.ActualEndTime,
+                ActualPrintTime = job.ActualPrintTime,
+                ActualFilamentUsage = job.ActualFilamentUsage,
+                FailureReason = job.FailureReason,
+                CreatedAt = job.CreatedAt,
+                UpdatedAt = job.UpdatedAt
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error queueing print job for file {GcodeFileId}", request.GcodeFileId);
+            return Problem("An error occurred while queueing the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Get a specific job
+    /// </summary>
+    [HttpGet("{id}")]
+    public async Task<ActionResult<JobQueuePrintJobDto>> GetJob(Guid id)
+    {
+        try
+        {
+            var job = await db.PrintJobs
+                .Include(j => j.GcodeFile)
+                .Include(j => j.AssignedPrinter)
+                .FirstOrDefaultAsync(j => j.Id == id);
+
+            if (job == null)
+            {
+                return NotFound($"Print job with ID {id} not found");
+            }
+
+            return Ok(new JobQueuePrintJobDto
+            {
+                Id = job.Id,
+                GcodeFileId = job.GcodeFileId,
+                GcodeFileName = job.GcodeFile.OriginalFileName,
+                AssignedPrinterId = job.AssignedPrinterId,
+                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
+                Status = (PrintJobStatusDto)(int)job.Status,
+                Priority = job.Priority,
+                QueuePosition = job.QueuePosition,
+                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                RequiredMaterialType = job.RequiredMaterialType,
+                EstimatedPrintTime = job.EstimatedPrintTime,
+                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                ActualStartTime = job.ActualStartTime,
+                ActualEndTime = job.ActualEndTime,
+                ActualPrintTime = job.ActualPrintTime,
+                ActualFilamentUsage = job.ActualFilamentUsage,
+                FailureReason = job.FailureReason,
+                CreatedAt = job.CreatedAt,
+                UpdatedAt = job.UpdatedAt
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error retrieving print job {JobId}", id);
+            return Problem("An error occurred while retrieving the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Update job status, priority, or assignment
+    /// </summary>
+    [HttpPut("{id}")]
+    public async Task<ActionResult<JobQueuePrintJobDto>> UpdateJob(Guid id, [FromBody] UpdatePrintJobStatusDto request)
+    {
+        try
+        {
+            var job = await db.PrintJobs
+                .Include(j => j.GcodeFile)
+                .Include(j => j.AssignedPrinter)
+                .FirstOrDefaultAsync(j => j.Id == id);
+
+            if (job == null)
+            {
+                return NotFound($"Print job with ID {id} not found");
+            }
+
+            // Update fields if provided
+            if (request.Status.HasValue)
+            {
+                job.Status = (PrintJobStatus)(int)request.Status.Value;
+            }
+
+            if (request.Priority.HasValue)
+            {
+                job.Priority = (int)request.Priority.Value;
+            }
+
+            if (request.AssignedPrinterId.HasValue)
+            {
+                // Validate printer exists
+                var printer = await db.Printers.FindAsync(request.AssignedPrinterId.Value);
+                if (printer == null)
+                {
+                    return BadRequest($"Printer with ID {request.AssignedPrinterId} not found");
+                }
+                job.AssignedPrinterId = request.AssignedPrinterId.Value;
+            }
+
+            if (request.ActualFilamentUsage.HasValue)
+            {
+                job.ActualFilamentUsage = request.ActualFilamentUsage.Value;
+            }
+
+            if (!string.IsNullOrEmpty(request.FailureReason))
+            {
+                job.FailureReason = request.FailureReason;
+            }
+
+            job.UpdatedAt = DateTime.UtcNow;
+
+            await db.SaveChangesAsync();
+
+            // Reload printer if assignment changed
+            if (request.AssignedPrinterId.HasValue)
+            {
+                await db.Entry(job)
+                    .Reference(j => j.AssignedPrinter)
+                    .LoadAsync();
+            }
+
+            return Ok(new JobQueuePrintJobDto
+            {
+                Id = job.Id,
+                GcodeFileId = job.GcodeFileId,
+                GcodeFileName = job.GcodeFile.OriginalFileName,
+                AssignedPrinterId = job.AssignedPrinterId,
+                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
+                Status = (PrintJobStatusDto)(int)job.Status,
+                Priority = job.Priority,
+                QueuePosition = job.QueuePosition,
+                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                RequiredMaterialType = job.RequiredMaterialType,
+                EstimatedPrintTime = job.EstimatedPrintTime,
+                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                ActualStartTime = job.ActualStartTime,
+                ActualEndTime = job.ActualEndTime,
+                ActualPrintTime = job.ActualPrintTime,
+                ActualFilamentUsage = job.ActualFilamentUsage,
+                FailureReason = job.FailureReason,
+                CreatedAt = job.CreatedAt,
+                UpdatedAt = job.UpdatedAt
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error updating print job {JobId}", id);
+            return Problem("An error occurred while updating the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Delete a job from the queue
+    /// </summary>
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteJob(Guid id)
+    {
+        try
+        {
+            var job = await db.PrintJobs.FindAsync(id);
+            if (job == null)
+            {
+                return NotFound($"Print job with ID {id} not found");
+            }
+
+            // Can only delete queued or failed jobs
+            if (job.Status == PrintJobStatus.Printing || job.Status == PrintJobStatus.Starting)
+            {
+                return BadRequest("Cannot delete a job that is currently printing");
+            }
+
+            db.PrintJobs.Remove(job);
+            await db.SaveChangesAsync();
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error deleting print job {JobId}", id);
+            return Problem("An error occurred while deleting the job", statusCode: 500);
+        }
+    }
+}

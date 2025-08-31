@@ -267,3 +267,429 @@ public class AuxiliaryTotals
     public double Maximum { get; set; }
     public double Total { get; set; }
 }
+
+// G-code Library & Job Queue DTOs
+public enum GcodeSourceDto
+{
+    Upload = 0,
+    Harvested = 1,
+    Generated = 2
+}
+
+public record GcodeFileDto(
+    Guid Id,
+    string OriginalFileName,
+    string DisplayName,
+    long FileSizeBytes,
+    DateTime UploadedAt,
+    GcodeSourceDto Source = GcodeSourceDto.Upload,
+    Guid? SourcePrinterId = null,
+    string? SourcePrinterName = null,
+    string? OriginalPrinterPath = null,
+    DateTime? LastSeenOnPrinter = null,
+    string? Description = null,
+    string[]? Tags = null,
+    double? RequiredNozzleDiameter = null,
+    string? RequiredMaterial = null,
+    string[]? CompatibleMaterials = null,
+    double? EstimatedPrintTimeMinutes = null,
+    double? EstimatedFilamentLengthMm = null,
+    double? EstimatedFilamentWeightG = null,
+    double? RequiredBuildVolumeX = null,
+    double? RequiredBuildVolumeY = null,
+    double? RequiredBuildVolumeZ = null,
+    Guid? TargetPrinterId = null,
+    string? TargetPrinterName = null,
+    Guid? TargetModelId = null,
+    string? TargetModelName = null,
+    string? SlicerName = null,
+    string? SlicerVersion = null,
+    bool HasThumbnail = false);
+
+public class CreateGcodeFileDto
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string[]? Tags { get; set; }
+    public double? RequiredNozzleDiameter { get; set; }
+    public string? RequiredMaterial { get; set; }
+    public string[]? CompatibleMaterials { get; set; }
+    public double? EstimatedPrintTimeMinutes { get; set; }
+    public double? EstimatedFilamentLengthMm { get; set; }
+    public double? EstimatedFilamentWeightG { get; set; }
+    public double? RequiredBuildVolumeX { get; set; }
+    public double? RequiredBuildVolumeY { get; set; }
+    public double? RequiredBuildVolumeZ { get; set; }
+    public Guid? TargetPrinterId { get; set; }
+    public Guid? TargetModelId { get; set; }
+    public string? SlicerName { get; set; }
+    public string? SlicerVersion { get; set; }
+    public string? SlicerSettings { get; set; }
+}
+
+public record UpdateGcodeFileDto(
+    string DisplayName,
+    string? Description = null,
+    string[]? Tags = null,
+    double? RequiredNozzleDiameter = null,
+    string? RequiredMaterial = null,
+    string[]? CompatibleMaterials = null,
+    double? EstimatedPrintTimeMinutes = null,
+    double? EstimatedFilamentLengthMm = null,
+    double? EstimatedFilamentWeightG = null,
+    double? RequiredBuildVolumeX = null,
+    double? RequiredBuildVolumeY = null,
+    double? RequiredBuildVolumeZ = null,
+    Guid? TargetPrinterId = null,
+    Guid? TargetModelId = null,
+    string? SlicerName = null,
+    string? SlicerVersion = null,
+    string? SlicerSettings = null);
+
+// Print Job DTOs
+public enum PrintJobStatusDto
+{
+    Queued = 0,
+    Assigned = 1,
+    Starting = 2,
+    Printing = 3,
+    Paused = 4,
+    Completed = 5,
+    Failed = 6,
+    Cancelled = 7
+}
+
+public enum PrintJobPriority
+{
+    Low = 0,
+    Normal = 1,
+    High = 2,
+    Urgent = 3
+}
+
+public record PrintJobDto(
+    Guid Id,
+    string Name,
+    int Priority,
+    PrintJobStatusDto Status,
+    DateTime QueuedAt,
+    DateTime? StartedAt = null,
+    DateTime? CompletedAt = null,
+    string? ErrorMessage = null,
+    Guid GcodeFileId = default,
+    string GcodeFileName = "",
+    Guid? AssignedPrinterId = null,
+    string? AssignedPrinterName = null,
+    double? HotendTemperature = null,
+    double? BedTemperature = null,
+    int? SpoolId = null,
+    double? ProgressPercentage = null,
+    string? CurrentState = null,
+    string[]? RequiredCapabilities = null,
+    bool AutoAssign = true,
+    Guid[]? PreferredPrinterIds = null,
+    Guid[]? ExcludedPrinterIds = null);
+
+public class CreatePrintJobDto
+{
+    public string Name { get; set; } = string.Empty;
+    public int Priority { get; set; } = 0;
+    public Guid GcodeFileId { get; set; }
+    public double? HotendTemperature { get; set; }
+    public double? BedTemperature { get; set; }
+    public int? SpoolId { get; set; }
+    public string[]? RequiredCapabilities { get; set; }
+    public bool AutoAssign { get; set; } = true;
+    public Guid[]? PreferredPrinterIds { get; set; }
+    public Guid[]? ExcludedPrinterIds { get; set; }
+}
+
+public record UpdatePrintJobDto(
+    string Name,
+    int Priority,
+    double? HotendTemperature = null,
+    double? BedTemperature = null,
+    int? SpoolId = null,
+    string[]? RequiredCapabilities = null,
+    bool AutoAssign = true,
+    Guid[]? PreferredPrinterIds = null,
+    Guid[]? ExcludedPrinterIds = null);
+
+// Printer Capabilities DTOs
+public record PrinterCapabilitiesDto(
+    Guid Id,
+    Guid PrinterId,
+    string PrinterName,
+    double? NozzleDiameter = null,
+    string[]? SupportedMaterials = null,
+    double? MaxBuildVolumeX = null,
+    double? MaxBuildVolumeY = null,
+    double? MaxBuildVolumeZ = null,
+    bool HasHeatedBed = true,
+    bool HasEnclosure = false,
+    bool MultiMaterial = false,
+    int NumberOfExtruders = 1,
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+    string? CurrentMaterial = null,
+    int? CurrentSpoolId = null,
+    bool IsAvailable = true,
+    DateTime LastUpdated = default);
+
+public record CreatePrinterCapabilitiesDto(
+    Guid PrinterId,
+    double? NozzleDiameter = null,
+    string[]? SupportedMaterials = null,
+    double? MaxBuildVolumeX = null,
+    double? MaxBuildVolumeY = null,
+    double? MaxBuildVolumeZ = null,
+    bool HasHeatedBed = true,
+    bool HasEnclosure = false,
+    bool MultiMaterial = false,
+    int NumberOfExtruders = 1,
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null);
+
+public record UpdatePrinterCapabilitiesDto(
+    double? NozzleDiameter = null,
+    string[]? SupportedMaterials = null,
+    double? MaxBuildVolumeX = null,
+    double? MaxBuildVolumeY = null,
+    double? MaxBuildVolumeZ = null,
+    bool HasHeatedBed = true,
+    bool HasEnclosure = false,
+    bool MultiMaterial = false,
+    int NumberOfExtruders = 1,
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+    string? CurrentMaterial = null,
+    int? CurrentSpoolId = null,
+    bool IsAvailable = true);
+
+// Queue Management DTOs
+public record QueueStatusDto(
+    int TotalJobs,
+    int QueuedJobs,
+    int ActiveJobs,
+    int CompletedJobs,
+    int FailedJobs,
+    PrintJobDto[] RecentJobs,
+    PrinterCapabilitiesDto[] AvailablePrinters);
+
+// G-code Library Search/Filter DTOs
+public class GcodeLibrarySearchDto
+{
+    public string? SearchTerm { get; set; }
+    public string[]? Tags { get; set; }
+    public string? RequiredMaterial { get; set; }
+    public double? NozzleDiameter { get; set; }
+    public Guid? TargetPrinterId { get; set; }
+    public Guid? TargetModelId { get; set; }
+    public DateTime? UploadedAfter { get; set; }
+    public DateTime? UploadedBefore { get; set; }
+    public int Skip { get; set; } = 0;
+    public int Take { get; set; } = 50;
+    public string SortBy { get; set; } = "UploadedAt";
+    public bool SortDescending { get; set; } = true;
+}
+
+public record GcodeLibrarySearchResultDto(
+    GcodeFileDto[] Files,
+    int TotalCount,
+    string[] AvailableTags,
+    string[] AvailableMaterials);
+
+// Smart Queue Assignment DTOs
+public record QueueAssignmentResultDto(
+    bool Success,
+    string Message,
+    Guid? AssignedPrinterId = null,
+    string? AssignedPrinterName = null,
+    string[]? MissingCapabilities = null,
+    string[]? ConflictingRequirements = null);
+
+// G-code Harvesting DTOs
+public enum GcodeHarvestStatusDto
+{
+    Running = 0,
+    Completed = 1,
+    Failed = 2,
+    Cancelled = 3
+}
+
+public record GcodeHarvestOperationDto(
+    Guid Id,
+    Guid PrinterId,
+    string PrinterName,
+    DateTime StartedAt,
+    DateTime? CompletedAt = null,
+    GcodeHarvestStatusDto Status = GcodeHarvestStatusDto.Running,
+    string? ErrorMessage = null,
+    int FilesFound = 0,
+    int FilesAdded = 0,
+    int FilesSkipped = 0,
+    int FilesErrored = 0,
+    long TotalBytesProcessed = 0,
+    bool IncludeSubdirectories = true,
+    long? MaxFileSizeBytes = null,
+    DateTime? ModifiedAfter = null);
+
+public record DiscoveredGcodeFileDto(
+    Guid Id,
+    Guid HarvestOperationId,
+    string PrinterPath,
+    string FileName,
+    long FileSizeBytes,
+    DateTime? ModifiedAt = null,
+    string? FileHash = null,
+    bool IsSelected = false,
+    bool AlreadyInLibrary = false,
+    Guid? ExistingLibraryFileId = null,
+    bool ProcessingFailed = false,
+    string? ErrorMessage = null,
+    string? ExtractedSlicerName = null,
+    string? ExtractedSlicerVersion = null,
+    double? ExtractedPrintTime = null,
+    double? ExtractedFilamentLength = null,
+    double? ExtractedNozzleDiameter = null,
+    string? ExtractedMaterial = null,
+    string? ExtractedLayerHeight = null,
+    string? ExtractedInfill = null);
+
+public class StartGcodeHarvestDto
+{
+    public Guid PrinterId { get; set; }
+    public bool IncludeSubdirectories { get; set; } = true;
+    public long? MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024; // 100MB
+    public DateTime? ModifiedAfter { get; set; }
+}
+
+public class ImportSelectedGcodeFilesDto
+{
+    public Guid HarvestOperationId { get; set; }
+    public Guid[] SelectedFileIds { get; set; } = Array.Empty<Guid>();
+    public bool AddToLibraryOnly { get; set; } = true; // If false, also create print jobs
+    public bool AutoDetectCapabilities { get; set; } = true;
+    public string[]? DefaultTags { get; set; }
+}
+
+public record GcodeHarvestResultDto(
+    Guid OperationId,
+    bool Success,
+    string Message,
+    int DiscoveredFiles = 0,
+    int ImportedFiles = 0,
+    string[]? Errors = null);
+
+// G-code Metadata Extraction
+public record GcodeMetadataDto(
+    string? SlicerName = null,
+    string? SlicerVersion = null,
+    double? PrintTimeMinutes = null,
+    double? FilamentLengthMm = null,
+    double? FilamentWeightG = null,
+    double? NozzleDiameter = null,
+    string? Material = null,
+    double? LayerHeight = null,
+    string? InfillPercentage = null,
+    double? PrintSpeed = null,
+    double? BedTemperature = null,
+    double? HotendTemperature = null,
+    double? BuildPlateX = null,
+    double? BuildPlateY = null,
+    double? BuildPlateZ = null,
+    string[]? Objects = null,
+    Dictionary<string, object>? AdditionalMetadata = null);
+
+// Job Queue System DTOs
+public class JobQueuePrintJobDto
+{
+    public Guid Id { get; set; }
+    public Guid GcodeFileId { get; set; }
+    public string GcodeFileName { get; set; } = string.Empty;
+    public Guid? AssignedPrinterId { get; set; }
+    public string AssignedPrinterName { get; set; } = string.Empty;
+    public PrintJobStatusDto Status { get; set; }
+    public int Priority { get; set; }
+    public int QueuePosition { get; set; }
+    public decimal? RequiredNozzleDiameter { get; set; }
+    public string? RequiredMaterialType { get; set; }
+    public TimeSpan? EstimatedPrintTime { get; set; }
+    public double? EstimatedFilamentUsage { get; set; }
+    public DateTime? ActualStartTime { get; set; }
+    public DateTime? ActualEndTime { get; set; }
+    public TimeSpan? ActualPrintTime { get; set; }
+    public double? ActualFilamentUsage { get; set; }
+    public string? FailureReason { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+// Additional Job Queue DTOs
+public class QueuePrintJobDto
+{
+    public Guid GcodeFileId { get; set; }
+    public Guid? AssignedPrinterId { get; set; } // If null, auto-assign to best available printer
+    public PrintJobPriority Priority { get; set; } = PrintJobPriority.Normal;
+    public decimal? RequiredNozzleDiameter { get; set; }
+    public string? RequiredMaterialType { get; set; }
+}
+
+public class UpdatePrintJobStatusDto
+{
+    public PrintJobStatusDto? Status { get; set; }
+    public PrintJobPriority? Priority { get; set; }
+    public Guid? AssignedPrinterId { get; set; }
+    public double? ActualFilamentUsage { get; set; }
+    public string? FailureReason { get; set; }
+}
+
+public class ReorderQueueDto
+{
+    public JobOrderDto[] JobOrder { get; set; } = Array.Empty<JobOrderDto>();
+}
+
+public class JobOrderDto
+{
+    public Guid JobId { get; set; }
+    public int Position { get; set; }
+}
+
+// Printer Capabilities DTOs
+public class CreateOrUpdatePrinterCapabilitiesDto
+{
+    public decimal[]? NozzleDiameters { get; set; }
+    public string[]? SupportedMaterials { get; set; }
+    public decimal MaxPrintVolumeX { get; set; }
+    public decimal MaxPrintVolumeY { get; set; }
+    public decimal MaxPrintVolumeZ { get; set; }
+    public int MaxHotendTemperature { get; set; }
+    public int MaxBedTemperature { get; set; }
+    public bool HasHeatedBed { get; set; }
+    public bool HasEnclosure { get; set; }
+    public bool SupportsAutoLeveling { get; set; }
+    public int MaxPrintSpeed { get; set; }
+}
+
+public class PrinterWithCapabilitiesDto
+{
+    public Guid PrinterId { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+    public string PrinterModel { get; set; } = string.Empty;
+    public PrinterCapabilitiesDto? Capabilities { get; set; }
+}
+
+public class CompatiblePrinterDto
+{
+    public Guid PrinterId { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+    public int CompatibilityScore { get; set; } // 0-100
+    public string[] CompatibilityReasons { get; set; } = Array.Empty<string>();
+    public int CurrentQueueLength { get; set; }
+}

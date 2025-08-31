@@ -224,6 +224,7 @@ builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
 builder.Services.AddScoped<ISdcpClient, SdcpClient>();
 builder.Services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
+builder.Services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
 
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
