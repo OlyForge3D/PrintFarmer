@@ -58,7 +58,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
         if (manufacturerId is Guid mid)
             q = q.Where(m => m.ManufacturerId == mid);
         var list = await q.OrderBy(m => m.Name)
-            .Select(m => new ModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ, 
+            .Select(m => new ModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ,
                 m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null)).ToListAsync(ct);
         return Ok(list);
     }

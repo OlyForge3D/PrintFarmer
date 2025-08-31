@@ -20,10 +20,10 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
         catch (Exception ex)
         {
             var correlationId = context.TraceIdentifier;
-            
-            logger.LogError(ex, "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}", 
+
+            logger.LogError(ex, "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}",
                 context.Request.Method, context.Request.Path, correlationId);
-                
+
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }
@@ -31,11 +31,11 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
     private static async Task HandleExceptionAsync(HttpContext context, Exception ex, string correlationId)
     {
         context.Response.ContentType = "application/json";
-        
+
         var (statusCode, message, details) = MapExceptionToResponse(ex);
-        
+
         context.Response.StatusCode = (int)statusCode;
-        
+
         var response = new
         {
             Error = message,
@@ -61,28 +61,28 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
             // Domain-specific exceptions
             PrinterNotFoundException => (HttpStatusCode.NotFound, "Printer not found", ex.Message),
             SpoolmanServiceException => (HttpStatusCode.BadGateway, "External service error", ex.Message),
-            
+
             // Authentication and authorization
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "Unauthorized access", null),
-            
+
             // Validation errors (more specific first)
             ArgumentNullException => (HttpStatusCode.BadRequest, "Missing required parameter", ex.Message),
             ArgumentException => (HttpStatusCode.BadRequest, "Invalid request", ex.Message),
-            
+
             // Network and external service errors
             HttpRequestException => (HttpStatusCode.BadGateway, "External service unavailable", null),
-            TaskCanceledException when ex.InnerException is TimeoutException => 
+            TaskCanceledException when ex.InnerException is TimeoutException =>
                 (HttpStatusCode.RequestTimeout, "Request timeout", null),
             TimeoutException => (HttpStatusCode.RequestTimeout, "Request timeout", null),
-            
+
             // Database errors
-            InvalidOperationException when ex.Message.Contains("database") => 
+            InvalidOperationException when ex.Message.Contains("database") =>
                 (HttpStatusCode.ServiceUnavailable, "Database service unavailable", null),
-            
+
             // Circuit breaker
-            Farm.Web.Api.Infrastructure.CircuitBreakerOpenException => 
+            Farm.Web.Api.Infrastructure.CircuitBreakerOpenException =>
                 (HttpStatusCode.ServiceUnavailable, "Service temporarily unavailable", ex.Message),
-            
+
             // Default for all other exceptions
             _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred", null)
         };

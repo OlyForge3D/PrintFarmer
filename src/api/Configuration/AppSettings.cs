@@ -33,7 +33,7 @@ public class AppSettings
     public int HeartbeatIntervalSeconds { get; set; } = 30;
 
     public bool EnableDetailedErrors { get; set; } = false;
-    
+
     [Range(1, 10000)]
     public int MaxRetryAttempts { get; set; } = 10;
 }
@@ -55,7 +55,7 @@ public class DatabaseSettings
     public int CommandTimeoutSeconds { get; set; } = 30;
 
     public bool EnableSensitiveDataLogging { get; set; } = false;
-    
+
     public string InitMode { get; set; } = "Migrate";
 }
 
@@ -108,9 +108,9 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
         }
 
         logger.LogInformation("Configuration validation completed successfully");
-        logger.LogInformation("App Settings: Port={Port}, BaseUrl={BaseUrl}, HttpTimeout={Timeout}s", 
+        logger.LogInformation("App Settings: Port={Port}, BaseUrl={BaseUrl}, HttpTimeout={Timeout}s",
             appConfig.Port, appConfig.BaseUrl, appConfig.HttpTimeoutSeconds);
-        logger.LogInformation("Database Settings: Provider={Provider}, InitMode={InitMode}", 
+        logger.LogInformation("Database Settings: Provider={Provider}, InitMode={InitMode}",
             dbConfig.Provider, dbConfig.InitMode);
     }
 }

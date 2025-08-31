@@ -26,7 +26,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PongTimeout = TimeSpan.FromSeconds(10);
     private static readonly int MaxReconnectAttempts = 10;
-    
+
     // Client identification for Moonraker
     private static readonly string ClientName = "ForgeIQ";
     private static readonly string ClientVersion = "1.0.0";
@@ -118,15 +118,15 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     {
         var id = printer.Id;
         var metrics = _connectionMetrics.GetOrAdd(id, _ => new ConnectionMetrics());
-        
+
         logger.LogInformation("Starting subscription loop for printer {PrinterName} ({PrinterId})", printer.Name, id);
-        
+
         while (!ct.IsCancellationRequested && metrics.ReconnectAttempts < MaxReconnectAttempts)
         {
             ClientWebSocket? ws = null;
             CancellationTokenSource? heartbeatCts = null;
             Task? heartbeatTask = null;
-            
+
             try
             {
                 // Re-check backend on each iteration in case it changed
@@ -140,9 +140,9 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 if (metrics.ReconnectAttempts > 0)
                 {
                     var backoffDelay = metrics.GetNextBackoffDelay();
-                    logger.LogInformation("Backing off for {BackoffSeconds}s before reconnecting to printer {PrinterName} (attempt {Attempt}/{MaxAttempts})", 
+                    logger.LogInformation("Backing off for {BackoffSeconds}s before reconnecting to printer {PrinterName} (attempt {Attempt}/{MaxAttempts})",
                         backoffDelay.TotalSeconds, printer.Name, metrics.ReconnectAttempts + 1, MaxReconnectAttempts);
-                    
+
                     try
                     {
                         await Task.Delay(backoffDelay, ct);
@@ -156,10 +156,10 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 // Establish WebSocket connection
                 var uri = BuildWsUri(printer.ServerUrl);
                 ws = new ClientWebSocket();
-                
+
                 logger.LogDebug("Connecting to Moonraker WebSocket at {Uri} for printer {PrinterName}", uri, printer.Name);
                 await ws.ConnectAsync(uri, ct);
-                
+
                 logger.LogInformation("WebSocket connected to printer {PrinterName} ({PrinterId})", printer.Name, id);
 
                 // Step 1: Identify this connection to Moonraker
@@ -187,7 +187,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             catch (Exception ex)
             {
                 metrics.IncrementAttempts();
-                
+
                 if (MoonrakerErrors.IsFatalError(ex))
                 {
                     logger.LogError(ex, "Fatal error in subscription loop for printer {PrinterName}, stopping reconnection attempts", printer.Name);
@@ -195,12 +195,12 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 }
                 else if (MoonrakerErrors.IsTransientError(ex))
                 {
-                    logger.LogWarning(ex, "Transient error for printer {PrinterName}, will retry (attempt {Attempt}/{MaxAttempts})", 
+                    logger.LogWarning(ex, "Transient error for printer {PrinterName}, will retry (attempt {Attempt}/{MaxAttempts})",
                         printer.Name, metrics.ReconnectAttempts, MaxReconnectAttempts);
                 }
                 else
                 {
-                    logger.LogError(ex, "Unexpected error for printer {PrinterName} (attempt {Attempt}/{MaxAttempts})", 
+                    logger.LogError(ex, "Unexpected error for printer {PrinterName} (attempt {Attempt}/{MaxAttempts})",
                         printer.Name, metrics.ReconnectAttempts, MaxReconnectAttempts);
                 }
 
@@ -213,23 +213,23 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 heartbeatCts?.Cancel();
                 try { await (heartbeatTask ?? Task.CompletedTask); } catch { }
                 heartbeatCts?.Dispose();
-                
+
                 try { ws?.Dispose(); } catch { }
             }
         }
-        
+
         if (metrics.ReconnectAttempts >= MaxReconnectAttempts)
         {
-            logger.LogError("Exhausted all reconnection attempts ({MaxAttempts}) for printer {PrinterName}, giving up", 
+            logger.LogError("Exhausted all reconnection attempts ({MaxAttempts}) for printer {PrinterName}, giving up",
                 MaxReconnectAttempts, printer.Name);
             await SendOfflineStatusAsync(id, ct);
         }
-        
+
         logger.LogInformation("Subscription loop ended for printer {PrinterName} ({PrinterId})", printer.Name, id);
     }
 
     // Helper methods for improved connection management
-    
+
     private async Task<bool> ValidatePrinterBackendAsync(Guid printerId, CancellationToken ct)
     {
         try
@@ -237,19 +237,19 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var current = await db.Printers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == printerId, ct);
-            
+
             if (current is null)
             {
                 logger.LogInformation("Printer {PrinterId} was removed from database", printerId);
                 return false;
             }
-            
+
             if (current.Backend != 0)
             {
                 logger.LogInformation("Printer {PrinterId} backend changed from Moonraker (Backend={Backend})", printerId, current.Backend);
                 return false;
             }
-            
+
             return true;
         }
         catch (Exception ex)
@@ -278,7 +278,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             var identifyJson = JsonSerializer.Serialize(identifyRequest);
             var identifyBytes = Encoding.UTF8.GetBytes(identifyJson);
             await ws.SendAsync(identifyBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
-            
+
             logger.LogDebug("Sent connection identification to Moonraker: {ClientName} v{ClientVersion}", ClientName, ClientVersion);
         }
         catch (Exception ex)
@@ -301,18 +301,18 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 ["heater_bed"] = new[] { "temperature", "target" },
             }
         };
-        
+
         var subscriptionRequest = new JsonRpcRequest
         {
             Method = "printer.objects.subscribe",
             Params = subscriptionParams,
             Id = 101
         };
-        
+
         var subJson = JsonSerializer.Serialize(subscriptionRequest);
         var subBytes = Encoding.UTF8.GetBytes(subJson);
         await ws.SendAsync(subBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
-        
+
         logger.LogDebug("Sent object subscription request to Moonraker");
     }
 
@@ -321,13 +321,13 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         return Task.Run(async () =>
         {
             logger.LogDebug("Starting heartbeat for printer {PrinterName}", printer.Name);
-            
+
             try
             {
                 while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
                 {
                     await Task.Delay(HeartbeatInterval, ct);
-                    
+
                     if (ws.State != WebSocketState.Open)
                         break;
 
@@ -360,12 +360,12 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
     {
         var buffer = new byte[64 * 1024];
         var sb = new StringBuilder();
-        
+
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
             sb.Clear();
             WebSocketReceiveResult result;
-            
+
             try
             {
                 do
@@ -387,14 +387,14 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             }
 
             if (sb.Length == 0) continue;
-            
+
             try
             {
                 await ProcessJsonRpcMessageAsync(sb.ToString(), printer, ct);
             }
             catch (JsonException jsonEx)
             {
-                logger.LogWarning(jsonEx, "Failed to parse JSON message from printer {PrinterName}: {Message}", 
+                logger.LogWarning(jsonEx, "Failed to parse JSON message from printer {PrinterName}: {Message}",
                     printer.Name, sb.ToString().Substring(0, Math.Min(200, sb.Length)));
             }
             catch (Exception ex)
@@ -410,14 +410,14 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         var jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
         if (jsonRpcResponse?.Error != null)
         {
-            logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})", 
+            logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
                 printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
             return;
         }
 
         using var doc = JsonDocument.Parse(message);
         var root = doc.RootElement;
-        
+
         // Handle notification messages: {"method":"notify_status_update","params":[{"toolhead":{"position":[x,y,z,...]}...}]}
         if (root.TryGetProperty("method", out var methodProp))
         {
@@ -430,23 +430,23 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                         await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, ct);
                     }
                     break;
-                    
+
                 case "notify_klippy_disconnected":
                     logger.LogWarning("Klippy disconnected for printer {PrinterName}", printer.Name);
                     await SendOfflineStatusAsync(printer.Id, ct);
                     break;
-                    
+
                 case "notify_klippy_ready":
                     logger.LogInformation("Klippy ready for printer {PrinterName}", printer.Name);
                     break;
-                    
+
                 default:
                     logger.LogTrace("Unhandled notification method {Method} from printer {PrinterName}", method, printer.Name);
                     break;
             }
         }
         // Handle subscription acknowledgement which carries current state: { id: 101, result: { status: { ... } } }
-        else if (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object && 
+        else if (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object &&
                  root.TryGetProperty("id", out var idProp) && idProp.GetInt32() == 101 &&
                  res.TryGetProperty("status", out var statusObj))
         {
@@ -463,8 +463,8 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         double? hotend = null, bed = null, hotendTarget = null, bedTarget = null;
 
         // Toolhead position
-        if (statusObj.TryGetProperty("toolhead", out var th) && 
-            th.TryGetProperty("position", out var pos) && 
+        if (statusObj.TryGetProperty("toolhead", out var th) &&
+            th.TryGetProperty("position", out var pos) &&
             pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
         {
             try { x = pos[0].GetDouble(); } catch { }
@@ -487,58 +487,58 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         // Print stats (state, filename)
         if (statusObj.TryGetProperty("print_stats", out var ps))
         {
-            if (ps.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String) 
+            if (ps.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String)
                 state = st.GetString();
-            if (ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String) 
+            if (ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
                 jobName = fn.GetString();
         }
 
         // Extruder temperatures
         if (statusObj.TryGetProperty("extruder", out var ex))
         {
-            if (ex.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number) 
-            { 
-                try { hotend = t.GetDouble(); } catch { } 
+            if (ex.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
+            {
+                try { hotend = t.GetDouble(); } catch { }
             }
-            if (ex.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number) 
-            { 
-                try { hotendTarget = tt.GetDouble(); } catch { } 
+            if (ex.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
+            {
+                try { hotendTarget = tt.GetDouble(); } catch { }
             }
         }
 
         // Bed temperatures
         if (statusObj.TryGetProperty("heater_bed", out var hb))
         {
-            if (hb.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number) 
-            { 
-                try { bed = t.GetDouble(); } catch { } 
+            if (hb.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
+            {
+                try { bed = t.GetDouble(); } catch { }
             }
-            if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number) 
-            { 
-                try { bedTarget = tt.GetDouble(); } catch { } 
+            if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
+            {
+                try { bedTarget = tt.GetDouble(); } catch { }
             }
         }
 
         // Get spool information
         var spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
-        
+
         // Create and send status update
         var update = new PrinterStatusUpdate(
-            printerId, 
+            printerId,
             true, // IsOnline
-            state, 
-            progress, 
-            jobName, 
-            ThumbnailUrl: null, 
-            CameraStreamUrl: null, 
-            X: x, Y: y, Z: z, 
-            HotendTemp: hotend, 
-            BedTemp: bed, 
-            HotendTarget: hotendTarget, 
-            BedTarget: bedTarget, 
+            state,
+            progress,
+            jobName,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            X: x, Y: y, Z: z,
+            HotendTemp: hotend,
+            BedTemp: bed,
+            HotendTarget: hotendTarget,
+            BedTarget: bedTarget,
             SpoolInfo: spoolInfo
         );
-        
+
         await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
         logger.LogTrace("Sent status update for printer {PrinterId}", printerId);
     }
@@ -548,15 +548,15 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         try
         {
             var offlineUpdate = new PrinterStatusUpdate(
-                printerId, 
+                printerId,
                 false, // IsOnline
-                "Offline", 
-                null, null, null, null, 
-                null, null, null, 
-                null, null, null, null, 
+                "Offline",
+                null, null, null, null,
+                null, null, null,
+                null, null, null, null,
                 SpoolInfo: null
             );
-            
+
             await hub.Clients.All.SendAsync("PrinterUpdated", offlineUpdate, ct);
             logger.LogDebug("Sent offline status for printer {PrinterId}", printerId);
         }
@@ -574,7 +574,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             // Create scope to get moonraker client
             using var scope = scopeFactory.CreateScope();
             var moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
-            
+
             // Step 1: Get the active spool ID from Moonraker
             var activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
             if (activeSpoolId == null)
@@ -642,7 +642,7 @@ internal static class MoonrakerErrors
         TimeoutException => true,
         _ => false
     };
-    
+
     public static bool IsFatalError(Exception ex) => ex switch
     {
         ArgumentException => true, // Configuration issues

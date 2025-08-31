@@ -22,19 +22,19 @@ public static class ModelBuilderExtensions
             // String length constraints for better performance
             entity.Property(p => p.Name)
                   .HasMaxLength(100);
-                  
+
             entity.Property(p => p.ServerUrl)
                   .HasMaxLength(500);
-                  
+
             entity.Property(p => p.ApiKey)
                   .HasMaxLength(500);
-                  
+
             entity.Property(p => p.Notes)
                   .HasMaxLength(1000);
-                  
+
             entity.Property(p => p.OriginalServerUrl)
                   .HasMaxLength(500);
-                  
+
             entity.Property(p => p.IpAddress)
                   .HasMaxLength(50);
         });
@@ -45,7 +45,7 @@ public static class ModelBuilderExtensions
             entity.HasIndex(m => m.Name)
                   .IsUnique()
                   .HasDatabaseName("IX_Manufacturers_Name_Unique");
-                  
+
             entity.Property(m => m.Name)
                   .HasMaxLength(100);
         });
@@ -55,11 +55,11 @@ public static class ModelBuilderExtensions
         {
             entity.HasIndex(m => m.ManufacturerId)
                   .HasDatabaseName("IX_Models_ManufacturerId");
-                  
+
             entity.HasIndex(m => new { m.ManufacturerId, m.Name })
                   .IsUnique()
                   .HasDatabaseName("IX_Models_ManufacturerId_Name_Unique");
-                  
+
             entity.Property(m => m.Name)
                   .HasMaxLength(100);
         });
@@ -78,15 +78,15 @@ public static class ModelBuilderExtensions
             case var provider when provider.Contains("sqlite"):
                 ConfigureSqliteOptimizations(modelBuilder);
                 break;
-                
+
             case var provider when provider.Contains("postgres") || provider.Contains("npgsql"):
                 ConfigurePostgreSqlOptimizations(modelBuilder);
                 break;
-                
+
             case var provider when provider.Contains("sqlserver"):
                 ConfigureSqlServerOptimizations(modelBuilder);
                 break;
-                
+
             case var provider when provider.Contains("mysql"):
                 ConfigureMySqlOptimizations(modelBuilder);
                 break;

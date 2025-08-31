@@ -188,7 +188,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                               ?? "Data Source=farm.db");
             break;
     }
-    
+
     if (builder.Environment.IsDevelopment())
     {
         options.EnableSensitiveDataLogging();
@@ -244,9 +244,9 @@ using (var scope = app.Services.CreateScope())
 {
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    
+
     logger.LogInformation("[DB] Starting database initialization for provider: {DbProvider}", dbProvider);
-    
+
     try
     {
         await db.Database.MigrateAsync();
@@ -257,11 +257,11 @@ using (var scope = app.Services.CreateScope())
         logger.LogWarning(ex, "[DB] Migration failed for provider '{Provider}': {Message}. Falling back to EnsureCreated.", dbProvider, ex.Message);
         db.Database.EnsureCreated();
     }
-    
+
     // EF-based seeding for catalog data (idempotent)
     var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
     await seeder.SeedAllAsync();
-    
+
     // Validate configuration after services are built
     try
     {
@@ -312,7 +312,7 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
                     Data = kvp.Value.Data
                 })
         }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-        
+
         await context.Response.WriteAsync(result);
     }
 });

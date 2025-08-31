@@ -10,7 +10,7 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Get a list of G-code files from the local storage
     /// </summary>
-    public static async Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, string baseUrl, 
+    public static async Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -34,33 +34,33 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Upload a G-code file to the printer's local storage
     /// </summary>
-    public static async Task<bool> UploadGcodeAsync(this PrusaLinkApiClient client, string baseUrl, 
-        string fileName, Stream fileStream, string? apiKey = null, bool startPrintAfterUpload = false, 
+    public static async Task<bool> UploadGcodeAsync(this PrusaLinkApiClient client, string baseUrl,
+        string fileName, Stream fileStream, string? apiKey = null, bool startPrintAfterUpload = false,
         CancellationToken ct = default)
     {
         // Ensure the file path starts with /
         var filePath = fileName.StartsWith("/") ? fileName : "/" + fileName;
-        
-        return await client.UploadFileAsync(baseUrl, "/local", filePath, fileStream, apiKey, 
+
+        return await client.UploadFileAsync(baseUrl, "/local", filePath, fileStream, apiKey,
             startPrintAfterUpload, overwrite: true, ct);
     }
 
     /// <summary>
     /// Start printing a G-code file
     /// </summary>
-    public static async Task<bool> StartPrintAsync(this PrusaLinkApiClient client, string baseUrl, 
+    public static async Task<bool> StartPrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string fileName, string? apiKey = null, CancellationToken ct = default)
     {
         // Ensure the file path starts with /
         var filePath = fileName.StartsWith("/") ? fileName : "/" + fileName;
-        
+
         return await client.StartPrintAsync(baseUrl, "/local", filePath, apiKey, ct);
     }
 
     /// <summary>
     /// Get the current print job progress and information
     /// </summary>
-    public static async Task<PrintJobProgress?> GetPrintProgressAsync(this PrusaLinkApiClient client, 
+    public static async Task<PrintJobProgress?> GetPrintProgressAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -88,13 +88,13 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Get printer temperatures and status
     /// </summary>
-    public static async Task<SimplePrinterStatus?> GetPrinterStatusAsync(this PrusaLinkApiClient client, 
+    public static async Task<SimplePrinterStatus?> GetPrinterStatusAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         try
         {
             var status = await client.GetStatusAsync(baseUrl, apiKey, ct);
-            
+
             return new SimplePrinterStatus
             {
                 State = status.Printer.State,
@@ -120,7 +120,7 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Check if the printer is currently printing
     /// </summary>
-    public static async Task<bool> IsPrintingAsync(this PrusaLinkApiClient client, string baseUrl, 
+    public static async Task<bool> IsPrintingAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -137,7 +137,7 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Pause the current print job
     /// </summary>
-    public static async Task<bool> PausePrintAsync(this PrusaLinkApiClient client, string baseUrl, 
+    public static async Task<bool> PausePrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -158,7 +158,7 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Resume the current print job
     /// </summary>
-    public static async Task<bool> ResumePrintAsync(this PrusaLinkApiClient client, string baseUrl, 
+    public static async Task<bool> ResumePrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -179,7 +179,7 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Stop the current print job
     /// </summary>
-    public static async Task<bool> StopPrintAsync(this PrusaLinkApiClient client, string baseUrl, 
+    public static async Task<bool> StopPrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -200,14 +200,14 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Get printer information and capabilities
     /// </summary>
-    public static async Task<PrinterInformation?> GetPrinterInformationAsync(this PrusaLinkApiClient client, 
+    public static async Task<PrinterInformation?> GetPrinterInformationAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         try
         {
             var info = await client.GetInfoAsync(baseUrl, apiKey, ct);
             var version = await client.GetVersionAsync(baseUrl, apiKey, ct);
-            
+
             return new PrinterInformation
             {
                 Name = info.Name,
@@ -222,7 +222,7 @@ public static class PrusaLinkApiExtensions
                 HasMmu = info.Mmu,
                 SdCardReady = info.SdReady,
                 HasActiveCamera = info.ActiveCamera,
-                SupportsUploadByPut = version.Capabilities.ContainsKey("upload-by-put") && 
+                SupportsUploadByPut = version.Capabilities.ContainsKey("upload-by-put") &&
                                       Convert.ToBoolean(version.Capabilities["upload-by-put"])
             };
         }
@@ -235,7 +235,7 @@ public static class PrusaLinkApiExtensions
     /// <summary>
     /// Get storage information
     /// </summary>
-    public static async Task<StorageInformation[]> GetStorageInformationAsync(this PrusaLinkApiClient client, 
+    public static async Task<StorageInformation[]> GetStorageInformationAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -273,11 +273,11 @@ public class PrintJobProgress
     public int? TimeRemaining { get; set; }
     public string? FileName { get; set; }
     public bool InaccurateEstimates { get; set; }
-    
+
     public bool IsActive => State is JobStates.Printing or JobStates.Paused;
     public bool IsFinished => State is JobStates.Finished or JobStates.Stopped;
     public bool HasError => State == JobStates.Error;
-    
+
     public TimeSpan PrintingTime => TimeSpan.FromSeconds(TimePrinting);
     public TimeSpan? RemainingTime => TimeRemaining.HasValue ? TimeSpan.FromSeconds(TimeRemaining.Value) : null;
 }
@@ -296,7 +296,7 @@ public class SimplePrinterStatus
     public int? FanSpeed { get; set; }
     public int? FlowRate { get; set; }
     public int? SpeedMultiplier { get; set; }
-    
+
     public bool IsPrinting => State == PrinterStates.Printing;
     public bool IsPaused => State == PrinterStates.Paused;
     public bool IsIdle => State == PrinterStates.Idle;
@@ -332,9 +332,9 @@ public class StorageInformation
     public long? TotalSpace { get; set; }
     public long? PrintFileSize { get; set; }
     public long? SystemFileSize { get; set; }
-    
-    public double? UsagePercentage => TotalSpace.HasValue && TotalSpace > 0 
-        ? (double)(TotalSpace.Value - (FreeSpace ?? 0)) / TotalSpace.Value * 100 
+
+    public double? UsagePercentage => TotalSpace.HasValue && TotalSpace > 0
+        ? (double)(TotalSpace.Value - (FreeSpace ?? 0)) / TotalSpace.Value * 100
         : null;
 }
 
@@ -347,9 +347,9 @@ public class PrusaLinkException : Exception
     public int StatusCode { get; }
 
     public PrusaLinkException(string message) : base(message) { }
-    
+
     public PrusaLinkException(string message, Exception innerException) : base(message, innerException) { }
-    
+
     public PrusaLinkException(string message, int statusCode, PrusaLinkError? errorDetails = null) : base(message)
     {
         StatusCode = statusCode;
@@ -365,12 +365,12 @@ public static class PrusaLinkApiClientFactory
     public static PrusaLinkApiClient Create(HttpClient? httpClient = null, TimeSpan? timeout = null)
     {
         var client = httpClient ?? new HttpClient();
-        
+
         if (timeout.HasValue)
             client.Timeout = timeout.Value;
         else if (client.Timeout == System.Threading.Timeout.InfiniteTimeSpan)
             client.Timeout = TimeSpan.FromSeconds(30); // Default 30s timeout
-            
+
         return new PrusaLinkApiClient(client);
     }
 }

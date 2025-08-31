@@ -65,12 +65,12 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
             var root = doc.RootElement;
-            
+
             // Handle both direct response and wrapped response
             var infoElement = root;
             if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object)
                 infoElement = result;
-            
+
             return JsonSerializer.Deserialize<MoonrakerPrinterInfo>(infoElement.GetRawText());
         }
         catch
@@ -590,13 +590,13 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for file uploads
 
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/upload";
-            
+
             using var formContent = new MultipartFormDataContent();
             using var streamContent = new StreamContent(fileContent);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
-            
+
             using var resp = await http.PostAsync(url, formContent, cts.Token);
             return resp.IsSuccessStatusCode;
         }
@@ -612,10 +612,10 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/printer/print/start";
             var payload = new { filename = fileName };
-            
+
             using var resp = await http.PostAsJsonAsync(url, payload, cts.Token);
             return resp.IsSuccessStatusCode;
         }
@@ -631,23 +631,23 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/list?root=gcodes";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return Array.Empty<string>();
-            
+
             await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
             var root = doc.RootElement;
-            
-            if (!root.TryGetProperty("result", out var result) || 
-                result.ValueKind != JsonValueKind.Array) 
+
+            if (!root.TryGetProperty("result", out var result) ||
+                result.ValueKind != JsonValueKind.Array)
                 return Array.Empty<string>();
-            
+
             var files = new List<string>();
             foreach (var file in result.EnumerateArray())
             {
-                if (file.TryGetProperty("path", out var path) && 
+                if (file.TryGetProperty("path", out var path) &&
                     path.ValueKind == JsonValueKind.String)
                 {
                     var fileName = path.GetString();
@@ -666,7 +666,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     }
 
     // ===== FILE OPERATIONS API =====
-    
+
     /// <summary>
     /// Get list of available file roots
     /// </summary>
@@ -676,11 +676,11 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/roots";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return Array.Empty<FileRoot>();
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileRoot[]>>(cancellationToken: cts.Token);
             return response?.Result ?? Array.Empty<FileRoot>();
         }
@@ -699,12 +699,12 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var encodedPath = Uri.EscapeDataString(path);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -723,12 +723,12 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory";
             var request = new DirectoryCreateRequest { Path = path };
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryCreateResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -747,7 +747,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var encodedPath = Uri.EscapeDataString(path);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory?path={encodedPath}&force={force.ToString().ToLowerInvariant()}";
             using var resp = await http.DeleteAsync(url, cts.Token);
@@ -768,7 +768,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/move";
             var request = new FileMoveRequest { Source = source, Dest = dest };
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
@@ -789,7 +789,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/copy";
             var request = new FileCopyRequest { Source = source, Dest = dest };
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
@@ -810,12 +810,12 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var encodedFilename = Uri.EscapeDataString(filename);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/metadata?filename={encodedFilename}";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<GCodeMetadata>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -834,7 +834,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/metascan";
             var request = new MetadataScanRequest { Filename = filename };
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
@@ -855,12 +855,12 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var encodedFilename = Uri.EscapeDataString(filename);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/thumbs/{encodedFilename}";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             return await resp.Content.ReadAsByteArrayAsync(cts.Token);
         }
         catch
@@ -878,12 +878,12 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for downloads
-            
+
             var encodedFilename = Uri.EscapeDataString(filename);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedFilename}";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             return await resp.Content.ReadAsByteArrayAsync(cts.Token);
         }
         catch
@@ -895,28 +895,28 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     /// <summary>
     /// Upload a file to a specific root directory
     /// </summary>
-    public async Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content, 
+    public async Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content,
         bool print = false, CancellationToken ct = default)
     {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for uploads
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/upload";
-            
+
             using var formContent = new MultipartFormDataContent();
             using var streamContent = new StreamContent(content);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", filename);
             formContent.Add(new StringContent(root), "root");
-            
+
             if (print)
                 formContent.Add(new StringContent("true"), "print");
-            
+
             using var resp = await http.PostAsync(url, formContent, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -929,30 +929,30 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     /// <summary>
     /// Upload a file with path (can create subdirectories)
     /// </summary>
-    public async Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content, 
+    public async Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content,
         bool print = false, CancellationToken ct = default)
     {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(60));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/upload";
-            
+
             using var formContent = new MultipartFormDataContent();
             using var streamContent = new StreamContent(content);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-            
+
             var filename = System.IO.Path.GetFileName(path);
             formContent.Add(streamContent, "file", filename);
             formContent.Add(new StringContent(path), "path");
-            
+
             if (print)
                 formContent.Add(new StringContent("true"), "print");
-            
+
             using var resp = await http.PostAsync(url, formContent, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -971,14 +971,14 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/list?root={Uri.EscapeDataString(root)}&extended=true";
             if (!string.IsNullOrEmpty(path))
                 url += $"&path={Uri.EscapeDataString(path)}";
-            
+
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return Array.Empty<MoonrakerFileInfo>();
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerFileInfo[]>>(cancellationToken: cts.Token);
             return response?.Result ?? Array.Empty<MoonrakerFileInfo>();
         }
@@ -997,7 +997,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var encodedPath = Uri.EscapeDataString(path);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedPath}";
             using var resp = await http.DeleteAsync(url, cts.Token);
@@ -1018,7 +1018,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30));
-            
+
             var encodedFilename = Uri.EscapeDataString(filename);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedFilename}";
             var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
@@ -1027,7 +1027,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
                 resp.Dispose();
                 return null;
             }
-            
+
             return await resp.Content.ReadAsStreamAsync(cts.Token);
         }
         catch
@@ -1037,7 +1037,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     }
 
     // ===== HISTORY API OPERATIONS =====
-    
+
     /// <summary>
     /// List print history jobs with optional filtering parameters
     /// </summary>
@@ -1047,10 +1047,10 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/list";
             var queryParams = new List<string>();
-            
+
             if (limit.HasValue)
                 queryParams.Add($"limit={limit.Value}");
             if (start.HasValue)
@@ -1061,13 +1061,13 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
                 queryParams.Add($"before={((DateTimeOffset)before.Value).ToUnixTimeSeconds()}");
             if (!string.IsNullOrWhiteSpace(order))
                 queryParams.Add($"order={Uri.EscapeDataString(order)}");
-                
+
             if (queryParams.Any())
                 url += "?" + string.Join("&", queryParams);
 
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -1077,7 +1077,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             return null;
         }
     }
-    
+
     /// <summary>
     /// Get a specific history job by job ID
     /// </summary>
@@ -1087,11 +1087,11 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/job?uid={Uri.EscapeDataString(jobId)}";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -1101,7 +1101,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             return null;
         }
     }
-    
+
     /// <summary>
     /// Delete a specific history job by job ID
     /// </summary>
@@ -1111,7 +1111,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/job?uid={Uri.EscapeDataString(jobId)}";
             using var resp = await http.DeleteAsync(url, cts.Token);
             return resp.IsSuccessStatusCode;
@@ -1122,7 +1122,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             return false;
         }
     }
-    
+
     /// <summary>
     /// Get history totals and statistics
     /// </summary>
@@ -1132,11 +1132,11 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/totals";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryTotals>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -1146,7 +1146,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             return null;
         }
     }
-    
+
     /// <summary>
     /// Reset history totals (clears all statistics)
     /// </summary>
@@ -1156,7 +1156,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/history/reset_totals";
             using var resp = await http.PostAsync(url, null, cts.Token);
             return resp.IsSuccessStatusCode;
@@ -1169,7 +1169,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     }
 
     // ===== SPOOLMAN API OPERATIONS =====
-    
+
     /// <summary>
     /// Get Spoolman status and connection information
     /// </summary>
@@ -1179,11 +1179,11 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/status";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanStatus>>(cancellationToken: cts.Token);
             return response?.Result;
         }
@@ -1202,11 +1202,11 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/spool_id";
             using var resp = await http.GetAsync(url, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanSpoolIdResponse>>(cancellationToken: cts.Token);
             return response?.Result?.SpoolId;
         }
@@ -1225,7 +1225,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/spool_id";
             var request = new SpoolmanSpoolIdRequest { SpoolId = spoolId };
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
@@ -1240,14 +1240,14 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     /// <summary>
     /// Proxy a request to the Spoolman server
     /// </summary>
-    public async Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path, 
+    public async Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path,
         string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default)
     {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for proxy requests
-            
+
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/spoolman/proxy";
             var request = new SpoolmanProxyRequest
             {
@@ -1257,10 +1257,10 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
                 Body = body,
                 UseV2Response = useV2Response
             };
-            
+
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
             if (!resp.IsSuccessStatusCode) return null;
-            
+
             return await resp.Content.ReadAsStringAsync(cts.Token);
         }
         catch
@@ -1421,7 +1421,7 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
     /// <summary>
     /// Search spools in Spoolman with optional filters via proxy
     /// </summary>
-    public async Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null, 
+    public async Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null,
         bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default)
     {
         var queryParams = new List<string>();
@@ -1503,7 +1503,7 @@ public static class HistoryExtensions
     {
         return DateTimeOffset.FromUnixTimeSeconds((long)unixTimestamp).UtcDateTime;
     }
-    
+
     /// <summary>
     /// Convert Unix timestamp (seconds) to DateTime, handling null values
     /// </summary>
@@ -1511,7 +1511,7 @@ public static class HistoryExtensions
     {
         return unixTimestamp?.ToDateTime();
     }
-    
+
     /// <summary>
     /// Get the start time as DateTime
     /// </summary>
@@ -1519,7 +1519,7 @@ public static class HistoryExtensions
     {
         return job.StartTime.ToDateTime();
     }
-    
+
     /// <summary>
     /// Get the end time as DateTime, if available
     /// </summary>
@@ -1527,7 +1527,7 @@ public static class HistoryExtensions
     {
         return job.EndTime?.ToDateTime();
     }
-    
+
     /// <summary>
     /// Get print duration as TimeSpan
     /// </summary>
@@ -1535,7 +1535,7 @@ public static class HistoryExtensions
     {
         return TimeSpan.FromSeconds(job.PrintDuration);
     }
-    
+
     /// <summary>
     /// Get total duration as TimeSpan
     /// </summary>
@@ -1543,7 +1543,7 @@ public static class HistoryExtensions
     {
         return TimeSpan.FromSeconds(job.TotalDuration);
     }
-    
+
     /// <summary>
     /// Check if the job was completed successfully
     /// </summary>
@@ -1551,7 +1551,7 @@ public static class HistoryExtensions
     {
         return string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase);
     }
-    
+
     /// <summary>
     /// Check if the job was cancelled
     /// </summary>
@@ -1559,7 +1559,7 @@ public static class HistoryExtensions
     {
         return string.Equals(job.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
     }
-    
+
     /// <summary>
     /// Check if the job had an error
     /// </summary>

@@ -57,10 +57,10 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/job", apiKey);
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
             return null;
-        
+
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Job>(json, _jsonOptions);
@@ -100,7 +100,7 @@ public class PrusaLinkApiClient
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/storage", apiKey);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
             request.Headers.Add("Accept-Language", acceptLanguage);
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -112,10 +112,10 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/transfer", apiKey);
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
             return null;
-        
+
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Transfer>(json, _jsonOptions);
@@ -129,7 +129,7 @@ public class PrusaLinkApiClient
     }
 
     // File Management
-    public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, 
+    public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default)
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/files{storagePath}{filePath}", apiKey);
@@ -137,11 +137,11 @@ public class PrusaLinkApiClient
             request.Headers.Add("Accept-Language", acceptLanguage);
         if (!string.IsNullOrWhiteSpace(accept))
             request.Headers.Add("Accept", accept);
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
-        
+
         // Deserialize to appropriate type based on response content
         var document = JsonDocument.Parse(json);
         if (document.RootElement.TryGetProperty("type", out var typeElement))
@@ -158,18 +158,18 @@ public class PrusaLinkApiClient
         return JsonSerializer.Deserialize<FileInfo>(json, _jsonOptions)!;
     }
 
-    public async Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream, 
+    public async Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream,
         string? apiKey = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default)
     {
         var request = CreateRequest(HttpMethod.Put, $"{baseUrl}/api/v1/files{storagePath}{filePath}", apiKey);
-        
+
         request.Content = new StreamContent(fileStream);
         request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         request.Content.Headers.ContentLength = fileStream.Length;
-        
+
         request.Headers.Add("Print-After-Upload", printAfterUpload ? "?1" : "?0");
         request.Headers.Add("Overwrite", overwrite ? "?1" : "?0");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -178,7 +178,7 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Post, $"{baseUrl}/api/v1/files{storagePath}{filePath}", apiKey);
         request.Content = new StringContent("");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -187,24 +187,24 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Head, $"{baseUrl}/api/v1/files{storagePath}{filePath}", apiKey);
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (!response.IsSuccessStatusCode)
             return new FileStatus(false, false, false);
-        
-        var readOnly = response.Headers.Contains("Read-Only") && 
+
+        var readOnly = response.Headers.Contains("Read-Only") &&
             response.Headers.GetValues("Read-Only").FirstOrDefault() == "true";
-        var currentlyPrinted = response.Headers.Contains("Currently-Printed") && 
+        var currentlyPrinted = response.Headers.Contains("Currently-Printed") &&
             response.Headers.GetValues("Currently-Printed").FirstOrDefault() == "true";
-        
+
         return new FileStatus(true, readOnly, currentlyPrinted);
     }
 
-    public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, 
+    public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
         bool force = false, CancellationToken ct = default)
     {
         var request = CreateRequest(HttpMethod.Delete, $"{baseUrl}/api/v1/files{storagePath}{filePath}", apiKey);
         request.Headers.Add("Force", force ? "?1" : "?0");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -224,7 +224,7 @@ public class PrusaLinkApiClient
         var request = CreateRequest(HttpMethod.Put, $"{baseUrl}/api/v1/cameras", apiKey);
         var jsonContent = JsonSerializer.Serialize(cameraIds, _jsonOptions);
         request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -243,7 +243,7 @@ public class PrusaLinkApiClient
         var request = CreateRequest(HttpMethod.Post, $"{baseUrl}/api/v1/cameras/{cameraId}", apiKey);
         var jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
         request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -259,10 +259,10 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/cameras/snap", apiKey);
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
             return null;
-        
+
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
@@ -271,10 +271,10 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/cameras/{cameraId}/snap", apiKey);
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
             return null;
-        
+
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
@@ -283,12 +283,12 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Post, $"{baseUrl}/api/v1/cameras/{cameraId}/snap", apiKey);
         request.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (!response.IsSuccessStatusCode)
             return null;
-        
+
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
@@ -297,7 +297,7 @@ public class PrusaLinkApiClient
         var request = CreateRequest(HttpMethod.Patch, $"{baseUrl}/api/v1/cameras/{cameraId}/config", apiKey);
         var jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
         request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-        
+
         var response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -328,21 +328,21 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/update/{environment}", apiKey);
         var response = await _httpClient.SendAsync(request, ct);
-        
+
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
         {
-            var updateAvailable = response.Headers.Contains("Update-Available") && 
+            var updateAvailable = response.Headers.Contains("Update-Available") &&
                 response.Headers.GetValues("Update-Available").FirstOrDefault() == "true";
             return new UpdateInfo { UpdateAvailable = updateAvailable };
         }
-        
+
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
         var updateInfo = JsonSerializer.Deserialize<UpdateInfo>(json, _jsonOptions)!;
-        
+
         if (response.Headers.Contains("Update-Available"))
             updateInfo.UpdateAvailable = response.Headers.GetValues("Update-Available").FirstOrDefault() == "true";
-        
+
         return updateInfo;
     }
 

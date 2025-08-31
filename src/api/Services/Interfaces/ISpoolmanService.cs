@@ -13,20 +13,20 @@ public interface ISpoolmanService
     /// </summary>
     /// <returns>The current Spoolman configuration, or null if not configured</returns>
     SpoolmanConfigDto? GetConfig();
-    
+
     /// <summary>
     /// Sets the Spoolman configuration with the base URL for the Spoolman server.
     /// </summary>
     /// <param name="config">Configuration object containing the Spoolman server base URL</param>
     void SetConfig(SpoolmanConfigDto config);
-    
+
     /// <summary>
     /// Gets a list of all filament spools from the configured Spoolman server.
     /// </summary>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing a read-only list of all spools with their current status and information</returns>
     Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct);
-    
+
     /// <summary>
     /// Gets detailed information about a specific filament spool by its ID.
     /// </summary>

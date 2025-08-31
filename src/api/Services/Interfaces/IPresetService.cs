@@ -14,7 +14,7 @@ public interface IPresetService
     /// </summary>
     /// <returns>A preset configuration object containing temperature settings for different filament types</returns>
     FilamentPresetsDto GetPresets();
-    
+
     /// <summary>
     /// Saves new filament temperature presets, replacing the current configuration.
     /// </summary>

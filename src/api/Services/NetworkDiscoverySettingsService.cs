@@ -67,16 +67,16 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
     public List<string> GetDynamicNetworkRanges()
     {
         var networks = new List<string>();
-        
+
         try
         {
             // Use a simpler approach to detect current network
             var hostName = Dns.GetHostName();
             var hostEntry = Dns.GetHostEntry(hostName);
-            
+
             foreach (var address in hostEntry.AddressList)
             {
-                if (address.AddressFamily == AddressFamily.InterNetwork && 
+                if (address.AddressFamily == AddressFamily.InterNetwork &&
                     !IPAddress.IsLoopback(address) &&
                     IsPrivateNetwork(address))
                 {
@@ -90,7 +90,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
                 }
             }
 
-            _logger.LogInformation("Detected {Count} network ranges from host interfaces: {Networks}", 
+            _logger.LogInformation("Detected {Count} network ranges from host interfaces: {Networks}",
                 networks.Count, string.Join(", ", networks));
         }
         catch (Exception ex)
@@ -105,23 +105,23 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
     private static bool IsPrivateNetwork(IPAddress address)
     {
         var bytes = address.GetAddressBytes();
-        
+
         // 10.0.0.0/8
         if (bytes[0] == 10) return true;
-        
+
         // 172.16.0.0/12
         if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
-        
+
         // 192.168.0.0/16
         if (bytes[0] == 192 && bytes[1] == 168) return true;
-        
+
         return false;
     }
 
     private static string? GetNetworkAddressForPrivateIP(IPAddress address)
     {
         var bytes = address.GetAddressBytes();
-        
+
         // For private networks, assume common subnet masks
         if (bytes[0] == 10)
         {
@@ -138,7 +138,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             // 192.168.x.x -> assume /24 (192.168.x.0/24)
             return $"192.168.{bytes[2]}.0/24";
         }
-        
+
         return null;
     }
 
@@ -169,12 +169,12 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
     {
         var maskBytes = mask.GetAddressBytes();
         var cidr = 0;
-        
+
         foreach (var b in maskBytes)
         {
             cidr += Convert.ToString(b, 2).Count(c => c == '1');
         }
-        
+
         return cidr;
     }
 
@@ -184,7 +184,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         {
             "10.0.0.0/24",
             "192.168.1.0/24",
-            "192.168.0.0/24", 
+            "192.168.0.0/24",
             "192.168.2.0/24"
         };
     }

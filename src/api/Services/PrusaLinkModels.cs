@@ -205,37 +205,37 @@ public class PrintFileMetadata
     public int? Temperature { get; set; }
     public int[]? TemperaturePerTool { get; set; }
     public int? BrimWidth { get; set; }
-    
+
     [JsonPropertyName("estimated printing time (normal mode)")]
     public string? EstimatedPrintingTimeNormal { get; set; }
-    
+
     public int? EstimatedPrintTime { get; set; }
     public int? FadedLayers { get; set; }
-    
+
     [JsonPropertyName("filament cost")]
     public double? FilamentCost { get; set; }
-    
+
     [JsonPropertyName("filament cost per tool")]
     public double[]? FilamentCostPerTool { get; set; }
-    
+
     [JsonPropertyName("filament used [cm3]")]
     public double? FilamentUsedCm3 { get; set; }
-    
+
     [JsonPropertyName("filament used [cm3] per tool")]
     public double[]? FilamentUsedCm3PerTool { get; set; }
-    
+
     [JsonPropertyName("filament used [g]")]
     public double? FilamentUsedG { get; set; }
-    
+
     [JsonPropertyName("filament used [g] per tool")]
     public double[]? FilamentUsedGPerTool { get; set; }
-    
+
     [JsonPropertyName("filament used [mm]")]
     public double? FilamentUsedMm { get; set; }
-    
+
     [JsonPropertyName("filament used [mm] per tool")]
     public double[]? FilamentUsedMmPerTool { get; set; }
-    
+
     public string? FilamentType { get; set; }
     public string[]? FilamentTypePerTool { get; set; }
     public string? FillDensity { get; set; }
