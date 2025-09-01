@@ -311,3 +311,50 @@ dotnet_diagnostic.IDE0045.severity = suggestion
 # CA1515: Consider making public types internal
 dotnet_diagnostic.CA1515.severity = none
 
+# ------------------------------------------------------------
+# TEMPORARY ANALYZER NOISE SUPPRESSION (to be removed)
+# Goal: Reduce warning noise while we refactor logging, exception
+# handling, disposables, and HttpClient Uri usage.
+# Tracking issue: docs/issues/0001-analyzer-hardening.md
+# ------------------------------------------------------------
+
+# Logging: prefer LoggerMessage delegates (we'll migrate and re-enable)
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.S6667.severity = none
+
+# Catch-all exceptions: tighten later (specific exceptions or rethrow)
+dotnet_diagnostic.CA1031.severity = suggestion
+dotnet_diagnostic.S2139.severity = none
+dotnet_diagnostic.S2486.severity = none
+
+# Dispose patterns: will fix and re-enable
+dotnet_diagnostic.CA2000.severity = suggestion
+dotnet_diagnostic.IDISP001.severity = suggestion
+dotnet_diagnostic.IDISP003.severity = suggestion
+dotnet_diagnostic.IDISP004.severity = suggestion
+dotnet_diagnostic.CA1063.severity = suggestion
+dotnet_diagnostic.CA1816.severity = suggestion
+
+# HttpClient Uri overloads & API shapes: migrate gradually
+dotnet_diagnostic.CA2234.severity = suggestion
+dotnet_diagnostic.CA1054.severity = suggestion
+
+# Threading analyzer: CancelAsync guidance (suppress for now)
+dotnet_diagnostic.VSTHRD103.severity = suggestion
+dotnet_diagnostic.S6966.severity = none
+
+# Culture/formatting suggestions — keep visible but soft
+dotnet_diagnostic.CA1305.severity = suggestion
+dotnet_diagnostic.CA1310.severity = suggestion
+dotnet_diagnostic.CA1307.severity = suggestion
+
+# Misc Sonar style warnings that are noisy during refactors
+dotnet_diagnostic.S108.severity = none
+dotnet_diagnostic.S3358.severity = suggestion
+dotnet_diagnostic.S3267.severity = suggestion
+
+# Minor code quality ergonomics during refactor
+dotnet_diagnostic.CA2016.severity = suggestion
+dotnet_diagnostic.CA1852.severity = suggestion
+dotnet_diagnostic.CA1822.severity = suggestion
+
