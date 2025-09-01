@@ -9,7 +9,7 @@ using Moq;
 
 namespace Farm.Web.Api.Tests;
 
-public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisposable
+public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly string _dbPath;
     public Mock<INetworkDiscoveryService> MockNetworkDiscoveryService { get; private set; }
@@ -35,6 +35,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+        
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((context, config) =>
         {

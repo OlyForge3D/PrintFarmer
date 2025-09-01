@@ -11,6 +11,8 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
 {
     public async Task InvokeAsync(HttpContext context)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        
         try
         {
             await next(context);
