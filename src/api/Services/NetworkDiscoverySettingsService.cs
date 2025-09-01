@@ -11,6 +11,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
     private readonly ILogger<NetworkDiscoverySettingsService> _logger;
     private NetworkDiscoverySettingsDto? _settings;
     private readonly string _path = Path.Combine(AppContext.BaseDirectory, "network.discovery.settings.json");
+    private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
 
     public NetworkDiscoverySettingsService(ILogger<NetworkDiscoverySettingsService> logger)
     {
@@ -46,7 +47,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             dynamicRanges.Count > 0 ? dynamicRanges : GetFallbackNetworkRanges(),
             _settings?.TimeoutMs ?? 100,
             _settings?.MaxConcurrentScans ?? 20,
-            _settings?.Ports ?? new List<int> { 80, 7125 }
+            _settings?.Ports ?? [80, 7125]
         );
     }
 
@@ -55,7 +56,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         _settings = settings;
         try
         {
-            var json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(_settings, s_writeOptions);
             File.WriteAllText(_path, json);
             _logger.LogInformation("Saved network discovery settings to {Path}", _path);
         }
@@ -154,12 +155,11 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
 
     private static List<string> GetFallbackNetworkRanges()
     {
-        return new List<string>
-        {
+        return [
             "10.0.0.0/24",
             "192.168.1.0/24",
             "192.168.0.0/24",
             "192.168.2.0/24"
-        };
+        ];
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Health;
@@ -26,14 +27,6 @@ builder.Services.AddControllers()
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
-// Configure JSON options for minimal APIs
-builder.Services.ConfigureHttpJsonOptions(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.SerializerOptions.WriteIndented = false;
-    options.SerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-});
 
 // CORS configuration for API access
 builder.Services.AddCors(options =>
@@ -326,20 +319,22 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json";
-        var result = JsonSerializer.Serialize(new
-        {
-            Status = report.Status.ToString(),
-            TotalChecksDuration = report.TotalDuration,
-            Results = report.Entries.ToDictionary(
-                kvp => kvp.Key,
-                kvp => new
-                {
-                    Status = kvp.Value.Status.ToString(),
-                    Duration = kvp.Value.Duration,
-                    Description = kvp.Value.Description,
-                    Data = kvp.Value.Data
-                })
-        }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var result = JsonSerializer.Serialize(
+            new
+            {
+                Status = report.Status.ToString(),
+                TotalChecksDuration = report.TotalDuration,
+                Results = report.Entries.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => new
+                    {
+                        Status = kvp.Value.Status.ToString(),
+                        Duration = kvp.Value.Duration,
+                        Description = kvp.Value.Description,
+                        Data = kvp.Value.Data
+                    })
+            },
+            Program.HealthJsonOptions);
 
         await context.Response.WriteAsync(result);
     }
@@ -357,7 +352,22 @@ app.MapGet("/api/network-discovery/dynamic-ranges", ([FromServices] INetworkDisc
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
-app.Run();
+await app.RunAsync();
 
 // Expose Program for WebApplicationFactory in tests
-public partial class Program { }
+[
+    SuppressMessage("Design", "CA1052:Static holder types should be Static or NotInheritable", Justification = "Public partial Program required for WebApplicationFactory in tests and minimal hosting model.")
+]
+public partial class Program
+{
+    // Cached JSON options to avoid per-call allocations (CA1869)
+    public static readonly JsonSerializerOptions HealthJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false
+    };
+    protected Program() { }
+}
+
+// Cached JSON options to avoid per-call allocations (CA1869)
+// Removed per-file JsonDefaults class; using Program.HealthJsonOptions instead.

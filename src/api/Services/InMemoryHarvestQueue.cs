@@ -33,16 +33,13 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 
     public async Task EnqueueAsync(HarvestFileJob job, CancellationToken ct = default)
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(InMemoryHarvestQueue));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, nameof(InMemoryHarvestQueue));
+        ArgumentNullException.ThrowIfNull(job);
 
         try
         {
             await _channel.Writer.WriteAsync(job, ct);
-            _logger.LogDebug("Enqueued job for file {FileName} from operation {OperationId}",
-                job.FileName, job.OperationId);
+            _logger.LogDebug("Enqueued job for file {FileName} from operation {OperationId}", job.FileName, job.OperationId);
         }
         catch (InvalidOperationException)
         {

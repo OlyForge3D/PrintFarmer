@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Globalization;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
@@ -575,7 +576,7 @@ public class SpoolmanService : ISpoolmanService
             if (v.ValueKind == JsonValueKind.String)
             {
                 var s = v.GetString();
-                if (!string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, out var parsed))
+                if (!string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
                 {
                     return DateTime.SpecifyKind(parsed, parsed.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : parsed.Kind);
                 }

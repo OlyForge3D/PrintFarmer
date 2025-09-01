@@ -9,6 +9,12 @@ namespace Farm.Web.Api.Middleware;
 /// </summary>
 public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
 {
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
     [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}")]
     private static partial void LogUnhandledException(ILogger logger, Exception exception, string method, string path, string correlationId);
 
@@ -49,11 +55,7 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
             Path = context.Request.Path.ToString()
         };
 
-        var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false
-        });
+    var jsonResponse = JsonSerializer.Serialize(response, s_jsonOptions);
 
         await context.Response.WriteAsync(jsonResponse);
     }

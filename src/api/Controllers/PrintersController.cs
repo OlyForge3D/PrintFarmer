@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Data;
+﻿using System.Globalization;
+using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
@@ -1555,7 +1556,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                           $"{EscapeCsvValue(printer.ModelName)}," +
                           $"{EscapeCsvValue(printer.Backend)}," +
                           $"{EscapeCsvValue(printer.ApiKey)}," +
-                          $"{EscapeCsvValue(printer.DateAcquired?.ToString("yyyy-MM-dd"))}");
+                          $"{EscapeCsvValue(printer.DateAcquired?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))}");
         }
 
         var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
@@ -1621,7 +1622,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                                 NewModelName = string.IsNullOrWhiteSpace(values[5]) ? null : values[5].Trim(),
                                 Backend = Enum.TryParse<PrinterBackend>(values[6]?.Trim(), true, out var backend) ? backend : PrinterBackend.Moonraker,
                                 ApiKey = string.IsNullOrWhiteSpace(values[7]) ? null : values[7].Trim(),
-                                DateAcquired = DateTime.TryParse(values[8]?.Trim(), out var date) ? date : null
+                                DateAcquired = DateTime.TryParse(values[8]?.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null
                             };
 
                             // Validate required fields
@@ -1968,7 +1969,6 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [HttpGet("test-simple")]
     public ActionResult TestSimple()
     {
-        Console.WriteLine("=== SIMPLE TEST CALLED ===");
         logger.LogCritical("=== SIMPLE TEST CALLED ===");
         return Ok(new { message = "API is working!", timestamp = DateTime.UtcNow });
     }

@@ -29,7 +29,7 @@ public class Printer
     public string? Notes { get; set; }
 
     // Backend type (Moonraker or PrusaLink)
-    public int Backend { get; set; } = 0; // 0 = Moonraker, 1 = PrusaLink
+    public int Backend { get; set; } // 0 = Moonraker, 1 = PrusaLink
     public string? ApiKey { get; set; } // For PrusaLink
 
     // Metadata
@@ -57,7 +57,7 @@ public class Manufacturer
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    public ICollection<PrinterModel> Models { get; set; } = new List<PrinterModel>();
+    public ICollection<PrinterModel> Models { get; } = [];
 }
 
 public class PrinterModel
@@ -200,10 +200,10 @@ public class DiscoveredGcodeFile
     public string? FileHash { get; set; } // Calculated if downloaded
 
     // Processing status
-    public bool IsSelected { get; set; } = false; // User selection for import
-    public bool AlreadyInLibrary { get; set; } = false;
+    public bool IsSelected { get; set; } // User selection for import
+    public bool AlreadyInLibrary { get; set; }
     public Guid? ExistingLibraryFileId { get; set; }
-    public bool ProcessingFailed { get; set; } = false;
+    public bool ProcessingFailed { get; set; }
     public string? ErrorMessage { get; set; }
 
     // Extracted metadata (from G-code header analysis)
@@ -231,8 +231,8 @@ public class PrintJob
 
     // Queue Management
     public PrintJobStatus Status { get; set; } = PrintJobStatus.Queued;
-    public int Priority { get; set; } = 0; // Higher = more important
-    public int QueuePosition { get; set; } = 0;
+    public int Priority { get; set; } // Higher = more important
+    public int QueuePosition { get; set; }
 
     // Requirements
     public decimal? RequiredNozzleDiameter { get; set; }
@@ -288,8 +288,8 @@ public class PrinterCapabilities
 
     // Advanced capabilities
     public bool HasHeatedBed { get; set; } = true;
-    public bool HasEnclosure { get; set; } = false;
-    public bool MultiMaterial { get; set; } = false;
+    public bool HasEnclosure { get; set; }
+    public bool MultiMaterial { get; set; }
     public int NumberOfExtruders { get; set; } = 1;
 
     // Temperature ranges
@@ -305,7 +305,7 @@ public class PrinterCapabilities
     public DateTime LastUpdated { get; set; }
 
     // Additional capability fields
-    public bool SupportsAutoLeveling { get; set; } = false;
+    public bool SupportsAutoLeveling { get; set; }
     public int? MaxPrintSpeed { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

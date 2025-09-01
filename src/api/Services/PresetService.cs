@@ -8,6 +8,7 @@ public class PresetService : IPresetService
 {
     private FilamentPresetsDto? _presets;
     private readonly string _path = Path.Combine(AppContext.BaseDirectory, "filament.presets.json");
+    private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
 
     public PresetService()
     {
@@ -33,7 +34,7 @@ public class PresetService : IPresetService
         _presets = presets;
         try
         {
-            var json = JsonSerializer.Serialize(_presets, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(_presets, s_writeOptions);
             File.WriteAllText(_path, json);
         }
         catch { /* ignore */ }
