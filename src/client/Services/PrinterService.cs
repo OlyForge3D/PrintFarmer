@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using System.Text.Json;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Client.Services;
@@ -23,10 +24,22 @@ public class PrinterService
             var printers = await response.Content.ReadFromJsonAsync<List<PrinterBasicDto>>();
             return printers ?? new List<PrinterBasicDto>();
         }
-        catch (Exception ex)
+        catch (HttpRequestException ex)
         {
-            // Log error and return empty list for now
-            Console.WriteLine($"Error loading printers: {ex.Message}");
+            // Network or HTTP error
+            Console.WriteLine($"HTTP error loading printers: {ex.Message}");
+            return new List<PrinterBasicDto>();
+        }
+        catch (TaskCanceledException ex)
+        {
+            // Request timeout
+            Console.WriteLine($"Request timeout loading printers: {ex.Message}");
+            return new List<PrinterBasicDto>();
+        }
+        catch (JsonException ex)
+        {
+            // JSON deserialization error
+            Console.WriteLine($"JSON error loading printers: {ex.Message}");
             return new List<PrinterBasicDto>();
         }
     }

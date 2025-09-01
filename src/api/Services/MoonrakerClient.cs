@@ -1377,7 +1377,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 queryParams.Add($"order={Uri.EscapeDataString(order)}");
             }
 
-            if (queryParams.Any())
+            if (queryParams.Count > 0)
             {
                 url += "?" + string.Join("&", queryParams);
             }

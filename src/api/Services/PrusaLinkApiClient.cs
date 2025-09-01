@@ -452,7 +452,7 @@ public partial class PrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    private HttpRequestMessage CreateRequest(HttpMethod method, string url, string? apiKey)
+    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string? apiKey)
     {
         var request = new HttpRequestMessage(method, url);
         if (!string.IsNullOrWhiteSpace(apiKey))

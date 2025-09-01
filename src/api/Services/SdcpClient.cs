@@ -109,7 +109,7 @@ public class SdcpAckResult
     public int Ack { get; set; }
 }
 
-public partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger) : PrinterClientBase, ISdcpClient
+public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger) : PrinterClientBase, ISdcpClient
 {
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URL for {BaseUrl}")]
     private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
@@ -560,7 +560,7 @@ public partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logge
         }
     }
 
-    private async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
+    private static async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
     {
         try
         {

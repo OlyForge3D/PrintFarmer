@@ -37,6 +37,8 @@ public class ToastService
             await Task.Delay(ttlMs);
             Dismiss(id);
         }
+#pragma warning disable CA1031 // Intentionally ignore all exceptions in fire-and-forget operation
         catch { }
+#pragma warning restore CA1031
     }
 }

@@ -23,6 +23,8 @@ public static class RetryPolicyHelper
         ILogger? logger = null,
         string operationName = "operation")
     {
+        ArgumentNullException.ThrowIfNull(operation);
+        
         int retryCount = 0;
         Exception? lastException = null;
 
@@ -79,6 +81,8 @@ public static class RetryPolicyHelper
         ILogger? logger = null,
         string operationName = "operation")
     {
+        ArgumentNullException.ThrowIfNull(operation);
+        
         int retryCount = 0;
         Exception? lastException = null;
 
