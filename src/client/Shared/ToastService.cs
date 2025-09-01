@@ -10,6 +10,7 @@ public class ToastService
 
     public void Success(string message, int ttlMs = 3500) => Add(message, "success", ttlMs);
     public void Error(string message, int ttlMs = 5000) => Add(message, "error", ttlMs);
+    public void Warning(string message, int ttlMs = 3500) => Add(message, "warning", ttlMs);
 
     private void Add(string message, string type, int ttlMs)
     {
