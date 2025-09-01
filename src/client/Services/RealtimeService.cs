@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Farm.Web.Client;
 
-public class RealtimeService : IAsyncDisposable
+public sealed class RealtimeService : IAsyncDisposable
 {
     private readonly NavigationManager _nav;
     private readonly IConfiguration _config;
