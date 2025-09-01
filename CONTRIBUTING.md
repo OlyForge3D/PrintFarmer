@@ -1,9 +1,9 @@
 # Contributing to PrintFarmer
 
-Thanks for your interest in contributing! This guide has common, practical instructions for a C#/.NET 8 Blazor WebAssembly (hosted) solution.
+Thanks for your interest in contributing! This guide has common, practical instructions for a C#/.NET 9 Blazor WebAssembly solution with separate API backend and client frontend.
 
 ## Prerequisites
-- .NET SDK 8.0 or later
+- .NET SDK 9.0 or later
 - Git + a code editor (VS Code recommended)
 - Optional (VS Code): Extensions "C#", "C# Dev Kit", and "Razor Language Server"
 
@@ -15,8 +15,8 @@ dotnet --info
 
 ## Repository layout
 - `src/`
-  - `client/` — Blazor WebAssembly Client
-  - `server/` — ASP.NET Core Server (hosts the client and API)
+  - `client/` — Blazor WebAssembly Client (standalone frontend)
+  - `api/` — ASP.NET Core API Server (standalone backend)
   - `shared/` — Shared DTOs/models
   - `farm-web.sln` — Solution file
 
@@ -32,22 +32,38 @@ dotnet build .\farm-web.sln -c Debug
 dotnet build .\farm-web.sln -c Release
 ```
 
-## Run (hosted)
-The Server project hosts the Client; running the server is usually all you need during development.
+## Run (development)
+Both API server and client need to be run separately during development.
+
+**API Server (Backend):**
 ```powershell
 # From repo root
 cd .\src
-# Run Server (serves API + Blazor WASM)
-dotnet run --project .\server\Farm.Web.Server.csproj
+# Run API Server
+dotnet run --project .\api\Farm.Web.Api.csproj
 ```
-- Default URLs are printed to the console (typically http://localhost:5xxx).
-- Stop with Ctrl+C.
+API will be available at http://localhost:5245
+
+**Client (Frontend) - Run in separate terminal:**
+```powershell
+# From repo root  
+cd .\src
+# Run Client
+dotnet run --project .\client\Farm.Web.Client.csproj
+```
+Client will be available at http://localhost:5000
+
+Stop both with Ctrl+C.
 
 Tip: Use hot-reload/watch during active development:
 ```powershell
-# Watch mode with hot reload
+# API server (first terminal)
 cd .\src
-dotnet watch --project .\server\Farm.Web.Server.csproj run
+dotnet watch --project .\api\Farm.Web.Api.csproj run
+
+# Client (second terminal)
+cd .\src
+dotnet watch --project .\client\Farm.Web.Client.csproj run
 ```
 
 ## Tests
@@ -80,11 +96,11 @@ dotnet format .\farm-web.sln
 ```powershell
 # From repo root
 rd /s /q .\src\client\bin; rd /s /q .\src\client\obj
-rd /s /q .\src\server\bin; rd /s /q .\src\server\obj
+rd /s /q .\src\api\bin; rd /s /q .\src\api\obj
 rd /s /q .\src\shared\bin; rd /s /q .\src\shared\obj
 cd .\src; dotnet restore .\farm-web.sln; dotnet build .\farm-web.sln -c Debug
 ```
-- If ports are occupied, change the launch profile URLs in `server/Properties/launchSettings.json` or set `ASPNETCORE_URLS`.
+- If ports are occupied, change the launch profile URLs in `api/Properties/launchSettings.json` or set `ASPNETCORE_URLS`.
 
 ## Questions
 Open a discussion or an issue with clear repro steps, logs, and environment info (`dotnet --info`).

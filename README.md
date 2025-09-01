@@ -1,6 +1,6 @@
 # PrintFarmer
 
-A Blazor WebAssembly (hosted) dashboard for managing multiple 3D printers. Supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and streams live status via SignalR.
+A Blazor WebAssembly dashboard for managing multiple 3D printers. Supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and streams live status via SignalR.
 
 ## Features
 - Multi-backend: Moonraker and PrusaLink
@@ -12,14 +12,14 @@ A Blazor WebAssembly (hosted) dashboard for managing multiple 3D printers. Suppo
 ## Repository structure
 ```
 src/
-  client/   # Blazor WebAssembly client
-  server/   # ASP.NET Core server (hosts the client + API)
+  client/   # Blazor WebAssembly client (standalone frontend)
+  api/      # ASP.NET Core API server (standalone backend)
   shared/   # Shared DTOs and models
   farm-web.sln
 ```
 
 ## Prerequisites
-- .NET SDK 8.0+
+- .NET SDK 9.0+
 - Windows/macOS/Linux
 
 Verify:
@@ -28,23 +28,39 @@ dotnet --info
 ```
 
 ## Quick start (development)
-Run the hosted server (which serves the client and the API):
+Run both the API server and client separately:
+
+**API Server (Backend):**
 ```powershell
 # From repo root
 cd .\src
 # Restore and build
 dotnet restore .\farm-web.sln
 dotnet build .\farm-web.sln -c Debug
-# Run the server
-dotnet run --project .\server\Farm.Web.Server.csproj
+# Run the API server
+dotnet run --project .\api\Farm.Web.Api.csproj
 ```
-- Browse to the URL printed in the console (typically http://localhost:5xxx).
-- Stop with Ctrl+C.
+API will be available at http://localhost:5245
+
+**Client (Frontend) - Run in separate terminal:**
+```powershell
+cd .\src
+# Run the client
+dotnet run --project .\client\Farm.Web.Client.csproj
+```
+Client will be available at http://localhost:5000
+
+Stop both with Ctrl+C.
 
 Faster inner loop with hot reload:
 ```powershell
+# API server (first terminal)
 cd .\src
-dotnet watch --project .\server\Farm.Web.Server.csproj run
+dotnet watch --project .\api\Farm.Web.Api.csproj run
+
+# Client (second terminal)
+cd .\src
+dotnet watch --project .\client\Farm.Web.Client.csproj run
 ```
 
 ## Tests
@@ -64,7 +80,7 @@ dotnet test .\src\farm-web.sln -c Debug
 Note: The server normalizes camera URLs and stores both the original and IP-based server URLs.
 
 ## Data
-- SQLite file lives under `src/server` by default (e.g., `farm.db`). Startup includes safety steps for local development.
+- SQLite file lives under `src/api` by default (e.g., `farm.db`). Startup includes safety steps for local development.
 
 ## Contributing
 See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup, workflows, and troubleshooting.
