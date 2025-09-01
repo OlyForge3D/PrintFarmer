@@ -113,7 +113,7 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
             }
         }
 
-        if (validationErrors.Any())
+        if (validationErrors.Count > 0)
         {
             var errorMessage = $"Configuration validation failed:\n{string.Join("\n", validationErrors)}";
             logger.LogCritical(errorMessage);

@@ -327,8 +327,10 @@ public class HarvestWorkerService : BackgroundService
     }
 
     // Wrapper to satisfy call sites expecting apiKey and client parameters (currently unused)
+#pragma warning disable S1172 // Remove this unused method parameter
     private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient prusa)
         => DownloadPrusaLinkFileAsync(serverUrl, filePath);
+#pragma warning restore S1172
 
     // Note: No wrapper overload needed; use the primary method above.
 
@@ -349,8 +351,10 @@ public class HarvestWorkerService : BackgroundService
     }
 
     // Wrapper to satisfy call sites expecting a client parameter (currently unused)
+#pragma warning disable S1172 // Remove this unused method parameter
     private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient sdcp)
         => DownloadSdcpFileAsync(serverUrl, filePath);
+#pragma warning restore S1172
 
     // Note: No wrapper overload needed; use the primary method above.
 
@@ -416,7 +420,7 @@ public class HarvestWorkerService : BackgroundService
         }
 
         // Extract common parameters (simplified for now)
-        if (content.Contains("printing time") && content.Contains("h") && content.Contains("m"))
+        if (content.Contains("printing time") && content.Contains('h') && content.Contains('m'))
         {
             var timeMatch = System.Text.RegularExpressions.Regex.Match(content, @"(\d+)h (\d+)m");
             if (timeMatch.Success)

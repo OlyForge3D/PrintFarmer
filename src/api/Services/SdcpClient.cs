@@ -560,7 +560,7 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         }
     }
 
-    private async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
+    private static async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
     {
         try
         {
