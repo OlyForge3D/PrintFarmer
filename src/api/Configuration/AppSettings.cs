@@ -31,7 +31,7 @@ public class AppSettings
     [Range(10, 86400)]
     public int HeartbeatIntervalSeconds { get; set; } = 30;
 
-    public bool EnableDetailedErrors { get; set; } = false;
+    public bool EnableDetailedErrors { get; set; }
 
     [Range(1, 10000)]
     public int MaxRetryAttempts { get; set; } = 10;
@@ -53,7 +53,7 @@ public class DatabaseSettings
     [Range(1, 300)]
     public int CommandTimeoutSeconds { get; set; } = 30;
 
-    public bool EnableSensitiveDataLogging { get; set; } = false;
+    public bool EnableSensitiveDataLogging { get; set; }
 
     public string InitMode { get; set; } = "Migrate";
 }

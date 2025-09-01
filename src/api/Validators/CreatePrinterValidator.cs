@@ -64,7 +64,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
             "union select", "exec(", "execute("
         };
 
-        return !dangerousPatterns.Any(pattern =>
+        return !Array.Exists(dangerousPatterns, pattern =>
             input.Contains(pattern, StringComparison.OrdinalIgnoreCase));
     }
 }

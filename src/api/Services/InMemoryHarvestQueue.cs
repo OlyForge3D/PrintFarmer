@@ -11,7 +11,7 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 {
     private readonly Channel<HarvestFileJob> _channel;
     private readonly ILogger<InMemoryHarvestQueue> _logger;
-    private bool _disposed = false;
+    private bool _disposed;
 
     public InMemoryHarvestQueue(ILogger<InMemoryHarvestQueue> logger)
     {
