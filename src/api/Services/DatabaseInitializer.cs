@@ -59,28 +59,28 @@ public class DatabaseInitializer
                 // Seed catalog data
                 await _seeder.SeedAllAsync();
                 _logger.LogInformation("[DB] Database initialization completed successfully");
-                
+
                 return; // Success - exit retry loop
             }
             catch (Exception ex)
             {
                 lastException = ex;
                 retryCount++;
-                
+
                 if (retryCount < maxRetries)
                 {
-                    _logger.LogWarning(ex, 
-                        "[DB] Database initialization attempt {RetryCount}/{MaxRetries} failed: {Message}. Retrying in {Delay} seconds...", 
+                    _logger.LogWarning(ex,
+                        "[DB] Database initialization attempt {RetryCount}/{MaxRetries} failed: {Message}. Retrying in {Delay} seconds...",
                         retryCount, maxRetries, ex.Message, delaySeconds);
-                    
+
                     await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
                 }
                 else
                 {
-                    _logger.LogError(ex, 
-                        "[DB] Database initialization failed after {MaxRetries} attempts. Last error: {Message}", 
+                    _logger.LogError(ex,
+                        "[DB] Database initialization failed after {MaxRetries} attempts. Last error: {Message}",
                         maxRetries, ex.Message);
-                    
+
                     throw new InvalidOperationException(
                         $"Failed to initialize database after {maxRetries} attempts. " +
                         $"This usually indicates the database server is not ready or connection settings are incorrect. " +
