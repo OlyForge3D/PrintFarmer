@@ -239,6 +239,7 @@ builder.Services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
 builder.Services.AddHostedService<HarvestCompletionService>();
+builder.Services.AddHostedService<GracefulShutdownService>();
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
