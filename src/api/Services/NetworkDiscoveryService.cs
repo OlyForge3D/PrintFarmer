@@ -9,31 +9,98 @@ public interface INetworkDiscoveryService
     Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default);
 }
 
-public class NetworkDiscoveryService(
+public partial class NetworkDiscoveryService(
     MoonrakerClient moonrakerClient,
     PrusaLinkClient prusaLinkClient,
     INetworkDiscoverySettingsService settingsService,
     ILogger<NetworkDiscoveryService> logger) : INetworkDiscoveryService
 {
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting printer network discovery...")]
+    private static partial void LogDiscoveryStarting(ILogger logger);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}")]
+    private static partial void LogDiscoverySettings(ILogger logger, string networks, int timeoutMs, int maxScans, string ports);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Scanning network: {Network}")]
+    private static partial void LogScanningNetwork(ILogger logger, string network);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Network {Network} scan completed. Found {Count} printers")]
+    private static partial void LogNetworkScanCompleted(ILogger logger, string network, int count);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Network discovery completed. Found {Count} printers")]
+    private static partial void LogDiscoveryCompleted(ILogger logger, int count);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Network {Network} contains {HostCount} hosts to scan")]
+    private static partial void LogNetworkHostCount(ILogger logger, string network, int hostCount);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Scanning host: {Host}")]
+    private static partial void LogScanningHost(ILogger logger, string host);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Found printer at {Host}:{Port} - {Name} ({Backend})")]
+    private static partial void LogFoundPrinter(ILogger logger, string host, int port, string name, PrinterBackend backend);
+    
+    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to scan network: {Network}")]
+    private static partial void LogNetworkScanError(ILogger logger, Exception exception, string network);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to scan host {Host}")]
+    private static partial void LogHostScanError(ILogger logger, Exception exception, string host);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Attempting discovery at {BaseUrl}")]
+    private static partial void LogAttemptingDiscovery(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Testing Moonraker at {BaseUrl}")]
+    private static partial void LogTestingMoonraker(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered Moonraker printer at {BaseUrl}")]
+    private static partial void LogDiscoveredMoonraker(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "No Moonraker response from {BaseUrl}")]
+    private static partial void LogNoMoonrakerResponse(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Testing PrusaLink at {BaseUrl}")]
+    private static partial void LogTestingPrusaLink(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered PrusaLink printer at {BaseUrl}")]
+    private static partial void LogDiscoveredPrusaLink(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "No PrusaLink response from {BaseUrl}")]
+    private static partial void LogNoPrusaLinkResponse(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Testing Moonraker on port 80 at {BaseUrl}")]
+    private static partial void LogTestingMoonrakerPort80(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered Moonraker printer on port 80 at {BaseUrl}")]
+    private static partial void LogDiscoveredMoonrakerPort80(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "No Moonraker response on port 80 from {BaseUrl}")]
+    private static partial void LogNoMoonrakerResponsePort80(ILogger logger, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to discover printer at {BaseUrl}")]
+    private static partial void LogDiscoveryError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Moonraker discovery failed for {BaseUrl}")]
+    private static partial void LogMoonrakerDiscoveryError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink discovery failed for {BaseUrl}")]
+    private static partial void LogPrusaLinkDiscoveryError(ILogger logger, Exception exception, string baseUrl);
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)
     {
-        logger.LogInformation("Starting printer network discovery...");
+        LogDiscoveryStarting(logger);
 
         var settings = settingsService.GetSettings();
-        logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}",
-            string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
+        LogDiscoverySettings(logger, string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
 
         var discovered = new List<DiscoveredPrinterDto>();
 
         foreach (var network in settings.NetworkRanges)
         {
-            logger.LogInformation("Scanning network: {Network}", network);
+            LogScanningNetwork(logger, network);
             var networkPrinters = await ScanNetworkAsync(network, settings, cancellationToken);
-            logger.LogInformation("Network {Network} scan completed. Found {Count} printers", network, networkPrinters.Count);
+            LogNetworkScanCompleted(logger, network, networkPrinters.Count);
             discovered.AddRange(networkPrinters);
         }
 
-        logger.LogInformation("Network discovery completed. Found {Count} printers", discovered.Count);
+        LogDiscoveryCompleted(logger, discovered.Count);
         return [.. discovered.OrderBy(p => p.IpAddress)];
     }
 
@@ -45,7 +112,7 @@ public class NetworkDiscoveryService(
         {
             var (networkAddr, cidr) = ParseCidr(network);
             var hosts = GetHostsInRange(networkAddr, cidr);
-            logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
+            LogNetworkHostCount(logger, network, hosts.Count);
 
             using var semaphore = new SemaphoreSlim(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
             var tasks = hosts.Select(async host =>
@@ -53,12 +120,11 @@ public class NetworkDiscoveryService(
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    logger.LogDebug("Scanning host: {Host}", host);
+                    LogScanningHost(logger, host);
                     var result = await ScanHostAsync(host, settings, cancellationToken);
                     if (result != null)
                     {
-                        logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})",
-                            result.IpAddress, result.Port, result.Name, result.Backend);
+                        LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
                     }
                     return result;
                 }
@@ -71,9 +137,22 @@ public class NetworkDiscoveryService(
             var results = await Task.WhenAll(tasks);
             discovered.AddRange(results.Where(r => r != null)!);
         }
-        catch (Exception ex)
+        catch (FormatException ex)
         {
-            logger.LogError(ex, "Failed to scan network: {Network}", network);
+            LogNetworkScanError(logger, ex, network);
+        }
+        catch (ArgumentException ex)
+        {
+            LogNetworkScanError(logger, ex, network);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogNetworkScanError(logger, ex, network);
         }
 
         return discovered;
@@ -115,9 +194,13 @@ public class NetworkDiscoveryService(
                 hosts.Add(new IPAddress(hostBytes).ToString());
             }
         }
-        catch (Exception)
+        catch (ArgumentOutOfRangeException)
         {
-            // If range calculation fails, return empty list
+            // Invalid CIDR range, return empty list
+        }
+        catch (OverflowException)
+        {
+            // Host count calculation overflow, return empty list
         }
 
         return hosts;
@@ -142,9 +225,14 @@ public class NetworkDiscoveryService(
                 }
             }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            logger.LogDebug(ex, "Failed to scan host {Host}", ipAddress);
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogHostScanError(logger, ex, ipAddress);
         }
 
         return null;
@@ -156,53 +244,58 @@ public class NetworkDiscoveryService(
 
         try
         {
-            logger.LogDebug("Attempting discovery at {BaseUrl}", baseUrl);
+            LogAttemptingDiscovery(logger, baseUrl);
             // Test Moonraker first (port 7125) or PrusaLink (port 80)
             if (port == 7125)
             {
-                logger.LogInformation("Testing Moonraker at {BaseUrl}", baseUrl);
+                LogTestingMoonraker(logger, baseUrl);
                 var moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (moonrakerInfo != null)
                 {
-                    logger.LogInformation("Successfully discovered Moonraker printer at {BaseUrl}", baseUrl);
+                    LogDiscoveredMoonraker(logger, baseUrl);
                     return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
                 }
                 else
                 {
-                    logger.LogDebug("No Moonraker response from {BaseUrl}", baseUrl);
+                    LogNoMoonrakerResponse(logger, baseUrl);
                 }
             }
             else if (port == 80)
             {
-                logger.LogInformation("Testing PrusaLink at {BaseUrl}", baseUrl);
+                LogTestingPrusaLink(logger, baseUrl);
                 var prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (prusaInfo != null)
                 {
-                    logger.LogInformation("Successfully discovered PrusaLink printer at {BaseUrl}", baseUrl);
+                    LogDiscoveredPrusaLink(logger, baseUrl);
                     return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.PrusaLink, prusaInfo);
                 }
                 else
                 {
-                    logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
+                    LogNoPrusaLinkResponse(logger, baseUrl);
 
                     // Also test if this might be a Moonraker on port 80
-                    logger.LogInformation("Testing Moonraker on port 80 at {BaseUrl}", baseUrl);
+                    LogTestingMoonrakerPort80(logger, baseUrl);
                     var moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
                     if (moonrakerInfo != null)
                     {
-                        logger.LogInformation("Successfully discovered Moonraker printer on port 80 at {BaseUrl}", baseUrl);
+                        LogDiscoveredMoonrakerPort80(logger, baseUrl);
                         return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
                     }
                     else
                     {
-                        logger.LogDebug("No Moonraker response on port 80 from {BaseUrl}", baseUrl);
+                        LogNoMoonrakerResponsePort80(logger, baseUrl);
                     }
                 }
             }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            logger.LogDebug(ex, "Failed to discover printer at {BaseUrl}", baseUrl);
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogDiscoveryError(logger, ex, baseUrl);
         }
 
         return null;
@@ -229,9 +322,22 @@ public class NetworkDiscoveryService(
                 };
             }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogMoonrakerDiscoveryError(logger, ex, baseUrl);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogMoonrakerDiscoveryError(logger, ex, baseUrl);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogMoonrakerDiscoveryError(logger, ex, baseUrl);
         }
 
         return null;
@@ -258,9 +364,22 @@ public class NetworkDiscoveryService(
                 };
             }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogPrusaLinkDiscoveryError(logger, ex, baseUrl);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogPrusaLinkDiscoveryError(logger, ex, baseUrl);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogPrusaLinkDiscoveryError(logger, ex, baseUrl);
         }
 
         return null;
@@ -312,7 +431,11 @@ public class NetworkDiscoveryService(
             var uri = new Uri(url);
             return uri.Host;
         }
-        catch
+        catch (ArgumentException)
+        {
+            return "Unknown";
+        }
+        catch (UriFormatException)
         {
             return "Unknown";
         }
