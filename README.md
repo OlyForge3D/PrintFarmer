@@ -79,6 +79,10 @@ dotnet test .\src\farm-web.sln -c Debug
 
 Note: The server normalizes camera URLs and stores both the original and IP-based server URLs.
 
+## Conventions (minimal)
+- Async-suffix: All asynchronous methods in controllers and services use the `Async` suffix (for example, `GetPrintersAsync`). This clarifies intent and aligns with analyzers; route templates remain unchanged.
+- CreatedAtRoute for POST: Resource-creating POST endpoints return 201 Created with a Location header via `CreatedAtRoute(...)`. Ensure the matching GET-by-id route is named (for example, `Name = "GetPrinterById"`) so POSTs can reference it.
+
 ## Data
 - SQLite file lives under `src/api` by default (e.g., `farm.db`). Startup includes safety steps for local development.
 

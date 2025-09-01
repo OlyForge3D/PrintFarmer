@@ -114,3 +114,7 @@ Switch DB in compose by setting DB_PROVIDER and corresponding ConnectionStrings_
 cd ./src
 dotnet test ./farm-web.sln -c Debug
 ```
+
+## Conventions (minimal)
+- Async-suffix: All async controller/service methods are named with the `Async` suffix (e.g., `GetAsync`, `CreateAsync`). Routing is unaffected; this is for clarity and analyzer consistency.
+- CreatedAtRoute: POST endpoints that create resources return `CreatedAtRoute(...)` with a named GET-by-id route (e.g., `Name = "GetById"`) to populate the Location header.
