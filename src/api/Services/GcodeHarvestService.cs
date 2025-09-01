@@ -1051,7 +1051,7 @@ public class GcodeHarvestService : IGcodeHarvestService
     }
 
     // Helper class for file information
-    private class PrinterFileInfo
+    private sealed class PrinterFileInfo
     {
         public string Name { get; set; } = string.Empty;
         public string Path { get; set; } = string.Empty;
