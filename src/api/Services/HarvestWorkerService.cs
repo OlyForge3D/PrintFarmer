@@ -326,9 +326,11 @@ public class HarvestWorkerService : BackgroundService
         }
     }
 
-    // Overload to match call sites (apiKey and client provided but unused for now)
+    // Wrapper to satisfy call sites expecting apiKey and client parameters (currently unused)
     private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient prusa)
         => DownloadPrusaLinkFileAsync(serverUrl, filePath);
+
+    // Note: No wrapper overload needed; use the primary method above.
 
     private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath)
     {
@@ -346,9 +348,11 @@ public class HarvestWorkerService : BackgroundService
         }
     }
 
-    // Overload to match call sites (client provided but unused for now)
+    // Wrapper to satisfy call sites expecting a client parameter (currently unused)
     private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient sdcp)
         => DownloadSdcpFileAsync(serverUrl, filePath);
+
+    // Note: No wrapper overload needed; use the primary method above.
 
     private static async Task<string> CalculateFileHashAsync(Stream stream)
     {
@@ -466,7 +470,7 @@ public class HarvestWorkerService : BackgroundService
         }
     }
 
-    // Overload used at call sites to record an error with additional context
-    private static Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string message)
+    // Wrapper to satisfy call sites that provide file context (unused for now)
+    private static Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string? errorMessage)
         => RecordFileErrorAsync(db, operationId);
 }

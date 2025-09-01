@@ -1,6 +1,4 @@
-﻿using System.Collections.Concurrent;
-
-namespace Farm.Web.Client;
+﻿namespace Farm.Web.Client;
 
 public class ToastService
 {

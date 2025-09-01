@@ -17,70 +17,70 @@ public partial class NetworkDiscoveryService(
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting printer network discovery...")]
     private static partial void LogDiscoveryStarting(ILogger logger);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}")]
     private static partial void LogDiscoverySettings(ILogger logger, string networks, int timeoutMs, int maxScans, string ports);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Scanning network: {Network}")]
     private static partial void LogScanningNetwork(ILogger logger, string network);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Network {Network} scan completed. Found {Count} printers")]
     private static partial void LogNetworkScanCompleted(ILogger logger, string network, int count);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Network discovery completed. Found {Count} printers")]
     private static partial void LogDiscoveryCompleted(ILogger logger, int count);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Network {Network} contains {HostCount} hosts to scan")]
     private static partial void LogNetworkHostCount(ILogger logger, string network, int hostCount);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Scanning host: {Host}")]
     private static partial void LogScanningHost(ILogger logger, string host);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Found printer at {Host}:{Port} - {Name} ({Backend})")]
     private static partial void LogFoundPrinter(ILogger logger, string host, int port, string name, PrinterBackend backend);
-    
+
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to scan network: {Network}")]
     private static partial void LogNetworkScanError(ILogger logger, Exception exception, string network);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to scan host {Host}")]
     private static partial void LogHostScanError(ILogger logger, Exception exception, string host);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Attempting discovery at {BaseUrl}")]
     private static partial void LogAttemptingDiscovery(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Testing Moonraker at {BaseUrl}")]
     private static partial void LogTestingMoonraker(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered Moonraker printer at {BaseUrl}")]
     private static partial void LogDiscoveredMoonraker(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "No Moonraker response from {BaseUrl}")]
     private static partial void LogNoMoonrakerResponse(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Testing PrusaLink at {BaseUrl}")]
     private static partial void LogTestingPrusaLink(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered PrusaLink printer at {BaseUrl}")]
     private static partial void LogDiscoveredPrusaLink(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "No PrusaLink response from {BaseUrl}")]
     private static partial void LogNoPrusaLinkResponse(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Testing Moonraker on port 80 at {BaseUrl}")]
     private static partial void LogTestingMoonrakerPort80(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered Moonraker printer on port 80 at {BaseUrl}")]
     private static partial void LogDiscoveredMoonrakerPort80(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "No Moonraker response on port 80 from {BaseUrl}")]
     private static partial void LogNoMoonrakerResponsePort80(ILogger logger, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to discover printer at {BaseUrl}")]
     private static partial void LogDiscoveryError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Moonraker discovery failed for {BaseUrl}")]
     private static partial void LogMoonrakerDiscoveryError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink discovery failed for {BaseUrl}")]
     private static partial void LogPrusaLinkDiscoveryError(ILogger logger, Exception exception, string baseUrl);
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)

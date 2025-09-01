@@ -13,8 +13,8 @@ internal class LoggerAdapter<T>(ILogger logger) : ILogger<T>
 
 public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null) : PrinterClientBase, IPrusaLinkClient
 {
-    private readonly PrusaLinkApiClient apiClient = new(http, logger != null 
-        ? new LoggerAdapter<PrusaLinkApiClient>(logger) 
+    private readonly PrusaLinkApiClient apiClient = new(http, logger != null
+        ? new LoggerAdapter<PrusaLinkApiClient>(logger)
         : Microsoft.Extensions.Logging.Abstractions.NullLogger<PrusaLinkApiClient>.Instance);
     private readonly ILogger? _logger = logger;
 

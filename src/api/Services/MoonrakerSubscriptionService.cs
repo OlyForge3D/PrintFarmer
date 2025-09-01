@@ -16,28 +16,28 @@ public partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, I
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "MoonrakerSubscriptionService starting")]
     private static partial void LogServiceStarting(ILogger logger);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "MoonrakerSubscriptionService stopping")]
     private static partial void LogServiceStopping(ILogger logger);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting WebSocket connection for printer {PrinterName}")]
     private static partial void LogConnectionStarting(ILogger logger, string printerName);
-    
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connection failed for printer {PrinterName}: {ErrorMessage}")]
     private static partial void LogConnectionFailed(ILogger logger, string printerName, string errorMessage);
-    
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Connected to printer {PrinterName}")]
     private static partial void LogConnectionSuccess(ILogger logger, string printerName);
-    
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "WebSocket disconnected for printer {PrinterName}")]
     private static partial void LogWebSocketDisconnected(ILogger logger, string printerName);
-    
+
     [LoggerMessage(Level = LogLevel.Error, Message = "Connection error for printer {PrinterName}")]
     private static partial void LogConnectionError(ILogger logger, Exception exception, string printerName);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to send connection identification for printer {PrinterName}")]
     private static partial void LogIdentificationFailed(ILogger logger, Exception exception, string printerName);
-    
+
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();

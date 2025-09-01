@@ -36,7 +36,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     protected override IHost CreateHost(IHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        
+
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((context, config) =>
         {
@@ -130,7 +130,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     private void TryDelete()
     {
         try
-        { if (File.Exists(_dbPath))
+        {
+            if (File.Exists(_dbPath))
             {
                 File.Delete(_dbPath);
             }

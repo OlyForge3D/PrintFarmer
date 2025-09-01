@@ -26,22 +26,22 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 {
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get printer status from {BaseUrl}")]
     private static partial void LogStatusError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get printer info from {BaseUrl}")]
     private static partial void LogPrinterInfoError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get job info from {BaseUrl}")]
     private static partial void LogJobError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get composite status from {BaseUrl}")]
     private static partial void LogCompositeStatusError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to start metadata scan for {Filename} at {BaseUrl}")]
     private static partial void LogMetadataScanError(ILogger logger, Exception exception, string filename, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URLs from {BaseUrl}")]
     private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
-    
+
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 7125);
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -568,7 +568,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             var url = $"{NormalizeBaseUrl(baseUrl)}/printer/gcode/script";
-            var resp = await http.PostAsJsonAsync(url, new { script = string.Join("\n", gcodes) }, cts.Token);
+            using var resp = await http.PostAsJsonAsync(url, new { script = string.Join("\n", gcodes) }, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch

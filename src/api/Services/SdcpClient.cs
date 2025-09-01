@@ -113,16 +113,16 @@ public partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logge
 {
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URL for {BaseUrl}")]
     private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera snapshot URL for {BaseUrl}")]
     private static partial void LogCameraSnapshotUrlError(ILogger logger, Exception exception, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to send SDCP command {Command} to {BaseUrl}")]
     private static partial void LogCommandError(ILogger logger, Exception exception, int command, string baseUrl);
-    
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get SDCP status from {BaseUrl}")]
     private static partial void LogStatusError(ILogger logger, Exception exception, string baseUrl);
-    
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP
@@ -635,9 +635,6 @@ public partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logge
             // This implementation assumes a standard HTTP file upload endpoint
             var host = GetHostFromUrl(baseUrl);
             var uploadUrl = $"http://{host}/api/upload"; // Common SDCP upload endpoint
-
-            using var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(60);
 
             using var formContent = new MultipartFormDataContent();
             using var streamContent = new StreamContent(fileContent);

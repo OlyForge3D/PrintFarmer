@@ -152,19 +152,6 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         return null;
     }
 
-    private static int GetCidrFromMask(IPAddress mask)
-    {
-        var maskBytes = mask.GetAddressBytes();
-        var cidr = 0;
-
-        foreach (var b in maskBytes)
-        {
-            cidr += Convert.ToString(b, 2).Count(c => c == '1');
-        }
-
-        return cidr;
-    }
-
     private static List<string> GetFallbackNetworkRanges()
     {
         return new List<string>
