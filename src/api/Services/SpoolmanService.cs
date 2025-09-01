@@ -199,7 +199,6 @@ public class SpoolmanService : ISpoolmanService
                 ct.ThrowIfCancellationRequested();
                 yield return el;
             }
-            yield break;
         }
 
         // If it's an object, try common list containers
