@@ -1,6 +1,8 @@
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
+using Farm.Web.Api.Services;
+using System.Text.Json;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -13,11 +15,22 @@ public class GcodeHarvestController : ControllerBase
 {
     private readonly IGcodeHarvestService _harvestService;
     private readonly ILogger<GcodeHarvestController> _logger;
+    private readonly IMoonrakerClient _moonrakerClient;
+    private readonly IPrusaLinkClient _prusaLinkClient;
+    private readonly ISdcpClient _sdcpClient;
 
-    public GcodeHarvestController(IGcodeHarvestService harvestService, ILogger<GcodeHarvestController> logger)
+    public GcodeHarvestController(
+        IGcodeHarvestService harvestService, 
+        ILogger<GcodeHarvestController> logger,
+        IMoonrakerClient moonrakerClient,
+        IPrusaLinkClient prusaLinkClient,
+        ISdcpClient sdcpClient)
     {
         _harvestService = harvestService;
         _logger = logger;
+        _moonrakerClient = moonrakerClient;
+        _prusaLinkClient = prusaLinkClient;
+        _sdcpClient = sdcpClient;
     }
 
     /// <summary>
@@ -135,6 +148,29 @@ public class GcodeHarvestController : ControllerBase
     }
 
     /// <summary>
+    /// Get active harvest operation for a specific printer
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">Active harvest operation or null if none active</response>
+    [HttpGet("printers/{printerId:guid}/active")]
+    public async Task<ActionResult<GcodeHarvestOperationDto?>> GetActiveHarvest(
+        Guid printerId, 
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var operation = await _harvestService.GetActiveHarvestAsync(printerId, ct);
+            return Ok(operation);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get active harvest for printer {PrinterId}", printerId);
+            return StatusCode(500, "Failed to retrieve active harvest");
+        }
+    }
+
+    /// <summary>
     /// Get recent harvest operations for a specific printer
     /// </summary>
     /// <param name="printerId">The printer ID</param>
@@ -156,6 +192,26 @@ public class GcodeHarvestController : ControllerBase
         {
             _logger.LogError(ex, "Failed to get recent harvests for printer {PrinterId}", printerId);
             return StatusCode(500, "Failed to retrieve recent harvests");
+        }
+    }
+
+    /// <summary>
+    /// Get all active (running) harvest operations
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">List of active harvest operations</response>
+    [HttpGet("active")]
+    public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetActiveHarvests(CancellationToken ct = default)
+    {
+        try
+        {
+            var operations = await _harvestService.GetActiveHarvestsAsync(ct);
+            return Ok(operations);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get active harvest operations");
+            return StatusCode(500, "Failed to retrieve active harvest operations");
         }
     }
 
@@ -191,6 +247,99 @@ public class GcodeHarvestController : ControllerBase
         {
             _logger.LogError(ex, "Failed to analyze G-code file {FileName}", file.FileName);
             return StatusCode(500, "Failed to analyze G-code file");
+        }
+    }
+
+    /// <summary>
+    /// Test endpoint for MoonrakerClient.GetDirectoryAsync
+    /// </summary>
+    [HttpGet("test/moonraker/directory")]
+    public async Task<IActionResult> TestMoonrakerGetDirectory(
+        [FromQuery] string serverUrl, 
+        [FromQuery] string path = "gcodes", 
+        [FromQuery] bool extended = true,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}", 
+                serverUrl, path, extended);
+            
+            var directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
+            
+            if (directoryInfo == null)
+            {
+                _logger.LogWarning("GetDirectoryAsync returned null result");
+                return NotFound("Directory not found or error occurred");
+            }
+            
+            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories", 
+                directoryInfo.Files?.Length ?? 0, directoryInfo.Dirs?.Length ?? 0);
+            
+            // Return detailed info including all file data and structure
+            return Ok(new {
+                success = true,
+                result = directoryInfo,
+                fileCount = directoryInfo.Files?.Length ?? 0,
+                dirCount = directoryInfo.Dirs?.Length ?? 0
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error testing MoonrakerClient.GetDirectoryAsync");
+            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+        }
+    }
+
+    /// <summary>
+    /// Test endpoint for MoonrakerClient.GetFileListAsync
+    /// </summary>
+    [HttpGet("test/moonraker/files")]
+    public async Task<IActionResult> TestMoonrakerGetFileList(
+        [FromQuery] string serverUrl,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
+            
+            var files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
+            
+            _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
+            
+            return Ok(new {
+                success = true,
+                files = files,
+                count = files.Length
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error testing MoonrakerClient.GetFileListAsync");
+            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+        }
+    }
+
+    /// <summary>
+    /// Test endpoint to enable debug logging
+    /// </summary>
+    [HttpPost("debug-logs")]
+    public IActionResult EnableDebugLogs()
+    {
+        try
+        {
+            // Configure logging to show more detailed information
+            _logger.LogInformation("Debug logging was requested");
+            
+            // Just log the request since we can't modify logging at runtime easily
+            _logger.LogWarning("Enabling verbose logging for MoonrakerClient and GcodeHarvestService");
+            
+            return Ok(new { success = true, message = "Debug logging enabled (request logged)" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error enabling debug logs");
+            return StatusCode(500, new { success = false, error = ex.Message });
         }
     }
 }

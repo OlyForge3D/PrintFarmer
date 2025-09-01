@@ -3,16 +3,19 @@ using System;
 using Farm.Web.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace Farm.Web.Api.Migrations
+namespace Farm.Web.Api.api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250901030849_InitialSchema")]
+    partial class InitialSchema
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
@@ -163,7 +166,6 @@ namespace Farm.Web.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("OriginalPrinterPath")
-                        .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("PrintSpeed")
@@ -182,18 +184,21 @@ namespace Farm.Web.Api.Migrations
                         .HasColumnType("REAL");
 
                     b.Property<string>("RequiredMaterial")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("RequiredNozzleDiameter")
                         .HasColumnType("REAL");
 
                     b.Property<string>("SlicerName")
+                        .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerSettings")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerVersion")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Source")
@@ -231,8 +236,6 @@ namespace Farm.Web.Api.Migrations
                     b.HasIndex("RequiredMaterial");
 
                     b.HasIndex("RequiredNozzleDiameter");
-
-                    b.HasIndex("Source");
 
                     b.HasIndex("SourcePrinterId");
 
@@ -333,8 +336,8 @@ namespace Farm.Web.Api.Migrations
                     b.Property<double?>("ActualFilamentUsage")
                         .HasColumnType("REAL");
 
-                    b.Property<TimeSpan?>("ActualPrintTime")
-                        .HasColumnType("TEXT");
+                    b.Property<long?>("ActualPrintTime")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime?>("ActualStartTime")
                         .HasColumnType("TEXT");
@@ -348,8 +351,8 @@ namespace Farm.Web.Api.Migrations
                     b.Property<double?>("EstimatedFilamentUsage")
                         .HasColumnType("REAL");
 
-                    b.Property<TimeSpan?>("EstimatedPrintTime")
-                        .HasColumnType("TEXT");
+                    b.Property<long?>("EstimatedPrintTime")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("ExcludedPrinterIds")
                         .HasColumnType("TEXT");
@@ -369,7 +372,9 @@ namespace Farm.Web.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Priority")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
 
                     b.Property<int>("QueuePosition")
                         .HasColumnType("INTEGER");
@@ -643,17 +648,17 @@ namespace Farm.Web.Api.Migrations
                     b.HasOne("Farm.Web.Api.Domain.Printer", "SourcePrinter")
                         .WithMany()
                         .HasForeignKey("SourcePrinterId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("Farm.Web.Api.Domain.PrinterModel", "TargetModel")
                         .WithMany()
                         .HasForeignKey("TargetModelId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("Farm.Web.Api.Domain.Printer", "TargetPrinter")
                         .WithMany()
                         .HasForeignKey("TargetPrinterId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.Navigation("SourcePrinter");
 
@@ -667,7 +672,7 @@ namespace Farm.Web.Api.Migrations
                     b.HasOne("Farm.Web.Api.Domain.Printer", "Printer")
                         .WithMany()
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
 
                     b.Navigation("Printer");
@@ -678,12 +683,12 @@ namespace Farm.Web.Api.Migrations
                     b.HasOne("Farm.Web.Api.Domain.Printer", "AssignedPrinter")
                         .WithMany()
                         .HasForeignKey("AssignedPrinterId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("Farm.Web.Api.Domain.GcodeFile", "GcodeFile")
                         .WithMany()
                         .HasForeignKey("GcodeFileId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
 
                     b.Navigation("AssignedPrinter");

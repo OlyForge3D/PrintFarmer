@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Farm.Web.Client;
+using Farm.Web.Client.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
 
@@ -31,5 +32,8 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBaseU
 
 builder.Services.AddScoped<ToastService>();
 builder.Services.AddScoped<RealtimeService>();
+builder.Services.AddScoped<JobQueueService>();
+builder.Services.AddScoped<GcodeLibraryService>();
+builder.Services.AddScoped<PrinterService>();
 
 await builder.Build().RunAsync();

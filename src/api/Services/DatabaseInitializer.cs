@@ -41,14 +41,19 @@ public class DatabaseInitializer
                 // Perform migrations or ensure creation
                 try
                 {
-                    await _context.Database.MigrateAsync();
-                    _logger.LogInformation("[DB] Database migration completed successfully");
+                    // For MVP development, use EnsureCreated instead of migrations
+                    // This simplifies schema changes during rapid development
+                    await _context.Database.EnsureCreatedAsync();
+                    _logger.LogInformation("[DB] Database schema creation completed successfully");
+                    
+                    // Commented out migration code for future use
+                    // await _context.Database.MigrateAsync();
+                    // _logger.LogInformation("[DB] Database migration completed successfully");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[DB] Migration failed: {Message}. Falling back to EnsureCreated", ex.Message);
-                    await _context.Database.EnsureCreatedAsync();
-                    _logger.LogInformation("[DB] Database creation completed successfully");
+                    _logger.LogWarning(ex, "[DB] Database creation failed: {Message}", ex.Message);
+                    throw; // Re-throw to trigger retry mechanism
                 }
 
                 // Seed catalog data

@@ -700,16 +700,106 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
+            // First try using REST API
             var encodedPath = Uri.EscapeDataString(path);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}";
+            
             using var resp = await http.GetAsync(url, cts.Token);
-            if (!resp.IsSuccessStatusCode) return null;
-
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
-            return response?.Result;
+            if (resp.IsSuccessStatusCode)
+            {
+                try
+                {
+                    var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
+                    if (response?.Result != null)
+                    {
+                        return response.Result;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error parsing directory info from REST API: {ex.Message}");
+                    // Continue to fallback method
+                }
+            }
+            
+            // If REST API fails, try using JSON-RPC
+            var jsonRpcRequest = new JsonRpcRequest
+            {
+                Method = "server.files.get_directory",
+                Params = new Dictionary<string, object> 
+                { 
+                    ["path"] = path,
+                    ["extended"] = extended
+                },
+                Id = 1
+            };
+            
+            var jsonRpcUrl = $"{NormalizeBaseUrl(baseUrl)}/websocket";
+            var jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
+            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            
+            using var jsonRpcResp = await http.PostAsync(jsonRpcUrl, content, cts.Token);
+            if (!jsonRpcResp.IsSuccessStatusCode) return null;
+            
+            var responseJson = await jsonRpcResp.Content.ReadAsStringAsync(cts.Token);
+            
+            try
+            {
+                var jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(responseJson);
+                
+                if (jsonRpcResponse?.Error != null)
+                {
+                    Console.WriteLine($"JSON-RPC error: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                    
+                    // Special handling for URL parameter error
+                    if (jsonRpcResponse.Error.Message.Contains("No data for argument: url") ||
+                        jsonRpcResponse.Error.Code == 400)
+                    {
+                        // Try again with URL parameter included
+                        jsonRpcRequest.Params = new Dictionary<string, object> 
+                        { 
+                            ["path"] = path,
+                            ["extended"] = extended,
+                            ["url"] = "http://printfarmer-api:5088" // Add URL parameter
+                        };
+                        
+                        jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
+                        content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                        
+                        using var retryResp = await http.PostAsync(jsonRpcUrl, content, cts.Token);
+                        if (!retryResp.IsSuccessStatusCode) return null;
+                        
+                        responseJson = await retryResp.Content.ReadAsStringAsync(cts.Token);
+                        jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(responseJson);
+                        
+                        if (jsonRpcResponse?.Error != null)
+                        {
+                            Console.WriteLine($"JSON-RPC error after retry: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                            return null;
+                        }
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
+                
+                if (jsonRpcResponse?.Result == null) return null;
+                
+                // Deserialize the result to DirectoryInfo
+                var resultJson = jsonRpcResponse.Result.ToString();
+                var directoryInfo = JsonSerializer.Deserialize<DirectoryInfo>(resultJson ?? "{}");
+                return directoryInfo;
+            }
+            catch (JsonException jex)
+            {
+                Console.WriteLine($"JSON parsing error: {jex.Message}");
+                return null;
+            }
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Error in GetDirectoryAsync: {ex.Message}");
             return null;
         }
     }

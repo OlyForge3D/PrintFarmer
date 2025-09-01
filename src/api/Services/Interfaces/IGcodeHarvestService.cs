@@ -34,9 +34,19 @@ public interface IGcodeHarvestService
     Task<bool> CancelHarvestAsync(Guid operationId, CancellationToken ct = default);
     
     /// <summary>
+    /// Get the active harvest operation for a printer, if any
+    /// </summary>
+    Task<GcodeHarvestOperationDto?> GetActiveHarvestAsync(Guid printerId, CancellationToken ct = default);
+    
+    /// <summary>
     /// Get recent harvest operations for a printer
     /// </summary>
     Task<GcodeHarvestOperationDto[]> GetRecentHarvestsAsync(Guid printerId, int count = 10, CancellationToken ct = default);
+    
+    /// <summary>
+    /// Get all active (running) harvest operations
+    /// </summary>
+    Task<GcodeHarvestOperationDto[]> GetActiveHarvestsAsync(CancellationToken ct = default);
     
     /// <summary>
     /// Extract metadata from G-code content
@@ -47,4 +57,17 @@ public interface IGcodeHarvestService
     /// Calculate SHA256 hash of G-code file for deduplication
     /// </summary>
     Task<string> CalculateFileHashAsync(Stream fileStream, CancellationToken ct = default);
+    
+    /// <summary>
+    /// Gets information about all currently running harvest tasks
+    /// </summary>
+    /// <returns>Dictionary of operation IDs and their current status</returns>
+    IDictionary<Guid, bool> GetActiveTasksStatus();
+    
+    /// <summary>
+    /// Wait for all active tasks to complete or cancel them after timeout
+    /// </summary>
+    /// <param name="timeout">Maximum time to wait</param>
+    /// <param name="ct">Cancellation token</param>
+    Task WaitForAllTasksAsync(TimeSpan timeout, CancellationToken ct = default);
 }
