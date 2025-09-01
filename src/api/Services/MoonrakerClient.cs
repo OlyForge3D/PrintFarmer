@@ -895,7 +895,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             var jsonRpcUrl = $"{NormalizeBaseUrl(baseUrl)}/websocket";
             var jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            using var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using var jsonRpcResp = await http.PostAsync(jsonRpcUrl, content, cts.Token);
             if (!jsonRpcResp.IsSuccessStatusCode)
@@ -926,9 +926,9 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                         };
 
                         jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
-                        content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                        using var retryContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                        using var retryResp = await http.PostAsync(jsonRpcUrl, content, cts.Token);
+                        using var retryResp = await http.PostAsync(jsonRpcUrl, retryContent, cts.Token);
                         if (!retryResp.IsSuccessStatusCode)
                         {
                             return null;
@@ -1322,14 +1322,15 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             var encodedFilename = Uri.EscapeDataString(filename);
             var url = $"{NormalizeBaseUrl(baseUrl)}/server/files/gcodes/{encodedFilename}";
-            var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                resp.Dispose();
                 return null;
             }
 
-            return await resp.Content.ReadAsStreamAsync(cts.Token);
+            // Read the content into a MemoryStream to ensure proper disposal
+            var content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            return new MemoryStream(content);
         }
         catch
         {
