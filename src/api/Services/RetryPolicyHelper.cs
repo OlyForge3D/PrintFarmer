@@ -24,7 +24,7 @@ public static class RetryPolicyHelper
         string operationName = "operation")
     {
         ArgumentNullException.ThrowIfNull(operation);
-        
+
         int retryCount = 0;
         Exception? lastException = null;
 
@@ -82,7 +82,7 @@ public static class RetryPolicyHelper
         string operationName = "operation")
     {
         ArgumentNullException.ThrowIfNull(operation);
-        
+
         int retryCount = 0;
         Exception? lastException = null;
 

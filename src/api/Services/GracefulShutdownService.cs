@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
@@ -10,7 +10,7 @@ public class GracefulShutdownService : IHostedService
     private readonly IServiceProvider _serviceProvider;
     private readonly IHostApplicationLifetime _appLifetime;
     private readonly ILogger<GracefulShutdownService> _logger;
-    
+
     public GracefulShutdownService(
         IServiceProvider serviceProvider,
         IHostApplicationLifetime appLifetime,
@@ -20,22 +20,22 @@ public class GracefulShutdownService : IHostedService
         _appLifetime = appLifetime;
         _logger = logger;
     }
-    
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _appLifetime.ApplicationStopping.Register(OnStopping);
+        _appLifetime.ApplicationStopping.Register(() => _ = OnStoppingAsync());
         return Task.CompletedTask;
     }
-    
-    private async void OnStopping()
+
+    private async Task OnStoppingAsync()
     {
         _logger.LogInformation("Application is stopping. Waiting for background harvest tasks to complete...");
-        
+
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var harvestService = scope.ServiceProvider.GetRequiredService<IGcodeHarvestService>();
-            
+
             // Wait up to 30 seconds for tasks to complete
             await harvestService.WaitForAllTasksAsync(TimeSpan.FromSeconds(30));
             _logger.LogInformation("All background harvest tasks completed successfully");
@@ -49,7 +49,7 @@ public class GracefulShutdownService : IHostedService
             _logger.LogError(ex, "Error while waiting for background harvest tasks to complete");
         }
     }
-    
+
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;

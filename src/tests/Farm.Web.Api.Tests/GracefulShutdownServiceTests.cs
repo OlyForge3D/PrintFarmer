@@ -1,5 +1,4 @@
-using Farm.Web.Api.Services;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Farm.Web.Api.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -20,7 +19,7 @@ public class GracefulShutdownServiceTests
     }
 
     [Fact]
-    public async Task StartAsync_RegistersApplicationStoppingCallback()
+    public async Task StartAsync_RegistersApplicationStoppingCallbackAsync()
     {
         // Arrange
         var service = new GracefulShutdownService(
@@ -39,7 +38,7 @@ public class GracefulShutdownServiceTests
     }
 
     [Fact]
-    public async Task StopAsync_CompletesSuccessfully()
+    public async Task StopAsync_CompletesSuccessfullyAsync()
     {
         // Arrange
         var service = new GracefulShutdownService(

@@ -661,9 +661,12 @@ public class GcodeHarvestService : IGcodeHarvestService
         }
     }
 
-    // Wrapper to satisfy call sites expecting apiKey and pass-through client/logger
+    // Overload to satisfy call sites that include an apiKey param (currently unused by implementation)
     private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient? prusa = null, ILogger<GcodeHarvestService>? logger = null)
-        => DownloadPrusaLinkFileAsync(serverUrl, filePath, prusa, logger);
+    {
+        _ = apiKey; // explicitly discard unused
+        return DownloadPrusaLinkFileAsync(serverUrl, filePath, prusa, logger);
+    }
 
     private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ILogger<GcodeHarvestService>? logger = null)
     {
@@ -682,15 +685,11 @@ public class GcodeHarvestService : IGcodeHarvestService
         }
     }
 
-    // Wrapper to satisfy call sites expecting a client and pass-through logger
-    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient? sdcp = null, ILogger<GcodeHarvestService>? logger = null)
-        => DownloadSdcpFileAsync(serverUrl, filePath, logger);
-
-    private async Task UpdateOperationAsync(GcodeHarvestOperation operation, AppDbContext? db = null)
+    // Overload to satisfy call sites expecting a client and pass-through logger
+    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient? sdcp, ILogger<GcodeHarvestService>? logger = null)
     {
-        var dbContext = db ?? _db;
-        dbContext.GcodeHarvestOperations.Update(operation);
-        await dbContext.SaveChangesAsync();
+        _ = sdcp; // explicitly discard unused
+        return DownloadSdcpFileAsync(serverUrl, filePath, logger);
     }
 
     // Helper methods for different printer backends
@@ -727,7 +726,7 @@ public class GcodeHarvestService : IGcodeHarvestService
         catch (Exception ex)
         {
             log.LogError(ex, "Failed to get file list from Moonraker at {ServerUrl}", serverUrl);
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 
@@ -839,7 +838,7 @@ public class GcodeHarvestService : IGcodeHarvestService
         catch (Exception ex)
         {
             log.LogError(ex, "Failed to get file list from PrusaLink at {ServerUrl}", serverUrl);
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 
@@ -851,29 +850,20 @@ public class GcodeHarvestService : IGcodeHarvestService
             // SDCP implementation would go here
             log.LogInformation("SDCP file listing not yet implemented for {ServerUrl}", serverUrl);
             await Task.Delay(100); // Adding await to fix the warning
-            return new List<PrinterFileInfo>();
+            return [];
         }
         catch (Exception ex)
         {
             log.LogError(ex, "Failed to get file list from SDCP at {ServerUrl}", serverUrl);
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 
-    // Wrapper to satisfy call sites expecting a client and pass-through logger
-    private Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ISdcpClient? sdcp = null, ILogger<GcodeHarvestService>? logger = null)
-        => GetSdcpFilesAsync(serverUrl, logger);
-
-    private static void ApplyMetadataToDiscoveredFile(DiscoveredGcodeFile discoveredFile, GcodeMetadataDto metadata)
+    // Overload to satisfy call sites expecting a client and pass-through logger
+    private Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ISdcpClient? sdcp, ILogger<GcodeHarvestService>? logger = null)
     {
-        discoveredFile.ExtractedSlicerName = metadata.SlicerName;
-        discoveredFile.ExtractedSlicerVersion = metadata.SlicerVersion;
-        discoveredFile.ExtractedPrintTime = metadata.PrintTimeMinutes;
-        discoveredFile.ExtractedFilamentLength = metadata.FilamentLengthMm;
-        discoveredFile.ExtractedNozzleDiameter = metadata.NozzleDiameter;
-        discoveredFile.ExtractedMaterial = metadata.Material;
-        discoveredFile.ExtractedLayerHeight = metadata.LayerHeight?.ToString();
-        discoveredFile.ExtractedInfill = metadata.InfillPercentage;
+        _ = sdcp; // explicitly discard unused
+        return GetSdcpFilesAsync(serverUrl, logger);
     }
 
     private static GcodeHarvestOperationDto MapToDto(GcodeHarvestOperation operation)

@@ -45,7 +45,7 @@ public class SpoolmanService : ISpoolmanService
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        
+
         var baseUrl = NormalizeBaseUrl(config.BaseUrl);
         var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
         if (row is null)

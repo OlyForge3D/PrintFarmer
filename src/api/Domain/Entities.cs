@@ -1,11 +1,30 @@
-﻿namespace Farm.Web.Api.Domain;
+﻿using System.ComponentModel.DataAnnotations.Schema;
+using System.Diagnostics.CodeAnalysis;
+
+namespace Farm.Web.Api.Domain;
 
 public class Printer
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use ServerUri for typed access")]
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use OriginalServerUri for typed access")]
     public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
+
+    [NotMapped]
+    public Uri? ServerUri
+    {
+        get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+        set => ServerUrl = value?.ToString() ?? string.Empty;
+    }
+
+    [NotMapped]
+    public Uri? OriginalServerUri
+    {
+        get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out var u) ? u : null);
+        set => OriginalServerUrl = value?.ToString();
+    }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
     public string? Notes { get; set; }
 
@@ -56,7 +75,15 @@ public class PrinterModel
 public class SpoolmanConfig
 {
     public int Id { get; set; } // Single row table; use Id = 1
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use BaseUri for typed access")]
     public string BaseUrl { get; set; } = string.Empty;
+
+    [NotMapped]
+    public Uri? BaseUri
+    {
+        get => Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null;
+        set => BaseUrl = value?.ToString() ?? string.Empty;
+    }
 }
 
 // G-code Library System

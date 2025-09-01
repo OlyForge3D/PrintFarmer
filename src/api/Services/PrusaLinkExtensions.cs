@@ -12,7 +12,7 @@ public static class PrusaLinkApiExtensions
         string? apiKey = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(client);
-        
+
         try
         {
             var folderInfo = await client.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
@@ -39,7 +39,7 @@ public static class PrusaLinkApiExtensions
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(fileName);
-        
+
         // Ensure the file path starts with /
         var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
 
@@ -55,7 +55,7 @@ public static class PrusaLinkApiExtensions
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(fileName);
-        
+
         // Ensure the file path starts with /
         var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
 

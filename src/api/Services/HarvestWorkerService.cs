@@ -464,8 +464,10 @@ public class HarvestWorkerService : BackgroundService
         await db.SaveChangesAsync();
     }
 
-    private static async Task RecordFileErrorAsync(AppDbContext db, Guid operationId)
+    private static async Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string errorMessage)
     {
+        _ = fileName;
+        _ = errorMessage;
         var operation = await db.GcodeHarvestOperations.FirstOrDefaultAsync(o => o.Id == operationId);
         if (operation != null)
         {
@@ -474,9 +476,7 @@ public class HarvestWorkerService : BackgroundService
         }
     }
 
-    // Wrapper to satisfy call sites that provide file context (unused for now)
-    private static Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string? errorMessage)
-        => RecordFileErrorAsync(db, operationId);
+    // Helper overload intentionally removed to avoid duplicate definitions and recursive wrapper
 
     public override void Dispose()
     {

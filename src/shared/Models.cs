@@ -1,5 +1,9 @@
 ﻿namespace Farm.Web.Shared;
 
+// This file contains DTOs intended for JSON serialization across client/server.
+// URL-like values are represented as strings by design for transport compatibility.
+#pragma warning disable CA1056 // URI-like properties should not be strings
+
 public enum PrinterBackend
 {
     Moonraker = 0,
@@ -122,6 +126,7 @@ public record MoveRequest(double? X, double? Y, double? Z, double? F);
 
 // Spoolman integration
 public record SpoolmanConfigDto(string BaseUrl);
+#pragma warning restore CA1056
 public record SpoolmanSpoolDto(
     int Id,
     string Name,

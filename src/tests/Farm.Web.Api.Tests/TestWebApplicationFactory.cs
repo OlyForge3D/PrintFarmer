@@ -52,6 +52,31 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             // Remove existing service registrations
+            // Disable background hosted services that would talk to external systems during tests
+            var moonrakerHosted = services.SingleOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MoonrakerSubscriptionService));
+            if (moonrakerHosted != null)
+            {
+                services.Remove(moonrakerHosted);
+            }
+
+            var harvestWorkerHosted = services.SingleOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType?.Name == "HarvestWorkerService");
+            if (harvestWorkerHosted != null)
+            {
+                services.Remove(harvestWorkerHosted);
+            }
+
+            var harvestCompletionHosted = services.SingleOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType?.Name == "HarvestCompletionService");
+            if (harvestCompletionHosted != null)
+            {
+                services.Remove(harvestCompletionHosted);
+            }
+
+            var gracefulShutdownHosted = services.SingleOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType?.Name == "GracefulShutdownService");
+            if (gracefulShutdownHosted != null)
+            {
+                services.Remove(gracefulShutdownHosted);
+            }
+
             var networkDiscoveryDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(INetworkDiscoveryService));
             if (networkDiscoveryDescriptor != null)
             {
