@@ -11,13 +11,19 @@
 </div>
 
 @code {
+    private EventHandler? _handler;
+
     protected override void OnInitialized()
     {
-        Toaster.OnChanged += StateHasChanged;
+        _handler = async (_, __) => await InvokeAsync(StateHasChanged);
+        Toaster.OnChanged += _handler;
     }
     public void Dispose()
     {
-        Toaster.OnChanged -= StateHasChanged;
+        if (_handler is not null)
+        {
+            Toaster.OnChanged -= _handler;
+        }
     }
 }
 

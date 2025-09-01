@@ -94,7 +94,7 @@ public class JobQueueService
         }
     }
 
-    public async Task<bool> ReorderJobsAsync(List<Guid> jobIds)
+    public async Task<bool> ReorderJobsAsync(IReadOnlyList<Guid> jobIds)
     {
         try
         {

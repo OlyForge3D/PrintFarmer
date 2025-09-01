@@ -2,12 +2,11 @@
 
 public class ToastService
 {
-    public event Action? OnChanged;
+    // Use EventHandler to satisfy CA1003
+    public event EventHandler? OnChanged;
 
-    public record ToastItem(Guid Id, string Message, string Type);
-
-    private readonly List<ToastItem> items = new();
-    public IReadOnlyList<ToastItem> Toasts => items;
+    private readonly List<ToastItem> _items = new();
+    public IReadOnlyList<ToastItem> Toasts => _items;
 
     public void Success(string message, int ttlMs = 3500) => Add(message, "success", ttlMs);
     public void Error(string message, int ttlMs = 5000) => Add(message, "error", ttlMs);
@@ -15,18 +14,18 @@ public class ToastService
     private void Add(string message, string type, int ttlMs)
     {
         var t = new ToastItem(Guid.NewGuid(), message, type);
-        items.Add(t);
-        OnChanged?.Invoke();
+    _items.Add(t);
+        OnChanged?.Invoke(this, EventArgs.Empty);
         _ = AutoDismissAsync(t.Id, ttlMs);
     }
 
     public void Dismiss(Guid id)
     {
-        var idx = items.FindIndex(x => x.Id == id);
+        var idx = _items.FindIndex(x => x.Id == id);
         if (idx >= 0)
         {
-            items.RemoveAt(idx);
-            OnChanged?.Invoke();
+            _items.RemoveAt(idx);
+            OnChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
