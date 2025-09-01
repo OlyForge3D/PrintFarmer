@@ -7,8 +7,11 @@ namespace Farm.Web.Api.Middleware;
 /// Global exception handling middleware that provides consistent error responses
 /// and structured logging for all unhandled exceptions
 /// </summary>
-public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
+public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
 {
+    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}")]
+    private static partial void LogUnhandledException(ILogger logger, Exception exception, string method, string path, string correlationId);
+
     public async Task InvokeAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -17,12 +20,13 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
         {
             await next(context);
         }
+        // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application
+        // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
         {
             var correlationId = context.TraceIdentifier;
 
-            logger.LogError(ex, "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}",
-                context.Request.Method, context.Request.Path, correlationId);
+            LogUnhandledException(logger, ex, context.Request.Method, context.Request.Path, correlationId);
 
             await HandleExceptionAsync(context, ex, correlationId);
         }
