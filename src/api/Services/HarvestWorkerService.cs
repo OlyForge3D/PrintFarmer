@@ -473,4 +473,10 @@ public class HarvestWorkerService : BackgroundService
     // Wrapper to satisfy call sites that provide file context (unused for now)
     private static Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string? errorMessage)
         => RecordFileErrorAsync(db, operationId);
+
+    public override void Dispose()
+    {
+        _workerSemaphore.Dispose();
+        base.Dispose();
+    }
 }

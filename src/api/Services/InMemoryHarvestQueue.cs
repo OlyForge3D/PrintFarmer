@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// In-memory implementation of harvest file processing queue using System.Threading.Channels
 /// </summary>
-public class InMemoryHarvestQueue : IHarvestQueue, IDisposable
+public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 {
     private readonly Channel<HarvestFileJob> _channel;
     private readonly ILogger<InMemoryHarvestQueue> _logger;

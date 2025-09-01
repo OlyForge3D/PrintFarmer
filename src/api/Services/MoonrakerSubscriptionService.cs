@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
-public partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
+public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "MoonrakerSubscriptionService starting")]
     private static partial void LogServiceStarting(ILogger logger);

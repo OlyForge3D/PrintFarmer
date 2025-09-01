@@ -11,6 +11,8 @@ public static class PrusaLinkApiExtensions
     public static async Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        
         try
         {
             var folderInfo = await client.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
@@ -35,6 +37,9 @@ public static class PrusaLinkApiExtensions
         string fileName, Stream fileStream, string? apiKey = null, bool startPrintAfterUpload = false,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(fileName);
+        
         // Ensure the file path starts with /
         var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
 
@@ -48,6 +53,9 @@ public static class PrusaLinkApiExtensions
     public static async Task<bool> StartPrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string fileName, string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(fileName);
+        
         // Ensure the file path starts with /
         var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
 
