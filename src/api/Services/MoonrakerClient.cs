@@ -42,6 +42,33 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URLs from {BaseUrl}")]
     private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Error parsing directory info from REST API: {ErrorMessage}")]
+    private static partial void LogDirectoryParseError(ILogger logger, Exception exception, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "JSON-RPC error: {ErrorMessage} (Code: {ErrorCode})")]
+    private static partial void LogJsonRpcError(ILogger logger, string errorMessage, int errorCode);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "JSON parsing error: {ErrorMessage}")]
+    private static partial void LogJsonParseError(ILogger logger, Exception exception, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Error in GetDirectoryAsync: {ErrorMessage}")]
+    private static partial void LogGetDirectoryError(ILogger logger, Exception exception, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get history list from {BaseUrl}: {ErrorMessage}")]
+    private static partial void LogHistoryListError(ILogger logger, Exception exception, string baseUrl, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get history job {JobId} from {BaseUrl}: {ErrorMessage}")]
+    private static partial void LogHistoryJobError(ILogger logger, Exception exception, string jobId, string baseUrl, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to delete history job {JobId} from {BaseUrl}: {ErrorMessage}")]
+    private static partial void LogDeleteHistoryJobError(ILogger logger, Exception exception, string jobId, string baseUrl, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get history totals from {BaseUrl}: {ErrorMessage}")]
+    private static partial void LogHistoryTotalsError(ILogger logger, Exception exception, string baseUrl, string errorMessage);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to reset history totals from {BaseUrl}: {ErrorMessage}")]
+    private static partial void LogResetHistoryTotalsError(ILogger logger, Exception exception, string baseUrl, string errorMessage);
+
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 7125);
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -874,9 +901,9 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                         return response.Result;
                     }
                 }
-                catch (Exception ex)
+                catch (JsonException ex)
                 {
-                    Console.WriteLine($"Error parsing directory info from REST API: {ex.Message}");
+                    LogDirectoryParseError(logger, ex, ex.Message);
                     // Continue to fallback method
                 }
             }
@@ -911,7 +938,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
                 if (jsonRpcResponse?.Error != null)
                 {
-                    Console.WriteLine($"JSON-RPC error: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                    LogJsonRpcError(logger, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
 
                     // Special handling for URL parameter error
                     if (jsonRpcResponse.Error.Message.Contains("No data for argument: url") ||
@@ -939,7 +966,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
                         if (jsonRpcResponse?.Error != null)
                         {
-                            Console.WriteLine($"JSON-RPC error after retry: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                            LogJsonRpcError(logger, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
                             return null;
                         }
                     }
@@ -961,13 +988,29 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
             catch (JsonException jex)
             {
-                Console.WriteLine($"JSON parsing error: {jex.Message}");
+                LogJsonParseError(logger, jex, jex.Message);
                 return null;
             }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            Console.WriteLine($"Error in GetDirectoryAsync: {ex.Message}");
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogGetDirectoryError(logger, ex, ex.Message);
+            return null;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogGetDirectoryError(logger, ex, ex.Message);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Catch any remaining exceptions (JSON serialization errors, etc.) to ensure method resilience
+            LogGetDirectoryError(logger, ex, ex.Message);
             return null;
         }
     }
@@ -1393,7 +1436,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to get history list from {baseUrl}: {ex.Message}");
+            LogHistoryListError(logger, ex, baseUrl, ex.Message);
             return null;
         }
     }
@@ -1420,7 +1463,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to get history job {jobId} from {baseUrl}: {ex.Message}");
+            LogHistoryJobError(logger, ex, jobId, baseUrl, ex.Message);
             return null;
         }
     }
@@ -1441,7 +1484,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to delete history job {jobId} from {baseUrl}: {ex.Message}");
+            LogDeleteHistoryJobError(logger, ex, jobId, baseUrl, ex.Message);
             return false;
         }
     }
@@ -1468,7 +1511,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to get history totals from {baseUrl}: {ex.Message}");
+            LogHistoryTotalsError(logger, ex, baseUrl, ex.Message);
             return null;
         }
     }
@@ -1489,7 +1532,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to reset history totals from {baseUrl}: {ex.Message}");
+            LogResetHistoryTotalsError(logger, ex, baseUrl, ex.Message);
             return false;
         }
     }
