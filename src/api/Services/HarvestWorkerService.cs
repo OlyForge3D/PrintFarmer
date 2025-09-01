@@ -326,6 +326,10 @@ public class HarvestWorkerService : BackgroundService
         }
     }
 
+    // Overload to match call sites (apiKey and client provided but unused for now)
+    private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient prusa)
+        => DownloadPrusaLinkFileAsync(serverUrl, filePath);
+
     private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath)
     {
         try
@@ -341,6 +345,10 @@ public class HarvestWorkerService : BackgroundService
             return null;
         }
     }
+
+    // Overload to match call sites (client provided but unused for now)
+    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient sdcp)
+        => DownloadSdcpFileAsync(serverUrl, filePath);
 
     private static async Task<string> CalculateFileHashAsync(Stream stream)
     {
@@ -457,4 +465,8 @@ public class HarvestWorkerService : BackgroundService
             await db.SaveChangesAsync();
         }
     }
+
+    // Overload used at call sites to record an error with additional context
+    private static Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string message)
+        => RecordFileErrorAsync(db, operationId);
 }

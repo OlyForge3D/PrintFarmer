@@ -324,7 +324,7 @@ public class GcodeHarvestService : IGcodeHarvestService
 
                 // Check modification date
                 if (operation.ModifiedAfter.HasValue && fileInfo.ModifiedAt.HasValue &&
-                    fileInfo.ModifiedAt.Value < operation.ModifiedAfter.Value)
+                    fileInfo.ModifiedAt.GetValueOrDefault() < operation.ModifiedAfter.GetValueOrDefault())
                 {
                     continue;
                 }
@@ -790,6 +790,10 @@ public class GcodeHarvestService : IGcodeHarvestService
         }
     }
 
+    // Overload to accept apiKey and client/logger for compatibility with call sites
+    private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient? prusa = null, ILogger<GcodeHarvestService>? logger = null)
+        => DownloadPrusaLinkFileAsync(serverUrl, filePath, prusa, logger);
+
     private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ILogger<GcodeHarvestService>? logger = null)
     {
         var log = logger ?? _logger;
@@ -806,6 +810,10 @@ public class GcodeHarvestService : IGcodeHarvestService
             return null;
         }
     }
+
+    // Overload to accept sdcp client and logger for compatibility with call sites
+    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient? sdcp, ILogger<GcodeHarvestService>? logger = null)
+        => DownloadSdcpFileAsync(serverUrl, filePath, logger);
 
     private async Task UpdateOperationAsync(GcodeHarvestOperation operation, AppDbContext? db = null)
     {
@@ -980,6 +988,10 @@ public class GcodeHarvestService : IGcodeHarvestService
             return new List<PrinterFileInfo>();
         }
     }
+
+    // Overload to accept sdcp client and logger for compatibility with call sites
+    private Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ISdcpClient? sdcp, ILogger<GcodeHarvestService>? logger = null)
+        => GetSdcpFilesAsync(serverUrl, logger);
 
     private static void ApplyMetadataToDiscoveredFile(DiscoveredGcodeFile discoveredFile, GcodeMetadataDto metadata)
     {
