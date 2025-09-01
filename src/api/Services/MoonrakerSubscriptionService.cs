@@ -97,7 +97,13 @@ public partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, I
     public void Dispose()
     {
         try
-        { _cts.Cancel(); }
+        {
+            // Only cancel if not already cancelled to avoid VSTHRD103
+            if (!_cts.IsCancellationRequested)
+            {
+                _cts.Cancel();
+            }
+        }
         catch { /* ignore during dispose */ }
         _cts.Dispose();
     }
@@ -254,7 +260,10 @@ public partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, I
             finally
             {
                 // Cleanup resources
-                heartbeatCts?.Cancel();
+                if (heartbeatCts != null && !heartbeatCts.IsCancellationRequested)
+                {
+                    await heartbeatCts.CancelAsync();
+                }
                 try
                 { await (heartbeatTask ?? Task.CompletedTask); }
                 catch { }
