@@ -1,6 +1,4 @@
-using System.Text.Json;
-
-namespace Farm.Web.Api.Services;
+﻿namespace Farm.Web.Api.Services;
 
 /// <summary>
 /// Extension methods for PrusaLink API client
@@ -18,16 +16,15 @@ public static class PrusaLinkApiExtensions
             var folderInfo = await client.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
-                return folder.Children
+                return [.. folder.Children
                     .Where(f => f.Type == FileTypes.PrintFile && f.Name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
-                    .Select(f => f.Name)
-                    .ToArray();
+                    .Select(f => f.Name)];
             }
-            return Array.Empty<string>();
+            return [];
         }
         catch
         {
-            return Array.Empty<string>();
+            return [];
         }
     }
 
@@ -39,7 +36,7 @@ public static class PrusaLinkApiExtensions
         CancellationToken ct = default)
     {
         // Ensure the file path starts with /
-        var filePath = fileName.StartsWith("/") ? fileName : "/" + fileName;
+        var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
 
         return await client.UploadFileAsync(baseUrl, "/local", filePath, fileStream, apiKey,
             startPrintAfterUpload, overwrite: true, ct);
@@ -52,7 +49,7 @@ public static class PrusaLinkApiExtensions
         string fileName, string? apiKey = null, CancellationToken ct = default)
     {
         // Ensure the file path starts with /
-        var filePath = fileName.StartsWith("/") ? fileName : "/" + fileName;
+        var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
 
         return await client.StartPrintAsync(baseUrl, "/local", filePath, apiKey, ct);
     }
@@ -66,7 +63,10 @@ public static class PrusaLinkApiExtensions
         try
         {
             var job = await client.GetJobAsync(baseUrl, apiKey, ct);
-            if (job == null) return null;
+            if (job == null)
+            {
+                return null;
+            }
 
             return new PrintJobProgress
             {
@@ -241,7 +241,7 @@ public static class PrusaLinkApiExtensions
         try
         {
             var storageList = await client.GetStorageAsync(baseUrl, apiKey, ct: ct);
-            return storageList.StorageList.Select(s => new StorageInformation
+            return [.. storageList.StorageList.Select(s => new StorageInformation
             {
                 Name = s.Name,
                 Type = s.Type,
@@ -252,12 +252,17 @@ public static class PrusaLinkApiExtensions
                 TotalSpace = s.TotalSpace,
                 PrintFileSize = s.PrintFiles,
                 SystemFileSize = s.SystemFiles
-            }).ToArray();
+            })];
         }
         catch
         {
-            return Array.Empty<StorageInformation>();
+            return [];
         }
+    }
+
+    public static async Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        throw new NotImplementedException();
     }
 }
 
@@ -355,6 +360,9 @@ public class PrusaLinkException : Exception
         StatusCode = statusCode;
         ErrorDetails = errorDetails;
     }
+    public PrusaLinkException()
+    {
+    }
 }
 
 /// <summary>
@@ -367,9 +375,13 @@ public static class PrusaLinkApiClientFactory
         var client = httpClient ?? new HttpClient();
 
         if (timeout.HasValue)
+        {
             client.Timeout = timeout.Value;
+        }
         else if (client.Timeout == System.Threading.Timeout.InfiniteTimeSpan)
+        {
             client.Timeout = TimeSpan.FromSeconds(30); // Default 30s timeout
+        }
 
         return new PrusaLinkApiClient(client);
     }

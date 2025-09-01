@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Interfaces;
+﻿namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for database seeder providing initial data seeding functionality.

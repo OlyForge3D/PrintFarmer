@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -9,9 +9,6 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services;
 
@@ -24,12 +21,11 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     // Connection configuration constants
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan PongTimeout = TimeSpan.FromSeconds(10);
-    private static readonly int MaxReconnectAttempts = 10;
+    private const int MaxReconnectAttempts = 10;
 
     // Client identification for Moonraker
-    private static readonly string ClientName = "PrintFarmer";
-    private static readonly string ClientVersion = "1.0.0";
+    private const string ClientName = "PrintFarmer";
+    private const string ClientVersion = "1.0.0";
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -42,14 +38,17 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         // Signal cancellation to background loops (ignore if already disposed)
         try
         {
-            _cts.Cancel();
+            await _cts.CancelAsync();
         }
         catch (ObjectDisposedException)
         {
             // Already disposed/cancelled – safe to ignore during shutdown
         }
         var tasks = new List<Task>(_loops.Values);
-        if (_mainLoop is not null) tasks.Add(_mainLoop);
+        if (_mainLoop is not null)
+        {
+            tasks.Add(_mainLoop);
+        }
 
         try
         {
@@ -72,7 +71,9 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     public void Dispose()
     {
-    try { _cts.Cancel(); } catch { /* ignore during dispose */ }
+        try
+        { _cts.Cancel(); }
+        catch { /* ignore during dispose */ }
         _cts.Dispose();
     }
 
@@ -110,12 +111,23 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     private static Uri BuildWsUri(string httpBase)
     {
-        if (string.IsNullOrWhiteSpace(httpBase)) throw new ArgumentException("Missing base URL", nameof(httpBase));
+        if (string.IsNullOrWhiteSpace(httpBase))
+        {
+            throw new ArgumentException("Missing base URL", nameof(httpBase));
+        }
+
         var trimmed = httpBase.TrimEnd('/');
         if (!trimmed.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
             trimmed = "http://" + trimmed;
+        }
+
         var ub = new UriBuilder(trimmed);
-        if (ub.Port == -1) ub.Port = 7125;
+        if (ub.Port == -1)
+        {
+            ub.Port = 7125;
+        }
+
         ub.Scheme = ub.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws";
         ub.Path = "/websocket";
         return ub.Uri;
@@ -218,10 +230,14 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             {
                 // Cleanup resources
                 heartbeatCts?.Cancel();
-                try { await (heartbeatTask ?? Task.CompletedTask); } catch { }
+                try
+                { await (heartbeatTask ?? Task.CompletedTask); }
+                catch { }
                 heartbeatCts?.Dispose();
 
-                try { ws?.Dispose(); } catch { }
+                try
+                { ws?.Dispose(); }
+                catch { }
             }
         }
 
@@ -301,11 +317,11 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         {
             Objects = new Dictionary<string, string[]?>
             {
-                ["toolhead"] = new[] { "position" },
-                ["display_status"] = new[] { "progress" },
-                ["print_stats"] = new[] { "state", "filename" },
-                ["extruder"] = new[] { "temperature", "target" },
-                ["heater_bed"] = new[] { "temperature", "target" },
+                ["toolhead"] = ["position"],
+                ["display_status"] = ["progress"],
+                ["print_stats"] = ["state", "filename"],
+                ["extruder"] = ["temperature", "target"],
+                ["heater_bed"] = ["temperature", "target"],
             }
         };
 
@@ -336,7 +352,9 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                     await Task.Delay(HeartbeatInterval, ct);
 
                     if (ws.State != WebSocketState.Open)
+                    {
                         break;
+                    }
 
                     // Send ping frame
                     try
@@ -393,7 +411,10 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                 throw;
             }
 
-            if (sb.Length == 0) continue;
+            if (sb.Length == 0)
+            {
+                continue;
+            }
 
             try
             {
@@ -474,9 +495,15 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
             th.TryGetProperty("position", out var pos) &&
             pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
         {
-            try { x = pos[0].GetDouble(); } catch { }
-            try { y = pos[1].GetDouble(); } catch { }
-            try { z = pos[2].GetDouble(); } catch { }
+            try
+            { x = pos[0].GetDouble(); }
+            catch { }
+            try
+            { y = pos[1].GetDouble(); }
+            catch { }
+            try
+            { z = pos[2].GetDouble(); }
+            catch { }
         }
 
         // Display status (progress)
@@ -495,9 +522,14 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         if (statusObj.TryGetProperty("print_stats", out var ps))
         {
             if (ps.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String)
+            {
                 state = st.GetString();
+            }
+
             if (ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
+            {
                 jobName = fn.GetString();
+            }
         }
 
         // Extruder temperatures
@@ -505,11 +537,15 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         {
             if (ex.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
             {
-                try { hotend = t.GetDouble(); } catch { }
+                try
+                { hotend = t.GetDouble(); }
+                catch { }
             }
             if (ex.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
             {
-                try { hotendTarget = tt.GetDouble(); } catch { }
+                try
+                { hotendTarget = tt.GetDouble(); }
+                catch { }
             }
         }
 
@@ -518,11 +554,15 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         {
             if (hb.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
             {
-                try { bed = t.GetDouble(); } catch { }
+                try
+                { bed = t.GetDouble(); }
+                catch { }
             }
             if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
             {
-                try { bedTarget = tt.GetDouble(); } catch { }
+                try
+                { bedTarget = tt.GetDouble(); }
+                catch { }
             }
         }
 

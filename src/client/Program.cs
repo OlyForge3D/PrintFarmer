@@ -1,8 +1,6 @@
-using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Farm.Web.Client;
+﻿using Farm.Web.Client;
 using Farm.Web.Client.Services;
-using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");

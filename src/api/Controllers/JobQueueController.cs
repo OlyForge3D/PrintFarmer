@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -84,7 +84,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
                 Priority = (int)request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
-                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue ? 
+                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue ?
                     TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value) : null,
                 EstimatedFilamentUsage = gcodeFile.EstimatedFilamentLengthMm,
                 CreatedAt = DateTime.UtcNow,
@@ -105,7 +105,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
             await db.Entry(job)
                 .Reference(j => j.GcodeFile)
                 .LoadAsync();
-            
+
             if (job.AssignedPrinterId.HasValue)
             {
                 await db.Entry(job)

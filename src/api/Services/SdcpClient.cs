@@ -1,4 +1,4 @@
-using System.Net.WebSockets;
+﻿using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -309,9 +309,20 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
                         var coords = status.CurrenCoord.Split(',');
                         if (coords.Length >= 3)
                         {
-                            if (double.TryParse(coords[0], out var xVal)) x = xVal;
-                            if (double.TryParse(coords[1], out var yVal)) y = yVal;
-                            if (double.TryParse(coords[2], out var zVal)) z = zVal;
+                            if (double.TryParse(coords[0], out var xVal))
+                            {
+                                x = xVal;
+                            }
+
+                            if (double.TryParse(coords[1], out var yVal))
+                            {
+                                y = yVal;
+                            }
+
+                            if (double.TryParse(coords[2], out var zVal))
+                            {
+                                z = zVal;
+                            }
                         }
                     }
 
@@ -495,15 +506,15 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
                 var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 // Parse file list response and return filenames
                 // This would need to be implemented based on the actual SDCP file list response format
-                return new[] { "placeholder.gcode" }; // Placeholder implementation
+                return ["placeholder.gcode"]; // Placeholder implementation
             }
 
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
-            return Array.Empty<string>();
+            return [];
         }
         catch
         {
-            return Array.Empty<string>();
+            return [];
         }
     }
 
@@ -609,8 +620,6 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
         var uri = new Uri(normalizedUrl);
         return uri.Host;
     }
-
-    private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 80);
 
     public void Dispose()
     {

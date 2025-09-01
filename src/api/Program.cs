@@ -1,25 +1,16 @@
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Hubs;
+﻿using System.Text.Json;
 using Farm.Web.Api.Configuration;
+using Farm.Web.Api.Data;
 using Farm.Web.Api.Health;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
-using Farm.Web.Api.Validators;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
-using FluentValidation;
+using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using System.Text.Json;
+using FluentValidation;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -75,7 +66,9 @@ builder.Services.AddCors(options =>
                                                      .ToArray();
 
                 if (configuredOrigins.Contains(origin))
+                {
                     return true;
+                }
 
                 // Check if origin matches allowed network ranges
                 if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
@@ -98,20 +91,27 @@ static bool IsIpInAllowedRanges(string host, string networkRanges)
     try
     {
         if (!System.Net.IPAddress.TryParse(host, out var ipAddress))
+        {
             return false;
+        }
 
         var ranges = networkRanges.Split(',', StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var range in ranges)
         {
             var parts = range.Trim().Split('/');
-            if (parts.Length != 2) continue;
+            if (parts.Length != 2)
+            {
+                continue;
+            }
 
             if (System.Net.IPAddress.TryParse(parts[0], out var networkAddress) &&
                 int.TryParse(parts[1], out var prefixLength))
             {
                 if (IsIpInNetwork(ipAddress, networkAddress, prefixLength))
+                {
                     return true;
+                }
             }
         }
 
@@ -130,7 +130,9 @@ static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress n
     var networkBytes = networkAddress.GetAddressBytes();
 
     if (ipBytes.Length != networkBytes.Length)
+    {
         return false;
+    }
 
     var bytesToCheck = prefixLength / 8;
     var bitsToCheck = prefixLength % 8;
@@ -138,14 +140,18 @@ static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress n
     for (int i = 0; i < bytesToCheck; i++)
     {
         if (ipBytes[i] != networkBytes[i])
+        {
             return false;
+        }
     }
 
     if (bitsToCheck > 0 && bytesToCheck < ipBytes.Length)
     {
         var mask = (byte)(0xFF << (8 - bitsToCheck));
         if ((ipBytes[bytesToCheck] & mask) != (networkBytes[bytesToCheck] & mask))
+        {
             return false;
+        }
     }
 
     return true;
@@ -173,15 +179,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                                o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
-            {
-                var cs = builder.Configuration.GetConnectionString("MySql")
-                         ?? builder.Configuration.GetConnectionString("Default")
-                         ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-                var serverVersion = ServerVersion.AutoDetect(cs);
-                options.UseMySql(cs, serverVersion);
-                break;
-            }
-        case "Sqlite":
+        {
+            var cs = builder.Configuration.GetConnectionString("MySql")
+                     ?? builder.Configuration.GetConnectionString("Default")
+                     ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
+            var serverVersion = ServerVersion.AutoDetect(cs);
+            options.UseMySql(cs, serverVersion);
+            break;
+        }
         default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")

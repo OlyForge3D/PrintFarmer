@@ -1,13 +1,10 @@
-using System.Net;
-using System.Net.Http;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
-using Moq;
-using Moq.Protected;
-using Xunit;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Moq;
+using Moq.Protected;
 
 namespace Farm.Web.Api.Tests;
 
@@ -31,11 +28,15 @@ public class MoonrakerClientRetryTests
     }
 
     [Fact]
-    public async Task ExecuteWithRetryAsync_SucceedsOnThirdAttempt()
+    public async Task ExecuteWithRetryAsync_SucceedsOnThirdAttemptAsync()
     {
         var (client, _, _) = CreateFlakyClient(i =>
         {
-            if (i < 3) throw new HttpRequestException("boom");
+            if (i < 3)
+            {
+                throw new HttpRequestException("boom");
+            }
+
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(JsonSerializer.Serialize(new { result = new { state = "ready" } }), Encoding.UTF8, "application/json")
@@ -47,16 +48,20 @@ public class MoonrakerClientRetryTests
         {
             attempts++;
             var s = await client.GetStatusAsync(Base);
-            if (!s.IsOnline) throw new HttpRequestException("offline");
+            if (!s.IsOnline)
+            {
+                throw new HttpRequestException("offline");
+            }
+
             return s;
         }, maxRetries: 2, initialDelayMs: 1, operationName: nameof(client.GetStatusAsync));
 
         status.IsOnline.Should().BeTrue();
-    attempts.Should().Be(3);
+        attempts.Should().Be(3);
     }
 
     [Fact]
-    public async Task ExecuteWithRetryAsync_FailsAfterMaxRetries()
+    public async Task ExecuteWithRetryAsync_FailsAfterMaxRetriesAsync()
     {
         var (client, _, _) = CreateFlakyClient(i => throw new TaskCanceledException("timeout"));
 
@@ -67,7 +72,10 @@ public class MoonrakerClientRetryTests
             {
                 attempts++;
                 var s = await client.GetStatusAsync(Base);
-                if (!s.IsOnline) throw new Exception("offline");
+                if (!s.IsOnline)
+                {
+                    throw new Exception("offline");
+                }
             }, maxRetries: 2, initialDelayMs: 1, operationName: "StatusCheck");
         };
 
@@ -76,12 +84,15 @@ public class MoonrakerClientRetryTests
     }
 
     [Fact]
-    public async Task DirectoryCall_WithTransient5xx_RetriesAndSucceeds()
+    public async Task DirectoryCall_WithTransient5xx_RetriesAndSucceedsAsync()
     {
         var (client, _, _) = CreateFlakyClient(i =>
         {
             if (i == 1)
+            {
                 return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
             if (i == 2)
             {
                 // Simulate REST failure followed by JSON-RPC fallback success
@@ -102,11 +113,15 @@ public class MoonrakerClientRetryTests
         {
             attempts++;
             var d = await client.GetDirectoryAsync(Base, "gcodes");
-            if (d is null) throw new HttpRequestException("dir null");
+            if (d is null)
+            {
+                throw new HttpRequestException("dir null");
+            }
+
             return d;
         }, maxRetries: 2, initialDelayMs: 1, operationName: nameof(client.GetDirectoryAsync));
 
-    dir.Should().NotBeNull();
-    attempts.Should().Be(2);
+        dir.Should().NotBeNull();
+        attempts.Should().Be(2);
     }
 }

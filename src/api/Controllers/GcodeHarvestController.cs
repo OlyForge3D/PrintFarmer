@@ -1,8 +1,6 @@
-using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Farm.Web.Api.Services;
-using System.Text.Json;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -20,7 +18,7 @@ public class GcodeHarvestController : ControllerBase
     private readonly ISdcpClient _sdcpClient;
 
     public GcodeHarvestController(
-        IGcodeHarvestService harvestService, 
+        IGcodeHarvestService harvestService,
         ILogger<GcodeHarvestController> logger,
         IMoonrakerClient moonrakerClient,
         IPrusaLinkClient prusaLinkClient,
@@ -43,7 +41,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="404">Printer not found</response>
     [HttpPost("start")]
     public async Task<ActionResult<GcodeHarvestResultDto>> StartHarvestAsync(
-        [FromBody] StartGcodeHarvestDto request, 
+        [FromBody] StartGcodeHarvestDto request,
         CancellationToken ct)
     {
         try
@@ -67,7 +65,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="404">Operation not found</response>
     [HttpGet("operations/{operationId:guid}")]
     public async Task<ActionResult<GcodeHarvestOperationDto>> GetHarvestOperationAsync(
-        Guid operationId, 
+        Guid operationId,
         CancellationToken ct)
     {
         var operation = await _harvestService.GetHarvestOperationAsync(operationId, ct);
@@ -83,7 +81,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="404">Operation not found</response>
     [HttpGet("operations/{operationId:guid}/files")]
     public async Task<ActionResult<DiscoveredGcodeFileDto[]>> GetDiscoveredFilesAsync(
-        Guid operationId, 
+        Guid operationId,
         CancellationToken ct)
     {
         try
@@ -108,7 +106,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="404">Operation not found</response>
     [HttpPost("import")]
     public async Task<ActionResult<GcodeHarvestResultDto>> ImportSelectedFilesAsync(
-        [FromBody] ImportSelectedGcodeFilesDto request, 
+        [FromBody] ImportSelectedGcodeFilesDto request,
         CancellationToken ct)
     {
         try
@@ -118,7 +116,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to import selected files for operation {OperationId}", 
+            _logger.LogError(ex, "Failed to import selected files for operation {OperationId}",
                 request.HarvestOperationId);
             return StatusCode(500, "Failed to import selected files");
         }
@@ -155,7 +153,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">Active harvest operation or null if none active</response>
     [HttpGet("printers/{printerId:guid}/active")]
     public async Task<ActionResult<GcodeHarvestOperationDto?>> GetActiveHarvestAsync(
-        Guid printerId, 
+        Guid printerId,
         CancellationToken ct = default)
     {
         try
@@ -179,8 +177,8 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">List of recent harvest operations</response>
     [HttpGet("printers/{printerId:guid}/recent")]
     public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetRecentHarvestsAsync(
-        Guid printerId, 
-        [FromQuery] int count = 10, 
+        Guid printerId,
+        [FromQuery] int count = 10,
         CancellationToken ct = default)
     {
         try
@@ -224,7 +222,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Invalid file or not a G-code file</response>
     [HttpPost("analyze")]
     public async Task<ActionResult<GcodeMetadataDto>> AnalyzeGcodeAsync(
-        IFormFile file, 
+        IFormFile file,
         CancellationToken ct)
     {
         if (file == null || file.Length == 0)
@@ -255,29 +253,30 @@ public class GcodeHarvestController : ControllerBase
     /// </summary>
     [HttpGet("test/moonraker/directory")]
     public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
-        [FromQuery] string serverUrl, 
-        [FromQuery] string path = "gcodes", 
+        [FromQuery] string serverUrl,
+        [FromQuery] string path = "gcodes",
         [FromQuery] bool extended = true,
         CancellationToken ct = default)
     {
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}", 
+            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
                 serverUrl, path, extended);
-            
+
             var directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
-            
+
             if (directoryInfo == null)
             {
                 _logger.LogWarning("GetDirectoryAsync returned null result");
                 return NotFound("Directory not found or error occurred");
             }
-            
-            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories", 
+
+            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories",
                 directoryInfo.Files?.Length ?? 0, directoryInfo.Dirs?.Length ?? 0);
-            
+
             // Return detailed info including all file data and structure
-            return Ok(new {
+            return Ok(new
+            {
                 success = true,
                 result = directoryInfo,
                 fileCount = directoryInfo.Files?.Length ?? 0,
@@ -302,12 +301,13 @@ public class GcodeHarvestController : ControllerBase
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
-            
+
             var files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
-            
+
             _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
-            
-            return Ok(new {
+
+            return Ok(new
+            {
                 success = true,
                 files = files,
                 count = files.Length
@@ -330,10 +330,10 @@ public class GcodeHarvestController : ControllerBase
         {
             // Configure logging to show more detailed information
             _logger.LogInformation("Debug logging was requested");
-            
+
             // Just log the request since we can't modify logging at runtime easily
             _logger.LogWarning("Enabling verbose logging for MoonrakerClient and GcodeHarvestService");
-            
+
             return Ok(new { success = true, message = "Debug logging enabled (request logged)" });
         }
         catch (Exception ex)
@@ -341,5 +341,10 @@ public class GcodeHarvestController : ControllerBase
             _logger.LogError(ex, "Error enabling debug logs");
             return StatusCode(500, new { success = false, error = ex.Message });
         }
+    }
+
+    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(Uri serverUrl, string path = "gcodes", bool extended = true, CancellationToken ct = default)
+    {
+        throw new NotImplementedException();
     }
 }

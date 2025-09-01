@@ -1,11 +1,6 @@
-using System.Net;
-using System.Net.NetworkInformation;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
+﻿using System.Net;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services;
 
@@ -39,7 +34,7 @@ public class NetworkDiscoveryService(
         }
 
         logger.LogInformation("Network discovery completed. Found {Count} printers", discovered.Count);
-        return discovered.OrderBy(p => p.IpAddress).ToList();
+        return [.. discovered.OrderBy(p => p.IpAddress)];
     }
 
     private async Task<List<DiscoveredPrinterDto>> ScanNetworkAsync(string network, NetworkDiscoverySettingsDto settings, CancellationToken cancellationToken)
@@ -136,7 +131,9 @@ public class NetworkDiscoveryService(
             foreach (var port in settings.Ports)
             {
                 if (cancellationToken.IsCancellationRequested)
+                {
                     break;
+                }
 
                 var discovered = await TryDiscoverPrinterAsync(ipAddress, port, settings.TimeoutMs, cancellationToken);
                 if (discovered != null)

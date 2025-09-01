@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Farm.Web.Api.Services;
 
@@ -133,7 +133,7 @@ public class Job : JobFilePrint { }
 // Storage
 public class StorageListResponse
 {
-    public Storage[] StorageList { get; set; } = Array.Empty<Storage>();
+    public Storage[] StorageList { get; set; } = [];
 }
 
 public class Storage
@@ -283,7 +283,7 @@ public class FirmwareMetadata
 
 public class FolderInfo : FileInfoBase
 {
-    public FileInfoBase[] Children { get; set; } = Array.Empty<FileInfoBase>();
+    public FileInfoBase[] Children { get; set; } = [];
 }
 
 public record FileStatus(bool Exists, bool ReadOnly, bool CurrentlyPrinted);
@@ -311,10 +311,10 @@ public class CameraConfig
 {
     public string Name { get; set; } = string.Empty;
     public string TriggerScheme { get; set; } = string.Empty;
-    public CameraResolution[] AvailableResolutions { get; set; } = Array.Empty<CameraResolution>();
+    public CameraResolution[] AvailableResolutions { get; set; } = [];
     public CameraResolution Resolution { get; set; } = new();
     public double Focus { get; set; }
-    public string[] Capabilities { get; set; } = Array.Empty<string>();
+    public string[] Capabilities { get; set; } = [];
 }
 
 public class CameraConfigSet

@@ -1,7 +1,4 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
-using System.Net.Http.Json;
-using Moq;
+﻿using Moq;
 
 namespace Farm.Web.Api.Tests;
 
@@ -15,7 +12,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task Healthz_should_return_ok()
+    public async Task Healthz_should_return_okAsync()
     {
         var client = _factory.CreateClient();
         var resp = await client.GetAsync("/healthz");
@@ -25,7 +22,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task Printers_list_should_return_200()
+    public async Task Printers_list_should_return_200Async()
     {
         var client = _factory.CreateClient();
         var resp = await client.GetAsync("/api/printers");
@@ -33,7 +30,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task Create_then_get_then_delete_printer_smoke()
+    public async Task Create_then_get_then_delete_printer_smokeAsync()
     {
         var client = _factory.CreateClient();
 
@@ -65,7 +62,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task Create_PrusaLink_with_ApiKey_then_delete()
+    public async Task Create_PrusaLink_with_ApiKey_then_deleteAsync()
     {
         var client = _factory.CreateClient();
 
@@ -91,7 +88,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task Create_SDCP_printer_then_test_endpoints()
+    public async Task Create_SDCP_printer_then_test_endpointsAsync()
     {
         var client = _factory.CreateClient();
 
@@ -124,7 +121,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
     }
 
     [Fact]
-    public async Task Discovery_should_filter_existing_printers()
+    public async Task Discovery_should_filter_existing_printersAsync()
     {
         var client = _factory.CreateClient();
 

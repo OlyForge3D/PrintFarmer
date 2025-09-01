@@ -1,18 +1,13 @@
-using System;
-using System.Linq;
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Middleware;
-using Farm.Web.Api.Infrastructure;
 using Farm.Web.Shared;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
 using FluentValidation;
-using static Farm.Web.Api.Controllers.CatalogController;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -26,14 +21,18 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 {
     private static string EnsureLocalSuffix(string host)
     {
-    if (string.IsNullOrWhiteSpace(host)) { return host; }
-    if (System.Net.IPAddress.TryParse(host, out _)) { return host; }
-    if (host.Contains('.', StringComparison.Ordinal)) { return host; }
+        if (string.IsNullOrWhiteSpace(host))
+        { return host; }
+        if (System.Net.IPAddress.TryParse(host, out _))
+        { return host; }
+        if (host.Contains('.', StringComparison.Ordinal))
+        { return host; }
         return host + ".local";
     }
     private static string NormalizeServerUrl(string url, int defaultPort)
     {
-    if (string.IsNullOrWhiteSpace(url)) { return url; }
+        if (string.IsNullOrWhiteSpace(url))
+        { return url; }
         var trimmed = url.Trim();
         // Ensure scheme
         if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
@@ -277,7 +276,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<PrinterStatusDto>> GetStatusAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
 
         // Use moderate timeout for individual status checks (balance between responsiveness and accuracy)
         using var statusCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -396,8 +396,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<PrinterDto>> GetAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
-    if (p is null) { return NotFound(); }
-    if (p.Backend == 1) // PrusaLink
+        if (p is null)
+        { return NotFound(); }
+        if (p.Backend == 1) // PrusaLink
         {
             var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
             return new PrinterDto(
@@ -496,7 +497,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.AsNoTracking().Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         return new PrinterDetailsDto(
             p.Id,
             p.Name,
@@ -722,7 +724,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<IActionResult> UpdateAsync(Guid id, UpdatePrinterDto dto, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         // resolve or create manufacturer/model
         Guid? manufacturerId = dto.ManufacturerId ?? p.ManufacturerId;
         if (dto.ManufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -792,9 +795,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         p.ModelId = modelId;
         p.DateAcquired = dto.DateAcquired;
         if (dto.Backend.HasValue)
+        {
             p.Backend = (int)dto.Backend.Value;
+        }
+
         if (dto.ApiKey != null)
+        {
             p.ApiKey = dto.ApiKey;
+        }
+
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -861,7 +870,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         db.Printers.Remove(p);
         await db.SaveChangesAsync(ct);
         return NoContent();
@@ -880,9 +890,14 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<IActionResult> GetSnapshotAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
+
         var bytes = await moon.GetCameraSnapshotAsync(p.ServerUrl, ct);
-    if (bytes is null) { return NotFound(); }
+        if (bytes is null)
+        { return NotFound(); }
         return File(bytes, "image/jpeg");
     }
 
@@ -899,7 +914,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         var ok = await moon.SendHomeAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to send home command");
     }
@@ -917,7 +933,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         var ok = await moon.HomeXYAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to home XY");
     }
@@ -926,7 +943,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         var ok = await moon.HomeZAsync(p.ServerUrl, ct);
         return new CommandResult(ok, ok ? null : "Failed to home Z");
     }
@@ -935,7 +953,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, TempTargets targets, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         var ok = await moon.SetTempsAsync(p.ServerUrl, targets.Hotend, targets.Bed, ct);
         return new CommandResult(ok, ok ? null : "Failed to set temperatures");
     }
@@ -944,7 +963,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> MoveAsync(Guid id, MoveRequest req, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         var ok = await moon.MoveAsync(p.ServerUrl, req.X, req.Y, req.Z, req.F, ct);
         return new CommandResult(ok, ok ? null : "Failed to move");
     }
@@ -953,7 +973,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> MoveToAsync(Guid id, MoveRequest req, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-    if (p is null) { return NotFound(); }
+        if (p is null)
+        { return NotFound(); }
         var ok = await moon.MoveToAsync(p.ServerUrl, req.X, req.Y, req.Z, req.F, ct);
         return new CommandResult(ok, ok ? null : "Failed to move to position");
     }
@@ -962,7 +983,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> PauseAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         bool ok;
         if (p.Backend == 2) // SDCP
@@ -981,7 +1005,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> ResumeAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         bool ok;
         if (p.Backend == 2) // SDCP
@@ -1000,7 +1027,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         bool ok;
         if (p.Backend == 2) // SDCP
@@ -1020,7 +1050,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, StartPrintRequest request, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         if (p.Backend == 2) // SDCP
         {
@@ -1036,7 +1069,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> EnableCameraAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         if (p.Backend == 2) // SDCP
         {
@@ -1051,7 +1087,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CommandResult>> DisableCameraAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         if (p.Backend == 2) // SDCP
         {
@@ -1066,7 +1105,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FindAsync([id], ct);
-        if (p is null) return NotFound();
+        if (p is null)
+        {
+            return NotFound();
+        }
 
         if (p.Backend == 2) // SDCP
         {
@@ -1082,13 +1124,18 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult> UploadGcodeAsync(Guid id, IFormFile file, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
+        {
             return BadRequest("No file provided");
+        }
 
         if (!file.FileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
+        {
             return BadRequest("File must be a .gcode file");
+        }
 
         var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-    if (p == null) { return NotFound(); }
+        if (p == null)
+        { return NotFound(); }
 
         try
         {
@@ -1102,9 +1149,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             };
 
             if (success)
+            {
                 return Ok(new { message = "File uploaded successfully", filename = file.FileName });
+            }
             else
+            {
                 return StatusCode(500, "Failed to upload file to printer");
+            }
         }
         catch (Exception ex)
         {
@@ -1116,7 +1167,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<string[]>> GetFileListAsync(Guid id, CancellationToken ct)
     {
         var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-    if (p == null) { return NotFound(); }
+        if (p == null)
+        { return NotFound(); }
 
         try
         {
@@ -1125,7 +1177,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 PrinterBackend.Moonraker => await moon.GetFileListAsync(p.ServerUrl, ct),
                 PrinterBackend.PrusaLink => await prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct),
                 PrinterBackend.SDCP => await sdcp.GetFileListAsync(p.ServerUrl, ct),
-                _ => Array.Empty<string>()
+                _ => []
             };
 
             return Ok(files);
@@ -1140,7 +1192,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult> StartPrintFromFileAsync(Guid id, string fileName, CancellationToken ct)
     {
         var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-    if (p == null) { return NotFound(); }
+        if (p == null)
+        { return NotFound(); }
 
         try
         {
@@ -1153,9 +1206,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             };
 
             if (success)
+            {
                 return Ok(new { message = "Print started successfully", filename = fileName });
+            }
             else
+            {
                 return StatusCode(500, "Failed to start print");
+            }
         }
         catch (Exception ex)
         {
@@ -1246,12 +1303,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<Farm.Web.Shared.HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
         var printer = await db.Printers.FindAsync(id);
-    if (printer == null) { return NotFound(); }
+        if (printer == null)
+        { return NotFound(); }
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
             // For non-Moonraker printers, return empty history for now
-            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = [] };
         }
 
         try
@@ -1259,7 +1317,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             var moonrakerResponse = await moon.GetHistoryListAsync(printer.ServerUrl, limit, start, since, before, order, ct);
             if (moonrakerResponse == null)
             {
-                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = [] };
             }
 
             // Convert from Moonraker models to shared models
@@ -1296,7 +1354,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to get history for printer {id}: {ex.Message}");
-            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = [] };
         }
     }
 
@@ -1381,7 +1439,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<Farm.Web.Shared.HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
         var printer = await db.Printers.FindAsync(id);
-    if (printer == null) { return NotFound(); }
+        if (printer == null)
+        { return NotFound(); }
 
         Console.WriteLine($"GetHistoryTotals called for printer {id} ({printer.Name}), backend: {printer.Backend}");
 
@@ -1443,7 +1502,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult> DeleteHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
         var printer = await db.Printers.FindAsync(id);
-    if (printer == null) { return NotFound(); }
+        if (printer == null)
+        { return NotFound(); }
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
@@ -1506,10 +1566,14 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<IActionResult> ImportPrintersAsync(IFormFile file, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
+        {
             return BadRequest("No file provided");
+        }
 
         if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        {
             return BadRequest("File must be a CSV file");
+        }
 
         var results = new List<object>();
         var errors = new List<string>();
@@ -1616,14 +1680,20 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     private static string EscapeCsvValue(string? value)
     {
         if (string.IsNullOrEmpty(value))
+        {
             return "";
+        }
 
         // Escape quotes and wrap in quotes if contains comma, quote, or newline
         if (value.Contains('"'))
+        {
             value = value.Replace("\"", "\"\"");
+        }
 
         if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+        {
             value = $"\"{value}\"";
+        }
 
         return value;
     }
@@ -1667,7 +1737,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Add the last field
         result.Add(current.ToString());
 
-        return result.ToArray();
+        return [.. result];
     }
 
     private async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
@@ -1769,7 +1839,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     // Helper method to extract thumbnail URL from metadata
     private static string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
     {
-        if (metadata == null) return null;
+        if (metadata == null)
+        {
+            return null;
+        }
 
         // Look for thumbnail in common metadata keys
         var thumbnailKeys = new[] { "thumbnail", "thumbnails", "gcode_thumbnail" };
@@ -1783,7 +1856,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 {
                     // If it's already a full URL, return it
                     if (thumbnailStr.StartsWith("http://") || thumbnailStr.StartsWith("https://"))
+                    {
                         return thumbnailStr;
+                    }
 
                     // Otherwise, construct the full URL
                     return $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailStr}";

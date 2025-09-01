@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Farm.Web.Api.Services;
@@ -59,7 +59,9 @@ public class PrusaLinkApiClient
         var response = await _httpClient.SendAsync(request, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
             return null;
+        }
 
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -99,7 +101,9 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/storage", apiKey);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
+        {
             request.Headers.Add("Accept-Language", acceptLanguage);
+        }
 
         var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
@@ -114,7 +118,9 @@ public class PrusaLinkApiClient
         var response = await _httpClient.SendAsync(request, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
             return null;
+        }
 
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -134,9 +140,14 @@ public class PrusaLinkApiClient
     {
         var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/files{storagePath}{filePath}", apiKey);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
+        {
             request.Headers.Add("Accept-Language", acceptLanguage);
+        }
+
         if (!string.IsNullOrWhiteSpace(accept))
+        {
             request.Headers.Add("Accept", accept);
+        }
 
         var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
@@ -189,7 +200,9 @@ public class PrusaLinkApiClient
         var response = await _httpClient.SendAsync(request, ct);
 
         if (!response.IsSuccessStatusCode)
+        {
             return new FileStatus(false, false, false);
+        }
 
         var readOnly = response.Headers.Contains("Read-Only") &&
             response.Headers.GetValues("Read-Only").FirstOrDefault() == "true";
@@ -261,7 +274,9 @@ public class PrusaLinkApiClient
         var response = await _httpClient.SendAsync(request, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
             return null;
+        }
 
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
@@ -273,7 +288,9 @@ public class PrusaLinkApiClient
         var response = await _httpClient.SendAsync(request, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
             return null;
+        }
 
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
@@ -287,7 +304,9 @@ public class PrusaLinkApiClient
         var response = await _httpClient.SendAsync(request, ct);
 
         if (!response.IsSuccessStatusCode)
+        {
             return null;
+        }
 
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
@@ -341,7 +360,9 @@ public class PrusaLinkApiClient
         var updateInfo = JsonSerializer.Deserialize<UpdateInfo>(json, _jsonOptions)!;
 
         if (response.Headers.Contains("Update-Available"))
+        {
             updateInfo.UpdateAvailable = response.Headers.GetValues("Update-Available").FirstOrDefault() == "true";
+        }
 
         return updateInfo;
     }
@@ -357,7 +378,15 @@ public class PrusaLinkApiClient
     {
         var request = new HttpRequestMessage(method, url);
         if (!string.IsNullOrWhiteSpace(apiKey))
+        {
             request.Headers.Add("X-Api-Key", apiKey);
+        }
+
         return request;
+    }
+
+    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        throw new NotImplementedException();
     }
 }

@@ -1,11 +1,11 @@
+﻿using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Moq;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services;
-using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
@@ -51,16 +51,28 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
         {
             // Remove existing service registrations
             var networkDiscoveryDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(INetworkDiscoveryService));
-            if (networkDiscoveryDescriptor != null) services.Remove(networkDiscoveryDescriptor);
+            if (networkDiscoveryDescriptor != null)
+            {
+                services.Remove(networkDiscoveryDescriptor);
+            }
 
             var moonrakerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMoonrakerClient));
-            if (moonrakerDescriptor != null) services.Remove(moonrakerDescriptor);
+            if (moonrakerDescriptor != null)
+            {
+                services.Remove(moonrakerDescriptor);
+            }
 
             var prusaDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPrusaLinkClient));
-            if (prusaDescriptor != null) services.Remove(prusaDescriptor);
+            if (prusaDescriptor != null)
+            {
+                services.Remove(prusaDescriptor);
+            }
 
             var sdcpDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISdcpClient));
-            if (sdcpDescriptor != null) services.Remove(sdcpDescriptor);
+            if (sdcpDescriptor != null)
+            {
+                services.Remove(sdcpDescriptor);
+            }
 
             // Register mocked services
             services.AddSingleton(MockNetworkDiscoveryService.Object);
@@ -101,7 +113,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
                 ThumbnailUrl: null,
                 CameraStreamUrl: null,
                 CameraSnapshotUrl: null
-            )); return base.CreateHost(builder);
+            ));
+        return base.CreateHost(builder);
     }
 
     private void SetupDefaultMockBehaviors()
@@ -114,7 +127,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IDisp
 
     private void TryDelete()
     {
-        try { if (File.Exists(_dbPath)) File.Delete(_dbPath); } catch { }
+        try
+        { if (File.Exists(_dbPath))
+            {
+                File.Delete(_dbPath);
+            }
+        }
+        catch { }
     }
 
     public new void Dispose()

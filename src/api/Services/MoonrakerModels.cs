@@ -1,6 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Farm.Web.Api.Services
 {
@@ -64,16 +62,16 @@ namespace Farm.Web.Api.Services
         public string KlippyState { get; set; } = string.Empty;
 
         [JsonPropertyName("components")]
-        public string[] Components { get; set; } = Array.Empty<string>();
+        public string[] Components { get; set; } = [];
 
         [JsonPropertyName("failed_components")]
-        public string[] FailedComponents { get; set; } = Array.Empty<string>();
+        public string[] FailedComponents { get; set; } = [];
 
         [JsonPropertyName("registered_directories")]
-        public string[] RegisteredDirectories { get; set; } = Array.Empty<string>();
+        public string[] RegisteredDirectories { get; set; } = [];
 
         [JsonPropertyName("warnings")]
-        public string[] Warnings { get; set; } = Array.Empty<string>();
+        public string[] Warnings { get; set; } = [];
 
         [JsonPropertyName("websocket_count")]
         public int WebsocketCount { get; set; }
@@ -82,7 +80,7 @@ namespace Farm.Web.Api.Services
         public string MoonrakerVersion { get; set; } = string.Empty;
 
         [JsonPropertyName("api_version")]
-        public int[] ApiVersion { get; set; } = Array.Empty<int>();
+        public int[] ApiVersion { get; set; } = [];
 
         [JsonPropertyName("api_version_string")]
         public string ApiVersionString { get; set; } = string.Empty;
@@ -97,7 +95,7 @@ namespace Farm.Web.Api.Services
         public Dictionary<string, object> Orig { get; set; } = new();
 
         [JsonPropertyName("files")]
-        public ConfigFile[] Files { get; set; } = Array.Empty<ConfigFile>();
+        public ConfigFile[] Files { get; set; } = [];
     }
 
     public class ConfigFile
@@ -106,7 +104,7 @@ namespace Farm.Web.Api.Services
         public string Filename { get; set; } = string.Empty;
 
         [JsonPropertyName("sections")]
-        public string[] Sections { get; set; } = Array.Empty<string>();
+        public string[] Sections { get; set; } = [];
     }
 
     public class TemperatureData
@@ -121,7 +119,7 @@ namespace Farm.Web.Api.Services
     public class GCodeStoreResponse
     {
         [JsonPropertyName("gcode_store")]
-        public GCodeStoreEntry[] GCodeStore { get; set; } = Array.Empty<GCodeStoreEntry>();
+        public GCodeStoreEntry[] GCodeStore { get; set; } = [];
     }
 
     public class GCodeStoreEntry
@@ -145,7 +143,7 @@ namespace Farm.Web.Api.Services
     public class LogRolloverResponse
     {
         [JsonPropertyName("rolled_over")]
-        public string[] RolledOver { get; set; } = Array.Empty<string>();
+        public string[] RolledOver { get; set; } = [];
 
         [JsonPropertyName("failed")]
         public Dictionary<string, string> Failed { get; set; } = new();
@@ -186,7 +184,7 @@ namespace Farm.Web.Api.Services
     public class ObjectListResponse
     {
         [JsonPropertyName("objects")]
-        public string[] Objects { get; set; } = Array.Empty<string>();
+        public string[] Objects { get; set; } = [];
     }
 
     public class ObjectQueryResponse
@@ -237,7 +235,7 @@ namespace Farm.Web.Api.Services
         public DistributionInfo Distribution { get; set; } = new();
 
         [JsonPropertyName("available_services")]
-        public string[] AvailableServices { get; set; } = Array.Empty<string>();
+        public string[] AvailableServices { get; set; } = [];
 
         [JsonPropertyName("instance_ids")]
         public Dictionary<string, string> InstanceIds { get; set; } = new();
@@ -372,7 +370,7 @@ namespace Farm.Web.Api.Services
     public class PythonInfo
     {
         [JsonPropertyName("version")]
-        public object[] Version { get; set; } = Array.Empty<object>();
+        public object[] Version { get; set; } = [];
 
         [JsonPropertyName("version_string")]
         public string VersionString { get; set; } = string.Empty;
@@ -384,7 +382,7 @@ namespace Farm.Web.Api.Services
         public string MacAddress { get; set; } = string.Empty;
 
         [JsonPropertyName("ip_addresses")]
-        public IpAddress[] IpAddresses { get; set; } = Array.Empty<IpAddress>();
+        public IpAddress[] IpAddresses { get; set; } = [];
     }
 
     public class IpAddress
@@ -420,7 +418,7 @@ namespace Farm.Web.Api.Services
     public class ProcessStats
     {
         [JsonPropertyName("moonraker_stats")]
-        public ProcessStat[] MoonrakerStats { get; set; } = Array.Empty<ProcessStat>();
+        public ProcessStat[] MoonrakerStats { get; set; } = [];
 
         [JsonPropertyName("throttled_state")]
         public ThrottledState? ThrottledState { get; set; }
@@ -462,7 +460,7 @@ namespace Farm.Web.Api.Services
         public int Bits { get; set; }
 
         [JsonPropertyName("flags")]
-        public string[] Flags { get; set; } = Array.Empty<string>();
+        public string[] Flags { get; set; } = [];
     }
 
     public class NetworkStats
@@ -489,7 +487,7 @@ namespace Farm.Web.Api.Services
         public bool SudoRequested { get; set; }
 
         [JsonPropertyName("request_messages")]
-        public string[] RequestMessages { get; set; } = Array.Empty<string>();
+        public string[] RequestMessages { get; set; } = [];
     }
 
     public class SudoPasswordRequest
@@ -501,7 +499,7 @@ namespace Farm.Web.Api.Services
     public class SudoPasswordResponse
     {
         [JsonPropertyName("sudo_responses")]
-        public string[] SudoResponses { get; set; } = Array.Empty<string>();
+        public string[] SudoResponses { get; set; } = [];
 
         [JsonPropertyName("is_restarting")]
         public bool IsRestarting { get; set; }
@@ -510,7 +508,7 @@ namespace Farm.Web.Api.Services
     public class UsbDevicesResponse
     {
         [JsonPropertyName("usb_devices")]
-        public UsbDevice[] UsbDevices { get; set; } = Array.Empty<UsbDevice>();
+        public UsbDevice[] UsbDevices { get; set; } = [];
     }
 
     public class UsbDevice
@@ -534,7 +532,7 @@ namespace Farm.Web.Api.Services
     public class SerialDevicesResponse
     {
         [JsonPropertyName("serial_devices")]
-        public SerialDevice[] SerialDevices { get; set; } = Array.Empty<SerialDevice>();
+        public SerialDevice[] SerialDevices { get; set; } = [];
     }
 
     public class SerialDevice
@@ -558,7 +556,7 @@ namespace Farm.Web.Api.Services
     public class VideoDevicesResponse
     {
         [JsonPropertyName("video_devices")]
-        public VideoDevice[] VideoDevices { get; set; } = Array.Empty<VideoDevice>();
+        public VideoDevice[] VideoDevices { get; set; } = [];
     }
 
     public class VideoDevice
@@ -576,10 +574,10 @@ namespace Farm.Web.Api.Services
         public string Version { get; set; } = string.Empty;
 
         [JsonPropertyName("capabilities")]
-        public string[] Capabilities { get; set; } = Array.Empty<string>();
+        public string[] Capabilities { get; set; } = [];
 
         [JsonPropertyName("formats")]
-        public VideoFormat[] Formats { get; set; } = Array.Empty<VideoFormat>();
+        public VideoFormat[] Formats { get; set; } = [];
     }
 
     public class VideoFormat
@@ -591,13 +589,13 @@ namespace Farm.Web.Api.Services
         public string Description { get; set; } = string.Empty;
 
         [JsonPropertyName("resolutions")]
-        public string[] Resolutions { get; set; } = Array.Empty<string>();
+        public string[] Resolutions { get; set; } = [];
     }
 
     public class CanbusResponse
     {
         [JsonPropertyName("can_uuids")]
-        public CanUuid[] CanUuids { get; set; } = Array.Empty<CanUuid>();
+        public CanUuid[] CanUuids { get; set; } = [];
     }
 
     public class CanUuid
@@ -652,10 +650,10 @@ namespace Farm.Web.Api.Services
         public string? Permissions { get; set; }
 
         [JsonPropertyName("dirs")]
-        public DirectoryInfo[] Dirs { get; set; } = Array.Empty<DirectoryInfo>();
+        public DirectoryInfo[] Dirs { get; set; } = [];
 
         [JsonPropertyName("files")]
-        public MoonrakerFileInfo[] Files { get; set; } = Array.Empty<MoonrakerFileInfo>();
+        public MoonrakerFileInfo[] Files { get; set; } = [];
 
         [JsonPropertyName("disk_usage")]
         public DiskUsage? DiskUsage { get; set; }
@@ -739,7 +737,7 @@ namespace Farm.Web.Api.Services
         public int? EstimatedTime { get; set; }
 
         [JsonPropertyName("thumbnails")]
-        public ThumbnailInfo[] Thumbnails { get; set; } = Array.Empty<ThumbnailInfo>();
+        public ThumbnailInfo[] Thumbnails { get; set; } = [];
 
         [JsonPropertyName("first_layer_bed_temp")]
         public double? FirstLayerBedTemp { get; set; }
@@ -887,7 +885,7 @@ namespace Farm.Web.Api.Services
     public class UserListResponse
     {
         [JsonPropertyName("users")]
-        public UserInfo[] Users { get; set; } = Array.Empty<UserInfo>();
+        public UserInfo[] Users { get; set; } = [];
     }
 
     public class PasswordResetRequest
@@ -935,17 +933,17 @@ namespace Farm.Web.Api.Services
         public string DefaultSource { get; set; } = string.Empty;
 
         [JsonPropertyName("available_sources")]
-        public string[] AvailableSources { get; set; } = Array.Empty<string>();
+        public string[] AvailableSources { get; set; } = [];
     }
 
     // Database Models
     public class DatabaseListResponse
     {
         [JsonPropertyName("namespaces")]
-        public string[] Namespaces { get; set; } = Array.Empty<string>();
+        public string[] Namespaces { get; set; } = [];
 
         [JsonPropertyName("backups")]
-        public string[] Backups { get; set; } = Array.Empty<string>();
+        public string[] Backups { get; set; } = [];
     }
 
     public class DatabaseItemRequest
@@ -976,7 +974,7 @@ namespace Farm.Web.Api.Services
     public class JobQueueStatus
     {
         [JsonPropertyName("queued_jobs")]
-        public QueuedJob[] QueuedJobs { get; set; } = Array.Empty<QueuedJob>();
+        public QueuedJob[] QueuedJobs { get; set; } = [];
 
         [JsonPropertyName("queue_state")]
         public string QueueState { get; set; } = string.Empty;
@@ -1000,7 +998,7 @@ namespace Farm.Web.Api.Services
     public class EnqueueJobRequest
     {
         [JsonPropertyName("filenames")]
-        public string[] Filenames { get; set; } = Array.Empty<string>();
+        public string[] Filenames { get; set; } = [];
 
         [JsonPropertyName("reset")]
         public bool Reset { get; set; }
@@ -1010,10 +1008,10 @@ namespace Farm.Web.Api.Services
     public class AnnouncementListResponse
     {
         [JsonPropertyName("entries")]
-        public AnnouncementEntry[] Entries { get; set; } = Array.Empty<AnnouncementEntry>();
+        public AnnouncementEntry[] Entries { get; set; } = [];
 
         [JsonPropertyName("feeds")]
-        public string[] Feeds { get; set; } = Array.Empty<string>();
+        public string[] Feeds { get; set; } = [];
 
         [JsonPropertyName("modified")]
         public bool? Modified { get; set; }
@@ -1076,7 +1074,7 @@ namespace Farm.Web.Api.Services
     public class AnnouncementFeedsResponse
     {
         [JsonPropertyName("feeds")]
-        public string[] Feeds { get; set; } = Array.Empty<string>();
+        public string[] Feeds { get; set; } = [];
     }
 
     public class AnnouncementFeedRequest
@@ -1098,7 +1096,7 @@ namespace Farm.Web.Api.Services
     public class WebcamListResponse
     {
         [JsonPropertyName("webcams")]
-        public WebcamInfo[] Webcams { get; set; } = Array.Empty<WebcamInfo>();
+        public WebcamInfo[] Webcams { get; set; } = [];
     }
 
     public class WebcamInfo
@@ -1291,10 +1289,10 @@ namespace Farm.Web.Api.Services
         public bool Detached { get; set; }
 
         [JsonPropertyName("commits_behind")]
-        public GitCommit[] CommitsBehind { get; set; } = Array.Empty<GitCommit>();
+        public GitCommit[] CommitsBehind { get; set; } = [];
 
         [JsonPropertyName("git_messages")]
-        public string[] GitMessages { get; set; } = Array.Empty<string>();
+        public string[] GitMessages { get; set; } = [];
 
         [JsonPropertyName("full_version_string")]
         public string FullVersionString { get; set; } = string.Empty;
@@ -1306,7 +1304,7 @@ namespace Farm.Web.Api.Services
         public bool Corrupt { get; set; }
 
         [JsonPropertyName("info_tags")]
-        public string[] InfoTags { get; set; } = Array.Empty<string>();
+        public string[] InfoTags { get; set; } = [];
 
         [JsonPropertyName("recovery_url")]
         public string RecoveryUrl { get; set; } = string.Empty;
@@ -1315,10 +1313,10 @@ namespace Farm.Web.Api.Services
         public string RemoteUrl { get; set; } = string.Empty;
 
         [JsonPropertyName("warnings")]
-        public string[] Warnings { get; set; } = Array.Empty<string>();
+        public string[] Warnings { get; set; } = [];
 
         [JsonPropertyName("anomalies")]
-        public string[] Anomalies { get; set; } = Array.Empty<string>();
+        public string[] Anomalies { get; set; } = [];
     }
 
     public class GitCommit
@@ -1373,7 +1371,7 @@ namespace Farm.Web.Api.Services
     public class PowerDeviceListResponse
     {
         [JsonPropertyName("devices")]
-        public PowerDevice[] Devices { get; set; } = Array.Empty<PowerDevice>();
+        public PowerDevice[] Devices { get; set; } = [];
     }
 
     public class PowerDevice
@@ -1407,7 +1405,7 @@ namespace Farm.Web.Api.Services
         public int Count { get; set; }
 
         [JsonPropertyName("jobs")]
-        public HistoryJob[] Jobs { get; set; } = Array.Empty<HistoryJob>();
+        public HistoryJob[] Jobs { get; set; } = [];
     }
 
     public class HistoryJob
@@ -1568,7 +1566,7 @@ namespace Farm.Web.Api.Services
         public bool SpoolmanConnected { get; set; }
 
         [JsonPropertyName("pending_reports")]
-        public PendingReport[] PendingReports { get; set; } = Array.Empty<PendingReport>();
+        public PendingReport[] PendingReports { get; set; } = [];
 
         [JsonPropertyName("spool_id")]
         public int? SpoolId { get; set; }
@@ -1617,7 +1615,7 @@ namespace Farm.Web.Api.Services
     public class ExtensionListResponse
     {
         [JsonPropertyName("agents")]
-        public AgentInfo[] Agents { get; set; } = Array.Empty<AgentInfo>();
+        public AgentInfo[] Agents { get; set; } = [];
     }
 
     public class AgentInfo
@@ -1690,10 +1688,10 @@ namespace Farm.Web.Api.Services
         public string? ApiKey { get; set; }
 
         [JsonPropertyName("permissions")]
-        public string[] Permissions { get; set; } = Array.Empty<string>();
+        public string[] Permissions { get; set; } = [];
 
         [JsonPropertyName("groups")]
-        public string[] Groups { get; set; } = Array.Empty<string>();
+        public string[] Groups { get; set; } = [];
     }
 
     public class OctoPrintSettingsResponse
@@ -1852,7 +1850,7 @@ namespace Farm.Web.Api.Services
     public class OctoPrintCommandRequest
     {
         [JsonPropertyName("commands")]
-        public string[] Commands { get; set; } = Array.Empty<string>();
+        public string[] Commands { get; set; } = [];
     }
 
     public class OctoPrintProfilesResponse

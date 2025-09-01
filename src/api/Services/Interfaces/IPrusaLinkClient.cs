@@ -1,6 +1,4 @@
-using Farm.Web.Api.Services;
-
-namespace Farm.Web.Api.Services.Interfaces;
+﻿namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for PrusaLink client providing communication with Prusa printers via PrusaLink API.

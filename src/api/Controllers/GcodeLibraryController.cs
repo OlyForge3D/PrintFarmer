@@ -1,10 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+﻿using System.Security.Cryptography;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
-using System.Security.Cryptography;
-using System.Text;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -36,7 +35,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             // Apply filters
             if (!string.IsNullOrEmpty(search))
             {
-                query = query.Where(g => g.OriginalFileName.Contains(search) || 
+                query = query.Where(g => g.OriginalFileName.Contains(search) ||
                                         g.DisplayName.Contains(search) ||
                                         (g.Description != null && g.Description.Contains(search)));
             }
@@ -207,7 +206,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             {
                 Id = Guid.NewGuid(),
                 OriginalFileName = file.FileName,
-                DisplayName = string.IsNullOrEmpty(metadata.DisplayName) ? 
+                DisplayName = string.IsNullOrEmpty(metadata.DisplayName) ?
                     Path.GetFileNameWithoutExtension(file.FileName) : metadata.DisplayName,
                 FilePath = filePath,
                 FileSizeBytes = file.Length,
@@ -406,10 +405,10 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
 
             // Check if file is being used in any queued jobs
             var activeJobs = await db.PrintJobs
-                .Where(j => j.GcodeFileId == id && 
-                           (j.Status == PrintJobStatus.Queued || 
-                            j.Status == PrintJobStatus.Assigned || 
-                            j.Status == PrintJobStatus.Starting || 
+                .Where(j => j.GcodeFileId == id &&
+                           (j.Status == PrintJobStatus.Queued ||
+                            j.Status == PrintJobStatus.Assigned ||
+                            j.Status == PrintJobStatus.Starting ||
                             j.Status == PrintJobStatus.Printing))
                 .CountAsync();
 

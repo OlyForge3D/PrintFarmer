@@ -1,6 +1,5 @@
+﻿using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Options;
-using System.ComponentModel.DataAnnotations;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Configuration;
 
@@ -73,31 +72,45 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
         // Validate app settings
         var appConfig = appSettings.Value;
         if (appConfig.Port < 1 || appConfig.Port > 65535)
+        {
             validationErrors.Add($"Invalid port: {appConfig.Port}. Must be between 1-65535");
+        }
 
         if (!Uri.TryCreate(appConfig.BaseUrl, UriKind.Absolute, out var baseUri))
+        {
             validationErrors.Add($"Invalid BaseUrl: {appConfig.BaseUrl}");
+        }
 
         // Validate database settings
         var dbConfig = dbSettings.Value;
         var validProviders = new[] { "SqlServer", "Postgres", "MySql", "Sqlite" };
         if (!validProviders.Contains(dbConfig.Provider))
+        {
             validationErrors.Add($"Invalid database provider: {dbConfig.Provider}. Must be one of: {string.Join(", ", validProviders)}");
+        }
 
         if (dbConfig.Provider != "Sqlite" && string.IsNullOrWhiteSpace(dbConfig.ConnectionString))
+        {
             validationErrors.Add($"Connection string required for provider: {dbConfig.Provider}");
+        }
 
         // Log warnings for development settings in production
         if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Production")
         {
             if (appConfig.EnableDetailedErrors)
+            {
                 logger.LogWarning("Detailed errors are enabled in production environment");
+            }
 
             if (dbConfig.EnableSensitiveDataLogging)
+            {
                 logger.LogWarning("Sensitive data logging is enabled in production environment");
+            }
 
             if (appConfig.AllowedOrigins == "*")
+            {
                 logger.LogWarning("CORS is configured to allow all origins in production environment");
+            }
         }
 
         if (validationErrors.Any())

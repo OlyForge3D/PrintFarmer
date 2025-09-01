@@ -1,5 +1,5 @@
+﻿using Farm.Web.Shared;
 using FluentValidation;
-using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Validators;
 
@@ -34,7 +34,10 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
 
     private static bool BeValidUrl(string url)
     {
-        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
 
         try
         {
@@ -49,7 +52,10 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
 
     private static bool NotContainSqlInjectionPatterns(string input)
     {
-        if (string.IsNullOrEmpty(input)) return true;
+        if (string.IsNullOrEmpty(input))
+        {
+            return true;
+        }
 
         var dangerousPatterns = new[]
         {

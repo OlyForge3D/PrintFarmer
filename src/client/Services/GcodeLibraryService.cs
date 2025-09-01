@@ -1,17 +1,17 @@
+﻿using System.Net.Http.Json;
 using Farm.Web.Shared;
-using System.Net.Http.Json;
 
 namespace Farm.Web.Client.Services;
 
 public class GcodeLibraryService
 {
     private readonly HttpClient _httpClient;
-    
+
     public GcodeLibraryService(HttpClient httpClient)
     {
         _httpClient = httpClient;
     }
-    
+
     public async Task<List<GcodeFileDto>> GetFilesAsync()
     {
         try
@@ -24,7 +24,7 @@ public class GcodeLibraryService
             return new List<GcodeFileDto>();
         }
     }
-    
+
     public async Task<GcodeFileDto?> GetFileAsync(Guid id)
     {
         try
@@ -36,7 +36,7 @@ public class GcodeLibraryService
             return null;
         }
     }
-    
+
     public async Task<GcodeFileDto?> CreateFileAsync(CreateGcodeFileDto file)
     {
         try
@@ -53,7 +53,7 @@ public class GcodeLibraryService
         }
         return null;
     }
-    
+
     public async Task<bool> UpdateFileAsync(Guid id, UpdateGcodeFileDto file)
     {
         try
@@ -66,7 +66,7 @@ public class GcodeLibraryService
             return false;
         }
     }
-    
+
     public async Task<bool> DeleteFileAsync(Guid id)
     {
         try
@@ -79,7 +79,7 @@ public class GcodeLibraryService
             return false;
         }
     }
-    
+
     public async Task<GcodeHarvestResultDto?> StartHarvestAsync(StartGcodeHarvestDto request)
     {
         try
@@ -156,8 +156,8 @@ public class GcodeLibraryService
     {
         try
         {
-            var request = new StartGcodeHarvestDto 
-            { 
+            var request = new StartGcodeHarvestDto
+            {
                 PrinterId = printerId,
                 IncludeSubdirectories = true,
                 MaxFileSizeBytes = 100 * 1024 * 1024 // 100MB
@@ -170,7 +170,7 @@ public class GcodeLibraryService
             return false;
         }
     }
-    
+
     public async Task<List<string>> GetPrinterFilesAsync(Guid printerId)
     {
         try

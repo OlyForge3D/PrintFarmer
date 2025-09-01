@@ -1,6 +1,4 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 
 namespace Farm.Web.Api.Services;
 
@@ -45,7 +43,7 @@ public class DatabaseInitializer
                     // This simplifies schema changes during rapid development
                     await _context.Database.EnsureCreatedAsync();
                     _logger.LogInformation("[DB] Database schema creation completed successfully");
-                    
+
                     // Commented out migration code for future use
                     // await _context.Database.MigrateAsync();
                     // _logger.LogInformation("[DB] Database migration completed successfully");

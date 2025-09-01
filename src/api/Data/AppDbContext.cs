@@ -1,6 +1,5 @@
-using Farm.Web.Api.Domain;
+﻿using Farm.Web.Api.Domain;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Farm.Web.Api.Data;
 
@@ -11,7 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
     public DbSet<PrinterModel> Models => Set<PrinterModel>();
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
-    
+
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
@@ -102,7 +101,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(g => g.SlicerVersion).HasMaxLength(64);
             b.Property(g => g.RequiredMaterial).HasMaxLength(64);
             b.Property(g => g.SlicerSettings).HasColumnType("TEXT");
-            
+
             // JSON array properties
             b.Property(g => g.CompatibleMaterials)
                 .HasConversion(
@@ -116,7 +115,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
                     v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<string[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            
+
             // Foreign Keys - Use NoAction to avoid cascade conflicts in SQL Server
             b.HasOne(g => g.SourcePrinter)
                 .WithMany()
@@ -130,7 +129,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(g => g.TargetModelId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             // Indexes
             b.HasIndex(g => g.FileHash).IsUnique();
             b.HasIndex(g => g.UploadedAt);
@@ -149,7 +148,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(j => j.Priority).HasDefaultValue(0);
             b.Property(j => j.EstimatedPrintTime).HasConversion<long>();
             b.Property(j => j.ActualPrintTime).HasConversion<long>();
-            
+
             // JSON array properties
             b.Property(j => j.RequiredCapabilities)
                 .HasConversion(
@@ -163,7 +162,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
                     v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<Guid[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            
+
             // Foreign Keys - Use NoAction to avoid cascade conflicts
             b.HasOne(j => j.GcodeFile)
                 .WithMany()
@@ -173,7 +172,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(j => j.AssignedPrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             // Indexes
             b.HasIndex(j => j.Status);
             b.HasIndex(j => j.QueuedAt);
@@ -189,13 +188,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
                     v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<string[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            
+
             // Foreign Key - One-to-one relationship
             b.HasOne(c => c.Printer)
                 .WithOne(p => p.Capabilities)
                 .HasForeignKey<PrinterCapabilities>(c => c.PrinterId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             // Indexes
             b.HasIndex(c => c.PrinterId).IsUnique();
             b.HasIndex(c => c.NozzleDiameter);
@@ -207,13 +206,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasKey(h => h.Id);
             b.Property(h => h.Status).HasConversion<int>();
-            
+
             // Foreign Key
             b.HasOne(h => h.Printer)
                 .WithMany()
                 .HasForeignKey(h => h.PrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             // Indexes
             b.HasIndex(h => h.PrinterId);
             b.HasIndex(h => h.StartedAt);
@@ -232,13 +231,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(d => d.ExtractedMaterial).HasMaxLength(64);
             b.Property(d => d.ExtractedLayerHeight).HasMaxLength(32);
             b.Property(d => d.ExtractedInfill).HasMaxLength(32);
-            
+
             // Foreign Key
             b.HasOne(d => d.HarvestOperation)
                 .WithMany()
                 .HasForeignKey(d => d.HarvestOperationId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             // Indexes
             b.HasIndex(d => d.HarvestOperationId);
             b.HasIndex(d => d.FileHash);

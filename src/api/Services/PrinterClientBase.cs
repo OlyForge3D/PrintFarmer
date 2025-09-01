@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services;
+﻿namespace Farm.Web.Api.Services;
 
 // Shared helpers for printer clients (Moonraker, PrusaLink)
 public abstract class PrinterClientBase
@@ -11,7 +11,11 @@ public abstract class PrinterClientBase
     // Normalize a base URL and ensure a default port if not present
     protected static string NormalizeBaseUrl(string url, int defaultPort)
     {
-        if (string.IsNullOrWhiteSpace(url)) return url;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return url;
+        }
+
         var trimmed = url.Trim();
         if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -36,7 +40,11 @@ public abstract class PrinterClientBase
     // Normalize camera/thumbnail URLs that might be absolute with loopback host or relative
     protected static string NormalizeCameraUrl(string? url, string baseNorm)
     {
-        if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
         var s = url!.Trim();
         if (Uri.TryCreate(s, UriKind.Absolute, out var abs))
         {
@@ -59,5 +67,10 @@ public abstract class PrinterClientBase
         // Relative path -> anchor to base
         var rel = s.StartsWith('/') ? s : "/" + s;
         return baseNorm + rel;
+    }
+
+    protected static string NormalizeBaseUrl(Uri url, int defaultPort)
+    {
+        throw new NotImplementedException();
     }
 }

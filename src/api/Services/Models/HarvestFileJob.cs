@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Models;
+﻿namespace Farm.Web.Api.Services.Models;
 
 /// <summary>
 /// Represents a single file processing job in the harvest queue
@@ -13,7 +13,7 @@ public class HarvestFileJob
     public long FileSize { get; set; }
     public DateTime? ModifiedAt { get; set; }
     public DateTime QueuedAt { get; set; } = DateTime.UtcNow;
-    
+
     public override string ToString()
     {
         return $"HarvestFileJob(Operation: {OperationId}, File: {FileName}, Size: {FileSize} bytes)";

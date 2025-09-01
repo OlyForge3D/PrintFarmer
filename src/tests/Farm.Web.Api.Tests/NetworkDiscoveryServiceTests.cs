@@ -1,8 +1,6 @@
+﻿using System.Reflection;
 using Farm.Web.Api.Services;
 using Farm.Web.Shared;
-using FluentAssertions;
-using System.Reflection;
-using Xunit;
 
 namespace Farm.Web.Api.Tests;
 
@@ -323,7 +321,7 @@ public class NetworkDiscoveryServiceTests
         var networkDiscoveryServiceType = typeof(NetworkDiscoveryService);
         var method = networkDiscoveryServiceType.GetMethod("CreateDiscoveredPrinter", BindingFlags.NonPublic | BindingFlags.Static);
 
-        var result = method!.Invoke(null, new object[] { ipAddress, port, backend, printerInfo });
+        var result = method!.Invoke(null, [ipAddress, port, backend, printerInfo]);
         return (DiscoveredPrinterDto)result!;
     }
 }

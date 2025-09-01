@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace Farm.Web.Client;
 
@@ -8,7 +8,6 @@ public class ToastService
 
     public record ToastItem(Guid Id, string Message, string Type);
 
-    private readonly ConcurrentQueue<ToastItem> queue = new();
     private readonly List<ToastItem> items = new();
     public IReadOnlyList<ToastItem> Toasts => items;
 

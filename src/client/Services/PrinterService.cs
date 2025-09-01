@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Client.Services;
@@ -19,7 +19,7 @@ public class PrinterService
             // Use the existing API endpoint that returns basic printer info
             var response = await _http.GetAsync("api/printers/basic");
             response.EnsureSuccessStatusCode();
-            
+
             var printers = await response.Content.ReadFromJsonAsync<List<PrinterBasicDto>>();
             return printers ?? new List<PrinterBasicDto>();
         }

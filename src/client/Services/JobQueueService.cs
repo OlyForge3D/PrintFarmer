@@ -1,18 +1,17 @@
+﻿using System.Net.Http.Json;
 using Farm.Web.Shared;
-using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace Farm.Web.Client.Services;
 
 public class JobQueueService
 {
     private readonly HttpClient _httpClient;
-    
+
     public JobQueueService(HttpClient httpClient)
     {
         _httpClient = httpClient;
     }
-    
+
     public async Task<List<JobQueuePrintJobDto>> GetJobsAsync()
     {
         try
@@ -25,7 +24,7 @@ public class JobQueueService
             return new List<JobQueuePrintJobDto>();
         }
     }
-    
+
     public async Task<JobQueuePrintJobDto?> CreateJobAsync(JobQueuePrintJobDto job)
     {
         try
@@ -42,7 +41,7 @@ public class JobQueueService
         }
         return null;
     }
-    
+
     public async Task<bool> UpdateJobAsync(Guid id, JobQueuePrintJobDto job)
     {
         try
@@ -55,7 +54,7 @@ public class JobQueueService
             return false;
         }
     }
-    
+
     public async Task<bool> DeleteJobAsync(Guid id)
     {
         try
@@ -68,7 +67,7 @@ public class JobQueueService
             return false;
         }
     }
-    
+
     public async Task<bool> StartJobAsync(Guid id)
     {
         try
@@ -81,7 +80,7 @@ public class JobQueueService
             return false;
         }
     }
-    
+
     public async Task<bool> CancelJobAsync(Guid id)
     {
         try
@@ -94,7 +93,7 @@ public class JobQueueService
             return false;
         }
     }
-    
+
     public async Task<bool> ReorderJobsAsync(List<Guid> jobIds)
     {
         try

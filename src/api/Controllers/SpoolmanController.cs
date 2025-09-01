@@ -1,5 +1,4 @@
-using System;
-using Farm.Web.Api.Services;
+﻿using Farm.Web.Api.Services;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 

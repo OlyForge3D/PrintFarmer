@@ -1,6 +1,6 @@
-using System.Text.Json;
-using Farm.Web.Shared;
+﻿using System.Text.Json;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -17,7 +17,10 @@ public class PresetService : IPresetService
             {
                 var json = File.ReadAllText(_path);
                 var cfg = JsonSerializer.Deserialize<FilamentPresetsDto>(json);
-                if (cfg is not null) _presets = cfg;
+                if (cfg is not null)
+                {
+                    _presets = cfg;
+                }
             }
         }
         catch { /* ignore */ }

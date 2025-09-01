@@ -1,6 +1,4 @@
-using Farm.Web.Api.Services;
-
-namespace Farm.Web.Api.Services.Interfaces;
+﻿namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for Moonraker client providing communication with Moonraker/Klipper 3D printer firmware.

@@ -1,6 +1,4 @@
-using Farm.Web.Api.Services;
-
-namespace Farm.Web.Api.Services.Interfaces;
+﻿namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for SDCP (Smart Device Control Protocol) client providing communication with SDCP-compatible printers.

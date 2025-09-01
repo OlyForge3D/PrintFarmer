@@ -1,5 +1,5 @@
+﻿using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services;
 using Farm.Web.Shared;
 using Moq;
 
@@ -15,7 +15,7 @@ public class ServiceInterfaceExampleTests
     /// Example showing how to mock IMoonrakerClient for unit testing
     /// </summary>
     [Fact]
-    public async Task MockedMoonrakerClient_CanReturnPredefinedStatus()
+    public async Task MockedMoonrakerClient_CanReturnPredefinedStatusAsync()
     {
         // Arrange
         var mockMoonraker = new Mock<IMoonrakerClient>();
@@ -40,7 +40,7 @@ public class ServiceInterfaceExampleTests
     /// Example showing how to mock ISpoolmanService for testing filament spool functionality
     /// </summary>
     [Fact]
-    public async Task MockedSpoolmanService_CanReturnSpoolList()
+    public async Task MockedSpoolmanService_CanReturnSpoolListAsync()
     {
         // Arrange
         var mockSpoolman = new Mock<ISpoolmanService>();
@@ -118,7 +118,7 @@ public class ServiceInterfaceExampleTests
     /// Example showing how to mock IPrusaLinkClient for testing Prusa printer functionality
     /// </summary>
     [Fact]
-    public async Task MockedPrusaLinkClient_CanReturnJobInfo()
+    public async Task MockedPrusaLinkClient_CanReturnJobInfoAsync()
     {
         // Arrange
         var mockPrusa = new Mock<IPrusaLinkClient>();
@@ -149,7 +149,7 @@ public class ServiceInterfaceExampleTests
     /// Example showing how to mock ISdcpClient for testing SDCP printer functionality
     /// </summary>
     [Fact]
-    public async Task MockedSdcpClient_CanReturnCompositeStatus()
+    public async Task MockedSdcpClient_CanReturnCompositeStatusAsync()
     {
         // Arrange
         var mockSdcp = new Mock<ISdcpClient>();
@@ -191,7 +191,7 @@ public class ServiceInterfaceExampleTests
     /// Example showing how to mock IDatabaseSeeder for testing database initialization
     /// </summary>
     [Fact]
-    public async Task MockedDatabaseSeeder_CanSeedData()
+    public async Task MockedDatabaseSeeder_CanSeedDataAsync()
     {
         // Arrange
         var mockSeeder = new Mock<IDatabaseSeeder>();

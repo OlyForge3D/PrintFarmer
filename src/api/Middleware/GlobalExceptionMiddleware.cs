@@ -1,7 +1,5 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -96,6 +94,9 @@ public class PrinterNotFoundException : Exception
 {
     public PrinterNotFoundException(string message) : base(message) { }
     public PrinterNotFoundException(string message, Exception innerException) : base(message, innerException) { }
+    public PrinterNotFoundException()
+    {
+    }
 }
 
 /// <summary>
@@ -105,4 +106,7 @@ public class SpoolmanServiceException : Exception
 {
     public SpoolmanServiceException(string message) : base(message) { }
     public SpoolmanServiceException(string message, Exception innerException) : base(message, innerException) { }
+    public SpoolmanServiceException()
+    {
+    }
 }

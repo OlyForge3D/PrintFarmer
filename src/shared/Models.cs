@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared;
+﻿namespace Farm.Web.Shared;
 
 public enum PrinterBackend
 {
@@ -215,7 +215,7 @@ public record NetworkDiscoverySettingsDto(
 public class HistoryListResponse
 {
     public int Count { get; set; }
-    public HistoryJob[] Jobs { get; set; } = Array.Empty<HistoryJob>();
+    public HistoryJob[] Jobs { get; set; } = [];
 }
 
 public class HistoryJob
@@ -573,7 +573,7 @@ public class StartGcodeHarvestDto
 public class ImportSelectedGcodeFilesDto
 {
     public Guid HarvestOperationId { get; set; }
-    public Guid[] SelectedFileIds { get; set; } = Array.Empty<Guid>();
+    public Guid[] SelectedFileIds { get; set; } = [];
     public bool AddToLibraryOnly { get; set; } = true; // If false, also create print jobs
     public bool AutoDetectCapabilities { get; set; } = true;
     public string[]? DefaultTags { get; set; }
@@ -652,7 +652,7 @@ public class UpdatePrintJobStatusDto
 
 public class ReorderQueueDto
 {
-    public JobOrderDto[] JobOrder { get; set; } = Array.Empty<JobOrderDto>();
+    public JobOrderDto[] JobOrder { get; set; } = [];
 }
 
 public class JobOrderDto
@@ -690,6 +690,6 @@ public class CompatiblePrinterDto
     public Guid PrinterId { get; set; }
     public string PrinterName { get; set; } = string.Empty;
     public int CompatibilityScore { get; set; } // 0-100
-    public string[] CompatibilityReasons { get; set; } = Array.Empty<string>();
+    public string[] CompatibilityReasons { get; set; } = [];
     public int CurrentQueueLength { get; set; }
 }

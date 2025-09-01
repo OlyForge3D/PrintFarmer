@@ -1,8 +1,5 @@
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+﻿using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using Farm.Web.Api.Services;
-using System.Text.Json;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -35,29 +32,30 @@ public class ClientTestController : ControllerBase
     /// </summary>
     [HttpGet("moonraker/directory")]
     public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
-        [FromQuery] string serverUrl, 
-        [FromQuery] string path = "gcodes", 
+        [FromQuery] string serverUrl,
+        [FromQuery] string path = "gcodes",
         [FromQuery] bool extended = true,
         CancellationToken ct = default)
     {
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}", 
+            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
                 serverUrl, path, extended);
-            
+
             var directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
-            
+
             if (directoryInfo == null)
             {
                 _logger.LogWarning("GetDirectoryAsync returned null result");
                 return NotFound("Directory not found or error occurred");
             }
-            
-            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories", 
+
+            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories",
                 directoryInfo.Files?.Length ?? 0, directoryInfo.Dirs?.Length ?? 0);
-            
+
             // Return detailed info including all file data and structure
-            return Ok(new {
+            return Ok(new
+            {
                 success = true,
                 result = directoryInfo,
                 fileCount = directoryInfo.Files?.Length ?? 0,
@@ -82,12 +80,13 @@ public class ClientTestController : ControllerBase
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
-            
+
             var files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
-            
+
             _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
-            
-            return Ok(new {
+
+            return Ok(new
+            {
                 success = true,
                 files = files,
                 count = files.Length
@@ -111,12 +110,13 @@ public class ClientTestController : ControllerBase
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileRootsAsync with serverUrl={ServerUrl}", serverUrl);
-            
+
             var roots = await _moonrakerClient.GetFileRootsAsync(serverUrl, ct);
-            
+
             _logger.LogInformation("GetFileRootsAsync succeeded. Found {RootCount} roots", roots.Length);
-            
-            return Ok(new {
+
+            return Ok(new
+            {
                 success = true,
                 roots = roots,
                 count = roots.Length
@@ -141,12 +141,13 @@ public class ClientTestController : ControllerBase
         try
         {
             _logger.LogInformation("Testing PrusaLinkClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
-            
+
             var files = await _prusaLinkClient.GetFileListAsync(serverUrl, apiKey, ct);
-            
+
             _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
-            
-            return Ok(new {
+
+            return Ok(new
+            {
                 success = true,
                 files = files,
                 count = files.Length
@@ -157,5 +158,10 @@ public class ClientTestController : ControllerBase
             _logger.LogError(ex, "Error testing PrusaLinkClient.GetFileListAsync");
             return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
+    }
+
+    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(Uri serverUrl, string path = "gcodes", bool extended = true, CancellationToken ct = default)
+    {
+        throw new NotImplementedException();
     }
 }

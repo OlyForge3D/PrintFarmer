@@ -1,10 +1,8 @@
-using System.Net;
-using System.Net.NetworkInformation;
+﻿using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services;
 
@@ -23,7 +21,10 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             {
                 var json = File.ReadAllText(_path);
                 var cfg = JsonSerializer.Deserialize<NetworkDiscoverySettingsDto>(json);
-                if (cfg is not null) _settings = cfg;
+                if (cfg is not null)
+                {
+                    _settings = cfg;
+                }
             }
         }
         catch (Exception ex)
@@ -107,13 +108,22 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         var bytes = address.GetAddressBytes();
 
         // 10.0.0.0/8
-        if (bytes[0] == 10) return true;
+        if (bytes[0] == 10)
+        {
+            return true;
+        }
 
         // 172.16.0.0/12
-        if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+        if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+        {
+            return true;
+        }
 
         // 192.168.0.0/16
-        if (bytes[0] == 192 && bytes[1] == 168) return true;
+        if (bytes[0] == 192 && bytes[1] == 168)
+        {
+            return true;
+        }
 
         return false;
     }
@@ -140,29 +150,6 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         }
 
         return null;
-    }
-
-    private static string? GetNetworkAddress(IPAddress ip, IPAddress mask)
-    {
-        try
-        {
-            var ipBytes = ip.GetAddressBytes();
-            var maskBytes = mask.GetAddressBytes();
-            var networkBytes = new byte[4];
-
-            for (int i = 0; i < 4; i++)
-            {
-                networkBytes[i] = (byte)(ipBytes[i] & maskBytes[i]);
-            }
-
-            var network = new IPAddress(networkBytes);
-            var cidr = GetCidrFromMask(mask);
-            return $"{network}/{cidr}";
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static int GetCidrFromMask(IPAddress mask)

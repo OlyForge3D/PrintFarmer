@@ -1,8 +1,6 @@
-using Farm.Web.Api.Data;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+﻿using Farm.Web.Api.Data;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using System.Text.Json;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.Web.Api.Health;
 
@@ -93,7 +91,9 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         client.Timeout = TimeSpan.FromSeconds(2);
                         var response = await client.GetAsync($"{printer.ServerUrl}/server/info", cancellationToken);
                         if (!response.IsSuccessStatusCode)
+                        {
                             failedServices++;
+                        }
                     }
                     catch
                     {

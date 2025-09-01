@@ -1,8 +1,7 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Farm.Web.Shared;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Farm.Web.Client;
 
@@ -21,7 +20,11 @@ public class RealtimeService : IAsyncDisposable
 
     public async Task EnsureConnectedAsync()
     {
-        if (_hub != null && _hub.State == HubConnectionState.Connected) return;
+        if (_hub != null && _hub.State == HubConnectionState.Connected)
+        {
+            return;
+        }
+
         if (_hub == null)
         {
             var apiBaseUrl = _config["ApiBaseUrl"] ?? _nav.BaseUri;

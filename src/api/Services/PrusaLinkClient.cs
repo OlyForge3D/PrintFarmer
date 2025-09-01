@@ -1,10 +1,4 @@
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Net;
-using Farm.Web.Api.Services.Interfaces;
-using Microsoft.Extensions.Logging;
+﻿using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
@@ -12,14 +6,6 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
 {
     private readonly PrusaLinkApiClient apiClient = new(http);
     private readonly ILogger? _logger = logger;
-
-    private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 80);
-
-    private static void AddApiKey(HttpRequestMessage req, string? apiKey)
-    {
-        if (!string.IsNullOrWhiteSpace(apiKey))
-            req.Headers.Add("X-Api-Key", apiKey);
-    }
 
     public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
     {
@@ -64,7 +50,10 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
         try
         {
             var job = await apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            if (job == null) return null;
+            if (job == null)
+            {
+                return null;
+            }
 
             return new PrusaJob(
                 job.State,
@@ -118,7 +107,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get file list from {BaseUrl}", baseUrl);
-            return Array.Empty<string>();
+            return [];
         }
     }
 

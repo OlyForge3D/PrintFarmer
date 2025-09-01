@@ -1,5 +1,4 @@
-using System.Collections.Concurrent;
-using Microsoft.Extensions.Logging;
+﻿using System.Collections.Concurrent;
 
 namespace Farm.Web.Api.Infrastructure;
 
@@ -171,6 +170,9 @@ public class CircuitBreakerOpenException : Exception
 {
     public CircuitBreakerOpenException(string message) : base(message) { }
     public CircuitBreakerOpenException(string message, Exception innerException) : base(message, innerException) { }
+    public CircuitBreakerOpenException()
+    {
+    }
 }
 
 /// <summary>

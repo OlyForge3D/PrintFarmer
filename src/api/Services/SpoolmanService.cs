@@ -1,9 +1,8 @@
-using System.Net.Http.Json;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
-using Farm.Web.Shared;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -62,7 +61,11 @@ public class SpoolmanService : ISpoolmanService
 
     private static string NormalizeBaseUrl(string url)
     {
-        if (string.IsNullOrWhiteSpace(url)) return url;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return url;
+        }
+
         var t = url.Trim();
         if (!t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !t.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -75,7 +78,10 @@ public class SpoolmanService : ISpoolmanService
     public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
     {
         var cfg = GetConfig();
-        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl)) return [];
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return [];
+        }
 
         // Official Spoolman endpoint for listing spools
         var baseUrl = cfg.BaseUrl.TrimEnd('/');
@@ -85,7 +91,10 @@ public class SpoolmanService : ISpoolmanService
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Accept.ParseAdd("application/json");
             using var resp = await http.SendAsync(req, ct);
-            if (!resp.IsSuccessStatusCode) return [];
+            if (!resp.IsSuccessStatusCode)
+            {
+                return [];
+            }
             // Skip clearly-non-JSON payloads
             var mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
@@ -95,7 +104,11 @@ public class SpoolmanService : ISpoolmanService
 
             var all = new List<SpoolmanSpoolDto>();
             using var doc = await TryParseJsonAsync(resp.Content, ct);
-            if (doc is null) return [];
+            if (doc is null)
+            {
+                return [];
+            }
+
             foreach (var item in EnumerateItems(doc.RootElement, ct))
             {
                 all.Add(ParseSpool(item));
@@ -111,7 +124,10 @@ public class SpoolmanService : ISpoolmanService
     public async Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct)
     {
         var cfg = GetConfig();
-        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl)) return null;
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return null;
+        }
 
         // Official Spoolman endpoint for getting a specific spool
         var baseUrl = cfg.BaseUrl.TrimEnd('/');
@@ -121,7 +137,10 @@ public class SpoolmanService : ISpoolmanService
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Accept.ParseAdd("application/json");
             using var resp = await http.SendAsync(req, ct);
-            if (!resp.IsSuccessStatusCode) return null;
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
 
             // Skip clearly-non-JSON payloads
             var mediaType = resp.Content.Headers.ContentType?.MediaType;
@@ -131,7 +150,10 @@ public class SpoolmanService : ISpoolmanService
             }
 
             using var doc = await TryParseJsonAsync(resp.Content, ct);
-            if (doc is null) return null;
+            if (doc is null)
+            {
+                return null;
+            }
 
             return ParseSpool(doc.RootElement);
         }
@@ -154,7 +176,7 @@ public class SpoolmanService : ISpoolmanService
             try
             {
                 var text = await content.ReadAsStringAsync(ct);
-                if (!string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith("<"))
+                if (!string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith('<'))
                 {
                     return null; // HTML, not JSON
                 }
@@ -195,7 +217,11 @@ public class SpoolmanService : ISpoolmanService
     private static bool TryGetArray(JsonElement obj, out JsonElement arrayEl, params string[] names)
     {
         arrayEl = default;
-        if (obj.ValueKind != JsonValueKind.Object) return false;
+        if (obj.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
         foreach (var name in names)
         {
             if (obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Array)
@@ -226,8 +252,8 @@ public class SpoolmanService : ISpoolmanService
 
         // Material can be a string or nested inside an object
         var material = TryGetString(el, "material")
-                      ?? TryGetStringFromObject(el, new[] { "material" }, new[] { "name", "material", "material_name", "material__name" })
-                      ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "material", "material_name", "material__name" })
+                      ?? TryGetStringFromObject(el, ["material"], ["name", "material", "material_name", "material__name"])
+                      ?? TryGetStringFromObject(el, ["filament", "profile"], ["material", "material_name", "material__name"])
                       ?? string.Empty;
 
         // Remaining weight could be in grams or another field name
@@ -235,19 +261,19 @@ public class SpoolmanService : ISpoolmanService
 
         // Color may be direct or nested under filament/profile
         var color = TryGetString(el, "color_hex", "color")
-            ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "color_hex", "hex_color", "color" });
+            ?? TryGetStringFromObject(el, ["filament", "profile"], ["color_hex", "hex_color", "color"]);
         color = NormalizeHexColor(color);
 
         // Filament name and vendor/manufacturer
         var filamentName = TryGetString(el, "filament_name")
-                   ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "name", "filament_name", "display_name" });
+                   ?? TryGetStringFromObject(el, ["filament", "profile"], ["name", "filament_name", "display_name"]);
         var vendor =
             // Preferred path per Spoolman: filament.vendor.name
             TryGetStringAtPath(el, "filament", "vendor", "name")
             // Common alternative: profile.vendor.name
             ?? TryGetStringAtPath(el, "profile", "vendor", "name")
             // Fallbacks
-            ?? TryGetStringFromObject(el, new[] { "filament", "profile" }, new[] { "vendor", "manufacturer", "brand", "name" })
+            ?? TryGetStringFromObject(el, ["filament", "profile"], ["vendor", "manufacturer", "brand", "name"])
             ?? TryGetString(el, "vendor", "manufacturer");
 
         // In-use/active detection
@@ -256,7 +282,10 @@ public class SpoolmanService : ISpoolmanService
         {
             // Some schemas use archived=false to indicate active
             var archived = TryGetBool(el, "archived");
-            if (archived.HasValue) inUse = !archived.Value;
+            if (archived.HasValue)
+            {
+                inUse = !archived.Value;
+            }
         }
 
         // Dates: registered, first used, last used (tolerant to various names and formats)
@@ -272,7 +301,10 @@ public class SpoolmanService : ISpoolmanService
     {
         foreach (var n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)) return i;
+            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i))
+            {
+                return i;
+            }
         }
         // case-insensitive
         if (el.ValueKind == JsonValueKind.Object)
@@ -281,7 +313,10 @@ public class SpoolmanService : ISpoolmanService
             {
                 foreach (var n in names)
                 {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out var i)) return i;
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out var i))
+                    {
+                        return i;
+                    }
                 }
             }
         }
@@ -292,7 +327,10 @@ public class SpoolmanService : ISpoolmanService
     {
         foreach (var n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d)) return d;
+            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d))
+            {
+                return d;
+            }
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
@@ -300,7 +338,10 @@ public class SpoolmanService : ISpoolmanService
             {
                 foreach (var n in names)
                 {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var d)) return d;
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var d))
+                    {
+                        return d;
+                    }
                 }
             }
         }
@@ -309,10 +350,22 @@ public class SpoolmanService : ISpoolmanService
 
     private static string? NormalizeHexColor(string? raw)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
         var s = raw.Trim();
-        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
-        if (s.StartsWith('#')) s = s[1..];
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            s = s[2..];
+        }
+
+        if (s.StartsWith('#'))
+        {
+            s = s[1..];
+        }
+
         s = s.ToUpperInvariant();
         // Expand shorthand RGB like F0A -> FF00AA
         if (s.Length == 3 && s.All(IsHex))
@@ -325,7 +378,11 @@ public class SpoolmanService : ISpoolmanService
             // Heuristic: keep first 6 (assume RRGGBB and ignore alpha at the end)
             s = s[..6];
         }
-        if (s.Length == 6 && s.All(IsHex)) return "#" + s;
+        if (s.Length == 6 && s.All(IsHex))
+        {
+            return "#" + s;
+        }
+
         return null;
     }
 
@@ -336,7 +393,10 @@ public class SpoolmanService : ISpoolmanService
     {
         foreach (var n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String) return v.GetString();
+            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String)
+            {
+                return v.GetString();
+            }
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
@@ -344,7 +404,10 @@ public class SpoolmanService : ISpoolmanService
             {
                 foreach (var n in names)
                 {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.String) return p.Value.GetString();
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.String)
+                    {
+                        return p.Value.GetString();
+                    }
                 }
             }
         }
@@ -359,7 +422,10 @@ public class SpoolmanService : ISpoolmanService
             if (TryGetObject(el, out var nested, objName))
             {
                 var s = TryGetString(nested, fieldCandidates);
-                if (!string.IsNullOrEmpty(s)) return s;
+                if (!string.IsNullOrEmpty(s))
+                {
+                    return s;
+                }
             }
         }
         return null;
@@ -367,12 +433,24 @@ public class SpoolmanService : ISpoolmanService
 
     private static string? TryGetStringAtPath(JsonElement el, params string[] path)
     {
-        if (path.Length == 0) return null;
+        if (path.Length == 0)
+        {
+            return null;
+        }
+
         JsonElement current = el;
         for (int i = 0; i < path.Length; i++)
         {
-            if (current.ValueKind != JsonValueKind.Object) return null;
-            if (!TryGetPropertyCaseInsensitive(current, path[i], out var next)) return null;
+            if (current.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (!TryGetPropertyCaseInsensitive(current, path[i], out var next))
+            {
+                return null;
+            }
+
             if (i == path.Length - 1)
             {
                 return next.ValueKind == JsonValueKind.String ? next.GetString() : null;
@@ -385,12 +463,17 @@ public class SpoolmanService : ISpoolmanService
     private static bool TryGetPropertyCaseInsensitive(JsonElement obj, string name, out JsonElement value)
     {
         value = default;
-        if (obj.ValueKind != JsonValueKind.Object) return false;
+        if (obj.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
         foreach (var p in obj.EnumerateObject())
         {
             if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
             {
-                value = p.Value; return true;
+                value = p.Value;
+                return true;
             }
         }
         return false;
@@ -403,7 +486,8 @@ public class SpoolmanService : ISpoolmanService
         {
             if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Object)
             {
-                found = v; return true;
+                found = v;
+                return true;
             }
         }
         if (el.ValueKind == JsonValueKind.Object)
@@ -414,7 +498,8 @@ public class SpoolmanService : ISpoolmanService
                 {
                     if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Object)
                     {
-                        found = p.Value; return true;
+                        found = p.Value;
+                        return true;
                     }
                 }
             }
@@ -426,7 +511,10 @@ public class SpoolmanService : ISpoolmanService
     {
         foreach (var n in names)
         {
-            if (el.TryGetProperty(n, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False)) return v.GetBoolean();
+            if (el.TryGetProperty(n, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False))
+            {
+                return v.GetBoolean();
+            }
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
@@ -434,7 +522,10 @@ public class SpoolmanService : ISpoolmanService
             {
                 foreach (var n in names)
                 {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && (p.Value.ValueKind == JsonValueKind.True || p.Value.ValueKind == JsonValueKind.False)) return p.Value.GetBoolean();
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && (p.Value.ValueKind == JsonValueKind.True || p.Value.ValueKind == JsonValueKind.False))
+                    {
+                        return p.Value.GetBoolean();
+                    }
                 }
             }
         }
@@ -449,7 +540,10 @@ public class SpoolmanService : ISpoolmanService
             if (el.TryGetProperty(n, out var v))
             {
                 var dt = FromJsonElementToDateTime(v);
-                if (dt.HasValue) return dt;
+                if (dt.HasValue)
+                {
+                    return dt;
+                }
             }
         }
         if (el.ValueKind == JsonValueKind.Object)
@@ -461,7 +555,10 @@ public class SpoolmanService : ISpoolmanService
                     if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase))
                     {
                         var dt = FromJsonElementToDateTime(p.Value);
-                        if (dt.HasValue) return dt;
+                        if (dt.HasValue)
+                        {
+                            return dt;
+                        }
                     }
                 }
             }
@@ -488,17 +585,27 @@ public class SpoolmanService : ISpoolmanService
                     // Heuristic: epoch seconds vs milliseconds
                     // >= 1e12 -> milliseconds, >= 1e9 -> seconds
                     if (num >= 1_000_000_000_000)
+                    {
                         return DateTimeOffset.FromUnixTimeMilliseconds(num).UtcDateTime;
+                    }
+
                     if (num >= 1_000_000_000)
+                    {
                         return DateTimeOffset.FromUnixTimeSeconds(num).UtcDateTime;
+                    }
                 }
                 else if (v.TryGetDouble(out var dnum))
                 {
                     var ln = (long)dnum;
                     if (ln >= 1_000_000_000_000)
+                    {
                         return DateTimeOffset.FromUnixTimeMilliseconds(ln).UtcDateTime;
+                    }
+
                     if (ln >= 1_000_000_000)
+                    {
                         return DateTimeOffset.FromUnixTimeSeconds(ln).UtcDateTime;
+                    }
                 }
             }
         }
