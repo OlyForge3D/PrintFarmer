@@ -42,6 +42,6 @@ public class SpoolmanController(SpoolmanService spoolman) : ControllerBase
     /// <response code="200">Returns the list of spools from Spoolman</response>
     /// <response code="503">If Spoolman is not configured or unavailable</response>
     [HttpGet("spools")]
-    public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetSpools(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetSpoolsAsync(CancellationToken ct)
         => Ok(await spoolman.ListSpoolsAsync(ct));
 }

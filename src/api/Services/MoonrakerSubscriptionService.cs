@@ -39,8 +39,15 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Signal cancellation to background loops
-        _cts.Cancel();
+        // Signal cancellation to background loops (ignore if already disposed)
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed/cancelled – safe to ignore during shutdown
+        }
         var tasks = new List<Task>(_loops.Values);
         if (_mainLoop is not null) tasks.Add(_mainLoop);
 
@@ -65,7 +72,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
 
     public void Dispose()
     {
-        _cts.Cancel();
+    try { _cts.Cancel(); } catch { /* ignore during dispose */ }
         _cts.Dispose();
     }
 
@@ -83,7 +90,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
                     .ToListAsync(ct);
                 foreach (var p in printers)
                 {
-                    _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoop(p, ct), ct));
+                    _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
                 }
             }
             catch (Exception ex)
@@ -114,7 +121,7 @@ public class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceS
         return ub.Uri;
     }
 
-    private async Task SubscribePrinterLoop(Printer printer, CancellationToken ct)
+    private async Task SubscribePrinterLoopAsync(Printer printer, CancellationToken ct)
     {
         var id = printer.Id;
         var metrics = _connectionMetrics.GetOrAdd(id, _ => new ConnectionMetrics());

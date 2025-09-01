@@ -27,7 +27,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// Test endpoint to invoke GetFileRootsAsync directly
     /// </summary>
     [HttpGet("roots")]
-    public async Task<ActionResult<FileRoot[]>> GetFileRoots(string url)
+    public async Task<ActionResult<FileRoot[]>> GetFileRootsAsync(string url)
     {
         _logger.LogInformation("MoonrakerDiagnostics: GetFileRoots called for {Url}", url);
         
@@ -89,7 +89,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// Test endpoint to invoke GetDirectoryAsync directly
     /// </summary>
     [HttpGet("directory")]
-    public async Task<ActionResult<Farm.Web.Api.Services.DirectoryInfo>> GetDirectory(string url, string path = "gcodes")
+    public async Task<ActionResult<Farm.Web.Api.Services.DirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
     {
         _logger.LogInformation("MoonrakerDiagnostics: GetDirectory called for {Url}, path {Path}", url, path);
         
@@ -149,7 +149,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// Test endpoint to invoke GetDetailedFileListAsync directly
     /// </summary>
     [HttpGet("filelist")]
-    public async Task<ActionResult<MoonrakerFileInfo[]>> GetDetailedFileList(string url, string root = "gcodes", string? path = null)
+    public async Task<ActionResult<MoonrakerFileInfo[]>> GetDetailedFileListAsync(string url, string root = "gcodes", string? path = null)
     {
         _logger.LogInformation("MoonrakerDiagnostics: GetDetailedFileList called for {Url}, root {Root}, path {Path}", url, root, path);
         

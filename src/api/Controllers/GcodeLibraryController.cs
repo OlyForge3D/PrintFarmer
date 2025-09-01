@@ -19,7 +19,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// Get all G-code files in the library
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<GcodeFileDto>>> GetLibrary(
+    public async Task<ActionResult<IEnumerable<GcodeFileDto>>> GetLibraryAsync(
         [FromQuery] string? search = null,
         [FromQuery] string? material = null,
         [FromQuery] double? nozzleDiameter = null,
@@ -102,7 +102,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// Get a specific G-code file
     /// </summary>
     [HttpGet("{id}")]
-    public async Task<ActionResult<GcodeFileDto>> GetFile(Guid id)
+    public async Task<ActionResult<GcodeFileDto>> GetFileAsync(Guid id)
     {
         try
         {
@@ -159,7 +159,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// Upload a new G-code file to the library
     /// </summary>
     [HttpPost("upload")]
-    public async Task<ActionResult<GcodeFileDto>> UploadFile([FromForm] IFormFile file, [FromForm] CreateGcodeFileDto metadata)
+    public async Task<ActionResult<GcodeFileDto>> UploadFileAsync([FromForm] IFormFile file, [FromForm] CreateGcodeFileDto metadata)
     {
         try
         {
@@ -242,7 +242,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
                 .Reference(g => g.TargetModel)
                 .LoadAsync();
 
-            return CreatedAtAction(nameof(GetFile), new { id = gcodeFile.Id }, new GcodeFileDto(
+            return CreatedAtAction(nameof(GetFileAsync), new { id = gcodeFile.Id }, new GcodeFileDto(
                 Id: gcodeFile.Id,
                 OriginalFileName: gcodeFile.OriginalFileName,
                 DisplayName: gcodeFile.DisplayName,
@@ -284,7 +284,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// Update G-code file metadata
     /// </summary>
     [HttpPut("{id}")]
-    public async Task<ActionResult<GcodeFileDto>> UpdateFile(Guid id, [FromBody] UpdateGcodeFileDto request)
+    public async Task<ActionResult<GcodeFileDto>> UpdateFileAsync(Guid id, [FromBody] UpdateGcodeFileDto request)
     {
         try
         {
@@ -394,7 +394,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// Delete a G-code file from the library
     /// </summary>
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteFile(Guid id)
+    public async Task<IActionResult> DeleteFileAsync(Guid id)
     {
         try
         {
@@ -446,7 +446,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// Download a G-code file
     /// </summary>
     [HttpGet("{id}/download")]
-    public async Task<IActionResult> DownloadFile(Guid id)
+    public async Task<IActionResult> DownloadFileAsync(Guid id)
     {
         try
         {

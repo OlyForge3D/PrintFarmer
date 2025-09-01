@@ -17,7 +17,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Get all jobs in the queue
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<JobQueuePrintJobDto>>> GetQueue()
+    public async Task<ActionResult<IEnumerable<JobQueuePrintJobDto>>> GetQueueAsync()
     {
         try
         {
@@ -62,7 +62,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Add a new job to the queue
     /// </summary>
     [HttpPost]
-    public async Task<ActionResult<JobQueuePrintJobDto>> QueueJob([FromBody] QueuePrintJobDto request)
+    public async Task<ActionResult<JobQueuePrintJobDto>> QueueJobAsync([FromBody] QueuePrintJobDto request)
     {
         try
         {
@@ -113,7 +113,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
                     .LoadAsync();
             }
 
-            return CreatedAtAction(nameof(GetJob), new { id = job.Id }, new JobQueuePrintJobDto
+            return CreatedAtAction(nameof(GetJobAsync), new { id = job.Id }, new JobQueuePrintJobDto
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
@@ -147,7 +147,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Get a specific job
     /// </summary>
     [HttpGet("{id}")]
-    public async Task<ActionResult<JobQueuePrintJobDto>> GetJob(Guid id)
+    public async Task<ActionResult<JobQueuePrintJobDto>> GetJobAsync(Guid id)
     {
         try
         {
@@ -195,7 +195,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Update job status, priority, or assignment
     /// </summary>
     [HttpPut("{id}")]
-    public async Task<ActionResult<JobQueuePrintJobDto>> UpdateJob(Guid id, [FromBody] UpdatePrintJobStatusDto request)
+    public async Task<ActionResult<JobQueuePrintJobDto>> UpdateJobAsync(Guid id, [FromBody] UpdatePrintJobStatusDto request)
     {
         try
         {
@@ -287,7 +287,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Delete a job from the queue
     /// </summary>
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteJob(Guid id)
+    public async Task<IActionResult> DeleteJobAsync(Guid id)
     {
         try
         {

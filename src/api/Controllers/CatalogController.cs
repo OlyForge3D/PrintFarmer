@@ -21,7 +21,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     /// <returns>List of all printer manufacturers ordered by name</returns>
     /// <response code="200">Returns the list of manufacturers</response>
     [HttpGet("manufacturers")]
-    public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturers(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync(CancellationToken ct)
     {
         var list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
             .Select(m => new ManufacturerDto(m.Id, m.Name)).ToListAsync(ct);
@@ -38,7 +38,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     /// <response code="400">If the manufacturer name is invalid or empty</response>
     /// <response code="409">If a manufacturer with the same name already exists</response>
     [HttpPost("manufacturers")]
-    public async Task<ActionResult<ManufacturerDto>> CreateManufacturer([FromBody] string name, CancellationToken ct)
+    public async Task<ActionResult<ManufacturerDto>> CreateManufacturerAsync([FromBody] string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name)) return BadRequest("Name is required");
         var trimmed = name.Trim();
@@ -48,11 +48,11 @@ public class CatalogController(AppDbContext db) : ControllerBase
         var mfg = new Manufacturer { Id = Guid.NewGuid(), Name = trimmed };
         db.Manufacturers.Add(mfg);
         await db.SaveChangesAsync(ct);
-        return CreatedAtAction(nameof(GetManufacturers), new { id = mfg.Id }, new ManufacturerDto(mfg.Id, mfg.Name));
+    return CreatedAtAction(nameof(GetManufacturersAsync), new { id = mfg.Id }, new ManufacturerDto(mfg.Id, mfg.Name));
     }
 
     [HttpGet("models")]
-    public async Task<ActionResult<IEnumerable<ModelDto>>> GetModels([FromQuery] Guid? manufacturerId, CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<ModelDto>>> GetModelsAsync([FromQuery] Guid? manufacturerId, CancellationToken ct)
     {
         var q = db.Models.AsNoTracking().AsQueryable();
         if (manufacturerId is Guid mid)
@@ -66,7 +66,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     public record CreateModelRequest(Guid ManufacturerId, string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
 
     [HttpPost("models")]
-    public async Task<ActionResult<ModelDto>> CreateModel([FromBody] CreateModelRequest req, CancellationToken ct)
+    public async Task<ActionResult<ModelDto>> CreateModelAsync([FromBody] CreateModelRequest req, CancellationToken ct)
     {
         if (req.ManufacturerId == Guid.Empty) return BadRequest("ManufacturerId is required");
         if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest("Name is required");
@@ -98,14 +98,14 @@ public class CatalogController(AppDbContext db) : ControllerBase
             // Likely a FK or unique constraint violation
             return BadRequest("Invalid request: constraint failed (check ManufacturerId and uniqueness).");
         }
-        return CreatedAtAction(nameof(GetModels), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+    return CreatedAtAction(nameof(GetModelsAsync), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null));
     }
 
     public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
 
     [HttpPut("models/{id:guid}")]
-    public async Task<IActionResult> UpdateModel(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
+    public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
     {
         var model = await db.Models.FindAsync([id], ct);
         if (model is null) return NotFound();

@@ -17,7 +17,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Get capabilities for all printers
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<PrinterCapabilitiesDto>>> GetAllCapabilities()
+    public async Task<ActionResult<IEnumerable<PrinterCapabilitiesDto>>> GetAllCapabilitiesAsync()
     {
         try
         {
@@ -59,7 +59,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Get capabilities for a specific printer
     /// </summary>
     [HttpGet("printer/{printerId}")]
-    public async Task<ActionResult<PrinterCapabilitiesDto>> GetCapabilities(Guid printerId)
+    public async Task<ActionResult<PrinterCapabilitiesDto>> GetCapabilitiesAsync(Guid printerId)
     {
         try
         {
@@ -106,7 +106,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Create new capabilities for a printer
     /// </summary>
     [HttpPost]
-    public async Task<ActionResult<PrinterCapabilitiesDto>> CreateCapabilities([FromBody] CreatePrinterCapabilitiesDto request)
+    public async Task<ActionResult<PrinterCapabilitiesDto>> CreateCapabilitiesAsync([FromBody] CreatePrinterCapabilitiesDto request)
     {
         try
         {
@@ -175,7 +175,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
                 LastUpdated: capabilities.LastUpdated
             );
 
-            return CreatedAtAction(nameof(GetCapabilities), new { printerId = request.PrinterId }, result);
+            return CreatedAtAction(nameof(GetCapabilitiesAsync), new { printerId = request.PrinterId }, result);
         }
         catch (Exception ex)
         {
@@ -188,7 +188,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Create or update capabilities for a printer
     /// </summary>
     [HttpPut("printer/{printerId}")]
-    public async Task<ActionResult<PrinterCapabilitiesDto>> CreateOrUpdateCapabilities(Guid printerId, [FromBody] UpdatePrinterCapabilitiesDto request)
+    public async Task<ActionResult<PrinterCapabilitiesDto>> CreateOrUpdateCapabilitiesAsync(Guid printerId, [FromBody] UpdatePrinterCapabilitiesDto request)
     {
         try
         {
@@ -288,7 +288,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Get printers that match G-code file requirements
     /// </summary>
     [HttpGet("compatible/{gcodeFileId}")]
-    public async Task<ActionResult<IEnumerable<PrinterDto>>> GetCompatiblePrinters(Guid gcodeFileId)
+    public async Task<ActionResult<IEnumerable<PrinterDto>>> GetCompatiblePrintersAsync(Guid gcodeFileId)
     {
         try
         {
@@ -398,7 +398,7 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Delete capabilities for a printer
     /// </summary>
     [HttpDelete("printer/{printerId}")]
-    public async Task<IActionResult> DeleteCapabilities(Guid printerId)
+    public async Task<IActionResult> DeleteCapabilitiesAsync(Guid printerId)
     {
         try
         {

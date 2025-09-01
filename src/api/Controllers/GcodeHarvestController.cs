@@ -42,7 +42,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Invalid request parameters</response>
     /// <response code="404">Printer not found</response>
     [HttpPost("start")]
-    public async Task<ActionResult<GcodeHarvestResultDto>> StartHarvest(
+    public async Task<ActionResult<GcodeHarvestResultDto>> StartHarvestAsync(
         [FromBody] StartGcodeHarvestDto request, 
         CancellationToken ct)
     {
@@ -66,7 +66,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">Harvest operation details</response>
     /// <response code="404">Operation not found</response>
     [HttpGet("operations/{operationId:guid}")]
-    public async Task<ActionResult<GcodeHarvestOperationDto>> GetHarvestOperation(
+    public async Task<ActionResult<GcodeHarvestOperationDto>> GetHarvestOperationAsync(
         Guid operationId, 
         CancellationToken ct)
     {
@@ -82,7 +82,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">List of discovered G-code files</response>
     /// <response code="404">Operation not found</response>
     [HttpGet("operations/{operationId:guid}/files")]
-    public async Task<ActionResult<DiscoveredGcodeFileDto[]>> GetDiscoveredFiles(
+    public async Task<ActionResult<DiscoveredGcodeFileDto[]>> GetDiscoveredFilesAsync(
         Guid operationId, 
         CancellationToken ct)
     {
@@ -107,7 +107,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Invalid request parameters</response>
     /// <response code="404">Operation not found</response>
     [HttpPost("import")]
-    public async Task<ActionResult<GcodeHarvestResultDto>> ImportSelectedFiles(
+    public async Task<ActionResult<GcodeHarvestResultDto>> ImportSelectedFilesAsync(
         [FromBody] ImportSelectedGcodeFilesDto request, 
         CancellationToken ct)
     {
@@ -133,7 +133,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Operation cannot be cancelled</response>
     /// <response code="404">Operation not found</response>
     [HttpPost("operations/{operationId:guid}/cancel")]
-    public async Task<ActionResult<bool>> CancelHarvest(Guid operationId, CancellationToken ct)
+    public async Task<ActionResult<bool>> CancelHarvestAsync(Guid operationId, CancellationToken ct)
     {
         try
         {
@@ -154,7 +154,7 @@ public class GcodeHarvestController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">Active harvest operation or null if none active</response>
     [HttpGet("printers/{printerId:guid}/active")]
-    public async Task<ActionResult<GcodeHarvestOperationDto?>> GetActiveHarvest(
+    public async Task<ActionResult<GcodeHarvestOperationDto?>> GetActiveHarvestAsync(
         Guid printerId, 
         CancellationToken ct = default)
     {
@@ -178,7 +178,7 @@ public class GcodeHarvestController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">List of recent harvest operations</response>
     [HttpGet("printers/{printerId:guid}/recent")]
-    public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetRecentHarvests(
+    public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetRecentHarvestsAsync(
         Guid printerId, 
         [FromQuery] int count = 10, 
         CancellationToken ct = default)
@@ -201,7 +201,7 @@ public class GcodeHarvestController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">List of active harvest operations</response>
     [HttpGet("active")]
-    public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetActiveHarvests(CancellationToken ct = default)
+    public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetActiveHarvestsAsync(CancellationToken ct = default)
     {
         try
         {
@@ -223,7 +223,7 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">Extracted metadata</response>
     /// <response code="400">Invalid file or not a G-code file</response>
     [HttpPost("analyze")]
-    public async Task<ActionResult<GcodeMetadataDto>> AnalyzeGcode(
+    public async Task<ActionResult<GcodeMetadataDto>> AnalyzeGcodeAsync(
         IFormFile file, 
         CancellationToken ct)
     {
@@ -254,7 +254,7 @@ public class GcodeHarvestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync
     /// </summary>
     [HttpGet("test/moonraker/directory")]
-    public async Task<IActionResult> TestMoonrakerGetDirectory(
+    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
         [FromQuery] string serverUrl, 
         [FromQuery] string path = "gcodes", 
         [FromQuery] bool extended = true,
@@ -295,7 +295,7 @@ public class GcodeHarvestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetFileListAsync
     /// </summary>
     [HttpGet("test/moonraker/files")]
-    public async Task<IActionResult> TestMoonrakerGetFileList(
+    public async Task<IActionResult> TestMoonrakerGetFileListAsync(
         [FromQuery] string serverUrl,
         CancellationToken ct = default)
     {

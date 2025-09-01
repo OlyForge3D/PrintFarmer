@@ -34,7 +34,7 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync
     /// </summary>
     [HttpGet("moonraker/directory")]
-    public async Task<IActionResult> TestMoonrakerGetDirectory(
+    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
         [FromQuery] string serverUrl, 
         [FromQuery] string path = "gcodes", 
         [FromQuery] bool extended = true,
@@ -75,7 +75,7 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetFileListAsync
     /// </summary>
     [HttpGet("moonraker/files")]
-    public async Task<IActionResult> TestMoonrakerGetFileList(
+    public async Task<IActionResult> TestMoonrakerGetFileListAsync(
         [FromQuery] string serverUrl,
         CancellationToken ct = default)
     {
@@ -104,7 +104,7 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetFileRootsAsync
     /// </summary>
     [HttpGet("moonraker/roots")]
-    public async Task<IActionResult> TestMoonrakerGetFileRoots(
+    public async Task<IActionResult> TestMoonrakerGetFileRootsAsync(
         [FromQuery] string serverUrl,
         CancellationToken ct = default)
     {
@@ -133,7 +133,7 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for PrusaLinkClient.GetFileListAsync
     /// </summary>
     [HttpGet("prusalink/files")]
-    public async Task<IActionResult> TestPrusaLinkGetFileList(
+    public async Task<IActionResult> TestPrusaLinkGetFileListAsync(
         [FromQuery] string serverUrl,
         [FromQuery] string apiKey = "",
         CancellationToken ct = default)
