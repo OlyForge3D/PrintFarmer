@@ -109,8 +109,20 @@ public class SdcpAckResult
     public int Ack { get; set; }
 }
 
-public class SdcpClient : PrinterClientBase, ISdcpClient
+public partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger) : PrinterClientBase, ISdcpClient
 {
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URL for {BaseUrl}")]
+    private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera snapshot URL for {BaseUrl}")]
+    private static partial void LogCameraSnapshotUrlError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to send SDCP command {Command} to {BaseUrl}")]
+    private static partial void LogCommandError(ILogger logger, Exception exception, int command, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get SDCP status from {BaseUrl}")]
+    private static partial void LogStatusError(ILogger logger, Exception exception, string baseUrl);
+    
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP
@@ -390,31 +402,46 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             var cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:8080/video";
 
             // Test if camera stream is available
-            using var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
 
             try
             {
-                var response = await httpClient.GetAsync(cameraUrl, ct);
+                using var response = await httpClient.GetAsync(cameraUrl, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return cameraUrl;
                 }
             }
-            catch
+            catch (HttpRequestException)
             {
                 // Try alternative port
                 cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/video";
-                var response = await httpClient.GetAsync(cameraUrl, ct);
+                using var response = await httpClient.GetAsync(cameraUrl, cts.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    return cameraUrl;
+                }
+            }
+            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+            {
+                // Timeout trying first port, try alternative port
+                cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/video";
+                using var response = await httpClient.GetAsync(cameraUrl, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return cameraUrl;
                 }
             }
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Camera not available
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCameraUrlError(logger, ex, baseUrl);
         }
         return null;
     }
@@ -427,31 +454,46 @@ public class SdcpClient : PrinterClientBase, ISdcpClient
             var snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:8080/snapshot";
 
             // Test if snapshot endpoint is available
-            using var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
 
             try
             {
-                var response = await httpClient.GetAsync(snapshotUrl, ct);
+                using var response = await httpClient.GetAsync(snapshotUrl, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return snapshotUrl;
                 }
             }
-            catch
+            catch (HttpRequestException)
             {
                 // Try alternative port
                 snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/snapshot";
-                var response = await httpClient.GetAsync(snapshotUrl, ct);
+                using var response = await httpClient.GetAsync(snapshotUrl, cts.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    return snapshotUrl;
+                }
+            }
+            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+            {
+                // Timeout trying first port, try alternative port
+                snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/snapshot";
+                using var response = await httpClient.GetAsync(snapshotUrl, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return snapshotUrl;
                 }
             }
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Snapshot not available
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCameraSnapshotUrlError(logger, ex, baseUrl);
         }
         return null;
     }

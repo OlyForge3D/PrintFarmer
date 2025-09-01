@@ -227,6 +227,11 @@ builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
+builder.Services.AddHttpClient<SdcpClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 builder.Services.AddScoped<ISdcpClient, SdcpClient>();
 builder.Services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
 builder.Services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
