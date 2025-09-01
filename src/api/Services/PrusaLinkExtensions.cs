@@ -383,6 +383,6 @@ public static class PrusaLinkApiClientFactory
             client.Timeout = TimeSpan.FromSeconds(30); // Default 30s timeout
         }
 
-        return new PrusaLinkApiClient(client);
+        return new PrusaLinkApiClient(client, Microsoft.Extensions.Logging.Abstractions.NullLogger<PrusaLinkApiClient>.Instance);
     }
 }

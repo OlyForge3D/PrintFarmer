@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
 
@@ -23,7 +24,7 @@ public class MoonrakerClientTests
             });
 
         var http = new HttpClient(handler.Object);
-        var client = new MoonrakerClient(http) as IMoonrakerClient;
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance) as IMoonrakerClient;
         return (client, handler, recorded);
     }
 

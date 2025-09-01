@@ -7,14 +7,22 @@ namespace Farm.Web.Api.Services;
 /// Comprehensive PrusaLink API client based on the official OpenAPI specification
 /// https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
 /// </summary>
-public class PrusaLinkApiClient
+public partial class PrusaLinkApiClient
 {
+    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink API call failed for {Url}")]
+    private static partial void LogApiError(ILogger logger, Exception exception, string url);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink API deserialization failed for {Url}")]
+    private static partial void LogDeserializationError(ILogger logger, Exception exception, string url);
+    
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly ILogger<PrusaLinkApiClient> _logger;
 
-    public PrusaLinkApiClient(HttpClient httpClient)
+    public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
     {
         _httpClient = httpClient;
+        _logger = logger;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -25,31 +33,103 @@ public class PrusaLinkApiClient
     // API Version Information
     public async Task<VersionInfo> GetVersionAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/version", apiKey);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
-        return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
+        var url = $"{baseUrl}/api/version";
+        try
+        {
+            using var request = CreateRequest(HttpMethod.Get, url, apiKey);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogApiError(_logger, ex, url);
+            throw;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogApiError(_logger, ex, url);
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            LogDeserializationError(_logger, ex, url);
+            throw;
+        }
     }
 
     // Printer Information
     public async Task<PrinterInfo> GetInfoAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/info", apiKey);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
-        return JsonSerializer.Deserialize<PrinterInfo>(json, _jsonOptions)!;
+        var url = $"{baseUrl}/api/v1/info";
+        try
+        {
+            using var request = CreateRequest(HttpMethod.Get, url, apiKey);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<PrinterInfo>(json, _jsonOptions)!;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogApiError(_logger, ex, url);
+            throw;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogApiError(_logger, ex, url);
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            LogDeserializationError(_logger, ex, url);
+            throw;
+        }
     }
 
     // Status Information
     public async Task<StatusInfo> GetStatusAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var request = CreateRequest(HttpMethod.Get, $"{baseUrl}/api/v1/status", apiKey);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
-        return JsonSerializer.Deserialize<StatusInfo>(json, _jsonOptions)!;
+        var url = $"{baseUrl}/api/v1/status";
+        try
+        {
+            using var request = CreateRequest(HttpMethod.Get, url, apiKey);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<StatusInfo>(json, _jsonOptions)!;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogApiError(_logger, ex, url);
+            throw;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogApiError(_logger, ex, url);
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            LogDeserializationError(_logger, ex, url);
+            throw;
+        }
     }
 
     // Job Management

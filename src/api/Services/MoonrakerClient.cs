@@ -22,8 +22,26 @@ public record PrinterCompositeStatus(
     double? HotendTarget = null,
     double? BedTarget = null);
 
-public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerClient
+public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger) : PrinterClientBase, IMoonrakerClient
 {
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get printer status from {BaseUrl}")]
+    private static partial void LogStatusError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get printer info from {BaseUrl}")]
+    private static partial void LogPrinterInfoError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get job info from {BaseUrl}")]
+    private static partial void LogJobError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get composite status from {BaseUrl}")]
+    private static partial void LogCompositeStatusError(ILogger logger, Exception exception, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to start metadata scan for {Filename} at {BaseUrl}")]
+    private static partial void LogMetadataScanError(ILogger logger, Exception exception, string filename, string baseUrl);
+    
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URLs from {BaseUrl}")]
+    private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
+    
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 7125);
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -55,8 +73,29 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
 
             return new PrinterStatus(true, state);
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogStatusError(logger, ex, baseUrl);
+            return new PrinterStatus(false, null);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogStatusError(logger, ex, baseUrl);
+            return new PrinterStatus(false, null);
+        }
+        catch (JsonException ex)
+        {
+            LogStatusError(logger, ex, baseUrl);
+            return new PrinterStatus(false, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogStatusError(logger, ex, baseUrl);
             return new PrinterStatus(false, null);
         }
     }
@@ -87,8 +126,29 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
 
             return JsonSerializer.Deserialize<MoonrakerPrinterInfo>(infoElement.GetRawText());
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogPrinterInfoError(logger, ex, baseUrl);
+            return null;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogPrinterInfoError(logger, ex, baseUrl);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            LogPrinterInfoError(logger, ex, baseUrl);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogPrinterInfoError(logger, ex, baseUrl);
             return null;
         }
     }
@@ -610,7 +670,18 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
                             }
                         }
                     }
-                    catch { }
+                    catch (HttpRequestException)
+                    {
+                        // Test endpoint not available, continue with fallback
+                    }
+                    catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+                    {
+                        // Timeout during test, continue with fallback
+                    }
+                    catch (JsonException)
+                    {
+                        // Invalid JSON response, continue with fallback
+                    }
                 }
 
                 // Fallback to raw listing values, normalizing relative paths
@@ -637,7 +708,27 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
                 }
             }
         }
-        catch { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogCameraUrlError(logger, ex, baseUrl);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogCameraUrlError(logger, ex, baseUrl);
+        }
+        catch (JsonException ex)
+        {
+            LogCameraUrlError(logger, ex, baseUrl);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCameraUrlError(logger, ex, baseUrl);
+        }
         return (stream, snapshot);
     }
 
@@ -1013,8 +1104,24 @@ public class MoonrakerClient(HttpClient http) : PrinterClientBase, IMoonrakerCli
             using var resp = await http.PostAsJsonAsync(url, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogMetadataScanError(logger, ex, filename, baseUrl);
+            return false;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogMetadataScanError(logger, ex, filename, baseUrl);
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogMetadataScanError(logger, ex, filename, baseUrl);
             return false;
         }
     }
