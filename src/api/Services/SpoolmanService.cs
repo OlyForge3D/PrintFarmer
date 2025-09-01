@@ -1,5 +1,5 @@
-﻿using System.Text.Json;
-using System.Globalization;
+﻿using System.Globalization;
+using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
@@ -203,16 +203,13 @@ public class SpoolmanService : ISpoolmanService
         }
 
         // If it's an object, try common list containers
-        if (root.ValueKind == JsonValueKind.Object)
+        if (root.ValueKind == JsonValueKind.Object &&
+            TryGetArray(root, out var arr, "results", "spools", "items", "data"))
         {
-            if (TryGetArray(root, out var arr, "results", "spools", "items", "data"))
+            foreach (var el in arr.EnumerateArray())
             {
-                foreach (var el in arr.EnumerateArray())
-                {
-                    ct.ThrowIfCancellationRequested();
-                    yield return el;
-                }
-                yield break;
+                ct.ThrowIfCancellationRequested();
+                yield return el;
             }
         }
     }
@@ -296,8 +293,8 @@ public class SpoolmanService : ISpoolmanService
         var firstUsedAt = TryGetDateTime(el, "first_used");
         var lastUsedAt = TryGetDateTime(el, "last_used");
 
-        return new SpoolmanSpoolDto(id, name ?? "Spool", material, remaining, color, inUse ?? false, filamentName, vendor,
-            registeredAt, firstUsedAt, lastUsedAt);
+        return new SpoolmanSpoolDto(id, name, material, remaining, color, inUse ?? false, filamentName, vendor,
+                registeredAt, firstUsedAt, lastUsedAt);
     }
 
     private static int TryGetInt(JsonElement el, params string[] names)

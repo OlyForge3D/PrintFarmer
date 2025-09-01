@@ -1,5 +1,5 @@
-﻿using System.Text.Json;
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Health;
@@ -99,12 +99,10 @@ static bool IsIpInAllowedRanges(string host, string networkRanges)
             }
 
             if (System.Net.IPAddress.TryParse(parts[0], out var networkAddress) &&
-                int.TryParse(parts[1], out var prefixLength))
+                int.TryParse(parts[1], out var prefixLength) &&
+                IsIpInNetwork(ipAddress, networkAddress, prefixLength))
             {
-                if (IsIpInNetwork(ipAddress, networkAddress, prefixLength))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 

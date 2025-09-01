@@ -55,7 +55,7 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
             Path = context.Request.Path.ToString()
         };
 
-    var jsonResponse = JsonSerializer.Serialize(response, s_jsonOptions);
+        var jsonResponse = JsonSerializer.Serialize(response, s_jsonOptions);
 
         await context.Response.WriteAsync(jsonResponse);
     }

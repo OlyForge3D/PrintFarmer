@@ -645,7 +645,7 @@ public class GcodeHarvestService : IGcodeHarvestService
     private async Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string filePath, IPrusaLinkClient? prusa = null, ILogger<GcodeHarvestService>? logger = null)
     {
         var log = logger ?? _logger;
-        var client = prusa ?? _prusa;
+        _ = prusa; // explicitly discard unused optional client parameter
 
         try
         {

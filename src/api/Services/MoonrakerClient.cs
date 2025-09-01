@@ -226,32 +226,32 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 if (statusEl.TryGetProperty("display_status", out var display) &&
                     display.TryGetProperty("progress", out var prog))
                 {
-                    double pv;
+                    double pv = 0;
                     try
-                    { pv = prog.GetDouble(); }
-                    catch { pv = 0; }
+                    {
+                        pv = prog.GetDouble();
+                    }
+                    catch
+                    {
+                    }
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
-                if (statusEl.TryGetProperty("print_stats", out var ps))
+                if (statusEl.TryGetProperty("print_stats", out var ps) &&
+                    ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
                 {
-                    if (ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
-                    {
-                        jobName = fn.GetString();
-                    }
+                    jobName = fn.GetString();
                 }
             }
 
             // Try Klipper job queue for thumbnail path
-            if (result.TryGetProperty("job_queue", out var jq) && jq.ValueKind == JsonValueKind.Object)
+            if (result.TryGetProperty("job_queue", out var jq) && jq.ValueKind == JsonValueKind.Object &&
+                jq.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
             {
-                if (jq.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
+                var first = thumbs[0];
+                if (first.TryGetProperty("relative_path", out var rp) && rp.ValueKind == JsonValueKind.String)
                 {
-                    var first = thumbs[0];
-                    if (first.TryGetProperty("relative_path", out var rp) && rp.ValueKind == JsonValueKind.String)
-                    {
-                        var baseNormalized = NormalizeBaseUrl(baseUrl);
-                        thumb = $"{baseNormalized}/server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}";
-                    }
+                    var baseNormalized = NormalizeBaseUrl(baseUrl);
+                    thumb = $"{baseNormalized}/server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}";
                 }
             }
 
@@ -1915,6 +1915,7 @@ public static class HistoryExtensions
     /// </summary>
     public static DateTime GetStartTimeAsDateTime(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return job.StartTime.ToDateTime();
     }
 
@@ -1923,6 +1924,7 @@ public static class HistoryExtensions
     /// </summary>
     public static DateTime? GetEndTimeAsDateTime(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return job.EndTime?.ToDateTime();
     }
 
@@ -1931,6 +1933,7 @@ public static class HistoryExtensions
     /// </summary>
     public static TimeSpan GetPrintDuration(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return TimeSpan.FromSeconds(job.PrintDuration);
     }
 
@@ -1939,6 +1942,7 @@ public static class HistoryExtensions
     /// </summary>
     public static TimeSpan GetTotalDuration(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return TimeSpan.FromSeconds(job.TotalDuration);
     }
 
@@ -1947,6 +1951,7 @@ public static class HistoryExtensions
     /// </summary>
     public static bool IsCompleted(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1955,6 +1960,7 @@ public static class HistoryExtensions
     /// </summary>
     public static bool IsCancelled(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return string.Equals(job.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1963,6 +1969,7 @@ public static class HistoryExtensions
     /// </summary>
     public static bool IsError(this HistoryJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         return string.Equals(job.Status, "error", StringComparison.OrdinalIgnoreCase);
     }
 }

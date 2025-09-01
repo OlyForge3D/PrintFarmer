@@ -545,7 +545,6 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
 
             if (result.MessageType == WebSocketMessageType.Text)
             {
-                var responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 // Parse file list response and return filenames
                 // This would need to be implemented based on the actual SDCP file list response format
                 return ["placeholder.gcode"]; // Placeholder implementation
