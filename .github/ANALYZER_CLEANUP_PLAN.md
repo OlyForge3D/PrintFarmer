@@ -18,12 +18,14 @@ Status baseline (from latest local build/tests):
 - [ ] S1481/S1066/S3626/S1905: Remove unused locals, merge redundant ifs, remove redundant jumps/casts in the flagged files
 - [x] S6580: Provide CultureInfo when parsing/formatting DateTime in `PrintersController`, `SpoolmanService`
 - [ ] S6605/S6602: Prefer collection-specific Exists/Array.Find where suggested in tests and validators
+	- Scan result (2025-09-02): no actionable patterns found in tests; revisit after new tests land
 - [x] S4136: Co-locate overloads (method overload adjacency) in flagged classes (PrusaLinkApiClient.GetVersionAsync)
 - [x] CA1849: Prefer `RunAsync` over `Run` in `Program.cs`
 - [x] S2325: Make methods static when possible (HarvestWorkerService.ExtractMetadataAsync)
 - [x] S3923: Simplify redundant conditional logic (NetworkDiscoveryService.GetHostsInRange)
 - [x] S1199: Reduce nesting by extracting method from complex block (MoonrakerSubscriptionService.EnumerateAndStartSubscriptionsAsync)
 - [ ] CA1805: Remove explicit default initializers where redundant (Entities and services)
+	- Progress (2025-09-02): Removed redundant defaults in shared DTOs (CreatePrintJobDto.Priority, GcodeLibrarySearchDto.Skip) and Moonraker models (Mqtt Qos/Retain, SpoolmanProxyRequest.UseV2Response). Build/tests green.
 
 Acceptance criteria:
 - [x] Build still succeeds

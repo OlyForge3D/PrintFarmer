@@ -430,7 +430,7 @@ public record PrintJobDto(
 public class CreatePrintJobDto
 {
     public string Name { get; set; } = string.Empty;
-    public int Priority { get; set; } = 0;
+    public int Priority { get; set; }
     public Guid GcodeFileId { get; set; }
     public double? HotendTemperature { get; set; }
     public double? BedTemperature { get; set; }
@@ -530,7 +530,7 @@ public class GcodeLibrarySearchDto
     public Guid? TargetModelId { get; set; }
     public DateTime? UploadedAfter { get; set; }
     public DateTime? UploadedBefore { get; set; }
-    public int Skip { get; set; } = 0;
+    public int Skip { get; set; }
     public int Take { get; set; } = 50;
     public string SortBy { get; set; } = "UploadedAt";
     public bool SortDescending { get; set; } = true;

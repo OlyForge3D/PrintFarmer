@@ -1523,10 +1523,10 @@ namespace Farm.Web.Api.Services
         public object? Payload { get; set; }
 
         [JsonPropertyName("qos")]
-        public int Qos { get; set; } = 0;
+        public int Qos { get; set; }
 
         [JsonPropertyName("retain")]
-        public bool Retain { get; set; } = false;
+        public bool Retain { get; set; }
 
         [JsonPropertyName("timeout")]
         public double Timeout { get; set; } = 5.0;
@@ -1547,7 +1547,7 @@ namespace Farm.Web.Api.Services
         public string Topic { get; set; } = string.Empty;
 
         [JsonPropertyName("qos")]
-        public int Qos { get; set; } = 0;
+        public int Qos { get; set; }
 
         [JsonPropertyName("timeout")]
         public double? Timeout { get; set; }
@@ -1611,7 +1611,7 @@ namespace Farm.Web.Api.Services
         public object? Body { get; set; }
 
         [JsonPropertyName("use_v2_response")]
-        public bool UseV2Response { get; set; } = false;
+        public bool UseV2Response { get; set; }
     }
 
     // Extension Models
