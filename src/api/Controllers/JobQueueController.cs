@@ -17,6 +17,8 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Get all jobs in the queue
     /// </summary>
     [HttpGet]
+    [ProducesResponseType(typeof(IEnumerable<JobQueuePrintJobDto>), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<JobQueuePrintJobDto>>> GetQueueAsync()
     {
         try
@@ -36,7 +38,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
                 Status = (PrintJobStatusDto)(int)job.Status,
-                Priority = (int)job.Priority,
+                Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
                 RequiredMaterialType = job.RequiredMaterialType,
@@ -62,8 +64,16 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Add a new job to the queue
     /// </summary>
     [HttpPost]
+    [ProducesResponseType(typeof(JobQueuePrintJobDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<JobQueuePrintJobDto>> QueueJobAsync([FromBody] QueuePrintJobDto request)
     {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
         try
         {
             // Validate the gcode file exists
@@ -147,6 +157,9 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Get a specific job
     /// </summary>
     [HttpGet("{id}")]
+    [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<JobQueuePrintJobDto>> GetJobAsync(Guid id)
     {
         try
@@ -195,8 +208,16 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Update job status, priority, or assignment
     /// </summary>
     [HttpPut("{id}")]
+    [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<JobQueuePrintJobDto>> UpdateJobAsync(Guid id, [FromBody] UpdatePrintJobStatusDto request)
     {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
         try
         {
             var job = await db.PrintJobs
@@ -287,6 +308,10 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     /// Delete a job from the queue
     /// </summary>
     [HttpDelete("{id}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> DeleteJobAsync(Guid id)
     {
         try

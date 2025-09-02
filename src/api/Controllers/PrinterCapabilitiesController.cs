@@ -17,6 +17,8 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Get capabilities for all printers
     /// </summary>
     [HttpGet]
+    [ProducesResponseType(typeof(IEnumerable<PrinterCapabilitiesDto>), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<PrinterCapabilitiesDto>>> GetAllCapabilitiesAsync()
     {
         try
@@ -59,6 +61,9 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Get capabilities for a specific printer
     /// </summary>
     [HttpGet("printer/{printerId}")]
+    [ProducesResponseType(typeof(PrinterCapabilitiesDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterCapabilitiesDto>> GetCapabilitiesAsync(Guid printerId)
     {
         try
@@ -106,8 +111,17 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Create new capabilities for a printer
     /// </summary>
     [HttpPost]
+    [ProducesResponseType(typeof(PrinterCapabilitiesDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterCapabilitiesDto>> CreateCapabilitiesAsync([FromBody] CreatePrinterCapabilitiesDto request)
     {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
         try
         {
             // Check if printer exists
@@ -188,8 +202,16 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Create or update capabilities for a printer
     /// </summary>
     [HttpPut("printer/{printerId}")]
+    [ProducesResponseType(typeof(PrinterCapabilitiesDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterCapabilitiesDto>> CreateOrUpdateCapabilitiesAsync(Guid printerId, [FromBody] UpdatePrinterCapabilitiesDto request)
     {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
         try
         {
             // Check if printer exists
@@ -288,6 +310,9 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Get printers that match G-code file requirements
     /// </summary>
     [HttpGet("compatible/{gcodeFileId}")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<PrinterDto>>> GetCompatiblePrintersAsync(Guid gcodeFileId)
     {
         try
@@ -310,46 +335,36 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
                 bool isCompatible = true;
 
                 // Check nozzle diameter
-                if (gcodeFile.RequiredNozzleDiameter.HasValue && cap.NozzleDiameter.HasValue)
+                if (gcodeFile.RequiredNozzleDiameter.HasValue && cap.NozzleDiameter.HasValue &&
+                    Math.Abs(cap.NozzleDiameter.Value - gcodeFile.RequiredNozzleDiameter.Value) > 0.001)
                 {
-                    if (Math.Abs(cap.NozzleDiameter.Value - gcodeFile.RequiredNozzleDiameter.Value) > 0.001)
-                    {
-                        isCompatible = false;
-                    }
+                    isCompatible = false;
                 }
 
                 // Check material compatibility
-                if (!string.IsNullOrEmpty(gcodeFile.RequiredMaterial) && cap.SupportedMaterials != null)
+                if (!string.IsNullOrEmpty(gcodeFile.RequiredMaterial) && cap.SupportedMaterials != null &&
+                    !cap.SupportedMaterials.Contains(gcodeFile.RequiredMaterial))
                 {
-                    if (!cap.SupportedMaterials.Contains(gcodeFile.RequiredMaterial))
-                    {
-                        isCompatible = false;
-                    }
+                    isCompatible = false;
                 }
 
                 // Check build volume
-                if (gcodeFile.RequiredBuildVolumeX.HasValue && cap.MaxBuildVolumeX.HasValue)
+                if (gcodeFile.RequiredBuildVolumeX.HasValue && cap.MaxBuildVolumeX.HasValue &&
+                    gcodeFile.RequiredBuildVolumeX.Value > cap.MaxBuildVolumeX.Value)
                 {
-                    if (gcodeFile.RequiredBuildVolumeX.Value > cap.MaxBuildVolumeX.Value)
-                    {
-                        isCompatible = false;
-                    }
+                    isCompatible = false;
                 }
 
-                if (gcodeFile.RequiredBuildVolumeY.HasValue && cap.MaxBuildVolumeY.HasValue)
+                if (gcodeFile.RequiredBuildVolumeY.HasValue && cap.MaxBuildVolumeY.HasValue &&
+                    gcodeFile.RequiredBuildVolumeY.Value > cap.MaxBuildVolumeY.Value)
                 {
-                    if (gcodeFile.RequiredBuildVolumeY.Value > cap.MaxBuildVolumeY.Value)
-                    {
-                        isCompatible = false;
-                    }
+                    isCompatible = false;
                 }
 
-                if (gcodeFile.RequiredBuildVolumeZ.HasValue && cap.MaxBuildVolumeZ.HasValue)
+                if (gcodeFile.RequiredBuildVolumeZ.HasValue && cap.MaxBuildVolumeZ.HasValue &&
+                    gcodeFile.RequiredBuildVolumeZ.Value > cap.MaxBuildVolumeZ.Value)
                 {
-                    if (gcodeFile.RequiredBuildVolumeZ.Value > cap.MaxBuildVolumeZ.Value)
-                    {
-                        isCompatible = false;
-                    }
+                    isCompatible = false;
                 }
 
                 if (isCompatible)
@@ -398,6 +413,9 @@ public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapab
     /// Delete capabilities for a printer
     /// </summary>
     [HttpDelete("printer/{printerId}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> DeleteCapabilitiesAsync(Guid printerId)
     {
         try

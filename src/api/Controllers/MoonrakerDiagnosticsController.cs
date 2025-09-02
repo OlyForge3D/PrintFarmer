@@ -27,10 +27,15 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// </summary>
     [HttpGet("roots")]
     [ProducesResponseType(typeof(FileRoot[]), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<FileRoot[]>> GetFileRootsAsync(string url)
     {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return BadRequest("url is required");
+        }
         _logger.LogInformation("MoonrakerDiagnostics: GetFileRoots called for {Url}", url);
 
         try
@@ -68,18 +73,20 @@ public class MoonrakerDiagnosticsController : ControllerBase
                 }
             }
 
-            if (success && roots != null)
+            if (success)
             {
-                _logger.LogInformation("GetFileRootsAsync succeeded, found {RootCount} roots", roots.Length);
-                return Ok(roots);
-            }
-            else if (lastException != null)
-            {
-                _logger.LogError(lastException, "GetFileRootsAsync failed after retries");
-                return Problem($"GetFileRootsAsync failed after {MaxRetries} attempts", statusCode: 500);
+                if (roots is { Length: > 0 })
+                {
+                    _logger.LogInformation("GetFileRootsAsync succeeded, found {RootCount} roots", roots.Length);
+                    return Ok(roots);
+                }
+
+                return NotFound("No roots found");
             }
 
-            return NotFound("No roots found");
+            // failure path
+            _logger.LogError(lastException, "GetFileRootsAsync failed after retries");
+            return Problem($"GetFileRootsAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
         {
@@ -93,9 +100,14 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// </summary>
     [HttpGet("directory")]
     [ProducesResponseType(typeof(Farm.Web.Api.Services.DirectoryInfo), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<Farm.Web.Api.Services.DirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
     {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return BadRequest("url is required");
+        }
         _logger.LogInformation("MoonrakerDiagnostics: GetDirectory called for {Url}, path {Path}", url, path);
 
         try
@@ -133,16 +145,21 @@ public class MoonrakerDiagnosticsController : ControllerBase
                 }
             }
 
-            if (!success && lastException != null)
+            if (success)
             {
-                _logger.LogError(lastException, "GetDirectoryAsync failed after retries");
-                return Problem($"GetDirectoryAsync failed after {MaxRetries} attempts", statusCode: 500);
+                if (directory is not null)
+                {
+                    _logger.LogInformation("GetDirectoryAsync completed, directoryInfo is not null");
+                    return Ok(directory);
+                }
+
+                _logger.LogInformation("GetDirectoryAsync completed, directoryInfo is null");
+                return NotFound("Directory info not found");
             }
 
-            _logger.LogInformation("GetDirectoryAsync completed, directoryInfo is {IsNull}",
-                directory == null ? "null" : "not null");
-
-            return Ok(directory);
+            // failure path
+            _logger.LogError(lastException, "GetDirectoryAsync failed after retries");
+            return Problem($"GetDirectoryAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
         {
@@ -156,9 +173,14 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// </summary>
     [HttpGet("filelist")]
     [ProducesResponseType(typeof(MoonrakerFileInfo[]), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<MoonrakerFileInfo[]>> GetDetailedFileListAsync(string url, string root = "gcodes", string? path = null)
     {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return BadRequest("url is required");
+        }
         _logger.LogInformation("MoonrakerDiagnostics: GetDetailedFileList called for {Url}, root {Root}, path {Path}", url, root, path);
 
         try
@@ -196,16 +218,21 @@ public class MoonrakerDiagnosticsController : ControllerBase
                 }
             }
 
-            if (!success && lastException != null)
+            if (success)
             {
-                _logger.LogError(lastException, "GetDetailedFileListAsync failed after retries");
-                return Problem($"GetDetailedFileListAsync failed after {MaxRetries} attempts", statusCode: 500);
+                if (fileList is { Length: > 0 })
+                {
+                    _logger.LogInformation("GetDetailedFileListAsync returned {Count} files", fileList.Length);
+                    return Ok(fileList);
+                }
+
+                _logger.LogInformation("GetDetailedFileListAsync returned 0 files");
+                return Ok(Array.Empty<MoonrakerFileInfo>());
             }
 
-            _logger.LogInformation("GetDetailedFileListAsync returned {Count} files",
-                fileList?.Length ?? 0);
-
-            return Ok(fileList ?? []);
+            // failure path
+            _logger.LogError(lastException, "GetDetailedFileListAsync failed after retries");
+            return Problem($"GetDetailedFileListAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
         {

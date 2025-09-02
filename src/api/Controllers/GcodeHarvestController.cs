@@ -14,21 +14,16 @@ public class GcodeHarvestController : ControllerBase
     private readonly IGcodeHarvestService _harvestService;
     private readonly ILogger<GcodeHarvestController> _logger;
     private readonly IMoonrakerClient _moonrakerClient;
-    private readonly IPrusaLinkClient _prusaLinkClient;
-    private readonly ISdcpClient _sdcpClient;
+    // Removed unused fields to reduce analyzer warnings
 
     public GcodeHarvestController(
         IGcodeHarvestService harvestService,
         ILogger<GcodeHarvestController> logger,
-        IMoonrakerClient moonrakerClient,
-        IPrusaLinkClient prusaLinkClient,
-        ISdcpClient sdcpClient)
+        IMoonrakerClient moonrakerClient)
     {
         _harvestService = harvestService;
         _logger = logger;
         _moonrakerClient = moonrakerClient;
-        _prusaLinkClient = prusaLinkClient;
-        _sdcpClient = sdcpClient;
     }
 
     /// <summary>
@@ -40,10 +35,18 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Invalid request parameters</response>
     /// <response code="404">Printer not found</response>
     [HttpPost("start")]
+    [ProducesResponseType(typeof(GcodeHarvestResultDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestResultDto>> StartHarvestAsync(
         [FromBody] StartGcodeHarvestDto request,
         CancellationToken ct)
     {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
         try
         {
             var result = await _harvestService.StartHarvestAsync(request, ct);
@@ -64,12 +67,23 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">Harvest operation details</response>
     /// <response code="404">Operation not found</response>
     [HttpGet("operations/{operationId:guid}")]
+    [ProducesResponseType(typeof(GcodeHarvestOperationDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestOperationDto>> GetHarvestOperationAsync(
         Guid operationId,
         CancellationToken ct)
     {
-        var operation = await _harvestService.GetHarvestOperationAsync(operationId, ct);
-        return operation == null ? NotFound() : Ok(operation);
+        try
+        {
+            var operation = await _harvestService.GetHarvestOperationAsync(operationId, ct);
+            return operation == null ? NotFound() : Ok(operation);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get harvest operation {OperationId}", operationId);
+            return StatusCode(500, "Failed to retrieve harvest operation");
+        }
     }
 
     /// <summary>
@@ -80,6 +94,9 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">List of discovered G-code files</response>
     /// <response code="404">Operation not found</response>
     [HttpGet("operations/{operationId:guid}/files")]
+    [ProducesResponseType(typeof(DiscoveredGcodeFileDto[]), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<DiscoveredGcodeFileDto[]>> GetDiscoveredFilesAsync(
         Guid operationId,
         CancellationToken ct)
@@ -105,10 +122,18 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Invalid request parameters</response>
     /// <response code="404">Operation not found</response>
     [HttpPost("import")]
+    [ProducesResponseType(typeof(GcodeHarvestResultDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestResultDto>> ImportSelectedFilesAsync(
         [FromBody] ImportSelectedGcodeFilesDto request,
         CancellationToken ct)
     {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
         try
         {
             var result = await _harvestService.ImportSelectedFilesAsync(request, ct);
@@ -131,6 +156,10 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="400">Operation cannot be cancelled</response>
     /// <response code="404">Operation not found</response>
     [HttpPost("operations/{operationId:guid}/cancel")]
+    [ProducesResponseType(typeof(bool), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<bool>> CancelHarvestAsync(Guid operationId, CancellationToken ct)
     {
         try
@@ -152,6 +181,8 @@ public class GcodeHarvestController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">Active harvest operation or null if none active</response>
     [HttpGet("printers/{printerId:guid}/active")]
+    [ProducesResponseType(typeof(GcodeHarvestOperationDto), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestOperationDto?>> GetActiveHarvestAsync(
         Guid printerId,
         CancellationToken ct = default)
@@ -176,6 +207,8 @@ public class GcodeHarvestController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">List of recent harvest operations</response>
     [HttpGet("printers/{printerId:guid}/recent")]
+    [ProducesResponseType(typeof(GcodeHarvestOperationDto[]), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetRecentHarvestsAsync(
         Guid printerId,
         [FromQuery] int count = 10,
@@ -199,6 +232,8 @@ public class GcodeHarvestController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">List of active harvest operations</response>
     [HttpGet("active")]
+    [ProducesResponseType(typeof(GcodeHarvestOperationDto[]), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetActiveHarvestsAsync(CancellationToken ct = default)
     {
         try
@@ -221,6 +256,9 @@ public class GcodeHarvestController : ControllerBase
     /// <response code="200">Extracted metadata</response>
     /// <response code="400">Invalid file or not a G-code file</response>
     [HttpPost("analyze")]
+    [ProducesResponseType(typeof(GcodeMetadataDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeMetadataDto>> AnalyzeGcodeAsync(
         IFormFile file,
         CancellationToken ct)
@@ -252,6 +290,9 @@ public class GcodeHarvestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync
     /// </summary>
     [HttpGet("test/moonraker/directory")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
         [FromQuery] string serverUrl,
         [FromQuery] string path = "gcodes",
@@ -294,6 +335,8 @@ public class GcodeHarvestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetFileListAsync
     /// </summary>
     [HttpGet("test/moonraker/files")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> TestMoonrakerGetFileListAsync(
         [FromQuery] string serverUrl,
         CancellationToken ct = default)
@@ -324,6 +367,8 @@ public class GcodeHarvestController : ControllerBase
     /// Test endpoint to enable debug logging
     /// </summary>
     [HttpPost("debug-logs")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
     public IActionResult EnableDebugLogs()
     {
         try
@@ -343,8 +388,5 @@ public class GcodeHarvestController : ControllerBase
         }
     }
 
-    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(Uri serverUrl, string path = "gcodes", bool extended = true, CancellationToken ct = default)
-    {
-        throw new NotImplementedException();
-    }
+    // Removed duplicate unannotated test method overload to satisfy analyzers
 }

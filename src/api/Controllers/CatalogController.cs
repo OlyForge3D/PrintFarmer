@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Controllers.Requests;
+using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -20,6 +21,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     /// <returns>List of all printer manufacturers ordered by name</returns>
     /// <response code="200">Returns the list of manufacturers</response>
     [HttpGet("manufacturers")]
+    [ProducesResponseType(typeof(IEnumerable<ManufacturerDto>), 200)]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync(CancellationToken ct)
     {
         var list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
@@ -37,6 +39,9 @@ public class CatalogController(AppDbContext db) : ControllerBase
     /// <response code="400">If the manufacturer name is invalid or empty</response>
     /// <response code="409">If a manufacturer with the same name already exists</response>
     [HttpPost("manufacturers")]
+    [ProducesResponseType(typeof(ManufacturerDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(409)]
     public async Task<ActionResult<ManufacturerDto>> CreateManufacturerAsync([FromBody] string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -58,6 +63,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     }
 
     [HttpGet("models")]
+    [ProducesResponseType(typeof(IEnumerable<ModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<ModelDto>>> GetModelsAsync([FromQuery] Guid? manufacturerId, CancellationToken ct)
     {
         var q = db.Models.AsNoTracking().AsQueryable();
@@ -72,11 +78,17 @@ public class CatalogController(AppDbContext db) : ControllerBase
         return Ok(list);
     }
 
-    public record CreateModelRequest(Guid ManufacturerId, string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
-
     [HttpPost("models")]
+    [ProducesResponseType(typeof(ModelDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     public async Task<ActionResult<ModelDto>> CreateModelAsync([FromBody] CreateModelRequest req, CancellationToken ct)
     {
+        if (req is null)
+        {
+            return BadRequest("Request body is required");
+        }
         if (req.ManufacturerId == Guid.Empty)
         {
             return BadRequest("ManufacturerId is required");
@@ -125,11 +137,16 @@ public class CatalogController(AppDbContext db) : ControllerBase
                 model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null));
     }
 
-    public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
-
     [HttpPut("models/{id:guid}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
     public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
     {
+        if (req is null)
+        {
+            return BadRequest("Request body is required");
+        }
         var model = await db.Models.FindAsync([id], ct);
         if (model is null)
         {

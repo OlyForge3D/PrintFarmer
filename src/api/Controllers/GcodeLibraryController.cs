@@ -208,8 +208,8 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             Directory.CreateDirectory(libraryRootFull);
 
             // Save file
-            var safeExt = Path.GetExtension(file.FileName);
-            var fileName = $"{Guid.NewGuid()}{safeExt}";
+            // Extension is validated above to be .gcode; avoid using tainted filename-derived values
+            var fileName = $"{Guid.NewGuid()}.gcode";
             var filePathFull = Path.GetFullPath(Path.Combine(libraryRootFull, fileName));
             if (!filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal))
             {
@@ -304,6 +304,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     /// </summary>
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(GcodeFileDto), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeFileDto>> UpdateFileAsync(Guid id, [FromBody] UpdateGcodeFileDto request)

@@ -13,30 +13,35 @@ public class ClientTestController : ControllerBase
     private readonly ILogger<ClientTestController> _logger;
     private readonly IMoonrakerClient _moonrakerClient;
     private readonly IPrusaLinkClient _prusaLinkClient;
-    private readonly ISdcpClient _sdcpClient;
 
     public ClientTestController(
         ILogger<ClientTestController> logger,
-        IMoonrakerClient moonrakerClient,
-        IPrusaLinkClient prusaLinkClient,
-        ISdcpClient sdcpClient)
+    IMoonrakerClient moonrakerClient,
+    IPrusaLinkClient prusaLinkClient)
     {
         _logger = logger;
         _moonrakerClient = moonrakerClient;
         _prusaLinkClient = prusaLinkClient;
-        _sdcpClient = sdcpClient;
     }
 
     /// <summary>
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync
     /// </summary>
     [HttpGet("moonraker/directory")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
         [FromQuery] string serverUrl,
         [FromQuery] string path = "gcodes",
         [FromQuery] bool extended = true,
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return BadRequest("serverUrl is required");
+        }
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
@@ -73,10 +78,17 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetFileListAsync
     /// </summary>
     [HttpGet("moonraker/files")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> TestMoonrakerGetFileListAsync(
         [FromQuery] string serverUrl,
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return BadRequest("serverUrl is required");
+        }
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
@@ -103,10 +115,17 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for MoonrakerClient.GetFileRootsAsync
     /// </summary>
     [HttpGet("moonraker/roots")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> TestMoonrakerGetFileRootsAsync(
         [FromQuery] string serverUrl,
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return BadRequest("serverUrl is required");
+        }
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileRootsAsync with serverUrl={ServerUrl}", serverUrl);
@@ -133,11 +152,18 @@ public class ClientTestController : ControllerBase
     /// Test endpoint for PrusaLinkClient.GetFileListAsync
     /// </summary>
     [HttpGet("prusalink/files")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> TestPrusaLinkGetFileListAsync(
         [FromQuery] string serverUrl,
         [FromQuery] string apiKey = "",
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return BadRequest("serverUrl is required");
+        }
         try
         {
             _logger.LogInformation("Testing PrusaLinkClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
@@ -160,8 +186,5 @@ public class ClientTestController : ControllerBase
         }
     }
 
-    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(Uri serverUrl, string path = "gcodes", bool extended = true, CancellationToken ct = default)
-    {
-        throw new NotImplementedException();
-    }
+    // Removed duplicate unimplemented overload to satisfy analyzers
 }

@@ -17,6 +17,8 @@ public class SpoolmanController(SpoolmanService spoolman) : ControllerBase
     /// <returns>Current Spoolman configuration including server URL and connection settings</returns>
     /// <response code="200">Returns the current Spoolman configuration</response>
     [HttpGet("config")]
+    [ProducesResponseType(typeof(SpoolmanConfigDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult<SpoolmanConfigDto?> GetConfig() => spoolman.GetConfig();
 
     /// <summary>
@@ -27,8 +29,14 @@ public class SpoolmanController(SpoolmanService spoolman) : ControllerBase
     /// <response code="204">If the configuration was successfully updated</response>
     /// <response code="400">If the configuration data is invalid</response>
     [HttpPost("config")]
-    public IActionResult SetConfig(SpoolmanConfigDto config)
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult SetConfig([FromBody] SpoolmanConfigDto? config)
     {
+        if (config is null)
+        {
+            return BadRequest("Config body is required.");
+        }
         spoolman.SetConfig(config);
         return NoContent();
     }
@@ -41,6 +49,8 @@ public class SpoolmanController(SpoolmanService spoolman) : ControllerBase
     /// <response code="200">Returns the list of spools from Spoolman</response>
     /// <response code="503">If Spoolman is not configured or unavailable</response>
     [HttpGet("spools")]
+    [ProducesResponseType(typeof(IEnumerable<SpoolmanSpoolDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetSpoolsAsync(CancellationToken ct)
         => Ok(await spoolman.ListSpoolsAsync(ct));
 }
