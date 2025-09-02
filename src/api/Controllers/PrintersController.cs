@@ -1226,7 +1226,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     }
 
     [HttpPost("{id:guid}/files/upload")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -1301,7 +1301,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     }
 
     [HttpPost("{id:guid}/files/{fileName}/print")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult> StartPrintFromFileAsync(Guid id, string fileName, CancellationToken ct)
