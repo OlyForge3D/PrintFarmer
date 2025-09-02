@@ -84,7 +84,8 @@ Acceptance criteria:
 
 ## Phase 5 — Model and naming cleanups
 - [ ] CA2227: Make collection properties read-only (init/private set) in models that do not require external mutation
-- [ ] CA1711/CA1724: Evaluate renames for types ending with Queue and name conflicts (e.g., Storage); prefer internal or file-scoped suppressions if rename is breaking
+- [x] CA1711: Scoped suppression added for IHarvestQueue and InMemoryHarvestQueue (avoid breaking rename)
+- [x] CA1724: Class-level suppression on PrusaLinkModels.Storage to avoid conflict without rename
 - [x] S3260: Mark private classes as sealed (NetworkDiscoveryService.PrinterInfo, GcodeHarvestService.PrinterFileInfo)
 - [x] S125: Remove commented-out dead code (DatabaseInitializer)
 - [x] CA1002: Shift API-facing return types to IReadOnlyList where safe (INetworkDiscoverySettingsService.GetDynamicNetworkRanges)

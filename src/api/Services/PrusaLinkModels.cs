@@ -140,6 +140,7 @@ public class StorageListResponse
     public Storage[] StorageList { get; set; } = [];
 }
 
+[SuppressMessage("Naming", "CA1724:Type names should not conflict with namespaces", Justification = "Matches upstream API schema; renaming would be a breaking change.")]
 public class Storage
 {
     public string Name { get; set; } = string.Empty;
