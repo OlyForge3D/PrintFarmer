@@ -3,7 +3,7 @@
 This document tracks incremental cleanup of analyzer warnings across the solution. The goal is to reduce noise without risky churn, landing small, reviewable changes in phases.
 
 Status baseline (from latest local build/tests):
-- Build: succeeded with ~193 warnings (API), tests add a handful more
+- Build: succeeded with ~176 warnings overall (API majority), tests add a handful more
 - Framework: .NET 9, ASP.NET Core API + Blazor WASM
 
 ## Principles
@@ -28,11 +28,30 @@ Acceptance criteria:
 - [ ] Warning count reduced by at least 30–50 without public API breaks
 
 ## Phase 2 — Input validation and API surface polish
-- [ ] CA1062: Add guard clauses or nullable annotations + [ApiController] conventions to avoid null-use in controllers/services
-- [ ] S6965/S6968: Ensure controller actions have HTTP verb attributes and ProducesResponseType annotations for success paths
-- [ ] CA1034: Move public nested request/response types in controllers to top-level DTOs (e.g., `PrintersController` nested types)
-- [ ] CA3003: Mitigate file path injection warnings in `GcodeLibraryController` by validating and constraining paths
-- [x] Replace Console.WriteLine in API with structured logging in hot paths (history endpoints updated)
+- [x] CA1034: Move public nested request/response types in controllers to top-level DTOs
+	- Moved from `PrintersController` to:
+		- `api/Controllers/Requests/StartPrintRequest.cs`
+		- `api/Controllers/Requests/UploadGcodeRequest.cs` (kept for future use)
+		- `api/Controllers/Responses/CameraUrlResult.cs`
+- [x] S6965/S6968: Add ProducesResponseType annotations and ensure HTTP verb attributes
+	- `PrintersController`: test/demo endpoints annotated; camera URL annotated
+	- `GcodeLibraryController`: all CRUD and download endpoints annotated
+	- `MoonrakerDiagnosticsController`: roots/directory/filelist annotated
+	- Remaining: some `PrintersController` operational endpoints (camera enable/disable, file ops) and other controllers (e.g., `GcodeHarvestController`)
+- [x] CA1062: Add guard clauses in representative endpoints
+	- `PrintersController.ResolveHostAsync` and `StartPrintAsync`
+	- `GcodeLibraryController.UploadFileAsync` and `UpdateFileAsync`
+	- Remaining: sweep other controllers for request-body nulls
+- [x] CA3003: Mitigate file path injection in `GcodeLibraryController`
+	- Constrain to webroot `gcode-library` via `GetFullPath` + prefix check
+	- Download/Delete now validate and operate only under library root
+	- Upload saves with generated filename and validated extension
+- [x] Replace Console.WriteLine in API with structured logging in hot/demo paths
+
+Acceptance criteria:
+- [x] Build succeeds, tests green
+- [x] API Swagger/metadata reflects accurate response types for updated endpoints
+- [ ] Null handling covered by integration tests for at least 2 representative endpoints (follow-up)
 
 Acceptance criteria:
 - [ ] Build succeeds, tests green
@@ -51,6 +70,7 @@ Acceptance criteria:
 
 ## Phase 4 — Exceptions, logging, and disposals
 - [ ] CA2201/S112: Replace `throw new Exception(...)` with specific exception types; narrow catches
+	- Partial: `MoonrakerDiagnosticsController` now returns Problem responses instead of throwing general exceptions
 - [ ] Adopt LoggerMessage pattern for hot paths (controllers frequently hit, network clients, background services)
 - [ ] IDISP013/CA2000: Ensure `await using` and disposal correctness in Moonraker/Prusa/SDCP clients and background services
 
@@ -78,6 +98,22 @@ Create small PRs referencing this meta-issue, one per bullet or tight cluster:
 - [ ] PR: Phase 3 Uri migration (step 2: internal adoption + optional JSON converter)
 - [ ] PR: Phase 4 exceptions/logging/disposals
 - [ ] PR: Phase 5 model/naming, with suppressions where breaking
+
+## Remaining items snapshot (by rule and location)
+
+Phase 2 high-priority targets next:
+- S6965/S6968 (controller metadata):
+	- PrintersController: add ProducesResponseType to camera enable/disable, file list/upload/print-from-file endpoints
+	- GcodeHarvestController: add ProducesResponseType on key actions (e.g., update/delete, download)
+- CA1062 (null-guards):
+	- Sweep remaining controllers for request-body nulls (e.g., harvest endpoints)
+- CA3003 (path validation):
+	- Verify remaining file IO paths outside `GcodeLibraryController` (if any)
+
+Lower-priority or later phases (not tackled next):
+- CA2227 read-only collections in models (Phase 5)
+- LoggerMessage expansion across services (Phase 4)
+- Uri-typed models internal adoption + optional converter (Phase 3 step 2)
 
 Notes:
 - Re-run end-to-end validations per repository instructions after each PR (build, test, manual health checks).

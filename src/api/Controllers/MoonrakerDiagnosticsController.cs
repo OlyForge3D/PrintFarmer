@@ -26,6 +26,9 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// Test endpoint to invoke GetFileRootsAsync directly
     /// </summary>
     [HttpGet("roots")]
+    [ProducesResponseType(typeof(FileRoot[]), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<FileRoot[]>> GetFileRootsAsync(string url)
     {
         _logger.LogInformation("MoonrakerDiagnostics: GetFileRoots called for {Url}", url);
@@ -33,23 +36,23 @@ public class MoonrakerDiagnosticsController : ControllerBase
         try
         {
             // Apply retry logic
-            const int maxRetries = 3;
-            const int initialDelayMs = 500;
+            const int MaxRetries = 3;
+            const int InitialDelayMs = 500;
 
             int retryCount = 0;
             bool success = false;
             FileRoot[]? roots = null;
             Exception? lastException = null;
 
-            while (!success && retryCount < maxRetries)
+            while (!success && retryCount < MaxRetries)
             {
                 try
                 {
                     if (retryCount > 0)
                     {
-                        int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
+                        int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
                         _logger.LogInformation("Retry {RetryCount}/{MaxRetries} after {DelayMs}ms",
-                            retryCount, maxRetries, delay);
+                            retryCount, MaxRetries, delay);
                         await Task.Delay(delay);
                     }
 
@@ -61,7 +64,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                     lastException = ex;
                     retryCount++;
                     _logger.LogWarning(ex, "GetFileRootsAsync attempt {RetryCount}/{MaxRetries} failed",
-                        retryCount, maxRetries);
+                        retryCount, MaxRetries);
                 }
             }
 
@@ -72,7 +75,8 @@ public class MoonrakerDiagnosticsController : ControllerBase
             }
             else if (lastException != null)
             {
-                throw new Exception($"GetFileRootsAsync failed after {maxRetries} attempts", lastException);
+                _logger.LogError(lastException, "GetFileRootsAsync failed after retries");
+                return Problem($"GetFileRootsAsync failed after {MaxRetries} attempts", statusCode: 500);
             }
 
             return NotFound("No roots found");
@@ -88,6 +92,8 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// Test endpoint to invoke GetDirectoryAsync directly
     /// </summary>
     [HttpGet("directory")]
+    [ProducesResponseType(typeof(Farm.Web.Api.Services.DirectoryInfo), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<Farm.Web.Api.Services.DirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
     {
         _logger.LogInformation("MoonrakerDiagnostics: GetDirectory called for {Url}, path {Path}", url, path);
@@ -95,23 +101,23 @@ public class MoonrakerDiagnosticsController : ControllerBase
         try
         {
             // Apply retry logic
-            const int maxRetries = 3;
-            const int initialDelayMs = 500;
+            const int MaxRetries = 3;
+            const int InitialDelayMs = 500;
 
             int retryCount = 0;
             bool success = false;
             Farm.Web.Api.Services.DirectoryInfo? directory = null;
             Exception? lastException = null;
 
-            while (!success && retryCount < maxRetries)
+            while (!success && retryCount < MaxRetries)
             {
                 try
                 {
                     if (retryCount > 0)
                     {
-                        int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
+                        int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
                         _logger.LogInformation("Retry GetDirectoryAsync {RetryCount}/{MaxRetries} after {DelayMs}ms",
-                            retryCount, maxRetries, delay);
+                            retryCount, MaxRetries, delay);
                         await Task.Delay(delay);
                     }
 
@@ -123,13 +129,14 @@ public class MoonrakerDiagnosticsController : ControllerBase
                     lastException = ex;
                     retryCount++;
                     _logger.LogWarning(ex, "GetDirectoryAsync attempt {RetryCount}/{MaxRetries} failed",
-                        retryCount, maxRetries);
+                        retryCount, MaxRetries);
                 }
             }
 
             if (!success && lastException != null)
             {
-                throw new Exception($"GetDirectoryAsync failed after {maxRetries} attempts", lastException);
+                _logger.LogError(lastException, "GetDirectoryAsync failed after retries");
+                return Problem($"GetDirectoryAsync failed after {MaxRetries} attempts", statusCode: 500);
             }
 
             _logger.LogInformation("GetDirectoryAsync completed, directoryInfo is {IsNull}",
@@ -148,6 +155,8 @@ public class MoonrakerDiagnosticsController : ControllerBase
     /// Test endpoint to invoke GetDetailedFileListAsync directly
     /// </summary>
     [HttpGet("filelist")]
+    [ProducesResponseType(typeof(MoonrakerFileInfo[]), 200)]
+    [ProducesResponseType(500)]
     public async Task<ActionResult<MoonrakerFileInfo[]>> GetDetailedFileListAsync(string url, string root = "gcodes", string? path = null)
     {
         _logger.LogInformation("MoonrakerDiagnostics: GetDetailedFileList called for {Url}, root {Root}, path {Path}", url, root, path);
@@ -155,23 +164,23 @@ public class MoonrakerDiagnosticsController : ControllerBase
         try
         {
             // Apply retry logic
-            const int maxRetries = 3;
-            const int initialDelayMs = 500;
+            const int MaxRetries = 3;
+            const int InitialDelayMs = 500;
 
             int retryCount = 0;
             bool success = false;
             MoonrakerFileInfo[]? fileList = null;
             Exception? lastException = null;
 
-            while (!success && retryCount < maxRetries)
+            while (!success && retryCount < MaxRetries)
             {
                 try
                 {
                     if (retryCount > 0)
                     {
-                        int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
+                        int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
                         _logger.LogInformation("Retry GetDetailedFileListAsync {RetryCount}/{MaxRetries} after {DelayMs}ms",
-                            retryCount, maxRetries, delay);
+                            retryCount, MaxRetries, delay);
                         await Task.Delay(delay);
                     }
 
@@ -183,13 +192,14 @@ public class MoonrakerDiagnosticsController : ControllerBase
                     lastException = ex;
                     retryCount++;
                     _logger.LogWarning(ex, "GetDetailedFileListAsync attempt {RetryCount}/{MaxRetries} failed",
-                        retryCount, maxRetries);
+                        retryCount, MaxRetries);
                 }
             }
 
             if (!success && lastException != null)
             {
-                throw new Exception($"GetDetailedFileListAsync failed after {maxRetries} attempts", lastException);
+                _logger.LogError(lastException, "GetDetailedFileListAsync failed after retries");
+                return Problem($"GetDetailedFileListAsync failed after {MaxRetries} attempts", statusCode: 500);
             }
 
             _logger.LogInformation("GetDetailedFileListAsync returned {Count} files",
@@ -204,8 +214,5 @@ public class MoonrakerDiagnosticsController : ControllerBase
         }
     }
 
-    public async Task<ActionResult<FileRoot[]>> GetFileRootsAsync(Uri url)
-    {
-        throw new NotImplementedException();
-    }
+    // removed unused overload
 }
