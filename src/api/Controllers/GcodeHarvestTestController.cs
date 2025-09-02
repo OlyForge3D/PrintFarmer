@@ -4,17 +4,17 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Web.Api.Controllers;
 
 /// <summary>
-/// Test endpoints for Moonraker client APIs
+/// Test endpoints for G-code harvest flows (Moonraker sources)
 /// </summary>
 [ApiController]
-[Route("api/client-test/moonraker")]
-public class MoonrakerClientTestController : ControllerBase
+[Route("api/gcode-harvest/test/moonraker")]
+public class GcodeHarvestTestController : ControllerBase
 {
-    private readonly ILogger<MoonrakerClientTestController> _logger;
+    private readonly ILogger<GcodeHarvestTestController> _logger;
     private readonly IMoonrakerClient _moonrakerClient;
 
-    public MoonrakerClientTestController(
-        ILogger<MoonrakerClientTestController> logger,
+    public GcodeHarvestTestController(
+        ILogger<GcodeHarvestTestController> logger,
         IMoonrakerClient moonrakerClient)
     {
         _logger = logger;
@@ -39,6 +39,7 @@ public class MoonrakerClientTestController : ControllerBase
         {
             return BadRequest("serverUrl is required");
         }
+
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
@@ -85,6 +86,7 @@ public class MoonrakerClientTestController : ControllerBase
         {
             return BadRequest("serverUrl is required");
         }
+
         try
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
@@ -103,43 +105,6 @@ public class MoonrakerClientTestController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error testing MoonrakerClient.GetFileListAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
-        }
-    }
-
-    /// <summary>
-    /// Test endpoint for MoonrakerClient.GetFileRootsAsync
-    /// </summary>
-    [HttpGet("roots")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(500)]
-    public async Task<IActionResult> TestMoonrakerGetFileRootsAsync(
-        [FromQuery] string serverUrl,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(serverUrl))
-        {
-            return BadRequest("serverUrl is required");
-        }
-        try
-        {
-            _logger.LogInformation("Testing MoonrakerClient.GetFileRootsAsync with serverUrl={ServerUrl}", serverUrl);
-
-            var roots = await _moonrakerClient.GetFileRootsAsync(serverUrl, ct);
-
-            _logger.LogInformation("GetFileRootsAsync succeeded. Found {RootCount} roots", roots.Length);
-
-            return Ok(new
-            {
-                success = true,
-                roots = roots,
-                count = roots.Length
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetFileRootsAsync");
             return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }

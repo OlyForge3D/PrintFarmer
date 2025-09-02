@@ -1,8 +1,8 @@
 ﻿namespace Farm.Web.Api.Controllers.Requests;
 
 using System.ComponentModel.DataAnnotations;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 public record CreateModelRequest(
     [property: Required, BindRequired] // NOSONAR S6964: Binding is explicit; value type required with [BindRequired]

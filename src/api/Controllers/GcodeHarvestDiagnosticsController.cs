@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,16 +12,13 @@ namespace Farm.Web.Api.Controllers;
 public class GcodeHarvestDiagnosticsController : ControllerBase
 {
     private readonly ILogger<GcodeHarvestDiagnosticsController> _logger;
-    private readonly IMoonrakerClient _moonrakerClient;
     private readonly IGcodeHarvestService _harvestService;
 
     public GcodeHarvestDiagnosticsController(
-        ILogger<GcodeHarvestDiagnosticsController> logger,
-        IMoonrakerClient moonrakerClient,
-        IGcodeHarvestService harvestService)
+    ILogger<GcodeHarvestDiagnosticsController> logger,
+    IGcodeHarvestService harvestService)
     {
         _logger = logger;
-        _moonrakerClient = moonrakerClient;
         _harvestService = harvestService;
     }
 
@@ -59,81 +56,7 @@ public class GcodeHarvestDiagnosticsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Test endpoint for MoonrakerClient.GetDirectoryAsync
-    /// </summary>
-    [HttpGet("test/moonraker/directory")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<IActionResult> TestMoonrakerGetDirectoryAsync(
-        [FromQuery] string serverUrl,
-        [FromQuery] string path = "gcodes",
-        [FromQuery] bool extended = true,
-        CancellationToken ct = default)
-    {
-        try
-        {
-            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
-                serverUrl, path, extended);
-
-            var directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
-
-            if (directoryInfo == null)
-            {
-                _logger.LogWarning("GetDirectoryAsync returned null result");
-                return NotFound("Directory not found or error occurred");
-            }
-
-            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories",
-                directoryInfo.Files?.Length ?? 0, directoryInfo.Dirs?.Length ?? 0);
-
-            return Ok(new
-            {
-                success = true,
-                result = directoryInfo,
-                fileCount = directoryInfo.Files?.Length ?? 0,
-                dirCount = directoryInfo.Dirs?.Length ?? 0
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetDirectoryAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
-        }
-    }
-
-    /// <summary>
-    /// Test endpoint for MoonrakerClient.GetFileListAsync
-    /// </summary>
-    [HttpGet("test/moonraker/files")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(500)]
-    public async Task<IActionResult> TestMoonrakerGetFileListAsync(
-        [FromQuery] string serverUrl,
-        CancellationToken ct = default)
-    {
-        try
-        {
-            _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
-
-            var files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
-
-            _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
-
-            return Ok(new
-            {
-                success = true,
-                files = files,
-                count = files.Length
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetFileListAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
-        }
-    }
+    // Test endpoints moved to GcodeHarvestTestController under /api/gcode-harvest/test/*
 
     /// <summary>
     /// Test endpoint to enable debug logging

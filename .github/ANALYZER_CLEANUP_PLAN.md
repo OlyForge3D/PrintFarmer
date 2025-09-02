@@ -111,7 +111,12 @@ Create small PRs referencing this meta-issue, one per bullet or tight cluster:
 ## Current remaining warnings of note (snapshot)
 - CA1711: Naming for types ending with Queue (evaluate rename vs. scoped suppression)
 - CA1724: Type name conflicts with namespaces (e.g., Storage) — evaluate mitigation
-- S6960: Consider splitting controller responsibilities (review scope/benefit)
+- S6960: Controllers split completed for client tests and gcode-harvest (diagnostics vs. test)
+	- Routes now:
+		- /api/client-test/moonraker/*
+		- /api/client-test/prusalink/*
+		- /api/gcode-harvest/test/moonraker/*
+		- /api/gcode-harvest/analyze and /api/gcode-harvest/debug-logs remain in diagnostics
 - S6964: Clarify binding on remaining POST/PUT endpoints (partial; continue sweep)
 
 ## Remaining items snapshot (by rule and location)
