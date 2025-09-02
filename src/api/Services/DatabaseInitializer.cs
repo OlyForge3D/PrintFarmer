@@ -25,8 +25,7 @@ public class DatabaseInitializer
     {
         _logger.LogInformation("[DB] Starting database initialization for provider: {DbProvider}", dbProvider);
 
-        var retryCount = 0;
-        Exception? lastException = null;
+    var retryCount = 0;
 
         while (retryCount < maxRetries)
         {
@@ -39,14 +38,10 @@ public class DatabaseInitializer
                 // Perform migrations or ensure creation
                 try
                 {
-                    // For MVP development, use EnsureCreated instead of migrations
-                    // This simplifies schema changes during rapid development
+                    // For MVP development, use EnsureCreated instead of migrations.
+                    // This simplifies schema changes during rapid development.
                     await _context.Database.EnsureCreatedAsync();
                     _logger.LogInformation("[DB] Database schema creation completed successfully");
-
-                    // Commented out migration code for future use
-                    // await _context.Database.MigrateAsync();
-                    // _logger.LogInformation("[DB] Database migration completed successfully");
                 }
                 catch (Exception ex)
                 {
@@ -62,7 +57,6 @@ public class DatabaseInitializer
             }
             catch (Exception ex)
             {
-                lastException = ex;
                 retryCount++;
 
                 if (retryCount < maxRetries)

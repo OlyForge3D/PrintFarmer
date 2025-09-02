@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace Farm.Web.Api.Services;
 
@@ -11,6 +12,7 @@ public class VersionInfo
     public string Text { get; set; } = string.Empty;
     public string Firmware { get; set; } = string.Empty;
     public string? Sdk { get; set; }
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO for JSON transport; setter needed for deserialization")]
     public Dictionary<string, object> Capabilities { get; set; } = new();
 }
 
@@ -128,6 +130,8 @@ public class JobFile
 }
 
 // Use JobFilePrint as the default Job type since it's more common
+
+[SuppressMessage("Major Code Smell", "S2094:Classes should not be empty", Justification = "Convenience wrapper to keep API shape consistent")]
 public class Job : JobFilePrint { }
 
 // Storage
@@ -155,7 +159,7 @@ public class Transfer
     public string Type { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
-    public string? Url { get; set; }
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Url { get; set; }
     public long? Size { get; set; }
     public double Progress { get; set; }
     public long Transferred { get; set; }
@@ -182,7 +186,7 @@ public class FileInfo : FileInfoBase
 
 public class FileRefs
 {
-    public string? Download { get; set; }
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Download { get; set; }
 }
 
 public class PrintFileInfo : FileInfoBase
@@ -193,9 +197,9 @@ public class PrintFileInfo : FileInfoBase
 
 public class PrintFileRefs
 {
-    public string? Download { get; set; }
-    public string? Icon { get; set; }
-    public string? Thumbnail { get; set; }
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Download { get; set; }
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Icon { get; set; }
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Thumbnail { get; set; }
 }
 
 public class PrintFileMetadata
@@ -347,7 +351,7 @@ public class PrusaLinkError
     public string Code { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Text { get; set; } = string.Empty;
-    public string? Url { get; set; }
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Url { get; set; }
 }
 
 // Enums based on OpenAPI spec

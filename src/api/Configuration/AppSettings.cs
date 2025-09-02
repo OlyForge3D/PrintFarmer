@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Configuration;
@@ -16,6 +17,7 @@ public class AppSettings
 
     [Required]
     [Url]
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Bound from configuration as string; changing type would be a breaking change")]
     public string BaseUrl { get; set; } = "http://localhost:5088";
 
     [Required]
@@ -116,7 +118,7 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
         if (validationErrors.Count > 0)
         {
             var errorMessage = $"Configuration validation failed:\n{string.Join("\n", validationErrors)}";
-            logger.LogCritical(errorMessage);
+            logger.LogCritical("Configuration validation failed: {Errors}", errorMessage);
             throw new InvalidOperationException(errorMessage);
         }
 

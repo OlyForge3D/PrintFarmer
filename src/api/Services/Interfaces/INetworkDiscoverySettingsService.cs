@@ -22,6 +22,6 @@ public interface INetworkDiscoverySettingsService
     /// <summary>
     /// Gets network ranges dynamically based on the current server's network interfaces.
     /// </summary>
-    /// <returns>List of CIDR network ranges detected from active network interfaces</returns>
-    List<string> GetDynamicNetworkRanges();
+    /// <returns>Read-only list of CIDR network ranges detected from active network interfaces</returns>
+    IReadOnlyList<string> GetDynamicNetworkRanges();
 }

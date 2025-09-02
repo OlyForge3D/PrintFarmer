@@ -114,16 +114,22 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         {
             try
             {
-                using var scope = scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                // Only subscribe to Moonraker-backed printers (Backend == 0)
-                var printers = await db.Printers.AsNoTracking()
-                    .Where(p => p.Backend == 0)
-                    .ToListAsync(ct);
-                foreach (var p in printers)
+                // Using an async scope while awaiting EF Core ToListAsync is intentional here.
+                // The scope lifetime matches the query and is disposed immediately after.
+#pragma warning disable IDISP013 // Await in using
                 {
-                    _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    // Only subscribe to Moonraker-backed printers (Backend == 0)
+                    var printers = await db.Printers.AsNoTracking()
+                        .Where(p => p.Backend == 0)
+                        .ToListAsync(ct);
+                    foreach (var p in printers)
+                    {
+                        _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
+                    }
                 }
+#pragma warning restore IDISP013
             }
             catch (Exception ex)
             {
@@ -291,7 +297,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            using var scope = scopeFactory.CreateScope();
+            await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var current = await db.Printers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == printerId, ct);
 
@@ -653,7 +659,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         try
         {
             // Create scope to get moonraker client
-            using var scope = scopeFactory.CreateScope();
+            await using var scope = scopeFactory.CreateAsyncScope();
             var moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Step 1: Get the active spool ID from Moonraker

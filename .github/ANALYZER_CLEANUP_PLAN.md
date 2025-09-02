@@ -3,7 +3,7 @@
 This document tracks incremental cleanup of analyzer warnings across the solution. The goal is to reduce noise without risky churn, landing small, reviewable changes in phases.
 
 Status baseline (from latest local build/tests):
-- Build: succeeded with ~176 warnings overall (API majority), tests add a handful more
+- Build: succeeded with ~19 warnings (reduced from ~176 in early passes), tests add a handful more
 - Framework: .NET 9, ASP.NET Core API + Blazor WASM
 
 ## Principles
@@ -18,7 +18,7 @@ Status baseline (from latest local build/tests):
 - [ ] S1481/S1066/S3626/S1905: Remove unused locals, merge redundant ifs, remove redundant jumps/casts in the flagged files
 - [x] S6580: Provide CultureInfo when parsing/formatting DateTime in `PrintersController`, `SpoolmanService`
 - [ ] S6605/S6602: Prefer collection-specific Exists/Array.Find where suggested in tests and validators
-- [ ] S4136: Co-locate overloads (method overload adjacency) in flagged classes (Moonraker/Prusa/Harvest/PrinterClientBase)
+- [x] S4136: Co-locate overloads (method overload adjacency) in flagged classes (PrusaLinkApiClient.GetVersionAsync)
 - [x] CA1849: Prefer `RunAsync` over `Run` in `Program.cs`
 - [ ] CA1805: Remove explicit default initializers where redundant (Entities and services)
 
@@ -72,7 +72,8 @@ Acceptance criteria:
 - [ ] CA2201/S112: Replace `throw new Exception(...)` with specific exception types; narrow catches
 	- Partial: `MoonrakerDiagnosticsController` now returns Problem responses instead of throwing general exceptions
 - [ ] Adopt LoggerMessage pattern for hot paths (controllers frequently hit, network clients, background services)
-- [ ] IDISP013/CA2000: Ensure `await using` and disposal correctness in Moonraker/Prusa/SDCP clients and background services
+- [x] IDISP013: Ensure `await using` and disposal correctness in MoonrakerSubscriptionService (narrow suppression with async scope)
+- [x] CA2254: Use templated logging messages (AppSettings configuration validation)
 
 Acceptance criteria:
 - [ ] No broad catch-all except where required, with logging
@@ -81,6 +82,9 @@ Acceptance criteria:
 ## Phase 5 — Model and naming cleanups
 - [ ] CA2227: Make collection properties read-only (init/private set) in models that do not require external mutation
 - [ ] CA1711/CA1724: Evaluate renames for types ending with Queue and name conflicts (e.g., Storage); prefer internal or file-scoped suppressions if rename is breaking
+- [x] S3260: Mark private classes as sealed (NetworkDiscoveryService.PrinterInfo, GcodeHarvestService.PrinterFileInfo)
+- [x] S125: Remove commented-out dead code (DatabaseInitializer)
+- [x] CA1002: Shift API-facing return types to IReadOnlyList where safe (INetworkDiscoverySettingsService.GetDynamicNetworkRanges)
 
 Acceptance criteria:
 - [ ] Either rename with migration notes or add targeted suppressions with justification

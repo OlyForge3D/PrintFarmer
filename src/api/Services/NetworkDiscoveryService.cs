@@ -441,7 +441,7 @@ public partial class NetworkDiscoveryService(
         }
     }
 
-    private class PrinterInfo
+    private sealed class PrinterInfo
     {
         public string? Name { get; set; }
         public string? Manufacturer { get; set; }

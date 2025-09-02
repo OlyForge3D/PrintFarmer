@@ -64,6 +64,42 @@ public partial class PrusaLinkApiClient
         }
     }
 
+    // API Version Information (Uri overload co-located for S4136)
+    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+
+        var url = new Uri(baseUrl, "api/version");
+        try
+        {
+            using var request = CreateRequest(HttpMethod.Get, url.ToString(), apiKey);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogApiError(_logger, ex, url.ToString());
+            throw;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            LogApiError(_logger, ex, url.ToString());
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            LogDeserializationError(_logger, ex, url.ToString());
+            throw;
+        }
+    }
+
     // Printer Information
     public async Task<PrinterInfo> GetInfoAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
@@ -463,8 +499,5 @@ public partial class PrusaLinkApiClient
         return request;
     }
 
-    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
-    {
-        throw new NotImplementedException();
-    }
+
 }

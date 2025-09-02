@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared;
 
@@ -153,7 +154,6 @@ public partial record SpoolmanConfigDto
 {
     [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null);
 }
-#pragma warning restore CA1056
 public record SpoolmanSpoolDto(
     int Id,
     string Name,
@@ -232,6 +232,9 @@ public class DiscoveredPrinterDto
 }
 
 // Network discovery configuration
+// Collection types kept as List<T> for JSON binding and Blazor forms compatibility (non-breaking).
+// Interface methods return IReadOnlyList<T> to satisfy CA1002 on API surface.
+#pragma warning disable CA1002 // Do not expose generic lists in public APIs (kept for JSON binding compatibility)
 public record NetworkDiscoverySettingsDto(
     List<string> NetworkRanges,
     int TimeoutMs = 3000,
@@ -242,6 +245,7 @@ public record NetworkDiscoverySettingsDto(
     {
     }
 }
+#pragma warning restore CA1002
 
 // History Models (matching Moonraker structure)
 public class HistoryListResponse
@@ -257,6 +261,7 @@ public class HistoryJob
     public double? EndTime { get; set; }
     public double FilamentUsed { get; set; }
     public string Filename { get; set; } = string.Empty;
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO used for JSON serialization; setter required for deserialization")]
     public Dictionary<string, object> Metadata { get; set; } = new();
     public double PrintDuration { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -725,3 +730,5 @@ public class CompatiblePrinterDto
     public string[] CompatibilityReasons { get; set; } = [];
     public int CurrentQueueLength { get; set; }
 }
+
+#pragma warning restore CA1056

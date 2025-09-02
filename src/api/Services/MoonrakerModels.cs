@@ -1,4 +1,6 @@
 ﻿using System.Text.Json.Serialization;
+// DTOs: allow mutable collection setters for JSON serialization/deserialization
+#pragma warning disable CA2227 // Collection properties should be read only
 #pragma warning disable CA1056 // URI-like properties should not be strings (JSON transport models)
 
 namespace Farm.Web.Api.Services
@@ -90,10 +92,10 @@ namespace Farm.Web.Api.Services
     public class ServerConfig
     {
         [JsonPropertyName("config")]
-        public Dictionary<string, object> Config { get; set; } = new();
+        public Dictionary<string, object> Config { get; set; } = [];
 
         [JsonPropertyName("orig")]
-        public Dictionary<string, object> Orig { get; set; } = new();
+        public Dictionary<string, object> Orig { get; set; } = [];
 
         [JsonPropertyName("files")]
         public ConfigFile[] Files { get; set; } = [];
@@ -111,10 +113,10 @@ namespace Farm.Web.Api.Services
     public class TemperatureData
     {
         [JsonPropertyName("temperatures")]
-        public Dictionary<string, double[][]> Temperatures { get; set; } = new();
+        public Dictionary<string, double[][]> Temperatures { get; set; } = [];
 
         [JsonPropertyName("targets")]
-        public Dictionary<string, double[][]> Targets { get; set; } = new();
+        public Dictionary<string, double[][]> Targets { get; set; } = [];
     }
 
     public class GCodeStoreResponse
@@ -147,7 +149,7 @@ namespace Farm.Web.Api.Services
         public string[] RolledOver { get; set; } = [];
 
         [JsonPropertyName("failed")]
-        public Dictionary<string, string> Failed { get; set; } = new();
+        public Dictionary<string, string> Failed { get; set; } = [];
     }
 
     // Printer Administration Models
@@ -191,7 +193,7 @@ namespace Farm.Web.Api.Services
     public class ObjectQueryResponse
     {
         [JsonPropertyName("status")]
-        public Dictionary<string, object> Status { get; set; } = new();
+        public Dictionary<string, object> Status { get; set; } = [];
 
         [JsonPropertyName("eventtime")]
         public double EventTime { get; set; }
@@ -200,7 +202,7 @@ namespace Farm.Web.Api.Services
     public class ObjectSubscriptionRequest
     {
         [JsonPropertyName("objects")]
-        public Dictionary<string, string[]?> Objects { get; set; } = new();
+        public Dictionary<string, string[]?> Objects { get; set; } = [];
     }
 
     // GCode API Models
@@ -239,10 +241,10 @@ namespace Farm.Web.Api.Services
         public string[] AvailableServices { get; set; } = [];
 
         [JsonPropertyName("instance_ids")]
-        public Dictionary<string, string> InstanceIds { get; set; } = new();
+        public Dictionary<string, string> InstanceIds { get; set; } = [];
 
         [JsonPropertyName("service_state")]
-        public Dictionary<string, ServiceState> ServiceStates { get; set; } = new();
+        public Dictionary<string, ServiceState> ServiceStates { get; set; } = [];
 
         [JsonPropertyName("virtualization")]
         public VirtualizationInfo Virtualization { get; set; } = new();
@@ -251,10 +253,10 @@ namespace Farm.Web.Api.Services
         public PythonInfo Python { get; set; } = new();
 
         [JsonPropertyName("network")]
-        public Dictionary<string, NetworkInterface> Network { get; set; } = new();
+        public Dictionary<string, NetworkInterface> Network { get; set; } = [];
 
         [JsonPropertyName("canbus")]
-        public Dictionary<string, CanbusInterface> Canbus { get; set; } = new();
+        public Dictionary<string, CanbusInterface> Canbus { get; set; } = [];
     }
 
     public class CpuInfo
@@ -428,10 +430,10 @@ namespace Farm.Web.Api.Services
         public double? CpuTemp { get; set; }
 
         [JsonPropertyName("network")]
-        public Dictionary<string, NetworkStats> Network { get; set; } = new();
+        public Dictionary<string, NetworkStats> Network { get; set; } = [];
 
         [JsonPropertyName("system_cpu_usage")]
-        public Dictionary<string, double> SystemCpuUsage { get; set; } = new();
+        public Dictionary<string, double> SystemCpuUsage { get; set; } = [];
 
         [JsonPropertyName("system_uptime")]
         public double SystemUptime { get; set; }
@@ -1142,7 +1144,7 @@ namespace Farm.Web.Api.Services
         public string AspectRatio { get; set; } = string.Empty;
 
         [JsonPropertyName("extra_data")]
-        public Dictionary<string, object> ExtraData { get; set; } = new();
+        public Dictionary<string, object> ExtraData { get; set; } = [];
 
         [JsonPropertyName("source")]
         public string Source { get; set; } = string.Empty;
@@ -1236,7 +1238,7 @@ namespace Farm.Web.Api.Services
         public long GithubLimitResetTime { get; set; }
 
         [JsonPropertyName("version_info")]
-        public Dictionary<string, MoonrakerUpdateInfo> VersionInfo { get; set; } = new();
+        public Dictionary<string, MoonrakerUpdateInfo> VersionInfo { get; set; } = [];
     }
 
     public class MoonrakerUpdateInfo
@@ -1427,7 +1429,7 @@ namespace Farm.Web.Api.Services
         public string Filename { get; set; } = string.Empty;
 
         [JsonPropertyName("metadata")]
-        public Dictionary<string, object> Metadata { get; set; } = new();
+        public Dictionary<string, object> Metadata { get; set; } = [];
 
         [JsonPropertyName("print_duration")]
         public double PrintDuration { get; set; }
@@ -1698,7 +1700,7 @@ namespace Farm.Web.Api.Services
     public class OctoPrintSettingsResponse
     {
         [JsonPropertyName("plugins")]
-        public Dictionary<string, object> Plugins { get; set; } = new();
+        public Dictionary<string, object> Plugins { get; set; } = [];
 
         [JsonPropertyName("feature")]
         public OctoPrintFeature Feature { get; set; } = new();
@@ -1794,7 +1796,7 @@ namespace Farm.Web.Api.Services
     public class OctoPrintPrinterResponse
     {
         [JsonPropertyName("temperature")]
-        public Dictionary<string, OctoPrintTemperature> Temperature { get; set; } = new();
+        public Dictionary<string, OctoPrintTemperature> Temperature { get; set; } = [];
 
         [JsonPropertyName("state")]
         public OctoPrintState State { get; set; } = new();
@@ -1857,7 +1859,7 @@ namespace Farm.Web.Api.Services
     public class OctoPrintProfilesResponse
     {
         [JsonPropertyName("profiles")]
-        public Dictionary<string, OctoPrintProfile> Profiles { get; set; } = new();
+        public Dictionary<string, OctoPrintProfile> Profiles { get; set; } = [];
     }
 
     public class OctoPrintProfile
@@ -1888,3 +1890,4 @@ namespace Farm.Web.Api.Services
     }
 }
 #pragma warning restore CA1056
+#pragma warning restore CA2227
