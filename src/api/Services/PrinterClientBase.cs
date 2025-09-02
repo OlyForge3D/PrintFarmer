@@ -1,14 +1,20 @@
-﻿namespace Farm.Web.Api.Services;
+﻿using System.Diagnostics.CodeAnalysis;
+
+namespace Farm.Web.Api.Services;
 
 // Shared helpers for printer clients (Moonraker, PrusaLink)
 public abstract class PrinterClientBase
 {
     protected static bool IsLoopbackHost(string host)
-        => string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase)
-           || host.StartsWith("127.", StringComparison.Ordinal);
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase)
+               || host.StartsWith("127.", StringComparison.Ordinal);
+    }
 
     // Normalize a base URL and ensure a default port if not present
+    [SuppressMessage("Design", "CA1055:Uri return values should not be strings", Justification = "Non-breaking helper; Uri overload provided.")]
     protected static string NormalizeBaseUrl(string url, int defaultPort)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -37,9 +43,22 @@ public abstract class PrinterClientBase
         }
     }
 
+    protected static string NormalizeBaseUrl(Uri url, int defaultPort)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        var ub = new UriBuilder(url);
+        if (ub.Port == -1)
+        {
+            ub.Port = defaultPort;
+        }
+        return ub.Uri.ToString().TrimEnd('/');
+    }
+
     // Normalize camera/thumbnail URLs that might be absolute with loopback host or relative
+    [SuppressMessage("Design", "CA1055:Uri return values should not be strings", Justification = "Non-breaking helper; Uri-based overload pattern planned.")]
     protected static string NormalizeCameraUrl(string? url, string baseNorm)
     {
+        ArgumentNullException.ThrowIfNull(baseNorm);
         if (string.IsNullOrWhiteSpace(url))
         {
             return string.Empty;
@@ -56,6 +75,7 @@ public abstract class PrinterClientBase
                     var ub = new UriBuilder(abs)
                     {
                         Host = baseUri.Host,
+                        Port = baseUri.IsDefaultPort ? -1 : baseUri.Port,
                         Scheme = baseUri.Scheme // align scheme with base
                     };
                     return ub.Uri.ToString();
@@ -64,13 +84,19 @@ public abstract class PrinterClientBase
             catch { }
             return abs.ToString();
         }
-        // Relative path -> anchor to base
-        var rel = s.StartsWith('/') ? s : "/" + s;
-        return baseNorm + rel;
-    }
 
-    protected static string NormalizeBaseUrl(Uri url, int defaultPort)
-    {
-        throw new NotImplementedException();
+        // Relative or scheme-relative URL -> resolve against base using Uri composition
+        try
+        {
+            var baseUri = new Uri(baseNorm);
+            var combined = new Uri(baseUri, s);
+            return combined.ToString();
+        }
+        catch
+        {
+            // Fallback: conservative join without duplicating slashes
+            var rel = s.StartsWith('/') ? s : "/" + s;
+            return baseNorm.TrimEnd('/') + rel;
+        }
     }
 }

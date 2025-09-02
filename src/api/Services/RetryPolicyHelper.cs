@@ -15,7 +15,7 @@ public static class RetryPolicyHelper
     /// <param name="logger">Optional logger to log retry attempts</param>
     /// <param name="operationName">Name of the operation for logging</param>
     /// <returns>Result of the operation</returns>
-    /// <exception cref="Exception">Thrown when all retry attempts fail</exception>
+    /// <exception cref="InvalidOperationException">Thrown when all retry attempts fail</exception>
     public static async Task<T> ExecuteWithRetryAsync<T>(
         Func<Task<T>> operation,
         int maxRetries = 3,
@@ -62,7 +62,7 @@ public static class RetryPolicyHelper
             }
         }
 
-        throw new Exception($"{operationName} failed after {maxRetries} attempts", lastException);
+        throw new InvalidOperationException($"{operationName} failed after {maxRetries} attempts", lastException);
     }
 
     /// <summary>
@@ -73,7 +73,7 @@ public static class RetryPolicyHelper
     /// <param name="initialDelayMs">Initial delay in milliseconds (default: 500)</param>
     /// <param name="logger">Optional logger to log retry attempts</param>
     /// <param name="operationName">Name of the operation for logging</param>
-    /// <exception cref="Exception">Thrown when all retry attempts fail</exception>
+    /// <exception cref="InvalidOperationException">Thrown when all retry attempts fail</exception>
     public static async Task ExecuteWithRetryAsync(
         Func<Task> operation,
         int maxRetries = 3,
@@ -121,6 +121,6 @@ public static class RetryPolicyHelper
             }
         }
 
-        throw new Exception($"{operationName} failed after {maxRetries} attempts", lastException);
+        throw new InvalidOperationException($"{operationName} failed after {maxRetries} attempts", lastException);
     }
 }

@@ -39,12 +39,13 @@ public static class PrusaLinkApiExtensions
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(fileName);
+        ArgumentNullException.ThrowIfNull(fileStream);
 
-        // Ensure the file path starts with /
-        var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
+        // Build a rooted path using Uri to avoid manual separators
+        var filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
 
         return await client.UploadFileAsync(baseUrl, "/local", filePath, fileStream, apiKey,
-            startPrintAfterUpload, overwrite: true, ct);
+                startPrintAfterUpload, overwrite: true, ct);
     }
 
     /// <summary>
@@ -56,8 +57,8 @@ public static class PrusaLinkApiExtensions
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(fileName);
 
-        // Ensure the file path starts with /
-        var filePath = fileName.StartsWith('/') ? fileName : "/" + fileName;
+        // Build a rooted path using Uri to avoid manual separators
+        var filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
 
         return await client.StartPrintAsync(baseUrl, "/local", filePath, apiKey, ct);
     }
@@ -68,6 +69,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<PrintJobProgress?> GetPrintProgressAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var job = await client.GetJobAsync(baseUrl, apiKey, ct);
@@ -99,6 +101,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<SimplePrinterStatus?> GetPrinterStatusAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var status = await client.GetStatusAsync(baseUrl, apiKey, ct);
@@ -131,6 +134,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<bool> IsPrintingAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var status = await client.GetStatusAsync(baseUrl, apiKey, ct);
@@ -148,6 +152,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<bool> PausePrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var job = await client.GetJobAsync(baseUrl, apiKey, ct);
@@ -169,6 +174,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<bool> ResumePrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var job = await client.GetJobAsync(baseUrl, apiKey, ct);
@@ -190,6 +196,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<bool> StopPrintAsync(this PrusaLinkApiClient client, string baseUrl,
         string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var job = await client.GetJobAsync(baseUrl, apiKey, ct);
@@ -211,6 +218,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<PrinterInformation?> GetPrinterInformationAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var info = await client.GetInfoAsync(baseUrl, apiKey, ct);
@@ -268,10 +276,8 @@ public static class PrusaLinkApiExtensions
         }
     }
 
-    public static async Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
-    {
-        throw new NotImplementedException();
-    }
+    public static Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => client.GetGcodeFilesAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
 }
 
 /// <summary>
