@@ -35,6 +35,7 @@ public class CircuitBreaker
     /// </summary>
     public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(operation);
         if (_state == CircuitState.Open)
         {
             if (DateTime.UtcNow - _lastFailureTime < _retryDelay)
@@ -75,6 +76,7 @@ public class CircuitBreaker
     /// </summary>
     public async Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(operation);
         await ExecuteAsync<object?>(async token =>
         {
             await operation(token);
@@ -140,6 +142,7 @@ public class CircuitBreaker
     /// <summary>
     /// Gets current circuit breaker metrics
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1024:Use properties where appropriate", Justification = "Intentional method semantics; avoids API break and allows future parameters.")]
     public CircuitBreakerMetrics GetMetrics()
     {
         return new CircuitBreakerMetrics
@@ -202,14 +205,14 @@ public class CircuitBreakerService : ICircuitBreakerService
 
     public CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null)
     {
-        return _circuitBreakers.GetOrAdd(name, _ =>
+        return _circuitBreakers.GetOrAdd(name, key =>
         {
             var cb = new CircuitBreaker(
                 failureThreshold ?? 5,
                 timeout ?? TimeSpan.FromMinutes(1),
                 retryDelay ?? TimeSpan.FromSeconds(30),
                 null); // Pass null for logger since we can't convert types
-            cb.Name = name;
+            cb.Name = key;
             return cb;
         });
     }

@@ -12,6 +12,7 @@ public static class ModelBuilderExtensions
     /// </summary>
     public static void ConfigurePerformanceOptimizations(this ModelBuilder modelBuilder)
     {
+    ArgumentNullException.ThrowIfNull(modelBuilder);
         // Printer table optimizations
         modelBuilder.Entity<Farm.Web.Api.Domain.Printer>(entity =>
         {
@@ -73,6 +74,8 @@ public static class ModelBuilderExtensions
     /// </summary>
     public static void ConfigureDatabaseSpecificOptimizations(this ModelBuilder modelBuilder, string providerName)
     {
+    ArgumentNullException.ThrowIfNull(modelBuilder);
+    ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
         switch (providerName.ToLowerInvariant())
         {
             case var provider when provider.Contains("sqlite"):
