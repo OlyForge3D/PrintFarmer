@@ -16,7 +16,7 @@ public class JobQueueService
     {
         try
         {
-            var jobs = await _httpClient.GetFromJsonAsync<List<JobQueuePrintJobDto>>("api/queue");
+            var jobs = await _httpClient.GetFromJsonAsync<List<JobQueuePrintJobDto>>(new Uri("api/queue", UriKind.Relative));
             return jobs ?? new List<JobQueuePrintJobDto>();
         }
         catch (Exception)
@@ -29,7 +29,7 @@ public class JobQueueService
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("api/queue", job);
+            var response = await _httpClient.PostAsJsonAsync(new Uri("api/queue", UriKind.Relative), job);
             if (response.IsSuccessStatusCode)
             {
                 return await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
@@ -46,7 +46,7 @@ public class JobQueueService
     {
         try
         {
-            var response = await _httpClient.PutAsJsonAsync($"api/queue/{id}", job);
+            var response = await _httpClient.PutAsJsonAsync(new Uri($"api/queue/{id}", UriKind.Relative), job);
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
@@ -59,7 +59,7 @@ public class JobQueueService
     {
         try
         {
-            var response = await _httpClient.DeleteAsync($"api/queue/{id}");
+            var response = await _httpClient.DeleteAsync(new Uri($"api/queue/{id}", UriKind.Relative));
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
@@ -72,7 +72,7 @@ public class JobQueueService
     {
         try
         {
-            var response = await _httpClient.PostAsync($"api/queue/{id}/start", null);
+            var response = await _httpClient.PostAsync(new Uri($"api/queue/{id}/start", UriKind.Relative), null);
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
@@ -85,7 +85,7 @@ public class JobQueueService
     {
         try
         {
-            var response = await _httpClient.PostAsync($"api/queue/{id}/cancel", null);
+            var response = await _httpClient.PostAsync(new Uri($"api/queue/{id}/cancel", UriKind.Relative), null);
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
@@ -98,7 +98,7 @@ public class JobQueueService
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("api/queue/reorder", jobIds);
+            var response = await _httpClient.PostAsJsonAsync(new Uri("api/queue/reorder", UriKind.Relative), jobIds);
             return response.IsSuccessStatusCode;
         }
         catch (Exception)

@@ -15,7 +15,7 @@ public class ToastService
     private void Add(string message, string type, int ttlMs)
     {
         var t = new ToastItem(Guid.NewGuid(), message, type);
-    _items.Add(t);
+        _items.Add(t);
         OnChanged?.Invoke(this, EventArgs.Empty);
         _ = AutoDismissAsync(t.Id, ttlMs);
     }

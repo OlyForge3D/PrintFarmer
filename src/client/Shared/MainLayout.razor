@@ -96,7 +96,7 @@ main { background:#0f172a; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0
     {
         try
         {
-            var resp = await Http.GetAsync("/healthz");
+            var resp = await Http.GetAsync(new Uri("/healthz", UriKind.Relative));
             healthText = resp.IsSuccessStatusCode ? "ok" : "down";
         }
         catch { healthText = "down"; }

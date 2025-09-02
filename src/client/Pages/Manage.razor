@@ -321,7 +321,7 @@
       isExporting = true;
       StateHasChanged();
 
-      var response = await Http.GetAsync("api/printers/export");
+  var response = await Http.GetAsync(new Uri("api/printers/export", UriKind.Relative));
       if (response.IsSuccessStatusCode)
       {
         var content = await response.Content.ReadAsByteArrayAsync();
@@ -383,7 +383,7 @@
       fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv");
       content.Add(fileContent, "file", file.Name);
 
-      var response = await Http.PostAsync("api/printers/import", content);
+  var response = await Http.PostAsync(new Uri("api/printers/import", UriKind.Relative), content);
       var responseContent = await response.Content.ReadAsStringAsync();
 
       if (response.IsSuccessStatusCode)
@@ -454,7 +454,7 @@
       discoveryMessage = string.Empty;
       StateHasChanged();
 
-      var response = await Http.GetAsync("api/printers/discover");
+  var response = await Http.GetAsync(new Uri("api/printers/discover", UriKind.Relative));
       if (response.IsSuccessStatusCode)
       {
         var responseContent = await response.Content.ReadAsStringAsync();
@@ -581,7 +581,7 @@
   {
     try
     {
-      var response = await Http.DeleteAsync($"api/printers/{printerId}");
+  var response = await Http.DeleteAsync(new Uri($"api/printers/{printerId}", UriKind.Relative));
       if (response.IsSuccessStatusCode)
       {
         // Remove printer from local list

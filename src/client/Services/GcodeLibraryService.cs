@@ -71,7 +71,7 @@ public class GcodeLibraryService
     {
         try
         {
-            var response = await _httpClient.DeleteAsync($"api/library/{id}");
+            var response = await _httpClient.DeleteAsync(new Uri($"api/library/{id}", UriKind.Relative));
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
@@ -142,7 +142,7 @@ public class GcodeLibraryService
     {
         try
         {
-            var response = await _httpClient.PostAsync($"api/gcode-harvest/operations/{operationId}/cancel", null);
+            var response = await _httpClient.PostAsync(new Uri($"api/gcode-harvest/operations/{operationId}/cancel", UriKind.Relative), null);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)

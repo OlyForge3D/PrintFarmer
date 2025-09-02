@@ -1,14 +1,11 @@
-using System;
-using System.Threading.Tasks;
-using Farm.Web.Client;
-using Xunit;
+﻿using Xunit;
 
 namespace Farm.Web.Client.Tests;
 
 public class ToastServiceTests
 {
     [Fact]
-    public async Task Add_And_Dismiss_Raise_OnChanged()
+    public async Task Add_And_Dismiss_Raise_OnChangedAsync()
     {
         // Arrange
         var svc = new ToastService();
@@ -37,11 +34,11 @@ public class ToastServiceTests
     }
 
     [Fact]
-    public async Task Warning_Adds_WarningToast_And_Raises_OnChanged()
+    public async Task Warning_Adds_WarningToast_And_Raises_OnChangedAsync()
     {
         var svc = new ToastService();
         var fired = 0;
-    void Handler(object? _, EventArgs __) => fired++;
+        void Handler(object? _, EventArgs __) => fired++;
         svc.OnChanged += Handler;
 
         svc.Warning("be careful", ttlMs: 1_000); // long enough to avoid auto-dismiss during assertions
@@ -51,18 +48,18 @@ public class ToastServiceTests
         Assert.Equal("be careful", svc.Toasts[0].Message);
         Assert.Equal("warning", svc.Toasts[0].Type);
 
-    // Cleanup: ensure no auto-dismiss interference; cancel by manual dismiss
-    svc.Dismiss(svc.Toasts[0].Id);
-    await Task.Yield();
-    svc.OnChanged -= Handler;
+        // Cleanup: ensure no auto-dismiss interference; cancel by manual dismiss
+        svc.Dismiss(svc.Toasts[0].Id);
+        await Task.Yield();
+        svc.OnChanged -= Handler;
     }
 
     [Fact]
-    public async Task ManualDismiss_Removes_And_Raises_OnChanged()
+    public async Task ManualDismiss_Removes_And_Raises_OnChangedAsync()
     {
         var svc = new ToastService();
         var fired = 0;
-    void Handler(object? _, EventArgs __) => fired++;
+        void Handler(object? _, EventArgs __) => fired++;
         svc.OnChanged += Handler;
 
         // Add with long TTL to prevent auto-dismiss while we test manual dismiss

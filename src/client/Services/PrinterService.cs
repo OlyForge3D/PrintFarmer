@@ -18,7 +18,7 @@ public class PrinterService
         try
         {
             // Use the existing API endpoint that returns basic printer info
-            var response = await _http.GetAsync("api/printers/basic");
+            var response = await _http.GetAsync(new Uri("api/printers/basic", UriKind.Relative));
             response.EnsureSuccessStatusCode();
 
             var printers = await response.Content.ReadFromJsonAsync<List<PrinterBasicDto>>();
@@ -48,7 +48,7 @@ public class PrinterService
     {
         try
         {
-            var response = await _http.GetAsync($"api/printers/{printerId}");
+            var response = await _http.GetAsync(new Uri($"api/printers/{printerId}", UriKind.Relative));
             if (response.IsSuccessStatusCode)
             {
                 return await response.Content.ReadFromJsonAsync<PrinterDetailsDto>();

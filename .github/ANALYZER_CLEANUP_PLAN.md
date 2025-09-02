@@ -32,6 +32,7 @@ Acceptance criteria:
 - [ ] S6965/S6968: Ensure controller actions have HTTP verb attributes and ProducesResponseType annotations for success paths
 - [ ] CA1034: Move public nested request/response types in controllers to top-level DTOs (e.g., `PrintersController` nested types)
 - [ ] CA3003: Mitigate file path injection warnings in `GcodeLibraryController` by validating and constraining paths
+- [x] Replace Console.WriteLine in API with structured logging in hot paths (history endpoints updated)
 
 Acceptance criteria:
 - [ ] Build succeeds, tests green
@@ -39,7 +40,7 @@ Acceptance criteria:
 - [ ] Null handling covered by integration tests for at least 2 representative endpoints
 
 ## Phase 3 — URL/URI migration (gradual)
-- [ ] CA1055/CA1056: Introduce Uri-typed accessors alongside existing string properties (non-breaking) in DTOs/entities where feasible
+- [x] CA1055/CA1056: Introduce Uri-typed accessors alongside existing string properties (non-breaking) in DTOs/entities where feasible (added to PrinterDto, PrinterBasicDto, PrinterStatusDto, SpoolmanConfigDto)
 - [ ] Internally adopt Uri for HTTP calls and camera URL normalization; keep string properties for serialization until clients are updated
 - [ ] Add custom JSON converter if needed for smoother string<->Uri interop
 
@@ -73,7 +74,8 @@ Create small PRs referencing this meta-issue, one per bullet or tight cluster:
 - [x] PR: Phase 1 hygiene batch A (JsonSerializerOptions + RunAsync + trivial Sonar fixes)
 - [ ] PR: Phase 1 hygiene batch B (overload adjacency + default initializers)
 - [ ] PR: Phase 2 input validation (null guards + ProducesResponseType)
-- [ ] PR: Phase 3 Uri migration (internal first, adapters for DTOs)
+- [x] PR: Phase 3 Uri migration (step 1: non-breaking DTO accessors)
+- [ ] PR: Phase 3 Uri migration (step 2: internal adoption + optional JSON converter)
 - [ ] PR: Phase 4 exceptions/logging/disposals
 - [ ] PR: Phase 5 model/naming, with suppressions where breaking
 

@@ -8,13 +8,13 @@ builder.RootComponents.Add<App>("#app");
 // Load configuration
 var configHttp = new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) };
 
-using var response = await configHttp.GetAsync("appsettings.json");
+using var response = await configHttp.GetAsync(new Uri("appsettings.json", UriKind.Relative));
 using var stream = await response.Content.ReadAsStreamAsync();
 builder.Configuration.AddJsonStream(stream);
 
 if (builder.HostEnvironment.IsDevelopment())
 {
-    using var devResponse = await configHttp.GetAsync("appsettings.Development.json");
+    using var devResponse = await configHttp.GetAsync(new Uri("appsettings.Development.json", UriKind.Relative));
     if (devResponse.IsSuccessStatusCode)
     {
         using var devStream = await devResponse.Content.ReadAsStreamAsync();

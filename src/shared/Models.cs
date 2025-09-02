@@ -1,4 +1,6 @@
-﻿namespace Farm.Web.Shared;
+﻿using System.Text.Json.Serialization;
+
+namespace Farm.Web.Shared;
 
 // This file contains DTOs intended for JSON serialization across client/server.
 // URL-like values are represented as strings by design for transport compatibility.
@@ -11,7 +13,7 @@ public enum PrinterBackend
     SDCP = 2
 }
 
-public record PrinterDto(
+public partial record PrinterDto(
     Guid Id,
     string Name,
     string ServerUrl,
@@ -38,8 +40,17 @@ public record PrinterDto(
     string? IpAddress = null,
     PrinterSpoolInfoDto? SpoolInfo = null);
 
+// Non-breaking typed accessors for URL-like fields (ignored in JSON)
+public partial record PrinterDto
+{
+    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out var u) ? u : null);
+}
+
 // Basic printer info without live status (for fast loading)
-public record PrinterBasicDto(
+public partial record PrinterBasicDto(
     Guid Id,
     string Name,
     string ServerUrl,
@@ -51,8 +62,13 @@ public record PrinterBasicDto(
     string? OriginalServerUrl = null,
     string? IpAddress = null);
 
+public partial record PrinterBasicDto
+{
+    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+}
+
 // Live status info for a specific printer
-public record PrinterStatusDto(
+public partial record PrinterStatusDto(
     Guid Id,
     bool IsOnline,
     string? State,
@@ -69,6 +85,13 @@ public record PrinterStatusDto(
     double? HotendTarget = null,
     double? BedTarget = null,
     PrinterSpoolInfoDto? SpoolInfo = null);
+
+public partial record PrinterStatusDto
+{
+    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out var u) ? u : null);
+}
 
 // Real-time update payload for SignalR
 public record PrinterStatusUpdate(
@@ -125,7 +148,11 @@ public record TempTargets(double? Hotend, double? Bed);
 public record MoveRequest(double? X, double? Y, double? Z, double? F);
 
 // Spoolman integration
-public record SpoolmanConfigDto(string BaseUrl);
+public partial record SpoolmanConfigDto(string BaseUrl);
+public partial record SpoolmanConfigDto
+{
+    [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null);
+}
 #pragma warning restore CA1056
 public record SpoolmanSpoolDto(
     int Id,

@@ -171,13 +171,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             }
             catch (OperationCanceledException) when (fastTimeoutCts.Token.IsCancellationRequested)
             {
-                logger.LogDebug("Fast timeout for printer {PrinterName} ({PrinterId})", p.Name, p.Id);
+                logger.FastTimeout(p.Name, p.Id);
                 // Return offline printer for timeout cases
                 return CreateOfflinePrinterDto(p);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Error getting status for printer {PrinterName} ({PrinterId})", p.Name, p.Id);
+                logger.ErrorGettingStatus(ex, p.Name, p.Id);
                 // Return offline printer for any error
                 return CreateOfflinePrinterDto(p);
             }
@@ -353,7 +353,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (OperationCanceledException) when (statusCts.Token.IsCancellationRequested)
         {
-            logger.LogDebug("Status timeout for printer {PrinterId}", p.Id);
+            logger.StatusTimeout(p.Id);
             // Return offline status for timeout cases
             return new PrinterStatusDto(
                 Id: p.Id,
@@ -1443,11 +1443,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         if (printer == null)
         { return NotFound(); }
 
-        Console.WriteLine($"GetHistoryTotals called for printer {id} ({printer.Name}), backend: {printer.Backend}");
+        logger.LogDebug("GetHistoryTotals called for printer {PrinterId} ({PrinterName}), backend: {Backend}", id, printer.Name, printer.Backend);
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
-            Console.WriteLine($"Printer {id} is not Moonraker backend, returning empty totals");
+            logger.LogInformation("Printer {PrinterId} is not Moonraker backend, returning empty totals", id);
             // Return empty totals for non-Moonraker printers
             return new Farm.Web.Shared.HistoryTotals
             {
@@ -1457,15 +1457,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         try
         {
-            Console.WriteLine($"Calling Moonraker API for totals at: {printer.ServerUrl}");
+            logger.LogDebug("Calling Moonraker API for totals at: {ServerUrl}", printer.ServerUrl);
             var moonrakerTotals = await moon.GetHistoryTotalsAsync(printer.ServerUrl, ct);
             if (moonrakerTotals == null)
             {
-                Console.WriteLine("Moonraker API returned null totals");
+                logger.LogWarning("Moonraker API returned null totals");
                 return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
             }
 
-            Console.WriteLine($"Moonraker totals received - Jobs: {moonrakerTotals.JobTotals.TotalJobs}, PrintTime: {moonrakerTotals.JobTotals.TotalPrintTime}, FilamentUsed: {moonrakerTotals.JobTotals.TotalFilamentUsed}");
+            logger.LogDebug("Moonraker totals received - Jobs: {Jobs}, PrintTime: {PrintTime}, FilamentUsed: {Filament}", moonrakerTotals.JobTotals.TotalJobs, moonrakerTotals.JobTotals.TotalPrintTime, moonrakerTotals.JobTotals.TotalFilamentUsed);
 
             // Convert from Moonraker model to shared model
             var totals = new Farm.Web.Shared.HistoryTotals
@@ -1488,13 +1488,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 }).ToArray()
             };
 
-            Console.WriteLine($"Returning converted totals - Jobs: {totals.JobTotals.TotalJobs}, PrintTime: {totals.JobTotals.TotalPrintTime}, FilamentUsed: {totals.JobTotals.TotalFilamentUsed}");
+            logger.LogDebug("Returning converted totals - Jobs: {Jobs}, PrintTime: {PrintTime}, FilamentUsed: {Filament}", totals.JobTotals.TotalJobs, totals.JobTotals.TotalPrintTime, totals.JobTotals.TotalFilamentUsed);
             return totals;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to get history totals for printer {id}: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            logger.LogError(ex, "Failed to get history totals for printer {PrinterId}", id);
             return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
         }
     }
@@ -1518,7 +1517,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to delete history job {jobId} for printer {id}: {ex.Message}");
+            logger.LogError(ex, "Failed to delete history job {JobId} for printer {PrinterId}", jobId, id);
             return StatusCode(500, "Failed to delete history job");
         }
     }
