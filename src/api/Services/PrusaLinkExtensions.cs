@@ -30,6 +30,14 @@ public static class PrusaLinkApiExtensions
         }
     }
 
+    // Overload uses Uri baseUrl and delegates to string overload; kept adjacent for analyzer friendliness
+    public static Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return client.GetGcodeFilesAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+    }
+
     /// <summary>
     /// Upload a G-code file to the printer's local storage
     /// </summary>
@@ -254,6 +262,7 @@ public static class PrusaLinkApiExtensions
     public static async Task<StorageInformation[]> GetStorageInformationAsync(this PrusaLinkApiClient client,
         string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
         try
         {
             var storageList = await client.GetStorageAsync(baseUrl, apiKey, ct: ct);
@@ -276,8 +285,7 @@ public static class PrusaLinkApiExtensions
         }
     }
 
-    public static Task<string[]> GetGcodeFilesAsync(this PrusaLinkApiClient client, Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
-        => client.GetGcodeFilesAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+
 }
 
 /// <summary>

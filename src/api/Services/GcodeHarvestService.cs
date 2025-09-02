@@ -47,6 +47,7 @@ public class GcodeHarvestService : IGcodeHarvestService
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var printer = await _db.Printers.FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
         if (printer == null)
         {
@@ -173,7 +174,7 @@ public class GcodeHarvestService : IGcodeHarvestService
                     break;
                 default:
                     scopedLogger.LogWarning("Unsupported printer backend {Backend}", backend);
-                    fileList = new List<PrinterFileInfo>();
+                    fileList = [];
                     break;
             }
 
@@ -244,15 +245,12 @@ public class GcodeHarvestService : IGcodeHarvestService
                 existingFiles, operation.Id);
 
             // If no files were queued, mark operation as completed
-            if (queuedCount == 0)
+            if (queuedCount == 0 && dbOperation != null)
             {
-                if (dbOperation != null)
-                {
-                    dbOperation.Status = GcodeHarvestStatus.Completed;
-                    dbOperation.CompletedAt = DateTime.UtcNow;
-                    await scopedDb.SaveChangesAsync();
-                    scopedLogger.LogInformation("Operation {OperationId} completed with no files to process", operation.Id);
-                }
+                dbOperation.Status = GcodeHarvestStatus.Completed;
+                dbOperation.CompletedAt = DateTime.UtcNow;
+                await scopedDb.SaveChangesAsync();
+                scopedLogger.LogInformation("Operation {OperationId} completed with no files to process", operation.Id);
             }
         }
         catch (Exception ex)
@@ -272,9 +270,9 @@ public class GcodeHarvestService : IGcodeHarvestService
         }
     }
 
-    private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath, IMoonrakerClient? moonraker = null, IPrusaLinkClient? prusa = null, ISdcpClient? sdcp = null, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath, IMoonrakerClient? moonraker, IPrusaLinkClient? prusa, ISdcpClient? sdcp)
     {
-        var log = logger ?? _logger;
+        var log = _logger;
         try
         {
             return backend switch
@@ -296,11 +294,12 @@ public class GcodeHarvestService : IGcodeHarvestService
     // Overload for ImportSelectedFilesAsync that uses instance clients
     private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath)
     {
-        return await DownloadFileAsync(backend, printer, filePath, _moonraker, _prusa, _sdcp, _logger);
+        return await DownloadFileAsync(backend, printer, filePath, _moonraker, _prusa, _sdcp);
     }
 
     public async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(gcodeStream);
         var metadata = new GcodeMetadataDto();
 
         using var reader = new StreamReader(gcodeStream, leaveOpen: true);
@@ -390,6 +389,7 @@ public class GcodeHarvestService : IGcodeHarvestService
 
     public async Task<string> CalculateFileHashAsync(Stream fileStream, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(fileStream);
         using var sha256 = SHA256.Create();
         var hash = await sha256.ComputeHashAsync(fileStream, ct);
         return Convert.ToHexString(hash).ToLowerInvariant();
@@ -433,6 +433,7 @@ public class GcodeHarvestService : IGcodeHarvestService
 
     public async Task<GcodeHarvestResultDto> ImportSelectedFilesAsync(ImportSelectedGcodeFilesDto request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var operation = await _db.GcodeHarvestOperations
             .Include(h => h.Printer)
             .FirstOrDefaultAsync(h => h.Id == request.HarvestOperationId, ct);
@@ -584,38 +585,7 @@ public class GcodeHarvestService : IGcodeHarvestService
         return [.. operations.Select(MapToDto)];
     }
 
-    private async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl)
-    {
-        // Add files from current directory
-        foreach (var file in directory.Files)
-        {
-            files.Add(new PrinterFileInfo
-            {
-                Name = System.IO.Path.GetFileName(file.Path),
-                Path = file.Path,
-                Size = file.Size,
-                ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
-            });
-        }
-
-        // Recursively process subdirectories
-        foreach (var subDir in directory.Dirs)
-        {
-            try
-            {
-                var subDirPath = $"{basePath}/{subDir.Path}";
-                var subDirectoryInfo = await _moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
-                if (subDirectoryInfo != null)
-                {
-                    await CollectFilesRecursivelyAsync(files, subDirectoryInfo, subDirPath, serverUrl);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to access subdirectory {SubDirPath}", subDir.Path);
-            }
-        }
-    }
+    // (moved below to be adjacent to the other overload)
 
     private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IMoonrakerClient? moonraker = null, ILogger<GcodeHarvestService>? logger = null)
     {
@@ -772,6 +742,46 @@ public class GcodeHarvestService : IGcodeHarvestService
                 {
                     log.LogWarning(ex, "Error processing subdirectory {SubDirPath}", subDir.Path);
                     // Continue with next subdirectory
+                }
+            }
+        }
+    }
+
+    // Simple overload kept adjacent for analyzer friendliness
+    private async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl)
+    {
+        // Add files from current directory
+        if (directory.Files != null)
+        {
+            foreach (var file in directory.Files)
+            {
+                files.Add(new PrinterFileInfo
+                {
+                    Name = System.IO.Path.GetFileName(file.Path),
+                    Path = file.Path,
+                    Size = file.Size,
+                    ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
+                });
+            }
+        }
+
+        // Recursively process subdirectories
+        if (directory.Dirs != null)
+        {
+            foreach (var subDir in directory.Dirs)
+            {
+                try
+                {
+                    var subDirPath = $"{basePath}/{subDir.Path}";
+                    var subDirectoryInfo = await _moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
+                    if (subDirectoryInfo != null)
+                    {
+                        await CollectFilesRecursivelyAsync(files, subDirectoryInfo, subDirPath, serverUrl);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to access subdirectory {SubDirPath}", subDir.Path);
                 }
             }
         }
