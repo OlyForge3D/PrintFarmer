@@ -114,22 +114,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         {
             try
             {
-                // Using an async scope while awaiting EF Core ToListAsync is intentional here.
-                // The scope lifetime matches the query and is disposed immediately after.
-#pragma warning disable IDISP013 // Await in using
-                {
-                    await using var scope = scopeFactory.CreateAsyncScope();
-                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    // Only subscribe to Moonraker-backed printers (Backend == 0)
-                    var printers = await db.Printers.AsNoTracking()
-                        .Where(p => p.Backend == 0)
-                        .ToListAsync(ct);
-                    foreach (var p in printers)
-                    {
-                        _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
-                    }
-                }
-#pragma warning restore IDISP013
+                await EnumerateAndStartSubscriptionsAsync(ct);
             }
             catch (Exception ex)
             {
@@ -144,6 +129,24 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 break;
             }
         }
+    }
+
+    private async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
+    {
+        // Using an async scope while awaiting EF Core ToListAsync is intentional here.
+        // The scope lifetime matches the query and is disposed immediately after.
+#pragma warning disable IDISP013 // Await in using
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // Only subscribe to Moonraker-backed printers (Backend == 0)
+        var printers = await db.Printers.AsNoTracking()
+            .Where(p => p.Backend == 0)
+            .ToListAsync(ct);
+        foreach (var p in printers)
+        {
+            _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
+        }
+#pragma warning restore IDISP013
     }
 
     private static Uri BuildWsUri(string httpBase)

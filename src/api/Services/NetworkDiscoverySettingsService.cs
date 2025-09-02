@@ -44,7 +44,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         // If no settings exist or no ranges configured, return settings with dynamic ranges
         var dynamicRanges = GetDynamicNetworkRanges();
         return new NetworkDiscoverySettingsDto(
-            dynamicRanges.Count > 0 ? dynamicRanges.ToList() : GetFallbackNetworkRanges().ToList(),
+            dynamicRanges.Count > 0 ? [.. dynamicRanges] : [.. GetFallbackNetworkRanges()],
             _settings?.TimeoutMs ?? 100,
             _settings?.MaxConcurrentScans ?? 20,
             _settings?.Ports ?? [80, 7125]
@@ -101,7 +101,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             return GetFallbackNetworkRanges();
         }
 
-    return networks.Count > 0 ? networks : GetFallbackNetworkRanges();
+        return networks.Count > 0 ? networks : GetFallbackNetworkRanges();
     }
 
     private static bool IsPrivateNetwork(IPAddress address)

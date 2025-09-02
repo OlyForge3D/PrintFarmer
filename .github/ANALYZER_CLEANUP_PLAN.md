@@ -3,7 +3,7 @@
 This document tracks incremental cleanup of analyzer warnings across the solution. The goal is to reduce noise without risky churn, landing small, reviewable changes in phases.
 
 Status baseline (from latest local build/tests):
-- Build: succeeded with ~19 warnings (reduced from ~176 in early passes), tests add a handful more
+- Build: succeeded with 6 warnings (reduced from ~176 in early passes), tests all green
 - Framework: .NET 9, ASP.NET Core API + Blazor WASM
 
 ## Principles
@@ -20,6 +20,9 @@ Status baseline (from latest local build/tests):
 - [ ] S6605/S6602: Prefer collection-specific Exists/Array.Find where suggested in tests and validators
 - [x] S4136: Co-locate overloads (method overload adjacency) in flagged classes (PrusaLinkApiClient.GetVersionAsync)
 - [x] CA1849: Prefer `RunAsync` over `Run` in `Program.cs`
+- [x] S2325: Make methods static when possible (HarvestWorkerService.ExtractMetadataAsync)
+- [x] S3923: Simplify redundant conditional logic (NetworkDiscoveryService.GetHostsInRange)
+- [x] S1199: Reduce nesting by extracting method from complex block (MoonrakerSubscriptionService.EnumerateAndStartSubscriptionsAsync)
 - [ ] CA1805: Remove explicit default initializers where redundant (Entities and services)
 
 Acceptance criteria:
@@ -96,12 +99,19 @@ Acceptance criteria:
 ## Tracking (proposed PRs)
 Create small PRs referencing this meta-issue, one per bullet or tight cluster:
 - [x] PR: Phase 1 hygiene batch A (JsonSerializerOptions + RunAsync + trivial Sonar fixes)
+- [x] PR: Phase 1 hygiene batch C (S2325/S3923/S1199 in services)
 - [ ] PR: Phase 1 hygiene batch B (overload adjacency + default initializers)
 - [ ] PR: Phase 2 input validation (null guards + ProducesResponseType)
 - [x] PR: Phase 3 Uri migration (step 1: non-breaking DTO accessors)
 - [ ] PR: Phase 3 Uri migration (step 2: internal adoption + optional JSON converter)
 - [ ] PR: Phase 4 exceptions/logging/disposals
 - [ ] PR: Phase 5 model/naming, with suppressions where breaking
+
+## Current remaining warnings of note (snapshot)
+- CA1711: Naming for types ending with Queue (evaluate rename vs. scoped suppression)
+- CA1724: Type name conflicts with namespaces (e.g., Storage) — evaluate mitigation
+- S6960: Consider splitting controller responsibilities (review scope/benefit)
+- S6964: Clarify binding on remaining POST/PUT endpoints (partial; continue sweep)
 
 ## Remaining items snapshot (by rule and location)
 

@@ -365,7 +365,7 @@ public class HarvestWorkerService : BackgroundService
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    private async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream stream)
+    private static async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream stream)
     {
         var metadata = new GcodeMetadataDto();
 

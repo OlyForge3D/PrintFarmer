@@ -25,7 +25,7 @@ public class DatabaseInitializer
     {
         _logger.LogInformation("[DB] Starting database initialization for provider: {DbProvider}", dbProvider);
 
-    var retryCount = 0;
+        var retryCount = 0;
 
         while (retryCount < maxRetries)
         {

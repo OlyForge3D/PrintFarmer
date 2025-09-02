@@ -181,15 +181,8 @@ public partial class NetworkDiscoveryService(
                 var hostBytes = (byte[])networkBytes.Clone();
 
                 // For /24 networks, just increment the last octet
-                if (cidr == 24)
-                {
-                    hostBytes[3] = (byte)i;
-                }
-                else
-                {
-                    // For other CIDR ranges, implement more complex logic if needed
-                    hostBytes[3] = (byte)i;
-                }
+                // For /24 and other CIDR ranges currently supported, increment last octet
+                hostBytes[3] = (byte)i;
 
                 hosts.Add(new IPAddress(hostBytes).ToString());
             }
