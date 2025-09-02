@@ -40,7 +40,7 @@ public class GcodeHarvestController : ControllerBase
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestResultDto>> StartHarvestAsync(
-        [FromBody] StartGcodeHarvestDto request,
+    [FromBody] StartGcodeHarvestDto request,
         CancellationToken ct)
     {
         if (request is null)
@@ -127,7 +127,7 @@ public class GcodeHarvestController : ControllerBase
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeHarvestResultDto>> ImportSelectedFilesAsync(
-        [FromBody] ImportSelectedGcodeFilesDto request,
+    [FromBody] ImportSelectedGcodeFilesDto request,
         CancellationToken ct)
     {
         if (request is null)

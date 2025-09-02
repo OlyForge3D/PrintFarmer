@@ -551,7 +551,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDto>> CreateAsync(CreatePrinterDto dto, CancellationToken ct)
+    public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterDto dto, CancellationToken ct)
     {
         if (dto is null)
         {
@@ -750,7 +750,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<IActionResult> UpdateAsync(Guid id, UpdatePrinterDto dto, CancellationToken ct)
+    public async Task<IActionResult> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
     {
         if (dto is null)
         {
@@ -1010,7 +1010,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, TempTargets targets, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] TempTargets targets, CancellationToken ct)
     {
         if (targets is null)
         {
@@ -1028,7 +1028,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> MoveAsync(Guid id, MoveRequest req, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> MoveAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
         if (req is null)
         {
@@ -1046,7 +1046,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> MoveToAsync(Guid id, MoveRequest req, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> MoveToAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
         if (req is null)
         {
@@ -1230,7 +1230,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult> UploadGcodeAsync(Guid id, IFormFile file, CancellationToken ct)
+    public async Task<ActionResult> UploadGcodeAsync(Guid id, [FromForm] IFormFile file, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
         {
