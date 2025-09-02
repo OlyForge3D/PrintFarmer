@@ -231,6 +231,10 @@ public class DiscoveredPrinterDto
     public DateTime DiscoveredAt { get; set; }
 }
 
+// File operations results (upload/print)
+public record UploadGcodeResultDto(string Message, string Filename);
+public record StartPrintResultDto(string Message, string Filename);
+
 // Network discovery configuration
 // Collection types kept as List<T> for JSON binding and Blazor forms compatibility (non-breaking).
 // Interface methods return IReadOnlyList<T> to satisfy CA1002 on API surface.

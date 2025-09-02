@@ -1226,11 +1226,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     }
 
     [HttpPost("{id:guid}/files/upload")]
-    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(typeof(Farm.Web.Shared.UploadGcodeResultDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult> UploadGcodeAsync(Guid id, [FromForm] IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<Farm.Web.Shared.UploadGcodeResultDto>> UploadGcodeAsync(Guid id, [FromForm] IFormFile file, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
         {
@@ -1259,7 +1259,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
             if (success)
             {
-                return Ok(new { message = "File uploaded successfully", filename = file.FileName });
+                return Ok(new Farm.Web.Shared.UploadGcodeResultDto("File uploaded successfully", file.FileName));
             }
             else
             {
@@ -1301,10 +1301,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     }
 
     [HttpPost("{id:guid}/files/{fileName}/print")]
-    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(typeof(Farm.Web.Shared.StartPrintResultDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult> StartPrintFromFileAsync(Guid id, string fileName, CancellationToken ct)
+    public async Task<ActionResult<Farm.Web.Shared.StartPrintResultDto>> StartPrintFromFileAsync(Guid id, string fileName, CancellationToken ct)
     {
         var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p == null)
@@ -1322,7 +1322,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
             if (success)
             {
-                return Ok(new { message = "Print started successfully", filename = fileName });
+                return Ok(new Farm.Web.Shared.StartPrintResultDto("Print started successfully", fileName));
             }
             else
             {
