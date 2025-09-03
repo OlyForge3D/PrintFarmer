@@ -8,7 +8,8 @@ import {
   Cog, 
   Users,
   Menu,
-  X
+  X,
+  Box
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -31,6 +32,12 @@ const navigation: NavigationItem[] = [
     href: '/printers', 
     icon: Printer,
     requiredPermission: { resource: 'printers', action: 'read' }
+  },
+  { 
+    name: '3D Models', 
+    href: '/models', 
+    icon: Box,
+    requiredPermission: { resource: 'models', action: 'read' }
   },
   { 
     name: 'G-code Harvest', 
