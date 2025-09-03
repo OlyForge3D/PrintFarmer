@@ -4,7 +4,7 @@ import {
   HubConnectionState,
   LogLevel 
 } from '@microsoft/signalr';
-import type { PrinterStatusUpdate } from '@/types/api';
+import { PrinterStatusUpdate } from '@/types/api';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: any) => void;

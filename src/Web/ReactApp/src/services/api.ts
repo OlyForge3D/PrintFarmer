@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import type { 
+import { 
   Printer, 
   CreatePrinterDto, 
   UpdatePrinterDto, 

@@ -38,5 +38,6 @@
     "isolatedModules": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "src/**/*"]
+  "include": ["src"],
+  "exclude": ["src/test/**/*", "**/*.test.*", "**/*.spec.*"]
 }

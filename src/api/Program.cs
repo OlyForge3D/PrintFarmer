@@ -240,6 +240,12 @@ builder.Services.AddHostedService<GracefulShutdownService>();
 // SignalR for real-time updates
 builder.Services.AddSignalR();
 
+// SPA services for React
+builder.Services.AddSpaStaticFiles(configuration =>
+{
+    configuration.RootPath = "../../wwwroot/react";
+});
+
 // Health checks
 builder.Services.AddHealthChecks()
     .AddCheck<ComprehensiveHealthCheck>("comprehensive");
@@ -307,6 +313,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("Default");
 
+// Static files for SPA
+app.UseSpaStaticFiles();
+
 // Configure API routing and SignalR hubs
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
@@ -349,6 +358,18 @@ app.MapGet("/api/network-discovery/dynamic-ranges", ([FromServices] INetworkDisc
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+
+// TODO: Configure React SPA (temporarily disabled for testing)
+// app.UseSpa(spa =>
+// {
+//     spa.Options.SourcePath = "../../Web/ReactApp";
+//
+//     if (app.Environment.IsDevelopment())
+//     {
+//         // In development, proxy to the Vite dev server
+//         spa.UseProxyToSpaDevelopmentServer("http://localhost:3000");
+//     }
+// });
 
 await app.RunAsync();
 
