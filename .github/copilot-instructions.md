@@ -23,10 +23,10 @@
 
 **CRITICAL**: If .NET 9 SDK is not installed, install it first:
 ```bash
-# Download .NET 9.0.304 SDK (exact version required by global.json)
+# Download .NET 9.0.302 SDK (exact version required by global.json)
 wget https://dot.net/v1/dotnet-install.sh
 chmod +x dotnet-install.sh
-./dotnet-install.sh --version 9.0.304
+./dotnet-install.sh --version 9.0.302
 export PATH="$HOME/.dotnet:$PATH"
 ```
 
@@ -54,13 +54,13 @@ dotnet build ./farm-web.sln -c Debug
 # Release build
 dotnet build ./farm-web.sln -c Release
 ```
-*Note: Debug build takes ~29 seconds. Set timeout to 90+ seconds.*
+*Note: Debug build takes ~83 seconds. Set timeout to 150+ seconds.*
 
 **3. Run tests:**
 ```powershell
 dotnet test ./farm-web.sln -c Debug
 ```
-*Note: Tests take ~49 seconds and run 51 integration tests. Set timeout to 120+ seconds. NEVER CANCEL.*
+*Note: Tests take ~11 seconds and run 62 integration tests. Set timeout to 60+ seconds. NEVER CANCEL.*
 
 **4. Format code:**
 ```powershell
@@ -131,6 +131,12 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
    # Should return HTML with <!DOCTYPE html> and PrintFarmer title
    ```
 
+5. **Catalog API (verify database seeding):**
+   ```bash
+   curl -s http://localhost:5245/api/catalog/manufacturers | jq length
+   # Should return: 8 (default manufacturers seeded)
+   ```
+
 **Manual Testing Workflow:**
 1. Start API server: `dotnet run --project ./api/Farm.Web.Api.csproj`
 2. Start client: `dotnet run --project ./client/Farm.Web.Client.csproj`
@@ -165,7 +171,7 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 /
 ├── CONTRIBUTING.md          # Detailed contributor guidelines (NOTE: Contains outdated references to "server/")
 ├── README.md               # Basic project overview (NOTE: Contains outdated references)
-├── global.json             # .NET SDK version (9.0.304)
+├── global.json             # .NET SDK version (9.0.302)
 ├── docker-compose.yml      # Multi-container deployment
 ├── test-providers.sh       # Database provider testing script
 └── src/                    # ⚠️ WORKING DIRECTORY FOR ALL COMMANDS
@@ -224,7 +230,7 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 - `src/api/appsettings.json` - Database connections, logging, multi-provider config
 - `src/api/Properties/launchSettings.json` - Development server settings (ports 5245/7281)
 - `src/farm-web.sln` - Solution configuration
-- `global.json` - .NET SDK version requirement (9.0.304)
+- `global.json` - .NET SDK version requirement (9.0.302)
 - Project files: `*.csproj` in each directory
 
 ### Dependencies & External Services
@@ -254,7 +260,7 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 - Uses `CustomWebApplicationFactory` for testing
 - Tests API endpoints, database operations, and health checks
 - Tests run against temporary SQLite database (in-memory)
-- Total: 51 tests covering core functionality (verified working)
+- Total: 62 tests covering core functionality (verified working)
 
 **Manual Verification:**
 1. API server starts successfully at http://localhost:5245 (Development profile)
@@ -316,7 +322,7 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 - SignalR Hub: `/hubs/printers` - Real-time printer status updates
 
 **Trust These Instructions:**
-These instructions have been thoroughly tested and validated with .NET 9.0.304. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
+These instructions have been thoroughly tested and validated with .NET 9.0.302. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
 
 ## Critical Timeout Settings & Build Times
 
@@ -325,8 +331,8 @@ These instructions have been thoroughly tested and validated with .NET 9.0.304. 
 | Command | Typical Time | Minimum Timeout | Notes |
 |---------|--------------|-----------------|-------|
 | `dotnet restore ./farm-web.sln` | ~41 seconds | 120 seconds | First run downloads packages |
-| `dotnet build ./farm-web.sln -c Debug` | ~29 seconds | 90 seconds | Includes compilation warnings |
-| `dotnet test ./farm-web.sln -c Debug` | ~49 seconds | 120 seconds | Runs 51 integration tests |
+| `dotnet build ./farm-web.sln -c Debug` | ~83 seconds | 150 seconds | Includes compilation warnings |
+| `dotnet test ./farm-web.sln -c Debug` | ~11 seconds | 60 seconds | Runs 62 integration tests |
 | `dotnet format ./farm-web.sln` | ~80 seconds | 150 seconds | Formats entire solution |
 | API server startup | ~15 seconds | 60 seconds | Database initialization |
 | Client startup | ~10 seconds | 30 seconds | Blazor WebAssembly build |
@@ -342,8 +348,8 @@ These instructions have been thoroughly tested and validated with .NET 9.0.304. 
 **Full development workflow from fresh clone:**
 
 ```bash
-# 1. Ensure .NET 9.0.304 is installed
-dotnet --info  # Should show 9.0.304
+# 1. Ensure .NET 9.0.302 is installed
+dotnet --info  # Should show 9.0.302
 
 # 2. Navigate to working directory
 cd ./src
@@ -351,10 +357,10 @@ cd ./src
 # 3. Restore dependencies (41 seconds, set timeout 120+)
 dotnet restore ./farm-web.sln
 
-# 4. Build solution (29 seconds, set timeout 90+)
+# 4. Build solution (83 seconds, set timeout 150+)
 dotnet build ./farm-web.sln -c Debug
 
-# 5. Run tests (49 seconds, set timeout 120+)
+# 5. Run tests (11 seconds, set timeout 60+)
 dotnet test ./farm-web.sln -c Debug
 
 # 6. Format code (80 seconds, set timeout 150+)
@@ -372,6 +378,7 @@ dotnet run --project ./client/Farm.Web.Client.csproj
 curl -s http://localhost:5245/healthz        # Should return: {"status":"ok"}
 curl -s http://localhost:5245/api/printers   # Should return: []
 curl -s http://localhost:5000/ | head -5     # Should show HTML with PrintFarmer
+curl -s http://localhost:5245/api/catalog/manufacturers | jq length  # Should return: 8
 ```
 
 **Expected total time for fresh setup:** ~3-4 minutes (excluding .NET SDK installation)
