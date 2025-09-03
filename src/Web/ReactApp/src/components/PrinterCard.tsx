@@ -40,21 +40,21 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
   };
 
   const getStatusColor = (isOnline: boolean, state?: string) => {
-    if (!isOnline) return 'bg-gray-100 text-gray-800 border-gray-300';
+    if (!isOnline) return 'bg-pf-status-offline-bg text-pf-status-offline-text border-pf-status-offline-border';
     
     switch (state?.toLowerCase()) {
       case 'printing':
-        return 'bg-green-100 text-green-800 border-green-300';
+        return 'bg-pf-status-online-bg text-pf-status-online-text border-pf-status-online-border';
       case 'paused':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+        return 'bg-pf-warning text-pf-text-primary border-pf-border-light';
       case 'error':
-        return 'bg-red-100 text-red-800 border-red-300';
+        return 'bg-pf-error-bg text-pf-error-text border-pf-error-border';
       case 'ready':
       case 'idle':
       case 'operational':
-        return 'bg-blue-100 text-blue-800 border-blue-300';
+        return 'bg-pf-loading text-pf-loading border-pf-loading-border';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
+        return 'bg-pf-border-medium text-pf-text-secondary border-pf-border';
     }
   };
 
@@ -90,7 +90,7 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
   if (viewMode === 'list') {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 hover:shadow-lg transition-all duration-200">
         <div className="flex items-center justify-between">
           {/* Left: Basic Info */}
           <div className="flex items-center space-x-4 min-w-0 flex-1">
@@ -100,14 +100,14 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
             
             <div className="min-w-0 flex-1">
               <div className="flex items-center space-x-2">
-                <h3 className="text-lg font-medium text-gray-900 truncate">
+                <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
                   {printer.name}
                 </h3>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+                <span className={`inline-flex items-center px-3 py-1 rounded text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
                   {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
                 </span>
               </div>
-              <p className="text-sm text-gray-500 truncate">
+              <p className="text-sm text-pf-text-secondary truncate">
                 {printer.manufacturerName} {printer.modelName} • {printer.ipAddress}
               </p>
             </div>
@@ -118,8 +118,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
             {/* Progress */}
             {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
               <div className="text-center">
-                <div className="text-xs text-gray-500">Progress</div>
-                <div className="text-sm font-semibold text-gray-900">
+                <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide">Progress</div>
+                <div className="text-sm font-semibold text-pf-text-primary">
                   {Math.round(currentStatus.progress)}%
                 </div>
               </div>
@@ -128,8 +128,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
             {/* Temperatures */}
             {currentStatus.isOnline && (currentStatus.hotendTemp || currentStatus.bedTemp) && (
               <div className="text-center">
-                <div className="text-xs text-gray-500">Temps</div>
-                <div className="text-sm font-medium text-gray-900">
+                <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide">Temps</div>
+                <div className="text-sm font-medium text-pf-text-primary">
                   {[
                     currentStatus.hotendTemp && `H${formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}`,
                     currentStatus.bedTemp && `B${formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}`
@@ -141,8 +141,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
             {/* Position */}
             {currentStatus.isOnline && formatPosition(currentStatus.x, currentStatus.y, currentStatus.z) && (
               <div className="text-center">
-                <div className="text-xs text-gray-500">Position</div>
-                <div className="text-sm font-medium text-gray-900">
+                <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide">Position</div>
+                <div className="text-sm font-medium text-pf-text-primary">
                   {formatPosition(currentStatus.x, currentStatus.y, currentStatus.z)}
                 </div>
               </div>
@@ -154,23 +154,23 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
             {hasPermission('printers', 'execute') && currentStatus.isOnline && (
               <>
                 {currentStatus.state === 'printing' && (
-                  <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                  <button className="p-2 text-pf-text-secondary hover:text-pf-warning bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                     <Pause className="h-4 w-4" />
                   </button>
                 )}
                 {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                  <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                  <button className="p-2 text-pf-text-secondary hover:text-pf-success bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                     <Play className="h-4 w-4" />
                   </button>
                 )}
-                <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                <button className="p-2 text-pf-text-secondary hover:text-pf-error bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                   <StopIcon className="h-4 w-4" />
                 </button>
               </>
             )}
             
             {hasPermission('printers', 'update') && (
-              <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+              <button className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                 <Cog className="h-4 w-4" />
               </button>
             )}
@@ -179,14 +179,14 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
         {/* Progress bar for list view */}
         {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
-          <div className="mt-3 pt-3 border-t border-gray-100">
-            <div className="flex justify-between text-sm text-gray-600 mb-1">
+          <div className="mt-3 pt-3 border-t border-pf-border">
+            <div className="flex justify-between text-sm text-pf-text-secondary mb-1">
               <span className="truncate">{currentStatus.jobName || 'Printing...'}</span>
               <span>{Math.round(currentStatus.progress)}%</span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-pf-border-dark rounded-full h-2">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                className="bg-pf-success h-2 rounded-full transition-all duration-300"
                 style={{ width: `${currentStatus.progress}%` }}
               />
             </div>
@@ -198,24 +198,24 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
   // Grid view (default)
   return (
-    <div className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow">
+    <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl hover:shadow-lg transition-all duration-200">
       {/* Header */}
       <div className="px-4 py-5 sm:p-6">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center min-w-0 flex-1">
             <span className="text-2xl mr-3 flex-shrink-0">{getBackendIcon(printer.backend)}</span>
             <div className="min-w-0 flex-1">
-              <h3 className="text-lg font-medium text-gray-900 truncate">
+              <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
                 {printer.name}
               </h3>
-              <p className="text-sm text-gray-500 truncate">
+              <p className="text-sm text-pf-text-secondary truncate">
                 {printer.manufacturerName} {printer.modelName}
               </p>
             </div>
           </div>
           
           {hasPermission('printers', 'update') && (
-            <button className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors">
+            <button className="flex-shrink-0 text-pf-text-tertiary hover:text-pf-accent transition-colors">
               <MoreVertical className="w-5 h-5" />
             </button>
           )}
@@ -223,7 +223,7 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
         {/* Status Badge */}
         <div className="mb-3">
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+          <span className={`inline-flex items-center px-3 py-1 rounded text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
             {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
           </span>
         </div>
@@ -231,13 +231,13 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
         {/* Progress Bar */}
         {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
           <div className="mb-4">
-            <div className="flex justify-between text-sm text-gray-600 mb-1">
+            <div className="flex justify-between text-sm text-pf-text-secondary mb-1">
               <span className="truncate">{currentStatus.jobName || 'Printing...'}</span>
               <span>{Math.round(currentStatus.progress)}%</span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-pf-border-dark rounded-full h-2">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                className="bg-pf-success h-2 rounded-full transition-all duration-300"
                 style={{ width: `${currentStatus.progress}%` }}
               />
             </div>
@@ -249,8 +249,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
           <div className="mb-4 grid grid-cols-2 gap-4">
             {currentStatus.hotendTemp !== undefined && (
               <div className="text-center">
-                <div className="text-xs text-gray-500">Hotend</div>
-                <div className="text-lg font-semibold text-gray-900">
+                <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide">Hotend</div>
+                <div className="text-lg font-semibold text-pf-text-primary">
                   {formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}
                 </div>
               </div>
@@ -258,8 +258,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
             
             {currentStatus.bedTemp !== undefined && (
               <div className="text-center">
-                <div className="text-xs text-gray-500">Bed</div>
-                <div className="text-lg font-semibold text-gray-900">
+                <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide">Bed</div>
+                <div className="text-lg font-semibold text-pf-text-primary">
                   {formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}
                 </div>
               </div>
@@ -270,8 +270,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
         {/* Position Display */}
         {currentStatus.isOnline && formatPosition(currentStatus.x, currentStatus.y, currentStatus.z) && (
           <div className="mb-4">
-            <div className="text-xs text-gray-500 text-center">Position</div>
-            <div className="text-sm font-medium text-gray-900 text-center">
+            <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide text-center">Position</div>
+            <div className="text-sm font-medium text-pf-text-primary text-center">
               {formatPosition(currentStatus.x, currentStatus.y, currentStatus.z)}
             </div>
           </div>
@@ -293,7 +293,7 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
         {/* Action buttons */}
         <div className="flex space-x-2">
-          <button className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+          <button className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-pf-border-light shadow-sm text-sm leading-4 font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors">
             <Cog className="h-4 w-4 mr-1.5" />
             Manage
           </button>
@@ -301,13 +301,13 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
           {hasPermission('printers', 'execute') && currentStatus.isOnline && (
             <>
               {currentStatus.state === 'printing' && (
-                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors">
+                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-warning hover:bg-pf-warning focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-warning transition-colors">
                   <Pause className="h-4 w-4 mr-1.5" />
                   Pause
                 </button>
               )}
               {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors">
+                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-success hover:bg-pf-success-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-success transition-colors">
                   <Play className="h-4 w-4 mr-1.5" />
                   {currentStatus.state === 'paused' ? 'Resume' : 'Start'}
                 </button>
@@ -318,8 +318,8 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
         {/* Notes */}
         {printer.notes && (
-          <div className="mt-3 pt-3 border-t border-gray-100">
-            <p className="text-xs text-gray-500 italic">{printer.notes}</p>
+          <div className="mt-3 pt-3 border-t border-pf-border">
+            <p className="text-xs text-pf-text-tertiary italic">{printer.notes}</p>
           </div>
         )}
       </div>

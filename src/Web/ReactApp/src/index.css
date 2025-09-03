@@ -1,3 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Bebas+Neue&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-pf-bg-0;
+  }
+  
+  body {
+    @apply bg-pf-bg-0 text-pf-text-primary font-inter;
+    margin: 0;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bebas font-bold uppercase text-pf-text-primary;
+  }
+  
+  #root {
+    @apply min-h-screen bg-pf-bg-0;
+  }
+}
+
+@layer components {
+  /* PrintFarmer Button Styles */
+  .btn-pf {
+    @apply px-3 py-2 border border-pf-border-light rounded-lg bg-gradient-to-b from-pf-gradient-primary-start to-pf-gradient-primary-end text-pf-text-primary cursor-pointer transition-all duration-200 shadow-sm;
+  }
+  
+  .btn-pf:hover:not(:disabled) {
+    @apply bg-gradient-to-b from-pf-gradient-secondary-start to-pf-gradient-secondary-end border-pf-accent-2;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+  }
+  
+  .btn-pf:active {
+    @apply translate-y-px;
+  }
+  
+  .btn-pf:disabled {
+    @apply opacity-60 cursor-not-allowed;
+  }
+  
+  .btn-pf-primary {
+    @apply border-pf-success bg-gradient-to-b from-pf-gradient-success-start to-pf-gradient-success-end text-white;
+  }
+  
+  .btn-pf-secondary {
+    @apply bg-gradient-to-b from-pf-gradient-gray-start to-pf-gradient-gray-end border-pf-border-medium text-white;
+  }
+  
+  .btn-pf-secondary:hover:not(:disabled) {
+    @apply bg-pf-text-muted bg-opacity-10 border-pf-border-gray;
+  }
+  
+  /* PrintFarmer Card Styles */
+  .card-pf {
+    @apply border border-pf-border rounded-xl p-4 bg-gradient-to-b from-pf-gradient-primary-end to-pf-bg-2 shadow-lg;
+  }
+  
+  /* PrintFarmer Status Styles */
+  .status-pf {
+    @apply text-xs px-3 py-1 rounded border font-bold uppercase tracking-wide;
+  }
+  
+  .status-pf-online {
+    @apply bg-pf-status-online-bg text-pf-status-online-text border-pf-status-online-border;
+  }
+  
+  .status-pf-offline {
+    @apply bg-pf-status-offline-bg text-pf-status-offline-text border-pf-status-offline-border;
+  }
+  
+  .status-pf-loading {
+    @apply bg-pf-loading bg-opacity-10 text-pf-loading border-pf-loading-border;
+  }
+}

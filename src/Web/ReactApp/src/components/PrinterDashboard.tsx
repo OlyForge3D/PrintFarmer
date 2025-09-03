@@ -27,14 +27,14 @@ interface StatsCardProps {
 
 function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
   const colorClasses = {
-    blue: 'bg-blue-50 text-blue-700',
-    green: 'bg-green-50 text-green-700',
-    yellow: 'bg-yellow-50 text-yellow-700',
-    gray: 'bg-gray-50 text-gray-700',
+    blue: 'bg-pf-loading text-pf-text-primary',
+    green: 'bg-pf-status-online-bg text-pf-status-online-text',
+    yellow: 'bg-pf-warning text-pf-text-primary',
+    gray: 'bg-pf-border-medium text-pf-text-secondary',
   };
 
   return (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
+    <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg">
       <div className="p-5">
         <div className="flex items-center">
           <div className="flex-shrink-0">
@@ -44,8 +44,8 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
           </div>
           <div className="ml-5 w-0 flex-1">
             <dl>
-              <dt className="text-sm font-medium text-gray-500 truncate">{title}</dt>
-              <dd className="text-lg font-medium text-gray-900">{value}</dd>
+              <dt className="text-sm font-medium text-pf-text-tertiary truncate uppercase tracking-wide">{title}</dt>
+              <dd className="text-lg font-bold text-pf-text-primary">{value}</dd>
             </dl>
           </div>
         </div>
@@ -181,8 +181,8 @@ export function PrinterDashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Dashboard</h1>
+          <p className="mt-1 text-sm text-pf-text-secondary">
             Monitor and manage your 3D printer farm
           </p>
         </div>
@@ -193,7 +193,7 @@ export function PrinterDashboard() {
             <>
               <button
                 onClick={() => setShowDiscovery(true)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="inline-flex items-center px-4 py-2 border border-pf-border-light shadow-sm text-sm font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2"
               >
                 <Search className="h-4 w-4 mr-2" />
                 Discover Printers
@@ -233,18 +233,18 @@ export function PrinterDashboard() {
       </div>
 
       {/* Filters and Controls */}
-      <div className="bg-white shadow rounded-lg p-4">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 shadow-lg">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex flex-col sm:flex-row gap-4 flex-1">
             {/* Search */}
             <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
               <input
                 type="text"
                 placeholder="Search printers..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 w-full"
+                className="pl-10 pr-4 py-2 border border-pf-border-medium bg-pf-panel rounded-md focus:ring-pf-accent focus:border-pf-accent w-full text-pf-text-primary placeholder-pf-text-tertiary"
               />
             </div>
             
@@ -252,7 +252,7 @@ export function PrinterDashboard() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              className="px-3 py-2 border border-pf-border-medium bg-pf-panel rounded-md focus:ring-pf-accent focus:border-pf-accent text-pf-text-primary"
             >
               <option value="">All Status</option>
               <option value="online">Online</option>
@@ -263,13 +263,13 @@ export function PrinterDashboard() {
           </div>
           
           {/* View Mode Toggle */}
-          <div className="flex border border-gray-300 rounded-md">
+          <div className="flex border border-pf-border-medium rounded-md">
             <button
               onClick={() => setViewMode('grid')}
               className={`px-3 py-2 text-sm font-medium rounded-l-md ${
                 viewMode === 'grid'
-                  ? 'bg-blue-100 text-blue-700 border-r border-blue-200'
-                  : 'text-gray-500 hover:text-gray-700 border-r border-gray-300'
+                  ? 'bg-pf-accent bg-opacity-20 text-pf-accent border-r border-pf-accent'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary border-r border-pf-border-medium bg-pf-panel'
               }`}
             >
               <Grid3X3 className="h-4 w-4" />
@@ -278,8 +278,8 @@ export function PrinterDashboard() {
               onClick={() => setViewMode('list')}
               className={`px-3 py-2 text-sm font-medium ${
                 viewMode === 'list'
-                  ? 'bg-blue-100 text-blue-700 border-r border-blue-200'
-                  : 'text-gray-500 hover:text-gray-700 border-r border-gray-300'
+                  ? 'bg-pf-accent bg-opacity-20 text-pf-accent border-r border-pf-accent'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary border-r border-pf-border-medium bg-pf-panel'
               }`}
             >
               <List className="h-4 w-4" />
@@ -288,8 +288,8 @@ export function PrinterDashboard() {
               onClick={() => setViewMode('detailed')}
               className={`px-3 py-2 text-sm font-medium rounded-r-md ${
                 viewMode === 'detailed'
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-pf-accent bg-opacity-20 text-pf-accent'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary bg-pf-panel'
               }`}
             >
               <Settings className="h-4 w-4" />
