@@ -209,7 +209,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
         />
         
         {/* Modal */}
-        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border">
+        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative overflow-visible">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">
@@ -232,7 +232,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
           )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
             {/* Basic Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Printer Name */}
@@ -344,24 +344,30 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             </div>
 
             {/* Date Acquired */}
-            <div>
+            <div className="relative z-20">
               <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                Date Acquired
+                Date Acquired (click the calendar icon →)
               </label>
-              <input
-                type="date"
-                value={formData.dateAcquired || ''}
-                onChange={(e) => handleInputChange('dateAcquired', e.target.value)}
-                className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100"
-                max={new Date().toISOString().split('T')[0]} // Prevent future dates
-                placeholder="YYYY-MM-DD"
-              />
+              <div className="relative">
+                <input
+                  type="date"
+                  value={formData.dateAcquired || ''}
+                  onChange={(e) => handleInputChange('dateAcquired', e.target.value)}
+                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                  style={{
+                    colorScheme: 'dark',
+                  }}
+                  max={new Date().toISOString().split('T')[0]}
+                  title="Click to open date picker"
+                />
+              </div>
               {formData.dateAcquired && (
-                <p className="mt-1 text-xs text-pf-text-secondary">Selected: {formData.dateAcquired}</p>
+                <p className="mt-1 text-xs text-pf-text-secondary">✅ Selected: {formData.dateAcquired}</p>
               )}
               {validationErrors.dateAcquired && (
                 <p className="mt-1 text-sm text-pf-error-text">{validationErrors.dateAcquired[0]}</p>
               )}
+              <p className="mt-1 text-xs text-pf-text-tertiary">Try clicking inside the input field or on the right edge</p>
             </div>
 
             {/* Notes */}
