@@ -310,3 +310,94 @@ public class PrinterCapabilities
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
+
+// User Management and Authentication System
+public class User
+{
+    public Guid Id { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string PasswordHash { get; set; } = string.Empty;
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool EmailConfirmed { get; set; } = false;
+    public string? EmailConfirmationToken { get; set; }
+    public string? PasswordResetToken { get; set; }
+    public DateTime? PasswordResetExpires { get; set; }
+    public DateTime? LastLogin { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Navigation properties
+    public ICollection<UserRole> UserRoles { get; } = [];
+}
+
+public class Role
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsSystemRole { get; set; } = false;
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Navigation properties
+    public ICollection<UserRole> UserRoles { get; } = [];
+    public ICollection<RolePermission> RolePermissions { get; } = [];
+}
+
+public class Resource
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string ResourceType { get; set; } = string.Empty; // 'printer', 'harvest', 'slicer', 'system'
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Navigation properties
+    public ICollection<RolePermission> RolePermissions { get; } = [];
+}
+
+public class Action
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Navigation properties
+    public ICollection<RolePermission> RolePermissions { get; } = [];
+}
+
+public class RolePermission
+{
+    public Guid Id { get; set; }
+    public Guid RoleId { get; set; }
+    public Role Role { get; set; } = null!;
+    public Guid ResourceId { get; set; }
+    public Resource Resource { get; set; } = null!;
+    public Guid ActionId { get; set; }
+    public Action Action { get; set; } = null!;
+    public bool Granted { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+}
+
+public class UserRole
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public Guid RoleId { get; set; }
+    public Role Role { get; set; } = null!;
+    public DateTime AssignedAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
+    public bool IsActive { get; set; } = true;
+}
