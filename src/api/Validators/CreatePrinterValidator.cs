@@ -30,6 +30,10 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
 
         RuleFor(x => x.Backend)
             .IsInEnum().WithMessage("Invalid printer backend specified");
+
+        RuleFor(x => x.DateAcquired)
+            .LessThanOrEqualTo(DateTime.Today.AddDays(1)).WithMessage("Date acquired cannot be in the future")
+            .When(x => x.DateAcquired.HasValue);
     }
 
     private static bool BeValidUrl(string url)

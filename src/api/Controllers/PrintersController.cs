@@ -643,95 +643,63 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
-            DateAcquired = dto.DateAcquired,
+            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified 
+                ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
+                : dto.DateAcquired,
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey
         };
         db.Printers.Add(p);
         await db.SaveChangesAsync(ct);
-        if (p.Backend == 1) // PrusaLink
+
+        logger.LogInformation("Successfully created printer: {Name} with ID {Id}", p.Name, p.Id);
+
+        // Get manufacturer and model names for the response
+        string? manufacturerName = null;
+        string? modelName = null;
+        
+        if (manufacturerId.HasValue)
         {
-            var status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
-            return CreatedAtRoute("GetPrinterById", new { id = p.Id }, new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: status.IsOnline,
-                State: status.State,
-                ManufacturerName: null,
-                ModelName: null,
-                Progress: status.Progress,
-                JobName: status.JobName,
-                ThumbnailUrl: status.ThumbnailUrl,
-                CameraStreamUrl: status.CameraStreamUrl,
-                CameraSnapshotUrl: status.CameraSnapshotUrl,
-                Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            ));
+            var manufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Id == manufacturerId, ct);
+            manufacturerName = manufacturer?.Name;
         }
-        else if (p.Backend == 2) // SDCP
+        
+        if (modelId.HasValue)
         {
-            var status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
-            return CreatedAtRoute("GetPrinterById", new { id = p.Id }, new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: status.IsOnline,
-                State: status.State,
-                ManufacturerName: null,
-                ModelName: null,
-                Progress: status.Progress,
-                JobName: status.JobName,
-                ThumbnailUrl: status.ThumbnailUrl,
-                CameraStreamUrl: status.CameraStreamUrl,
-                CameraSnapshotUrl: status.CameraSnapshotUrl,
-                X: status.X,
-                Y: status.Y,
-                Z: status.Z,
-                HotendTemp: status.HotendTemp,
-                BedTemp: status.BedTemp,
-                HotendTarget: status.HotendTarget,
-                BedTarget: status.BedTarget,
-                Backend: Farm.Web.Shared.PrinterBackend.SDCP,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            ));
+            var model = await db.Models.FirstOrDefaultAsync(m => m.Id == modelId, ct);
+            modelName = model?.Name;
         }
-        else // Moonraker
-        {
-            var status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
-            return CreatedAtRoute("GetPrinterById", new { id = p.Id }, new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: status.IsOnline,
-                State: status.State,
-                ManufacturerName: null,
-                ModelName: null,
-                Progress: status.Progress,
-                JobName: status.JobName,
-                ThumbnailUrl: status.ThumbnailUrl,
-                CameraStreamUrl: status.CameraStreamUrl,
-                CameraSnapshotUrl: status.CameraSnapshotUrl,
-                X: status.X,
-                Y: status.Y,
-                Z: status.Z,
-                HotendTemp: status.HotendTemp,
-                BedTemp: status.BedTemp,
-                HotendTarget: status.HotendTarget,
-                BedTarget: status.BedTarget,
-                Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            ));
-        }
+
+        // Return the created printer without attempting to fetch status
+        // Status will be fetched later when needed (like in the printers list)
+        var printerDto = new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            IsOnline: false, // Default to offline, will be updated by background services
+            State: "Unknown",
+            ManufacturerName: manufacturerName,
+            ModelName: modelName,
+            Progress: null,
+            JobName: null,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            CameraSnapshotUrl: null,
+            X: null,
+            Y: null,
+            Z: null,
+            HotendTemp: null,
+            BedTemp: null,
+            HotendTarget: null,
+            BedTarget: null,
+            Backend: (PrinterBackend)p.Backend,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
+        );
+
+        return CreatedAtRoute("GetPrinterById", new { id = p.Id }, printerDto);
     }
 
     /// <summary>
@@ -826,7 +794,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
-        p.DateAcquired = dto.DateAcquired;
+        p.DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified 
+            ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
+            : dto.DateAcquired;
         if (dto.Backend.HasValue)
         {
             p.Backend = (int)dto.Backend.Value;
@@ -1950,7 +1920,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
-            DateAcquired = dto.DateAcquired,
+            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified 
+                ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
+                : dto.DateAcquired,
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey
         };

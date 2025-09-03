@@ -59,7 +59,7 @@ export class ApiClient {
   // ============ Printer API methods ============
 
   async getPrinters(): Promise<Printer[]> {
-    const response = await this.client.get<Printer[]>('/printers');
+    const response = await this.client.get<Printer[]>('/printers/fast');
     return response.data;
   }
 
