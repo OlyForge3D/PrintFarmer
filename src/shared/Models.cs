@@ -648,6 +648,84 @@ public record GcodeMetadataDto(
     string[]? Objects = null,
     Dictionary<string, object>? AdditionalMetadata = null);
 
+// 3D Model Management DTOs
+public class Model3DDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+    public string FileType { get; set; } = string.Empty; // stl, 3mf, obj, ply
+    public DateTime UploadedAt { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string? ThumbnailUrl { get; set; }
+}
+
+public class Model3DUploadResultDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+    public string FileType { get; set; } = string.Empty;
+    public DateTime UploadedAt { get; set; }
+    public string Url { get; set; } = string.Empty;
+}
+
+public class Model3DValidationResultDto
+{
+    public bool Valid { get; set; }
+    public string[]? Issues { get; set; }
+}
+
+// Slicer Integration DTOs
+public class SlicerProfileDto
+{
+    public double LayerHeight { get; set; } = 0.2;
+    public int InfillPercentage { get; set; } = 20;
+    public int PrintSpeed { get; set; } = 50; // mm/s
+    public int NozzleTemperature { get; set; } = 210; // °C
+    public int BedTemperature { get; set; } = 60; // °C
+    public bool Supports { get; set; } = false;
+    public string Material { get; set; } = "PLA";
+    public string Quality { get; set; } = "standard"; // draft, standard, fine
+}
+
+public class SliceResultDto
+{
+    public string JobId { get; set; } = string.Empty;
+    public string GcodeUrl { get; set; } = string.Empty;
+    public int PrintTime { get; set; } // in seconds
+    public double FilamentUsed { get; set; } // in grams
+    public int LayerCount { get; set; }
+    public SliceMetadataDto Metadata { get; set; } = new();
+}
+
+public class SliceMetadataDto
+{
+    public string SlicerVersion { get; set; } = string.Empty;
+    public string ProfileUsed { get; set; } = string.Empty;
+    public double EstimatedCost { get; set; }
+}
+
+public class SlicingJobDto
+{
+    public string JobId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty; // queued, slicing, completed, error, cancelled
+    public int Progress { get; set; } // 0-100
+    public string? Message { get; set; }
+    public string SlicerEngine { get; set; } = string.Empty; // prusaslicer, orcaslicer
+    public Guid PrinterId { get; set; }
+    public string ModelFilePath { get; set; } = string.Empty;
+    public string? GcodeFilePath { get; set; }
+    public SlicerProfileDto? Profile { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public int? EstimatedPrintTime { get; set; }
+    public double? EstimatedFilamentUsed { get; set; }
+    public int? LayerCount { get; set; }
+}
+
 // Job Queue System DTOs
 public class JobQueuePrintJobDto
 {
