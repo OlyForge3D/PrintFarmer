@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 

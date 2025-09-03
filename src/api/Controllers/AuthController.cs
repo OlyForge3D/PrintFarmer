@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using System.Security.Claims;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
-using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -28,7 +28,7 @@ public class AuthController : ControllerBase
         }
 
         var result = await _authService.AuthenticateAsync(request.Username, request.Password);
-        
+
         if (result.Success)
         {
             return Ok(result);
@@ -40,8 +40,8 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<AuthenticationResult>> RegisterAsync([FromBody] RegisterRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Username) || 
-            string.IsNullOrWhiteSpace(request.Email) || 
+        if (string.IsNullOrWhiteSpace(request.Username) ||
+            string.IsNullOrWhiteSpace(request.Email) ||
             string.IsNullOrWhiteSpace(request.Password))
         {
             return BadRequest(new AuthenticationResult(false, Error: "Username, email, and password are required"));
@@ -54,7 +54,7 @@ public class AuthController : ControllerBase
         }
 
         var result = await _authService.RegisterAsync(request);
-        
+
         if (result.Success)
         {
             return Ok(result);
@@ -70,7 +70,7 @@ public class AuthController : ControllerBase
         // For JWT tokens, logout is typically handled client-side by removing the token
         // In the future, we could implement a token blacklist for enhanced security
         _logger.LogInformation("User {UserId} logged out", User.FindFirstValue(ClaimTypes.NameIdentifier));
-        
+
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
 

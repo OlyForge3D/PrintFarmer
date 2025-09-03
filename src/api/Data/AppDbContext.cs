@@ -318,18 +318,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<RolePermission>(b =>
         {
             b.HasKey(rp => rp.Id);
-            
+
             // Foreign Keys
             b.HasOne(rp => rp.Role)
                 .WithMany(r => r.RolePermissions)
                 .HasForeignKey(rp => rp.RoleId)
                 .OnDelete(DeleteBehavior.Cascade);
-            
+
             b.HasOne(rp => rp.Resource)
                 .WithMany(r => r.RolePermissions)
                 .HasForeignKey(rp => rp.ResourceId)
                 .OnDelete(DeleteBehavior.Cascade);
-            
+
             b.HasOne(rp => rp.Action)
                 .WithMany(a => a.RolePermissions)
                 .HasForeignKey(rp => rp.ActionId)
@@ -343,13 +343,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<UserRole>(b =>
         {
             b.HasKey(ur => ur.Id);
-            
+
             // Foreign Keys
             b.HasOne(ur => ur.User)
                 .WithMany(u => u.UserRoles)
                 .HasForeignKey(ur => ur.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-            
+
             b.HasOne(ur => ur.Role)
                 .WithMany(r => r.UserRoles)
                 .HasForeignKey(ur => ur.RoleId)
