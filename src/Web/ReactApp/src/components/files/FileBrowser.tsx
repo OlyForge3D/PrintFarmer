@@ -9,6 +9,7 @@ import {
   GetGcodeFilesResponse
 } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiClient } from '@/services/api';
 import { FileRow } from './FileRow';
 
 interface FileBrowserProps {
@@ -16,26 +17,6 @@ interface FileBrowserProps {
   printerId?: string;
   initialPath?: string;
 }
-
-// Mock API client - in a real app this would be imported from services
-const apiClient = {
-  getGcodeFiles: async (request: GetGcodeFilesRequest): Promise<GetGcodeFilesResponse> => {
-    // Mock implementation - replace with actual API call
-    return {
-      files: [],
-      totalFiles: 0,
-      totalSize: 0
-    };
-  },
-  deleteGcodeFiles: async (filePaths: string[]): Promise<void> => {
-    // Mock implementation - replace with actual API call
-    console.log('Deleting files:', filePaths);
-  },
-  downloadGcodeFile: async (filePath: string): Promise<void> => {
-    // Mock implementation - replace with actual API call
-    console.log('Downloading file:', filePath);
-  }
-};
 
 // Utility function to format bytes
 const formatBytes = (bytes: number): string => {
@@ -62,7 +43,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
 
   const { data: files, isLoading } = useQuery({
     queryKey: ['gcode-files', currentPath, harvestId, printerId, sortBy, sortOrder, searchTerm],
-    queryFn: () => apiClient.getGcodeFiles({
+    queryFn: () => apiClient.getGcodeFilesWithFilter({
       path: currentPath,
       harvestId,
       printerId,
@@ -98,7 +79,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     if (selectedFiles.length === files?.files.length) {
       setSelectedFiles([]);
     } else {
-      setSelectedFiles(files?.files.map(f => f.path) || []);
+      setSelectedFiles(files?.files.map((f: GcodeFile) => f.path) || []);
     }
   };
 
@@ -227,7 +208,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
 
           {/* File rows */}
           <div className="divide-y divide-gray-200">
-            {files.files.map((file) => (
+            {files.files.map((file: GcodeFile) => (
               <FileRow
                 key={file.path}
                 file={file}

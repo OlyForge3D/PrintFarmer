@@ -24,20 +24,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePrinters } from '@/hooks/useApi';
 import { useHarvestUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/signalr';
+import { apiClient } from '@/services/api';
 import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
 import { AccessDenied } from '@/components/common/AccessDenied';
-
-// Mock API client - in a real app this would be imported from services
-const apiClient = {
-  getHarvestOperations: async (): Promise<GcodeHarvestOperation[]> => {
-    // Mock implementation - replace with actual API call
-    return [];
-  },
-  startBulkHarvest: async (printerIds: string[], options: HarvestOptions): Promise<{ operationIds: string[] }> => {
-    // Mock implementation - replace with actual API call
-    return { operationIds: printerIds.map(() => crypto.randomUUID()) };
-  }
-};
 
 export const HarvestPage: React.FC = () => {
   const { hasPermission } = useAuth();

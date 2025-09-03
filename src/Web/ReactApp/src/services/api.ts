@@ -172,15 +172,50 @@ export class ApiClient {
     return response.data;
   }
 
+  async startBulkHarvest(printerIds: string[], options: any): Promise<{ operationIds: string[] }> {
+    // For now, start individual harvests for each printer
+    // In the future, the API could be extended to support true bulk operations
+    const operations = await Promise.all(
+      printerIds.map(printerId => this.startHarvestOperation(printerId))
+    );
+    return { operationIds: operations.map(op => op.id) };
+  }
+
   async getHarvestOperations(printerId?: string): Promise<GcodeHarvestOperation[]> {
     const params = printerId ? { printerId } : {};
-    const response = await this.client.get<GcodeHarvestOperation[]>('/harvest-operations', { params });
+    const response = await this.client.get<GcodeHarvestOperation[]>('/gcode-harvest/active', { params });
     return response.data;
   }
 
   async getHarvestOperation(id: string): Promise<GcodeHarvestOperation> {
-    const response = await this.client.get<GcodeHarvestOperation>(`/harvest-operations/${id}`);
+    const response = await this.client.get<GcodeHarvestOperation>(`/gcode-harvest/operations/${id}`);
     return response.data;
+  }
+
+  async getGcodeFilesWithFilter(request: any): Promise<any> {
+    const response = await this.client.get('/gcode-files', { params: request });
+    return response.data;
+  }
+
+  async deleteGcodeFiles(filePaths: string[]): Promise<void> {
+    await this.client.delete('/gcode-files', { data: { filePaths } });
+  }
+
+  async downloadGcodeFile(filePath: string): Promise<void> {
+    const response = await this.client.get(`/gcode-files/download`, { 
+      params: { path: filePath },
+      responseType: 'blob'
+    });
+    
+    // Create a download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filePath.split('/').pop() || 'file.gcode');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   }
 
   // ============ Job Queue methods ============
