@@ -100,7 +100,7 @@ public class GcodeFile
     public string? Tags { get; set; } // JSON array of tags
 
     // Source tracking
-    public GcodeSource Source { get; set; } = GcodeSource.Upload;
+    public GcodeSource Source { get; set; }
     public Guid? SourcePrinterId { get; set; } // Printer it was harvested from
     public Printer? SourcePrinter { get; set; }
     public string? OriginalPrinterPath { get; set; } // Original path on the printer
@@ -161,7 +161,7 @@ public class GcodeHarvestOperation
     public Printer Printer { get; set; } = null!;
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
-    public GcodeHarvestStatus Status { get; set; } = GcodeHarvestStatus.Running;
+    public GcodeHarvestStatus Status { get; set; }
     public string? ErrorMessage { get; set; }
 
     // Results
@@ -230,7 +230,7 @@ public class PrintJob
     public Printer? AssignedPrinter { get; set; }
 
     // Queue Management
-    public PrintJobStatus Status { get; set; } = PrintJobStatus.Queued;
+    public PrintJobStatus Status { get; set; }
     public int Priority { get; set; } // Higher = more important
     public int QueuePosition { get; set; }
 

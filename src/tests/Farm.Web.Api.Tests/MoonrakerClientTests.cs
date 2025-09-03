@@ -184,6 +184,52 @@ public class MoonrakerClientTests
         bytes!.Length.Should().Be(3);
     }
 
+    [Fact]
+    public async Task GetCompositeStatusAsync_NormalizesLoopbackCameraHostsToBaseAsync()
+    {
+        var (client, _, _) = CreateClient(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.EndsWith("/printer/info"))
+            {
+                return Json(new { result = new { state = "ready" } });
+            }
+
+            if (url.EndsWith("/server/webcams/list"))
+            {
+                // Absolute loopback URLs should be rewritten to base host:port
+                return Json(new
+                {
+                    result = new
+                    {
+                        webcams = new[]
+                        {
+                            new
+                            {
+                                enabled = true,
+                                stream_url = "http://127.0.0.1:8080/stream.mjpg",
+                                snapshot_url = "http://localhost:8080/snap.jpg"
+                            }
+                        }
+                    }
+                });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var cs = await client.GetCompositeStatusAsync(Base);
+        cs.IsOnline.Should().BeTrue();
+        cs.CameraStreamUrl.Should().NotBeNullOrWhiteSpace();
+        cs.CameraSnapshotUrl.Should().NotBeNullOrWhiteSpace();
+
+        // Base is http://printer -> normalized to base host with scheme; explicit port may or may not be present
+        cs.CameraStreamUrl!.Should().StartWith("http://printer");
+        cs.CameraStreamUrl.Should().EndWith("/stream.mjpg");
+        cs.CameraSnapshotUrl!.Should().StartWith("http://printer");
+        cs.CameraSnapshotUrl.Should().EndWith("/snap.jpg");
+    }
+
     [Theory]
     [InlineData("G28", nameof(IMoonrakerClient.SendHomeAsync))]
     [InlineData("G28 X Y", nameof(IMoonrakerClient.HomeXYAsync))]
@@ -202,7 +248,8 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var mi = typeof(IMoonrakerClient).GetMethod(methodName);
+        // Disambiguate overloads: explicitly select (string baseUrl, CancellationToken ct) signature
+        var mi = typeof(IMoonrakerClient).GetMethod(methodName, [typeof(string), typeof(CancellationToken)]);
         mi.Should().NotBeNull();
         var task = (Task<bool>)mi!.Invoke(client, [Base, CancellationToken.None])!;
         var ok = await task;

@@ -282,8 +282,9 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                             var first = mthumbs[0];
                             if (first.TryGetProperty("relative_path", out var rp) && rp.ValueKind == JsonValueKind.String)
                             {
-                                var baseNorm = NormalizeBaseUrl(baseUrl);
-                                thumb = $"{baseNorm}/server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}";
+                                var baseUriX = new Uri(NormalizeBaseUrl(baseUrl));
+                                var thumbUri2 = new Uri(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
+                                thumb = thumbUri2.ToString();
                             }
                         }
                     }
@@ -604,8 +605,9 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var url = $"{NormalizeBaseUrl(baseUrl)}/printer/gcode/script";
-            using var resp = await http.PostAsJsonAsync(url, new { script = string.Join("\n", gcodes) }, cts.Token);
+            var baseUri4 = new Uri(NormalizeBaseUrl(baseUrl));
+            var scriptUri = new Uri(baseUri4, "printer/gcode/script");
+            using var resp = await http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -674,14 +676,14 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                     name = nmEl.GetString();
                 }
 
-                var testUrl = uid is not null
-                    ? $"{baseNorm}/server/webcams/test?uid={Uri.EscapeDataString(uid)}"
-                    : (name is not null ? $"{baseNorm}/server/webcams/test?name={Uri.EscapeDataString(name)}" : null);
-                if (testUrl is not null)
+                Uri? testUri = uid is not null
+                    ? new Uri(new Uri(baseNorm), $"server/webcams/test?uid={Uri.EscapeDataString(uid)}")
+                    : (name is not null ? new Uri(new Uri(baseNorm), $"server/webcams/test?name={Uri.EscapeDataString(name)}") : null);
+                if (testUri is not null)
                 {
                     try
                     {
-                        using var tresp = await http.PostAsync(testUrl, content: null, cts.Token);
+                        using var tresp = await http.PostAsync(testUri, content: null, cts.Token);
                         if (tresp.IsSuccessStatusCode)
                         {
                             await using var tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);

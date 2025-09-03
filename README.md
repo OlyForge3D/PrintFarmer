@@ -83,6 +83,10 @@ Note: The server normalizes camera URLs and stores both the original and IP-base
 - Async-suffix: All asynchronous methods in controllers and services use the `Async` suffix (for example, `GetPrintersAsync`). This clarifies intent and aligns with analyzers; route templates remain unchanged.
 - CreatedAtRoute for POST: Resource-creating POST endpoints return 201 Created with a Location header via `CreatedAtRoute(...)`. Ensure the matching GET-by-id route is named (for example, `Name = "GetPrinterById"`) so POSTs can reference it.
 
+## Notes
+
+- PrusaLink client consolidation: `PrusaLinkExtensions` has been fully superseded by `PrusaLinkClient`. Use the concrete `PrusaLinkClient` (and `IPrusaLinkClient`) for file upload, start print, and info helpers. All functionality previously provided by the extension shims now lives in the client with both string and Uri-based overloads.
+
 ## Data
 - SQLite file lives under `src/api` by default (e.g., `farm.db`). Startup includes safety steps for local development.
 

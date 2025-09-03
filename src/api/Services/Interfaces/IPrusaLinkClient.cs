@@ -14,6 +14,8 @@ public interface IPrusaLinkClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed printer status including state, progress, and camera URLs</returns>
     Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default);
+    // Analyzer-friendly overload (non-breaking): allow Uri input too
+    Task<PrusaCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the basic status information from a PrusaLink printer.
@@ -23,6 +25,7 @@ public interface IPrusaLinkClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing printer status information including online status and state</returns>
     Task<PrusaStatus> GetStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaStatus> GetStatusAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the current print job information from a PrusaLink printer.
@@ -32,6 +35,7 @@ public interface IPrusaLinkClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing current job information, or null if no job is active</returns>
     Task<PrusaJob?> GetJobAsync(string baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaJob?> GetJobAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
 
     /// <summary>
     /// Uploads a G-code file to the PrusaLink printer's storage.
@@ -43,6 +47,7 @@ public interface IPrusaLinkClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the upload was successful</returns>
     Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default);
 
     /// <summary>
     /// Starts printing a G-code file by name on the PrusaLink printer.
@@ -53,6 +58,7 @@ public interface IPrusaLinkClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the print start command was successfully sent</returns>
     Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> StartPrintAsync(Uri baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets a list of G-code file names available on the PrusaLink printer.
@@ -62,4 +68,5 @@ public interface IPrusaLinkClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing an array of G-code file names</returns>
     Task<string[]> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<string[]> GetFileListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
 }
