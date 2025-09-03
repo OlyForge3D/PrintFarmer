@@ -275,7 +275,7 @@ public class ModelController : ControllerBase
         var result = new Model3DValidationResultDto
         {
             Valid = issues.Count == 0,
-            Issues = issues.Count > 0 ? issues : null
+            Issues = issues.Count > 0 ? issues.ToArray() : null
         };
 
         return Ok(result);
