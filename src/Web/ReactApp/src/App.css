@@ -2,8 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import component-specific styles to ensure all classes are available */
+@import './styles/components.css';
+
+/* Remove restrictive max-width to allow full-width layouts */
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  text-align: left;
+  width: 100%;
+  min-height: 100vh;
 }

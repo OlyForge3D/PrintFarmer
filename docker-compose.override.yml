@@ -1,7 +1,8 @@
 # Docker Compose override for development and testing
 # Usage examples:
-# Development with hot reload: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-# Testing with SQL Server: docker compose -f docker-compose.yml -f docker-compose.override.yml up
+# Development with hot reload: docker compose --profile dev up
+# Testing with SQL Server: docker compose --profile sqlserver up
+# Testing with MySQL: docker compose --profile mysql up
 
 services:
   # Development overrides for React hot reload
@@ -15,7 +16,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:8080
-      - ConnectionStrings__Default=Host=postgres;Database=printfarmer_dev;Username=printfarmer;Password=PrintFarm123!
+      - ConnectionStrings__Default=Host=postgres-dev;Database=printfarmer_dev;Username=printfarmer;Password=PrintFarm123!
       - JWT_SECRET=dev-secret-key-minimum-32-characters
       - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://localhost:5173
     volumes:
@@ -46,7 +47,7 @@ services:
     networks:
       - printfarmer-net
 
-  # Alternative database services for testing
+  # Alternative database services for testing (only enabled with specific profiles)
   sqlserver:
     profiles: ["sqlserver"]
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -90,17 +91,8 @@ services:
       timeout: 10s
       retries: 3
 
-  # Override main service to use alternative databases
-  printfarmer:
-    profiles: ["sqlserver-test"]
-    environment:
-      - DB_PROVIDER=SqlServer
-      - ConnectionStrings__Default=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
-      - ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-
 volumes:
   postgres-dev-data:
   printfarmer-dev-data:
+  sqlserver-data:
+  mysql-data:

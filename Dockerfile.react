@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Copy package files first for better caching
 COPY src/Web/ReactApp/package*.json ./
-RUN npm ci --silent
+RUN npm install --silent
 
 # Copy React source code
 COPY src/Web/ReactApp/ ./
