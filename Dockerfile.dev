@@ -1,0 +1,97 @@
+# syntax=docker/dockerfile:1
+# Development Dockerfile for PrintFarmer React + ASP.NET Core with hot reload
+
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS development
+WORKDIR /app
+
+# Install Node.js for React development
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y nodejs curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install .NET global tools
+RUN dotnet tool install --global dotnet-ef
+ENV PATH="$PATH:/root/.dotnet/tools"
+
+# Copy project files
+COPY src/ ./src/
+COPY Directory.Build.props ./
+
+# Restore .NET dependencies
+RUN dotnet restore ./src/Web/Api/Farm.Web.Api.csproj
+
+# Install React dependencies
+WORKDIR /app/src/Web/ReactApp
+RUN npm ci
+
+# Set working directory back to app root
+WORKDIR /app
+
+# Create startup script for development
+RUN echo '#!/bin/bash' > /app/start-dev.sh && \
+    echo 'set -e' >> /app/start-dev.sh && \
+    echo 'echo "Starting PrintFarmer Development Environment..."' >> /app/start-dev.sh && \
+    echo 'cd /app/src/Web/ReactApp' >> /app/start-dev.sh && \
+    echo 'npm run dev &' >> /app/start-dev.sh && \
+    echo 'cd /app/src/Web/Api' >> /app/start-dev.sh && \
+    echo 'dotnet watch run --urls="http://0.0.0.0:8080"' >> /app/start-dev.sh && \
+    chmod +x /app/start-dev.sh
+
+# Expose ports
+EXPOSE 8080 5173
+
+# Environment variables for development
+ENV ASPNETCORE_ENVIRONMENT=Development
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+
+ENTRYPOINT ["/app/start-dev.sh"]
+
+# Production stage (same as Dockerfile.react)
+FROM node:18-alpine AS react-build
+WORKDIR /app
+
+COPY src/Web/ClientApp/package*.json ./
+RUN npm ci --only=production --silent
+
+COPY src/Web/ClientApp/ ./
+RUN npm run build
+
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS dotnet-build
+WORKDIR /src
+
+COPY src/shared/*.csproj ./shared/
+COPY src/api/*.csproj ./api/
+COPY src/Web/Api/*.csproj ./Web/Api/
+COPY Directory.Build.props ./
+
+RUN dotnet restore ./Web/Api/Farm.Web.Api.csproj
+
+COPY src/ ./
+
+RUN dotnet publish ./Web/Api/Farm.Web.Api.csproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    --verbosity minimal
+
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=dotnet-build /app/publish .
+COPY --from=react-build /app/dist ./wwwroot
+
+RUN mkdir -p /app/uploads /app/gcode /app/slicers /data
+
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]

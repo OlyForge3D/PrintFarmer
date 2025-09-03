@@ -31,7 +31,7 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
-    outDir: '../../../wwwroot/react',
+    outDir: 'dist',
   },
   test: {
     environment: 'jsdom',

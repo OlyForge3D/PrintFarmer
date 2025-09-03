@@ -1,85 +1,162 @@
 services:
-  api:
+  # React + ASP.NET Core Application (Unified Single Container)
+  printfarmer:
     build:
       context: .
-      dockerfile: Dockerfile.api
-    image: printfarmer-api:latest
-    container_name: printfarmer-api
+      dockerfile: Dockerfile.react
+    image: printfarmer-react:latest
+    container_name: printfarmer-app
     environment:
-      # Database provider selection: SqlServer (default), Sqlite, Postgres, MySql
-      - DB_PROVIDER=SqlServer
+      # Database Configuration - PostgreSQL recommended for React architecture
+      - DB_PROVIDER=Postgres
       - ASPNETCORE_URLS=http://0.0.0.0:8080
-      - ASPNETCORE_ENVIRONMENT=Production
-      # SQL Server connection string for containerized SQL Server
-      - ConnectionStrings__Default=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
-      - ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
+      - ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
       - DB_INIT_MODE=EnsureCreated
-      # CORS Configuration - Choose one approach:
-      # Option 1: Allow any origin (for development/local networks)
+      
+      # Authentication & Security
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-minimum-32-chars}
+      - JWT_ISSUER=PrintFarmer
+      - JWT_AUDIENCE=PrintFarmerClient
+      - JWT_EXPIRE_HOURS=24
+      
+      # CORS Configuration for React SPA
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://localhost:5173
       - ALLOW_LOCAL_NETWORK=true
-      # Option 2: Specific origins (comment out ALLOW_LOCAL_NETWORK above)
-      # - ALLOWED_ORIGINS=http://YOUR_REMOTE_IP:8081,https://YOUR_REMOTE_IP:8443
-      # Option 3: Network ranges (comment out ALLOW_LOCAL_NETWORK above)
-      # - ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
-      # Examples to use a different RDBMS (uncomment and update as needed):
-      # - DB_PROVIDER=Sqlite
-      # - ConnectionStrings__Sqlite=Data Source=/data/farm.db
-      # - DB_PROVIDER=Postgres
-      # - ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
-      # - DB_PROVIDER=MySql
-      # - ConnectionStrings__MySql=Server=mysql;Database=printfarmer;User=root;Password=example;
+      
+      # SignalR Configuration
+      - SIGNALR_REDIS_CONNECTION=redis:6379
+      
+      # File Storage
+      - UPLOAD_PATH=/app/uploads
+      - GCODE_PATH=/app/gcode
+      - MAX_FILE_SIZE=100MB
+      
+      # Printer Discovery
+      - PRINTER_DISCOVERY_ENABLED=true
+      - MOONRAKER_TIMEOUT=5000
+      - PRUSALINK_TIMEOUT=5000
+      
+      # Slicer Integration
+      - SLICER_ENGINES_PATH=/app/slicers
+      - PRUSA_SLICER_PATH=/app/slicers/prusa-slicer
+      - ORCA_SLICER_PATH=/app/slicers/orca-slicer
+      
     ports:
-      - "5088:8080"
+      - "5080:8080"
+      - "5081:8443"
     extra_hosts:
       # Enable container to access host network for printer discovery
       - "host.docker.internal:host-gateway"
     volumes:
       # Persistent storage for application data
       - printfarmer-data:/data
+      - printfarmer-uploads:/app/uploads
+      - printfarmer-gcode:/app/gcode
+      - printfarmer-slicers:/app/slicers
     depends_on:
-      - sqlserver
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - printfarmer-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: printfarmer-sqlserver
+  # PostgreSQL Database (Recommended for React architecture)
+  postgres:
+    image: postgres:15-alpine
+    container_name: printfarmer-postgres
     environment:
-      ACCEPT_EULA: Y
-      SA_PASSWORD: PrintFarm123!
-      MSSQL_PID: Express
+      - POSTGRES_DB=printfarmer
+      - POSTGRES_USER=printfarmer
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-PrintFarm123!}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
-      - "1433:1433"
+      - "5432:5432"
     volumes:
-      # Persistent storage for SQL Server database
-      - sqlserver-data:/var/opt/mssql
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - printfarmer-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres 
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.max=10000
+      -c pg_stat_statements.track=all
 
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-    image: printfarmer-web:latest
-    container_name: printfarmer-web
-    environment:
-      # Configure API base URL for Blazor client - update for remote deployment
-      - API_BASE_URL=http://localhost:8081
-    depends_on:
-      - api
-    ports:
-      - "8081:8080"
-      - "8443:8443"
+  # Redis for caching and SignalR backplane
+  redis:
+    image: redis:7-alpine
+    container_name: printfarmer-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - printfarmer-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Nginx reverse proxy for production deployments
+  # Uncomment if you need SSL termination, load balancing, or custom routing
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: printfarmer-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./deploy/nginx/ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - printfarmer
+  #   networks:
+  #     - printfarmer-net
+  #   restart: unless-stopped
 
 volumes:
-  # Persistent volume for application data  
+  # Persistent volume for application data
   printfarmer-data:
     driver: local
-  # Persistent volume for SQL Server database
-  # This ensures database survives container rebuilds and restarts
-  sqlserver-data:
-    driver: local
-  # Volumes for optional database services (used with docker-compose.override.yml)
+  # Persistent volume for PostgreSQL database
   postgres-data:
+    driver: local
+  # Persistent volume for Redis data
+  redis-data:
+    driver: local
+  # Persistent volumes for file storage
+  printfarmer-uploads:
+    driver: local
+  printfarmer-gcode:
+    driver: local
+  printfarmer-slicers:
+    driver: local
+  # Legacy volumes for backward compatibility
+  sqlserver-data:
     driver: local
   mysql-data:
     driver: local
+
+networks:
+  printfarmer-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

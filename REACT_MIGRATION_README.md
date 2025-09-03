@@ -221,7 +221,7 @@ if (hasRole('farm_admin') || hasPermission('users', 'admin')) {
 
 ### Prerequisites
 - Node.js 18+ and npm
-- .NET 8 SDK
+- .NET 9 SDK
 - Git
 
 ### Quick Start

@@ -243,7 +243,7 @@ builder.Services.AddSignalR();
 // SPA services for React
 builder.Services.AddSpaStaticFiles(configuration =>
 {
-    configuration.RootPath = "../../wwwroot/react";
+    configuration.RootPath = "wwwroot";
 });
 
 // Health checks
@@ -398,17 +398,15 @@ app.MapGet("/api/network-discovery/dynamic-ranges", ([FromServices] INetworkDisc
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
-// TODO: Configure React SPA (temporarily disabled for testing)
-// app.UseSpa(spa =>
-// {
-//     spa.Options.SourcePath = "../../Web/ReactApp";
-//
-//     if (app.Environment.IsDevelopment())
-//     {
-//         // In development, proxy to the Vite dev server
-//         spa.UseProxyToSpaDevelopmentServer("http://localhost:3000");
-//     }
-// });
+// Configure React SPA fallback routing
+app.UseSpa(spa =>
+{
+    spa.Options.SourcePath = "wwwroot";
+
+    // Note: We're serving pre-built static files from wwwroot, 
+    // so we don't need the development proxy even in Development mode
+    // The React app is built at container build time, not runtime
+});
 
 await app.RunAsync();
 

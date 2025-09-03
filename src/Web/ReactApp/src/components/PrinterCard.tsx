@@ -13,7 +13,7 @@ import { formatDistanceToNow } from 'date-fns';
 
 interface PrinterCardProps {
   printer: Printer;
-  viewMode?: 'grid' | 'list';
+  viewMode?: 'grid' | 'list' | 'detailed';
 }
 
 export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {

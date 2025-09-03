@@ -1,32 +1,137 @@
 {
-  "name": "PrintFarmer (.NET 9 + Blazor WASM hosted)",
-  "image": "mcr.microsoft.com/devcontainers/dotnet:9.0",
+  "name": "PrintFarmer (React + .NET 9 + PostgreSQL)",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:18-bookworm",
   "features": {
-    "ghcr.io/swift-server-community/swift-devcontainer-features/sqlite:1": {}
+    "ghcr.io/devcontainers/features/dotnet:2": {
+      "version": "9.0",
+      "installUsingApt": false
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/git:1": {
+      "ppa": false
+    }
   },
   "customizations": {
     "vscode": {
       "extensions": [
+        // .NET Extensions
         "ms-dotnettools.csharp",
         "ms-dotnettools.csdevkit",
         "ms-dotnettools.vscode-dotnet-runtime",
+        
+        // React/TypeScript Extensions
+        "bradlc.vscode-tailwindcss",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.vscode-typescript-next",
+        "formulahendry.auto-rename-tag",
+        "christian-kohler.path-intellisense",
+        
+        // React/JSX Extensions
+        "ms-vscode.vscode-json",
+        "ms-playwright.playwright",
+        "ms-vscode.vscode-node-azure-pack",
+        
+        // Database Extensions
+        "ms-ossdata.vscode-postgresql",
+        "cweijan.vscode-redis-client",
+        
+        // Development Tools
+        "ms-vscode.extension-test-runner",
+        "ms-vscode.vscode-jest",
         "eamodio.gitlens",
-        "editorconfig.editorconfig"
+        "editorconfig.editorconfig",
+        "ms-vscode.vscode-yaml",
+        
+        // Docker Extensions
+        "ms-azuretools.vscode-docker",
+        "ms-vscode-remote.remote-containers"
       ],
       "settings": {
+        // .NET Settings
         "dotnet.defaultSolution": "src/farm-web.sln",
-        "dotnetAcquisitionExtension.enableTelemetry": false
+        "dotnetAcquisitionExtension.enableTelemetry": false,
+        
+        // TypeScript/React Settings
+        "typescript.updateImportsOnFileMove.enabled": "always",
+        "typescript.preferences.importModuleSpecifier": "relative",
+        "emmet.includeLanguages": {
+          "typescript": "html",
+          "typescriptreact": "html"
+        },
+        
+        // Formatting Settings  
+        "[typescript]": {
+          "editor.defaultFormatter": "vscode.typescript-language-features"
+        },
+        "[typescriptreact]": {
+          "editor.defaultFormatter": "vscode.typescript-language-features"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "vscode.json-language-features"
+        },
+        "[jsonc]": {
+          "editor.defaultFormatter": "vscode.json-language-features"
+        },
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit",
+          "source.organizeImports": "explicit"
+        },
+        
+        // File Associations
+        "files.associations": {
+          "*.json": "jsonc"
+        },
+        
+        // Terminal Settings
+        "terminal.integrated.defaultProfile.linux": "bash",
+        
+        // Tailwind CSS Settings
+        "tailwindCSS.includeLanguages": {
+          "typescript": "javascript",
+          "typescriptreact": "html"
+        },
+        "tailwindCSS.experimental.classRegex": [
+          ["clsx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"]
+        ]
       }
     }
   },
   "remoteUser": "vscode",
-  "postCreateCommand": "dotnet restore ./src/farm-web.sln",
-  "forwardPorts": [5088],
+  "postCreateCommand": ".devcontainer/post-create.sh",
+  "forwardPorts": [5000, 5173, 5432, 6379, 8080],
   "portsAttributes": {
-    "5088": { "label": "PrintFarmer Server/API" }
+    "5000": { 
+      "label": "PrintFarmer API",
+      "requireLocalPort": false 
+    },
+    "5173": { 
+      "label": "Vite Dev Server",
+      "requireLocalPort": false 
+    },
+    "5432": { 
+      "label": "PostgreSQL",
+      "requireLocalPort": false 
+    },
+    "6379": { 
+      "label": "Redis",
+      "requireLocalPort": false 
+    },
+    "8080": { 
+      "label": "Docker App",
+      "requireLocalPort": false 
+    }
   },
   "otherPortsAttributes": {
     "onAutoForward": "notify"
   },
+  "mounts": [
+    "source=printfarmer-node-modules,target=${containerWorkspaceFolder}/src/Web/ReactApp/node_modules,type=volume"
+  ],
   "shutdownAction": "stopContainer"
 }

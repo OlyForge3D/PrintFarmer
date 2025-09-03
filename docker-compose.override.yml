@@ -1,79 +1,106 @@
-# Docker Compose override for development database testing
-# Uncomment the services you want to test with by running:
-# docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+# Docker Compose override for development and testing
+# Usage examples:
+# Development with hot reload: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Testing with SQL Server: docker compose -f docker-compose.yml -f docker-compose.override.yml up
 
-services: {}
-  # Uncomment to add PostgreSQL for testing
-  # postgres:
-  #   image: postgres:15
-  #   container_name: printfarmer-postgres
-  #   environment:
-  #     POSTGRES_DB: printfarmer
-  #     POSTGRES_USER: postgres
-  #     POSTGRES_PASSWORD: postgres
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
+services:
+  # Development overrides for React hot reload
+  printfarmer-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: development
+    container_name: printfarmer-dev
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
+      - ConnectionStrings__Default=Host=postgres;Database=printfarmer_dev;Username=printfarmer;Password=PrintFarm123!
+      - JWT_SECRET=dev-secret-key-minimum-32-characters
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://localhost:5173
+    volumes:
+      # Mount source code for hot reload
+      - ./src:/app/src:ro
+      - ./src/Web/ClientApp:/app/clientapp
+      - printfarmer-dev-data:/data
+    ports:
+      - "5000:8080"  # API
+      - "5173:5173"  # Vite dev server
+    depends_on:
+      - postgres-dev
+    networks:
+      - printfarmer-net
 
-  # Uncomment to add MySQL for testing  
-  # mysql:
-  #   image: mysql:8.0
-  #   container_name: printfarmer-mysql
-  #   environment:
-  #     MYSQL_DATABASE: printfarmer
-  #     MYSQL_ROOT_PASSWORD: example
-  #     MYSQL_USER: printfarmer
-  #     MYSQL_PASSWORD: printfarmer
-  #   ports:
-  #     - "3306:3306"
-  #   volumes:
-  #     - mysql-data:/var/lib/mysql
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
+  postgres-dev:
+    profiles: ["dev"]
+    image: postgres:15-alpine
+    container_name: printfarmer-postgres-dev
+    environment:
+      - POSTGRES_DB=printfarmer_dev
+      - POSTGRES_USER=printfarmer
+      - POSTGRES_PASSWORD=PrintFarm123!
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    networks:
+      - printfarmer-net
 
-  # Uncomment to add SQL Server for testing
-  # sqlserver:
-  #   image: mcr.microsoft.com/mssql/server:2022-latest
-  #   container_name: printfarmer-sqlserver
-  #   environment:
-  #     ACCEPT_EULA: Y
-  #     SA_PASSWORD: Your_password123
-  #     MSSQL_PID: Developer
-  #   ports:
-  #     - "1433:1433"
-  #   volumes:
-  #     - sqlserver-data:/var/opt/mssql
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P 'Your_password123' -Q 'SELECT 1'"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
+  # Alternative database services for testing
+  sqlserver:
+    profiles: ["sqlserver"]
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: printfarmer-sqlserver
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: PrintFarm123!
+      MSSQL_PID: Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    networks:
+      - printfarmer-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P 'PrintFarm123!' -Q 'SELECT 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Override api service to depend on database services when testing
-  # api:
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     # OR uncomment for MySQL:
-  #     # mysql:
-  #     #   condition: service_healthy
-  #     # OR uncomment for SQL Server:
-  #     # sqlserver:
-  #     #   condition: service_healthy
+  mysql:
+    profiles: ["mysql"]
+    image: mysql:8.0
+    container_name: printfarmer-mysql
+    environment:
+      MYSQL_DATABASE: printfarmer
+      MYSQL_ROOT_PASSWORD: PrintFarm123!
+      MYSQL_USER: printfarmer
+      MYSQL_PASSWORD: printfarmer
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - printfarmer-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "printfarmer", "-pprintfarmer"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Override main service to use alternative databases
+  printfarmer:
+    profiles: ["sqlserver-test"]
+    environment:
+      - DB_PROVIDER=SqlServer
+      - ConnectionStrings__Default=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+      - ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;
+    depends_on:
+      sqlserver:
+        condition: service_healthy
 
 volumes:
-  postgres-data:
-  mysql-data:
-  sqlserver-data:
+  postgres-dev-data:
+  printfarmer-dev-data:

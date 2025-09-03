@@ -1,0 +1,143 @@
+#!/bin/bash
+set -e
+
+echo "🚀 Setting up PrintFarmer React Development Environment..."
+
+# Update system packages
+echo "📦 Updating system packages..."
+sudo apt-get update
+
+# Install additional tools
+echo "🛠️  Installing additional development tools..."
+sudo apt-get install -y curl wget git jq
+
+# Ensure latest npm and install global packages
+echo "📦 Setting up Node.js global packages..."
+sudo npm install -g npm@latest
+sudo npm install -g @vitejs/create-vite
+sudo npm install -g typescript
+sudo npm install -g eslint
+sudo npm install -g prettier
+
+# Install .NET global tools
+echo "🔧 Installing .NET global tools..."
+dotnet tool install --global dotnet-ef
+dotnet tool install --global dotnet-watch
+dotnet tool install --global dotnet-user-secrets
+
+# Restore .NET solution
+echo "🔄 Restoring .NET solution..."
+if [ -f "src/farm-web.sln" ]; then
+    dotnet restore ./src/farm-web.sln
+else
+    echo "⚠️  Solution file not found, skipping .NET restore"
+fi
+
+# Install React app dependencies if the app exists
+echo "📱 Setting up React application..."
+if [ -d "src/Web/ReactApp" ]; then
+    cd src/Web/ReactApp
+    echo "📦 Installing React dependencies..."
+    npm ci
+    cd ../../../
+else
+    echo "ℹ️  React app not found - will be created during Phase 1 implementation"
+fi
+
+# Set up environment file
+echo "⚙️  Setting up environment configuration..."
+if [ ! -f ".env" ]; then
+    cp .env.template .env
+    echo "📝 Created .env file from template - please configure it for your environment"
+fi
+
+# Create useful aliases
+echo "🔗 Setting up development aliases..."
+cat >> ~/.bashrc << 'EOF'
+
+# PrintFarmer development aliases
+alias pf-api='cd /workspaces/PrintFarmer/src/api && dotnet watch run'
+alias pf-react='cd /workspaces/PrintFarmer/src/Web/ReactApp && npm run dev'
+alias pf-build='cd /workspaces/PrintFarmer && ./scripts/build.sh'
+alias pf-deploy='cd /workspaces/PrintFarmer && ./scripts/deploy.sh'
+alias pf-dev='cd /workspaces/PrintFarmer && ./scripts/dev.sh'
+alias pf-logs='docker-compose logs -f'
+alias pf-ps='docker-compose ps'
+EOF
+
+# Make scripts executable
+echo "🔐 Making scripts executable..."
+chmod +x scripts/*.sh
+
+# Initialize git hooks (if available)
+if [ -d ".git" ]; then
+    echo "🎣 Setting up git hooks..."
+    git config core.hooksPath .githooks
+    mkdir -p .githooks
+fi
+
+# Create development workspace file
+echo "🏠 Setting up VS Code workspace..."
+cat > PrintFarmer.code-workspace << 'EOF'
+{
+    "folders": [
+        {
+            "name": "PrintFarmer",
+            "path": "."
+        },
+        {
+            "name": "React App",
+            "path": "./src/Web/ReactApp"
+        },
+        {
+            "name": "API",
+            "path": "./src/api"
+        },
+        {
+            "name": "Shared",
+            "path": "./src/shared"
+        }
+    ],
+    "settings": {
+        "typescript.preferences.importModuleSpecifier": "relative",
+        "eslint.workingDirectories": [
+            "./src/Web/ReactApp"
+        ]
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-dotnettools.csharp",
+            "ms-dotnettools.csdevkit",
+            "bradlc.vscode-tailwindcss",
+            "esbenp.prettier-vscode",
+            "dbaeumer.vscode-eslint"
+        ]
+    }
+}
+EOF
+
+# Display setup completion info
+echo ""
+echo "✅ PrintFarmer React development environment setup complete!"
+echo ""
+echo "🎯 Next steps:"
+echo "   1. Configure .env file with your settings"
+echo "   2. Review GitHub issues for React migration phases"
+echo "   3. Start Phase 1: React Foundation setup"
+echo ""
+echo "🚀 Quick start commands:"
+echo "   • pf-dev    - Start development environment"
+echo "   • pf-api    - Start API only"
+echo "   • pf-react  - Start React dev server (after Phase 1)"
+echo "   • pf-build  - Build Docker images"
+echo ""
+echo "🔗 Useful URLs (after starting services):"
+echo "   • React App: http://localhost:5173"
+echo "   • API: http://localhost:5000"
+echo "   • Health Check: http://localhost:5000/health"
+echo ""
+echo "📚 Documentation:"
+echo "   • React Migration: ./REACT_MIGRATION_README.md"
+echo "   • Docker Deployment: ./DOCKER_DEPLOYMENT_README.md"
+echo "   • GitHub Issues: ./.github/issues/"
+echo ""
