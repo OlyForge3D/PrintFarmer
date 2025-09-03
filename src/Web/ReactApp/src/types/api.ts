@@ -6,6 +6,7 @@ export interface Printer {
   serverUrl: string;
   notes?: string;
   isOnline: boolean;
+  isReachable: boolean;
   state?: string;
   manufacturerName?: string;
   modelName?: string;
@@ -240,21 +241,76 @@ export interface GcodeFile {
 
 // G-code harvest operations
 export enum GcodeHarvestStatus {
-  Running = 0,
-  Completed = 1,
-  Failed = 2,
-  Cancelled = 3
+  Starting = 0,
+  Running = 1,
+  Completed = 2,
+  Failed = 3,
+  Cancelled = 4
+}
+
+export interface HarvestOptions {
+  includeSubfolders: boolean;
+  fileTypes: string[];
+  minFileSize: number;
+  maxFileAge?: number;
+  duplicateHandling: 'skip' | 'overwrite' | 'rename';
 }
 
 export interface GcodeHarvestOperation {
   id: string;
   printerId: string;
+  printerName: string;
   status: GcodeHarvestStatus;
   filesFound: number;
   filesProcessed: number;
+  filesAdded: number;
+  filesSkipped: number;
+  filesErrored: number;
+  duplicatesSkipped: number;
+  totalSizeBytes: number;
   startedAt: Date;
   completedAt?: Date;
   error?: string;
+  options?: HarvestOptions;
+  filesPaths?: string[];
+}
+
+export interface HarvestProgress {
+  operationId: string;
+  filesProcessed: number;
+  filesFound: number;
+  currentFile?: string;
+  phase: 'discovering' | 'processing' | 'completing';
+}
+
+export interface StartBulkHarvestRequest {
+  printerIds: string[];
+  options: HarvestOptions;
+}
+
+export interface GcodeFile {
+  id: string;
+  path: string;
+  name: string;
+  size: number;
+  modifiedAt: Date;
+  isDirectory: boolean;
+  harvestOperationId?: string;
+}
+
+export interface GetGcodeFilesRequest {
+  path?: string;
+  harvestId?: string;
+  printerId?: string;
+  sortBy?: 'name' | 'size' | 'date';
+  sortOrder?: 'asc' | 'desc';
+  search?: string;
+}
+
+export interface GetGcodeFilesResponse {
+  files: GcodeFile[];
+  totalFiles: number;
+  totalSize: number;
 }
 
 // Job queue system

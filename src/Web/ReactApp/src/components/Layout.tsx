@@ -9,7 +9,8 @@ import {
   Users,
   Menu,
   X,
-  Box
+  Box,
+  FileText
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -43,6 +44,12 @@ const navigation: NavigationItem[] = [
     name: 'G-code Harvest', 
     href: '/harvest', 
     icon: Cog,
+    requiredPermission: { resource: 'gcode_harvest', action: 'read' }
+  },
+  { 
+    name: 'G-code Files', 
+    href: '/files', 
+    icon: FileText,
     requiredPermission: { resource: 'gcode_harvest', action: 'read' }
   },
   { 
