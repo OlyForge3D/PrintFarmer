@@ -2,7 +2,7 @@
   "name": "PrintFarmer (.NET 9 + Blazor WASM hosted)",
   "image": "mcr.microsoft.com/devcontainers/dotnet:9.0",
   "features": {
-    "ghcr.io/devcontainers/features/sqlite:1": {}
+    "ghcr.io/swift-server-community/swift-devcontainer-features/sqlite:1": {}
   },
   "customizations": {
     "vscode": {
