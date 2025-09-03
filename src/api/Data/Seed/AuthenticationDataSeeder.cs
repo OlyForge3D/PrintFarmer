@@ -1,5 +1,5 @@
+﻿using Farm.Web.Api.Domain;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Domain;
 
 namespace Farm.Web.Api.Data.Seed;
 
@@ -23,13 +23,13 @@ public static class AuthenticationDataSeeder
 
         // Seed Actions first
         await SeedActionsAsync(context);
-        
+
         // Seed Resources
         await SeedResourcesAsync(context);
-        
+
         // Seed Roles
         await SeedRolesAsync(context);
-        
+
         // Seed Role Permissions
         await SeedRolePermissionsAsync(context);
 
@@ -138,12 +138,12 @@ public static class AuthenticationDataSeeder
         {
             var allResources = await context.Resources.ToListAsync();
             var adminAction = await context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
-            
+
             if (adminAction != null)
             {
                 foreach (var resource in allResources)
                 {
-                    if (!await context.RolePermissions.AnyAsync(rp => 
+                    if (!await context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == adminRole.Id && rp.ResourceId == resource.Id && rp.ActionId == adminAction.Id))
                     {
                         context.RolePermissions.Add(new RolePermission
@@ -182,7 +182,7 @@ public static class AuthenticationDataSeeder
 
                 if (resource != null && action != null)
                 {
-                    if (!await context.RolePermissions.AnyAsync(rp => 
+                    if (!await context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == userRole.Id && rp.ResourceId == resource.Id && rp.ActionId == action.Id))
                     {
                         context.RolePermissions.Add(new RolePermission

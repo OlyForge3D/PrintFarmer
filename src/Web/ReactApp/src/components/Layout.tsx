@@ -8,7 +8,9 @@ import {
   Cog, 
   Users,
   Menu,
-  X
+  X,
+  Box,
+  FileText
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -33,9 +35,21 @@ const navigation: NavigationItem[] = [
     requiredPermission: { resource: 'printers', action: 'read' }
   },
   { 
+    name: '3D Models', 
+    href: '/models', 
+    icon: Box,
+    requiredPermission: { resource: 'models', action: 'read' }
+  },
+  { 
     name: 'G-code Harvest', 
     href: '/harvest', 
     icon: Cog,
+    requiredPermission: { resource: 'gcode_harvest', action: 'read' }
+  },
+  { 
+    name: 'G-code Files', 
+    href: '/files', 
+    icon: FileText,
     requiredPermission: { resource: 'gcode_harvest', action: 'read' }
   },
   { 

@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 
 namespace Farm.Web.Api.Infrastructure.Authorization;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public class RequirePermissionAttribute : Attribute, IAuthorizationRequirement
+public sealed class RequirePermissionAttribute : Attribute, IAuthorizationRequirement
 {
     public string Resource { get; }
     public string Action { get; }

@@ -1,5 +1,4 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -544,7 +543,7 @@ namespace Farm.Web.Api.api.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_Models_ManufacturerId_Name",
                 table: "Models",
-                columns: new[] { "ManufacturerId", "Name" },
+                columns: ["ManufacturerId", "Name"],
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -627,7 +626,7 @@ namespace Farm.Web.Api.api.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_RolePermissions_RoleId_ResourceId_ActionId",
                 table: "RolePermissions",
-                columns: new[] { "RoleId", "ResourceId", "ActionId" },
+                columns: ["RoleId", "ResourceId", "ActionId"],
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -669,7 +668,7 @@ namespace Farm.Web.Api.api.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_UserRoles_UserId_RoleId",
                 table: "UserRoles",
-                columns: new[] { "UserId", "RoleId" },
+                columns: ["UserId", "RoleId"],
                 unique: true);
 
             migrationBuilder.CreateIndex(

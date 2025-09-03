@@ -65,7 +65,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
           emailConfirmed: true,
           createdAt: new Date(),
           roles: ['farm_admin'],
-          permissions: ['printers:read', 'printers:create', 'printers:update', 'printers:delete', 'gcode_harvest:read']
+          permissions: [
+            'printers:read', 
+            'printers:create', 
+            'printers:update', 
+            'printers:delete', 
+            'gcode_harvest:read',
+            'gcode_harvest:create',
+            'gcode_harvest:execute',
+            'gcode_harvest:delete'
+          ]
         };
         
         localStorage.setItem('auth-token', 'mock-dev-token');
@@ -92,7 +101,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
           emailConfirmed: true,
           createdAt: new Date(),
           roles: ['farm_admin'],
-          permissions: ['printers:read', 'printers:create', 'printers:update', 'printers:delete', 'gcode_harvest:read']
+          permissions: [
+            'printers:read', 
+            'printers:create', 
+            'printers:update', 
+            'printers:delete', 
+            'gcode_harvest:read',
+            'gcode_harvest:create',
+            'gcode_harvest:execute',
+            'gcode_harvest:delete'
+          ]
         };
         
         setUser(mockUser);

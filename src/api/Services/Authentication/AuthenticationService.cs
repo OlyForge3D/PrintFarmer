@@ -1,11 +1,11 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Web.Api.Services.Authentication;
 
@@ -253,7 +253,9 @@ public class AuthenticationService : IAuthenticationService
             .FirstOrDefaultAsync(u => u.Id == userId);
 
         if (user == null)
+        {
             return null;
+        }
 
         var roles = user.UserRoles
             .Where(ur => ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
@@ -286,11 +288,11 @@ public class AuthenticationService : IAuthenticationService
     public async Task<bool> HasPermissionAsync(Guid userId, string resource, string action)
     {
         return await _context.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && 
+            .Where(ur => ur.UserId == userId && ur.IsActive &&
                         (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .SelectMany(ur => ur.Role.RolePermissions)
-            .AnyAsync(rp => rp.Granted && 
-                           rp.Resource.Name == resource && 
+            .AnyAsync(rp => rp.Granted &&
+                           rp.Resource.Name == resource &&
                            rp.Action.Name == action);
     }
 
@@ -308,10 +310,14 @@ public class AuthenticationService : IAuthenticationService
     {
         var user = await _context.Users.FindAsync(userId);
         if (user == null)
+        {
             return false;
+        }
 
         if (!_passwordHashing.VerifyPassword(currentPassword, user.PasswordHash))
+        {
             return false;
+        }
 
         user.PasswordHash = _passwordHashing.HashPassword(newPassword);
         user.UpdatedAt = DateTime.UtcNow;
@@ -329,7 +335,7 @@ public class AuthenticationService : IAuthenticationService
     private async Task<List<string>> GetUserRolesAsync(Guid userId)
     {
         return await _context.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && 
+            .Where(ur => ur.UserId == userId && ur.IsActive &&
                         (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .Select(ur => ur.Role.Name)
             .ToListAsync();
@@ -338,7 +344,7 @@ public class AuthenticationService : IAuthenticationService
     private async Task<List<(string Resource, string Action)>> GetUserPermissionsAsync(Guid userId)
     {
         return await _context.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && 
+            .Where(ur => ur.UserId == userId && ur.IsActive &&
                         (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .SelectMany(ur => ur.Role.RolePermissions)
             .Where(rp => rp.Granted)

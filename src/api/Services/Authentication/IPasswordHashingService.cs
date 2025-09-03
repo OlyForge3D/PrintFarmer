@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Authentication;
+﻿namespace Farm.Web.Api.Services.Authentication;
 
 public interface IPasswordHashingService
 {
