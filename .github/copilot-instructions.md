@@ -2,14 +2,14 @@
 
 ## Repository Summary
 
-**PrintFarmer** is a Blazor WebAssembly (standalone) dashboard for managing multiple 3D printers. It supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and provides live printer status via SignalR real-time updates.
+**PrintFarmer** is a React TypeScript dashboard for managing multiple 3D printers. It supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and provides live printer status via SignalR real-time updates.
 
-- **Language**: C# with .NET 9
-- **Framework**: ASP.NET Core API backend (separate) + Blazor WebAssembly frontend (standalone)
+- **Languages**: C# with .NET 9 (API), TypeScript with React 19 (Frontend)
+- **Framework**: ASP.NET Core API backend + React TypeScript frontend (migrated from Blazor WebAssembly)
 - **Database**: Multi-provider support (SQLite default, SQL Server, PostgreSQL, MySQL)
 - **Real-time**: SignalR hubs for live printer status
-- **Testing**: xUnit with integration tests using WebApplicationFactory
-- **Repository size**: ~81 source files (66 C#, 15 Razor), small-to-medium project
+- **Testing**: xUnit with integration tests (API), Vitest with React Testing Library (Frontend)
+- **Repository size**: Medium project with comprehensive React migration in progress
 
 **Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.**
 
@@ -18,7 +18,8 @@
 ⚠️ **CRITICAL**: Always run commands from the `/src` directory, not the repository root.
 
 ### Prerequisites
-- .NET SDK 9.0 or later (verified working with 9.0.304)
+- .NET SDK 9.0 or later (verified working with 9.0.304) - for API backend
+- Node.js 18+ and npm - for React frontend
 - Windows/macOS/Linux supported
 
 **CRITICAL**: If .NET 9 SDK is not installed, install it first:
@@ -33,21 +34,31 @@ export PATH="$HOME/.dotnet:$PATH"
 **Verify setup:**
 ```powershell
 dotnet --info
+node --version  # Should be 18+
+npm --version
 ```
 
 ### Bootstrap & Build Process
 
 **NEVER CANCEL builds or long-running commands. Set timeouts appropriately.**
 
-**1. Restore dependencies:**
+**1. Restore .NET dependencies:**
 ```powershell
 cd ./src
 dotnet restore ./farm-web.sln
 ```
 *Note: Restore takes ~41 seconds on first run. Set timeout to 120+ seconds.*
 
-**2. Build solution:**
+**2. Install React dependencies:**
 ```powershell
+cd ./src/Web/ReactApp
+npm install
+```
+*Note: npm install takes ~30-60 seconds. Set timeout to 120+ seconds.*
+
+**3. Build .NET solution:**
+```powershell
+cd ./src
 # Debug build (default for development)
 dotnet build ./farm-web.sln -c Debug
 
@@ -56,21 +67,40 @@ dotnet build ./farm-web.sln -c Release
 ```
 *Note: Debug build takes ~83 seconds. Set timeout to 150+ seconds.*
 
-**3. Run tests:**
+**4. Build React application:**
 ```powershell
-dotnet test ./farm-web.sln -c Debug
+cd ./src/Web/ReactApp
+npm run build
 ```
-*Note: Tests take ~11 seconds and run 62 integration tests. Set timeout to 60+ seconds. NEVER CANCEL.*
+*Note: React build takes ~20-40 seconds. Set timeout to 90+ seconds.*
 
-**4. Format code:**
+**5. Run tests:**
 ```powershell
-dotnet format ./farm-web.sln
+# .NET API tests
+cd ./src
+dotnet test ./farm-web.sln -c Debug
+
+# React tests
+cd ./src/Web/ReactApp
+npm test
 ```
-*Note: Formatting takes ~80 seconds. Set timeout to 150+ seconds.*
+*Note: .NET tests take ~11 seconds for 62 tests. React tests are fast. Set timeout to 60+ seconds each.*
+
+**6. Format code:**
+```powershell
+# .NET formatting
+cd ./src
+dotnet format ./farm-web.sln
+
+# React linting
+cd ./src/Web/ReactApp
+npm run lint
+```
+*Note: .NET formatting takes ~80 seconds. React linting is fast. Set timeout to 150+ seconds.*
 
 ### Running the Application
 
-**CRITICAL**: This is a two-tier architecture - API backend + separate Blazor WebAssembly frontend.
+**CRITICAL**: This is a two-tier architecture - API backend + separate React TypeScript frontend.
 
 **API Server (Backend):**
 ```powershell
@@ -83,24 +113,25 @@ dotnet run --project ./api/Farm.Web.Api.csproj
 - API endpoints available at http://localhost:5245/api/*
 - Basic health at http://localhost:5245/healthz
 
-**Blazor Client (Frontend) - Run separately:**
+**React Client (Frontend) - Run separately:**
 ```powershell
-cd ./src
-dotnet run --project ./client/Farm.Web.Client.csproj
+cd ./src/Web/ReactApp
+npm run dev
 ```
-- Client starts at http://localhost:5000
-- Serves the Blazor WebAssembly application
+- Client starts at http://localhost:3000 (default Vite dev server)
+- Serves the React TypeScript application
 - Connects to API at http://localhost:5245
+- Hot reload enabled for fast development
 
 **Hot reload for active development:**
 ```powershell
-# API server
+# API server (Terminal 1)
 cd ./src
 dotnet watch --project ./api/Farm.Web.Api.csproj run
 
-# Client (separate terminal)
-cd ./src
-dotnet watch --project ./client/Farm.Web.Client.csproj run
+# React client (Terminal 2)
+cd ./src/Web/ReactApp
+npm run dev
 ```
 
 ### Validation Scenarios
@@ -125,9 +156,9 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
    # Should return detailed health status JSON
    ```
 
-4. **Client Application:**
+4. **React Client Application:**
    ```bash
-   curl -s http://localhost:5000/ | head -5
+   curl -s http://localhost:3000/ | head -5
    # Should return HTML with <!DOCTYPE html> and PrintFarmer title
    ```
 
@@ -139,9 +170,9 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 
 **Manual Testing Workflow:**
 1. Start API server: `dotnet run --project ./api/Farm.Web.Api.csproj`
-2. Start client: `dotnet run --project ./client/Farm.Web.Client.csproj`
+2. Start React client: `cd ./src/Web/ReactApp && npm run dev`
 3. Verify API health: `curl http://localhost:5245/healthz`
-4. Verify client: `curl http://localhost:5000/`
+4. Verify React client: `curl http://localhost:3000/`
 5. Test SignalR hub connection and printer status updates
 
 ### Common Build Issues & Solutions
@@ -165,17 +196,18 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 
 ## Project Architecture & Layout
 
-**IMPORTANT**: This is NOT a "hosted" Blazor WebAssembly project. It's a separate API + client architecture.
+**IMPORTANT**: This is a separate API + React frontend architecture (migrated from Blazor WebAssembly).
 
 ```
 /
-├── CONTRIBUTING.md          # Detailed contributor guidelines (NOTE: Contains outdated references to "server/")
-├── README.md               # Basic project overview (NOTE: Contains outdated references)
+├── CONTRIBUTING.md          # Detailed contributor guidelines
+├── README.md               # Basic project overview
+├── REACT_MIGRATION_README.md # Comprehensive React migration plan and documentation
 ├── global.json             # .NET SDK version (9.0.302)
 ├── docker-compose.yml      # Multi-container deployment
 ├── test-providers.sh       # Database provider testing script
 └── src/                    # ⚠️ WORKING DIRECTORY FOR ALL COMMANDS
-    ├── farm-web.sln        # Solution file
+    ├── farm-web.sln        # .NET Solution file
     ├── api/                # ASP.NET Core API server (STANDALONE backend)
     │   ├── Controllers/    # REST API controllers
     │   ├── Services/       # Background services, HTTP clients
@@ -185,18 +217,27 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
     │   ├── Properties/launchSettings.json  # Launch configuration (ports 5245/7281)
     │   ├── appsettings.json # App configuration
     │   └── Program.cs      # Server entry point + startup (API-only, no static files)
-    ├── client/             # Blazor WebAssembly client (STANDALONE frontend)
-    │   ├── Pages/          # Razor pages/components
-    │   ├── Services/       # Client-side services
-    │   ├── wwwroot/        # Static assets (CSS, JS, icons)
-    │   └── Program.cs      # Client entry point
+    ├── Web/                # React frontend applications
+    │   └── ReactApp/       # React TypeScript application (NEW - replaces Blazor client)
+    │       ├── src/
+    │       │   ├── components/      # React components
+    │       │   ├── contexts/        # React contexts (Auth, etc.)
+    │       │   ├── pages/           # Page components
+    │       │   ├── services/        # API clients and services
+    │       │   ├── types/           # TypeScript type definitions
+    │       │   └── utils/           # Utility functions
+    │       ├── public/              # Static assets
+    │       ├── package.json         # npm dependencies and scripts
+    │       ├── vite.config.ts       # Vite configuration
+    │       └── tsconfig.json        # TypeScript configuration
+    ├── client/             # Blazor WebAssembly client (LEGACY - being replaced by React)
     ├── shared/             # DTOs and models shared between client/server
     ├── tests/              # Integration tests
     │   └── Farm.Web.Api.Tests/
     └── tools/IconGen/      # Utility tool for icon generation
 ```
 
-**Architecture Note:** Some documentation (README.md, CONTRIBUTING.md) still references a "server/" directory and describes this as a "hosted" Blazor app. This is outdated - the current structure uses separate "api/" (backend) and "client/" (frontend) projects that run independently.
+**Migration Status:** The project is actively migrating from Blazor WebAssembly to React TypeScript. The new React application is in `src/Web/ReactApp/` and follows modern React development practices with Vite, TypeScript, and comprehensive tooling.
 
 ### Key Architectural Components
 
@@ -209,14 +250,17 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 - **Network Discovery**: Hostname resolution and IP normalization
 
 **Client Architecture:**
-- **Blazor WebAssembly**: Standalone SPA that runs in browser
-- **Pages**: Razor components for UI (Printers management, etc.)
-- **SignalR Client**: Connects to API server hubs for real-time updates
-- **Configuration**: Loads API base URL from appsettings.json
+- **React TypeScript**: Modern frontend with Vite build tool and hot reload
+- **Components**: Modular React components for UI (Printer management, Dashboard, etc.)
+- **SignalR Client**: Connects to API server hubs for real-time updates using @microsoft/signalr
+- **State Management**: React Query for server state, React Context for application state
+- **Styling**: Tailwind CSS with modern responsive design
+- **Configuration**: Vite configuration for development and production builds
+- **Testing**: Vitest with React Testing Library for component testing
 
 **Data Flow:**
-1. Client UI (http://localhost:5000) → Server API (http://localhost:5245) → Database (CRUD operations)
-2. Server Background Service → External Printer APIs → SignalR Hub → Client (real-time status)
+1. React UI (http://localhost:3000) → Server API (http://localhost:5245) → Database (CRUD operations)
+2. Server Background Service → External Printer APIs → SignalR Hub → React Client (real-time status)
 
 **Database Providers:**
 - **SQLite** (default): File-based, no setup required
@@ -235,13 +279,23 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 
 ### Dependencies & External Services
 
-**Key NuGet Packages:**
+**Key NuGet Packages (.NET API):**
 - `Microsoft.EntityFrameworkCore.Sqlite/.SqlServer/.Postgres/.MySql` - Multi-database ORM
 - `Microsoft.AspNetCore.SignalR` - Real-time communication
 - `Refit.HttpClientFactory` - HTTP API clients
-- `Microsoft.AspNetCore.Components.WebAssembly` - Blazor hosting
 - `FluentValidation.AspNetCore` - Input validation
 - `xunit`, `FluentAssertions`, `Microsoft.AspNetCore.Mvc.Testing` - Testing
+
+**Key npm Packages (React Frontend):**
+- `react` & `react-dom` - React framework
+- `@microsoft/signalr` - Real-time SignalR client
+- `@tanstack/react-query` - Server state management
+- `axios` - HTTP client for API communication
+- `react-router-dom` - Client-side routing
+- `tailwindcss` - Utility-first CSS framework
+- `react-hook-form` & `zod` - Form handling and validation
+- `vite` - Build tool and dev server
+- `vitest` & `@testing-library/react` - Testing framework
 
 **External APIs:**
 - Moonraker API (Klipper 3D printer firmware)
@@ -256,30 +310,35 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 3. Code formatted: `dotnet format ./farm-web.sln`
 
 **Test Structure:**
-- Integration tests in `src/tests/Farm.Web.Api.Tests/`
-- Uses `CustomWebApplicationFactory` for testing
+- **API Integration tests** in `src/tests/Farm.Web.Api.Tests/`
+- **React component tests** in `src/Web/ReactApp/src/test/`
+- Uses `CustomWebApplicationFactory` for API testing
+- Uses Vitest and React Testing Library for frontend testing
 - Tests API endpoints, database operations, and health checks
 - Tests run against temporary SQLite database (in-memory)
-- Total: 62 tests covering core functionality (verified working)
+- Total: 62 API tests covering core functionality (verified working)
 
 **Manual Verification:**
 1. API server starts successfully at http://localhost:5245 (Development profile)
-2. Client starts successfully at http://localhost:5000 (Development profile)  
+2. React client starts successfully at http://localhost:3000 (Vite dev server)
 3. Health check endpoints respond:
    - http://localhost:5245/health (comprehensive)
    - http://localhost:5245/healthz (basic)
 4. API endpoints accessible (e.g., http://localhost:5245/api/printers)
-5. Client serves Blazor WebAssembly app with PrintFarmer title
+5. React client serves modern TypeScript application with PrintFarmer title
 6. Database initializes automatically (creates `farm.db` file)
 7. Application seeds default manufacturers and printer models on first run
 8. SignalR hub available at http://localhost:5245/hubs/printers
+9. React client connects to SignalR for real-time updates
 
 ## Development Guidelines
 
 **Code Style:**
-- C#: PascalCase for types/members, camelCase for locals/parameters
-- Follow conventional .NET patterns
-- Run `dotnet format` before committing
+- **C# (.NET API)**: PascalCase for types/members, camelCase for locals/parameters
+- **TypeScript (React)**: camelCase for variables/functions, PascalCase for components/types
+- Follow conventional .NET patterns for API code
+- Follow React and TypeScript best practices for frontend code
+- Run `dotnet format` for .NET code and `npm run lint` for React code before committing
 
 **Entity Framework:**
 - Migrations are applied automatically on startup
@@ -294,6 +353,8 @@ dotnet watch --project ./client/Farm.Web.Client.csproj run
 - Real-time updates flow: External API → Background Service → Hub → Clients
 
 **File Organization:**
+- **API Backend (src/api/)**: Controllers, Services, Hubs, Data models
+- **React Frontend (src/Web/ReactApp/)**: Components, pages, contexts, services, types
 - Controllers: Handle HTTP API requests (PrintersController, CatalogController, SpoolmanController)
 - Services: Business logic and external API integration (MoonrakerClient, PrusaLinkClient, etc.)
 - Hubs: SignalR real-time communication (PrinterHub)
@@ -331,11 +392,15 @@ These instructions have been thoroughly tested and validated with .NET 9.0.302. 
 | Command | Typical Time | Minimum Timeout | Notes |
 |---------|--------------|-----------------|-------|
 | `dotnet restore ./farm-web.sln` | ~41 seconds | 120 seconds | First run downloads packages |
+| `npm install` (React dependencies) | ~30-60 seconds | 120 seconds | Downloads React packages |
 | `dotnet build ./farm-web.sln -c Debug` | ~83 seconds | 150 seconds | Includes compilation warnings |
+| `npm run build` (React production build) | ~20-40 seconds | 90 seconds | Vite optimized build |
 | `dotnet test ./farm-web.sln -c Debug` | ~11 seconds | 60 seconds | Runs 62 integration tests |
-| `dotnet format ./farm-web.sln` | ~80 seconds | 150 seconds | Formats entire solution |
+| `npm test` (React tests) | ~5-10 seconds | 30 seconds | Vitest component tests |
+| `dotnet format ./farm-web.sln` | ~80 seconds | 150 seconds | Formats entire .NET solution |
+| `npm run lint` (React linting) | ~5-10 seconds | 30 seconds | ESLint checks |
 | API server startup | ~15 seconds | 60 seconds | Database initialization |
-| Client startup | ~10 seconds | 30 seconds | Blazor WebAssembly build |
+| React dev server startup | ~5-10 seconds | 30 seconds | Vite development server |
 
 **CRITICAL WARNINGS:**
 - **NEVER CANCEL** commands that appear to hang - they are processing
@@ -351,34 +416,55 @@ These instructions have been thoroughly tested and validated with .NET 9.0.302. 
 # 1. Ensure .NET 9.0.302 is installed
 dotnet --info  # Should show 9.0.302
 
-# 2. Navigate to working directory
+# 2. Ensure Node.js 18+ is installed
+node --version  # Should be 18+
+npm --version
+
+# 3. Navigate to working directory
 cd ./src
 
-# 3. Restore dependencies (41 seconds, set timeout 120+)
+# 4. Restore .NET dependencies (41 seconds, set timeout 120+)
 dotnet restore ./farm-web.sln
 
-# 4. Build solution (83 seconds, set timeout 150+)
+# 5. Install React dependencies (30-60 seconds, set timeout 120+)
+cd ./Web/ReactApp
+npm install
+cd ../../
+
+# 6. Build .NET solution (83 seconds, set timeout 150+)
 dotnet build ./farm-web.sln -c Debug
 
-# 5. Run tests (11 seconds, set timeout 60+)
+# 7. Build React application (20-40 seconds, set timeout 90+)
+cd ./Web/ReactApp
+npm run build
+cd ../../
+
+# 8. Run .NET tests (11 seconds, set timeout 60+)
 dotnet test ./farm-web.sln -c Debug
 
-# 6. Format code (80 seconds, set timeout 150+)
-dotnet format ./farm-web.sln
+# 9. Run React tests (fast, set timeout 30+)
+cd ./Web/ReactApp
+npm test
+cd ../../
 
-# 7. Start API server (separate terminal)
+# 10. Format code (80+ seconds, set timeout 150+)
+dotnet format ./farm-web.sln
+cd ./Web/ReactApp && npm run lint && cd ../../
+
+# 11. Start API server (Terminal 1)
 dotnet run --project ./api/Farm.Web.Api.csproj
 # Wait for: "Now listening on: http://localhost:5245"
 
-# 8. Start client (separate terminal)
-dotnet run --project ./client/Farm.Web.Client.csproj
-# Wait for: "Now listening on: http://localhost:5000"
+# 12. Start React client (Terminal 2)
+cd ./Web/ReactApp
+npm run dev
+# Wait for: "Local: http://localhost:3000/"
 
-# 9. Validate everything works
+# 13. Validate everything works
 curl -s http://localhost:5245/healthz        # Should return: {"status":"ok"}
 curl -s http://localhost:5245/api/printers   # Should return: []
-curl -s http://localhost:5000/ | head -5     # Should show HTML with PrintFarmer
+curl -s http://localhost:3000/ | head -5     # Should show HTML with PrintFarmer
 curl -s http://localhost:5245/api/catalog/manufacturers | jq length  # Should return: 8
 ```
 
-**Expected total time for fresh setup:** ~3-4 minutes (excluding .NET SDK installation)
+**Expected total time for fresh setup:** ~4-5 minutes (excluding .NET SDK and Node.js installation)
