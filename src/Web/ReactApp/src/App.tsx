@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 import { Layout } from '@/components/Layout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { AuthProvider } from '@/contexts/AuthContext';
 import './App.css';
 
 // Create a query client for React Query
@@ -30,18 +31,21 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <Router>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<PrinterDashboard />} />
-              <Route path="/printers" element={<PrinterDashboard />} />
-              {/* Add more routes as needed */}
-            </Routes>
-          </Layout>
-        </Router>
-        <ReactQueryDevtools initialIsOpen={false} />
-      </QueryClientProvider>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <Router>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<PrinterDashboard />} />
+                <Route path="/dashboard" element={<PrinterDashboard />} />
+                <Route path="/printers" element={<PrinterDashboard />} />
+                {/* Add more routes as needed */}
+              </Routes>
+            </Layout>
+          </Router>
+          <ReactQueryDevtools initialIsOpen={false} />
+        </QueryClientProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
