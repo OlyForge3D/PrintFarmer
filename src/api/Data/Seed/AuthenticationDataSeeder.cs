@@ -129,6 +129,9 @@ public static class AuthenticationDataSeeder
 
     private static async Task SeedRolePermissionsAsync(AppDbContext context)
     {
+        // Ensure all roles, resources, and actions are saved first
+        await context.SaveChangesAsync();
+
         // Get the admin role - admins get all permissions
         var adminRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole != null)
