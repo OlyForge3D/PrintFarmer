@@ -108,9 +108,21 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         dto!.Name.Should().Be("itest-sdcp");
         dto.Backend.Should().Be(Farm.Web.Shared.PrinterBackend.SDCP);
 
-        // Test camera URL endpoint (should not fail even if camera is not available)
+        // Mock SDCP camera endpoints to return URLs
+        _factory.MockSdcpClient
+            .Setup(x => x.GetCameraUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("http://192.168.1.100:8080/video");
+        _factory.MockSdcpClient
+            .Setup(x => x.GetCameraSnapshotUrlAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("http://192.168.1.100:8080/snapshot");
+
+        // Test camera URL endpoint returns typed JSON
         var cameraUrl = await client.GetAsync($"/api/printers/{dto.Id}/camera/url");
         cameraUrl.IsSuccessStatusCode.Should().BeTrue();
+        var cam = await cameraUrl.Content.ReadFromJsonAsync<CameraUrlResultDto>();
+        cam.Should().NotBeNull();
+        cam!.StreamUrl.Should().EndWith("/video");
+        cam.SnapshotUrl.Should().EndWith("/snapshot");
 
         // Test print control endpoints (will fail to connect but should not crash)
         var pauseResult = await client.PostAsync($"/api/printers/{dto.Id}/pause", null);
@@ -205,3 +217,5 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
 
     private record HealthzDto(string status);
 }
+
+internal sealed record CameraUrlResultDto(string? StreamUrl, string? SnapshotUrl);

@@ -204,6 +204,12 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         }
     }
 
+    public Task<PrinterStatus> GetStatusAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetStatusAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<PrinterJob> GetJobAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -263,6 +269,12 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         {
             return new PrinterJob(null, null, null, null);
         }
+    }
+
+    public Task<PrinterJob> GetJobAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetJobAsync(baseUrl.ToString(), ct);
     }
 
     public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -372,10 +384,23 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         }
     }
 
+    public Task<PrinterCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCompositeStatusAsync(baseUrl.ToString(), ct);
+    }
+
     // Print control methods
     public async Task<bool> StartPrintAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, 128, new { Filename = filename, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
+    }
+
+    public Task<bool> StartPrintAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return StartPrintAsync(baseUrl.ToString(), filename, ct);
     }
 
     public async Task<bool> PausePrintAsync(string baseUrl, CancellationToken ct = default)
@@ -383,14 +408,32 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         return await SendCommandAsync(baseUrl, 129, new { }, ct);
     }
 
+    public Task<bool> PausePrintAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return PausePrintAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, 130, new { }, ct);
     }
 
+    public Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return CancelPrintAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<bool> ResumePrintAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, 131, new { }, ct);
+    }
+
+    public Task<bool> ResumePrintAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return ResumePrintAsync(baseUrl.ToString(), ct);
     }
 
     // Camera control methods
@@ -399,7 +442,14 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         try
         {
             // SDCP cameras are typically accessible via HTTP streaming
-            var cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:8080/video";
+            var baseUri = new Uri(NormalizeBaseUrl(baseUrl, 80));
+            var cameraUri = new UriBuilder
+            {
+                Scheme = Uri.UriSchemeHttp,
+                Host = baseUri.Host,
+                Port = 8080,
+                Path = "/video"
+            }.Uri;
 
             // Test if camera stream is available
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -407,30 +457,42 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
 
             try
             {
-                using var response = await httpClient.GetAsync(cameraUrl, cts.Token);
+                using var response = await httpClient.GetAsync(cameraUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    return cameraUrl;
+                    return cameraUri.ToString();
                 }
             }
             catch (HttpRequestException)
             {
                 // Try alternative port
-                cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/video";
-                using var response = await httpClient.GetAsync(cameraUrl, cts.Token);
+                cameraUri = new UriBuilder
+                {
+                    Scheme = Uri.UriSchemeHttp,
+                    Host = baseUri.Host,
+                    Port = 3030,
+                    Path = "/video"
+                }.Uri;
+                using var response = await httpClient.GetAsync(cameraUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    return cameraUrl;
+                    return cameraUri.ToString();
                 }
             }
             catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
             {
                 // Timeout trying first port, try alternative port
-                cameraUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/video";
-                using var response = await httpClient.GetAsync(cameraUrl, cts.Token);
+                cameraUri = new UriBuilder
+                {
+                    Scheme = Uri.UriSchemeHttp,
+                    Host = baseUri.Host,
+                    Port = 3030,
+                    Path = "/video"
+                }.Uri;
+                using var response = await httpClient.GetAsync(cameraUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    return cameraUrl;
+                    return cameraUri.ToString();
                 }
             }
         }
@@ -446,12 +508,25 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         return null;
     }
 
+    public Task<string?> GetCameraUrlAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCameraUrlAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, CancellationToken ct = default)
     {
         try
         {
             // SDCP camera snapshots are typically available via HTTP
-            var snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:8080/snapshot";
+            var baseUri = new Uri(NormalizeBaseUrl(baseUrl, 80));
+            var snapshotUri = new UriBuilder
+            {
+                Scheme = Uri.UriSchemeHttp,
+                Host = baseUri.Host,
+                Port = 8080,
+                Path = "/snapshot"
+            }.Uri;
 
             // Test if snapshot endpoint is available
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -459,30 +534,42 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
 
             try
             {
-                using var response = await httpClient.GetAsync(snapshotUrl, cts.Token);
+                using var response = await httpClient.GetAsync(snapshotUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    return snapshotUrl;
+                    return snapshotUri.ToString();
                 }
             }
             catch (HttpRequestException)
             {
                 // Try alternative port
-                snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/snapshot";
-                using var response = await httpClient.GetAsync(snapshotUrl, cts.Token);
+                snapshotUri = new UriBuilder
+                {
+                    Scheme = Uri.UriSchemeHttp,
+                    Host = baseUri.Host,
+                    Port = 3030,
+                    Path = "/snapshot"
+                }.Uri;
+                using var response = await httpClient.GetAsync(snapshotUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    return snapshotUrl;
+                    return snapshotUri.ToString();
                 }
             }
             catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
             {
                 // Timeout trying first port, try alternative port
-                snapshotUrl = $"http://{GetHostFromUrl(baseUrl)}:3030/snapshot";
-                using var response = await httpClient.GetAsync(snapshotUrl, cts.Token);
+                snapshotUri = new UriBuilder
+                {
+                    Scheme = Uri.UriSchemeHttp,
+                    Host = baseUri.Host,
+                    Port = 3030,
+                    Path = "/snapshot"
+                }.Uri;
+                using var response = await httpClient.GetAsync(snapshotUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    return snapshotUrl;
+                    return snapshotUri.ToString();
                 }
             }
         }
@@ -498,14 +585,32 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         return null;
     }
 
+    public Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCameraSnapshotUrlAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<bool> EnableCameraAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, 386, new { Enable = 1 }, ct);
     }
 
+    public Task<bool> EnableCameraAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return EnableCameraAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<bool> DisableCameraAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, 386, new { Enable = 0 }, ct);
+    }
+
+    public Task<bool> DisableCameraAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return DisableCameraAsync(baseUrl.ToString(), ct);
     }
 
     // File management methods
@@ -557,6 +662,12 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         {
             return [];
         }
+    }
+
+    public Task<string[]> GetFileListAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetFileListAsync(baseUrl.ToString(), ct);
     }
 
     private static async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
@@ -618,8 +729,15 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         // SDCP WebSocket is available at ws://ip/websocket
         var normalizedUrl = NormalizeBaseUrl(baseUrl, 80);
         var uri = new Uri(normalizedUrl);
-        var wsScheme = uri.Scheme == "https" ? "wss" : "ws";
-        return $"{wsScheme}://{uri.Host}:{uri.Port}/websocket";
+        var isSecure = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        var ub = new UriBuilder
+        {
+            Scheme = isSecure ? "wss" : "ws",
+            Host = uri.Host,
+            Port = uri.Port,
+            Path = "/websocket"
+        };
+        return ub.Uri.ToString();
     }
 
     // File upload and management methods
@@ -633,20 +751,34 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
             // SDCP file upload is typically done via HTTP POST to a specific endpoint
             // This implementation assumes a standard HTTP file upload endpoint
             var host = GetHostFromUrl(baseUrl);
-            var uploadUrl = $"http://{host}/api/upload"; // Common SDCP upload endpoint
+            var uploadUri = new UriBuilder
+            {
+                Scheme = Uri.UriSchemeHttp,
+                Host = host,
+                Port = -1, // preserve default port formatting (no explicit port)
+                Path = "/api/upload"
+            }.Uri; // Common SDCP upload endpoint
 
             using var formContent = new MultipartFormDataContent();
             using var streamContent = new StreamContent(fileContent);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
 
-            using var resp = await httpClient.PostAsync(uploadUrl, formContent, cts.Token);
+            using var resp = await httpClient.PostAsync(uploadUri, formContent, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
         {
             return false;
         }
+    }
+
+    public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(fileName);
+        ArgumentNullException.ThrowIfNull(fileContent);
+        return UploadGcodeAsync(baseUrl.ToString(), fileName, fileContent, ct);
     }
 
     // The existing StartPrintAsync method already handles starting prints for SDCP
