@@ -13,7 +13,12 @@ import {
   GcodeFile,
   GcodeHarvestOperation,
   JobQueuePrintJob,
-  ApiError 
+  ApiError,
+  LoginRequest,
+  RegisterRequest,
+  AuthenticationResult,
+  UserDto,
+  DiscoveredPrinterDto 
 } from '@/types/api';
 
 export class ApiClient {
@@ -80,6 +85,11 @@ export class ApiClient {
 
   async deletePrinter(id: string): Promise<void> {
     await this.client.delete(`/printers/${id}`);
+  }
+
+  async discoverPrinters(): Promise<DiscoveredPrinterDto[]> {
+    const response = await this.client.get<DiscoveredPrinterDto[]>('/printers/discover');
+    return response.data;
   }
 
   // ============ Catalog API methods ============
@@ -229,6 +239,27 @@ export class ApiClient {
   async getBasicHealth(): Promise<{ status: string }> {
     const response = await this.client.get<{ status: string }>('/healthz');
     return response.data;
+  }
+
+  // ============ Authentication API methods ============
+
+  async login(credentials: LoginRequest): Promise<AuthenticationResult> {
+    const response = await this.client.post<AuthenticationResult>('/auth/login', credentials);
+    return response.data;
+  }
+
+  async register(userData: RegisterRequest): Promise<AuthenticationResult> {
+    const response = await this.client.post<AuthenticationResult>('/auth/register', userData);
+    return response.data;
+  }
+
+  async getCurrentUser(): Promise<UserDto> {
+    const response = await this.client.get<UserDto>('/auth/me');
+    return response.data;
+  }
+
+  async logout(): Promise<void> {
+    await this.client.post('/auth/logout');
   }
 
   // ============ Generic request method ============

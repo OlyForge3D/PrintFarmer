@@ -304,3 +304,51 @@ export interface ApiError {
   details?: string;
   statusCode: number;
 }
+
+// Authentication types
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface AuthenticationResult {
+  success: boolean;
+  token?: string;
+  expiresAt?: Date;
+  user?: UserDto;
+  error?: string;
+}
+
+export interface UserDto {
+  id: string;
+  username: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  isActive: boolean;
+  emailConfirmed: boolean;
+  lastLogin?: Date;
+  createdAt: Date;
+  roles: string[];
+  permissions: string[];
+}
+
+export interface DiscoveredPrinterDto {
+  ipAddress: string;
+  port: number;
+  serverUrl: string;
+  backend: PrinterBackend;
+  name: string;
+  manufacturer?: string;
+  model?: string;
+  firmware?: string;
+  version?: string;
+}

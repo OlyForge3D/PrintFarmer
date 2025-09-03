@@ -1,42 +1,60 @@
 import { PrinterBackend } from '@/types/api';
 import type { Printer } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { useAuth } from '@/contexts/AuthContext';
+import { 
+  MoreVertical,
+  Cog,
+  Play,
+  Pause,
+  Square as StopIcon 
+} from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 
 interface PrinterCardProps {
   printer: Printer;
+  viewMode?: 'grid' | 'list';
 }
 
-export function PrinterCard({ printer }: PrinterCardProps) {
+export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
+  const { hasPermission } = useAuth();
   const { getPrinterStatus } = usePrinterStatusUpdates();
   const realtimeStatus = getPrinterStatus(printer.id);
 
   // Use realtime status if available, otherwise use the printer data
-  const currentStatus = realtimeStatus || {
-    isOnline: printer.isOnline,
-    state: printer.state,
-    progress: printer.progress,
-    jobName: printer.jobName,
-    hotendTemp: printer.hotendTemp,
-    bedTemp: printer.bedTemp,
-    hotendTarget: printer.hotendTarget,
-    bedTarget: printer.bedTarget,
+  const currentStatus = {
+    isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
+    state: realtimeStatus?.state ?? printer.state,
+    progress: realtimeStatus?.progress ?? printer.progress,
+    jobName: realtimeStatus?.jobName ?? printer.jobName,
+    hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
+    bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
+    hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
+    bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
+    x: realtimeStatus?.x ?? printer.x,
+    y: realtimeStatus?.y ?? printer.y,
+    z: realtimeStatus?.z ?? printer.z,
+    cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
+    cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
+    thumbnailUrl: realtimeStatus?.thumbnailUrl ?? printer.thumbnailUrl,
   };
 
   const getStatusColor = (isOnline: boolean, state?: string) => {
-    if (!isOnline) return 'bg-gray-100 text-gray-800';
+    if (!isOnline) return 'bg-gray-100 text-gray-800 border-gray-300';
     
     switch (state?.toLowerCase()) {
       case 'printing':
-        return 'bg-green-100 text-green-800';
+        return 'bg-green-100 text-green-800 border-green-300';
       case 'paused':
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
       case 'error':
-        return 'bg-red-100 text-red-800';
+        return 'bg-red-100 text-red-800 border-red-300';
       case 'ready':
       case 'idle':
-        return 'bg-blue-100 text-blue-800';
+      case 'operational':
+        return 'bg-blue-100 text-blue-800 border-blue-300';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-gray-100 text-gray-800 border-gray-300';
     }
   };
 
@@ -53,57 +71,187 @@ export function PrinterCard({ printer }: PrinterCardProps) {
     }
   };
 
-  return (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
-      {/* Header */}
-      <div className="px-4 py-5 sm:p-6">
+  const formatTemperature = (temp?: number, target?: number) => {
+    if (temp === undefined && target === undefined) return null;
+    
+    if (target !== undefined) {
+      return `${Math.round(temp || 0)}°/${Math.round(target)}°`;
+    }
+    return `${Math.round(temp || 0)}°`;
+  };
+
+  const formatPosition = (x?: number, y?: number, z?: number) => {
+    const coords = [];
+    if (x !== undefined) coords.push(`X${x.toFixed(1)}`);
+    if (y !== undefined) coords.push(`Y${y.toFixed(1)}`);
+    if (z !== undefined) coords.push(`Z${z.toFixed(1)}`);
+    return coords.length > 0 ? coords.join(' ') : null;
+  };
+
+  if (viewMode === 'list') {
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
         <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <span className="text-2xl mr-3">{getBackendIcon(printer.backend)}</span>
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">
-                {printer.name}
-              </h3>
-              <p className="text-sm text-gray-500">
-                {printer.manufacturerName} {printer.modelName}
+          {/* Left: Basic Info */}
+          <div className="flex items-center space-x-4 min-w-0 flex-1">
+            <div className="flex-shrink-0">
+              <span className="text-2xl">{getBackendIcon(printer.backend)}</span>
+            </div>
+            
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center space-x-2">
+                <h3 className="text-lg font-medium text-gray-900 truncate">
+                  {printer.name}
+                </h3>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+                  {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
+                </span>
+              </div>
+              <p className="text-sm text-gray-500 truncate">
+                {printer.manufacturerName} {printer.modelName} • {printer.ipAddress}
               </p>
             </div>
           </div>
-          
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
-            {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
-          </span>
+
+          {/* Center: Status Info */}
+          <div className="hidden md:flex items-center space-x-6 flex-shrink-0">
+            {/* Progress */}
+            {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
+              <div className="text-center">
+                <div className="text-xs text-gray-500">Progress</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {Math.round(currentStatus.progress)}%
+                </div>
+              </div>
+            )}
+
+            {/* Temperatures */}
+            {currentStatus.isOnline && (currentStatus.hotendTemp || currentStatus.bedTemp) && (
+              <div className="text-center">
+                <div className="text-xs text-gray-500">Temps</div>
+                <div className="text-sm font-medium text-gray-900">
+                  {[
+                    currentStatus.hotendTemp && `H${formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}`,
+                    currentStatus.bedTemp && `B${formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}`
+                  ].filter(Boolean).join(' ')}
+                </div>
+              </div>
+            )}
+
+            {/* Position */}
+            {currentStatus.isOnline && formatPosition(currentStatus.x, currentStatus.y, currentStatus.z) && (
+              <div className="text-center">
+                <div className="text-xs text-gray-500">Position</div>
+                <div className="text-sm font-medium text-gray-900">
+                  {formatPosition(currentStatus.x, currentStatus.y, currentStatus.z)}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            {hasPermission('printers', 'execute') && currentStatus.isOnline && (
+              <>
+                {currentStatus.state === 'printing' && (
+                  <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                    <Pause className="h-4 w-4" />
+                  </button>
+                )}
+                {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
+                  <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                    <Play className="h-4 w-4" />
+                  </button>
+                )}
+                <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                  <StopIcon className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            
+            {hasPermission('printers', 'update') && (
+              <button className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                <Cog className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Progress Bar */}
+        {/* Progress bar for list view */}
         {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
-          <div className="mt-4">
+          <div className="mt-3 pt-3 border-t border-gray-100">
             <div className="flex justify-between text-sm text-gray-600 mb-1">
-              <span>{currentStatus.jobName || 'Printing...'}</span>
+              <span className="truncate">{currentStatus.jobName || 'Printing...'}</span>
               <span>{Math.round(currentStatus.progress)}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div
                 className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${currentStatus.progress}%` }}
-              ></div>
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Grid view (default)
+  return (
+    <div className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow">
+      {/* Header */}
+      <div className="px-4 py-5 sm:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center min-w-0 flex-1">
+            <span className="text-2xl mr-3 flex-shrink-0">{getBackendIcon(printer.backend)}</span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-medium text-gray-900 truncate">
+                {printer.name}
+              </h3>
+              <p className="text-sm text-gray-500 truncate">
+                {printer.manufacturerName} {printer.modelName}
+              </p>
+            </div>
+          </div>
+          
+          {hasPermission('printers', 'update') && (
+            <button className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors">
+              <MoreVertical className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status Badge */}
+        <div className="mb-3">
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+            {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
+          </span>
+        </div>
+
+        {/* Progress Bar */}
+        {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
+          <div className="mb-4">
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span className="truncate">{currentStatus.jobName || 'Printing...'}</span>
+              <span>{Math.round(currentStatus.progress)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${currentStatus.progress}%` }}
+              />
             </div>
           </div>
         )}
 
         {/* Temperature Display */}
-        {currentStatus.isOnline && (currentStatus.hotendTemp || currentStatus.bedTemp) && (
-          <div className="mt-4 grid grid-cols-2 gap-4">
+        {currentStatus.isOnline && (currentStatus.hotendTemp !== undefined || currentStatus.bedTemp !== undefined) && (
+          <div className="mb-4 grid grid-cols-2 gap-4">
             {currentStatus.hotendTemp !== undefined && (
               <div className="text-center">
                 <div className="text-xs text-gray-500">Hotend</div>
                 <div className="text-lg font-semibold text-gray-900">
-                  {Math.round(currentStatus.hotendTemp)}°
-                  {currentStatus.hotendTarget && (
-                    <span className="text-sm text-gray-500">
-                      /{Math.round(currentStatus.hotendTarget)}°
-                    </span>
-                  )}
+                  {formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}
                 </div>
               </div>
             )}
@@ -112,35 +260,59 @@ export function PrinterCard({ printer }: PrinterCardProps) {
               <div className="text-center">
                 <div className="text-xs text-gray-500">Bed</div>
                 <div className="text-lg font-semibold text-gray-900">
-                  {Math.round(currentStatus.bedTemp)}°
-                  {currentStatus.bedTarget && (
-                    <span className="text-sm text-gray-500">
-                      /{Math.round(currentStatus.bedTarget)}°
-                    </span>
-                  )}
+                  {formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Actions */}
-        <div className="mt-4 flex justify-end space-x-2">
-          <button className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-            <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
+        {/* Position Display */}
+        {currentStatus.isOnline && formatPosition(currentStatus.x, currentStatus.y, currentStatus.z) && (
+          <div className="mb-4">
+            <div className="text-xs text-gray-500 text-center">Position</div>
+            <div className="text-sm font-medium text-gray-900 text-center">
+              {formatPosition(currentStatus.x, currentStatus.y, currentStatus.z)}
+            </div>
+          </div>
+        )}
+
+        {/* Camera thumbnail */}
+        {printer.cameraSnapshotUrl && (
+          <div className="mb-4">
+            <img
+              src={printer.cameraSnapshotUrl}
+              alt={`${printer.name} camera`}
+              className="w-full h-24 object-cover rounded border"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex space-x-2">
+          <button className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+            <Cog className="h-4 w-4 mr-1.5" />
             Manage
           </button>
           
-          {currentStatus.isOnline && (
-            <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-              <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M19 10a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Control
-            </button>
+          {hasPermission('printers', 'execute') && currentStatus.isOnline && (
+            <>
+              {currentStatus.state === 'printing' && (
+                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors">
+                  <Pause className="h-4 w-4 mr-1.5" />
+                  Pause
+                </button>
+              )}
+              {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
+                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors">
+                  <Play className="h-4 w-4 mr-1.5" />
+                  {currentStatus.state === 'paused' ? 'Resume' : 'Start'}
+                </button>
+              )}
+            </>
           )}
         </div>
 

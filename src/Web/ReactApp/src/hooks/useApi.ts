@@ -100,6 +100,12 @@ export function useDeletePrinter() {
   });
 }
 
+export function useDiscoverPrinters() {
+  return useMutation({
+    mutationFn: () => apiClient.discoverPrinters(),
+  });
+}
+
 // ============ Catalog Hooks ============
 
 export function useManufacturers(options?: UseQueryOptions<ManufacturerDto[], ApiError>) {
