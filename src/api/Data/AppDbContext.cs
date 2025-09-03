@@ -18,6 +18,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<DiscoveredGcodeFile> DiscoveredGcodeFiles => Set<DiscoveredGcodeFile>();
 
+    // User Management & Authentication
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<Resource> Resources => Set<Resource>();
+    public DbSet<Domain.Action> Actions => Set<Domain.Action>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<UserRole> UserRoles => Set<UserRole>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -244,6 +252,113 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(d => d.FileHash);
             b.HasIndex(d => d.IsSelected);
             b.HasIndex(d => d.AlreadyInLibrary);
+        });
+
+        // User Entity Configuration
+        modelBuilder.Entity<User>(b =>
+        {
+            b.HasKey(u => u.Id);
+            b.Property(u => u.Username).IsRequired().HasMaxLength(50);
+            b.Property(u => u.Email).IsRequired().HasMaxLength(255);
+            b.Property(u => u.PasswordHash).IsRequired().HasMaxLength(255);
+            b.Property(u => u.FirstName).HasMaxLength(100);
+            b.Property(u => u.LastName).HasMaxLength(100);
+            b.Property(u => u.EmailConfirmationToken).HasMaxLength(255);
+            b.Property(u => u.PasswordResetToken).HasMaxLength(255);
+
+            // Unique constraints
+            b.HasIndex(u => u.Username).IsUnique();
+            b.HasIndex(u => u.Email).IsUnique();
+            b.HasIndex(u => u.IsActive);
+            b.HasIndex(u => u.CreatedAt);
+        });
+
+        // Role Entity Configuration
+        modelBuilder.Entity<Role>(b =>
+        {
+            b.HasKey(r => r.Id);
+            b.Property(r => r.Name).IsRequired().HasMaxLength(50);
+            b.Property(r => r.DisplayName).IsRequired().HasMaxLength(100);
+            b.Property(r => r.Description).HasColumnType("TEXT");
+
+            // Unique constraints
+            b.HasIndex(r => r.Name).IsUnique();
+            b.HasIndex(r => r.IsSystemRole);
+            b.HasIndex(r => r.IsActive);
+        });
+
+        // Resource Entity Configuration
+        modelBuilder.Entity<Resource>(b =>
+        {
+            b.HasKey(r => r.Id);
+            b.Property(r => r.Name).IsRequired().HasMaxLength(100);
+            b.Property(r => r.DisplayName).IsRequired().HasMaxLength(100);
+            b.Property(r => r.Description).HasColumnType("TEXT");
+            b.Property(r => r.ResourceType).IsRequired().HasMaxLength(50);
+
+            // Unique constraints
+            b.HasIndex(r => r.Name).IsUnique();
+            b.HasIndex(r => r.ResourceType);
+            b.HasIndex(r => r.IsActive);
+        });
+
+        // Action Entity Configuration
+        modelBuilder.Entity<Domain.Action>(b =>
+        {
+            b.HasKey(a => a.Id);
+            b.Property(a => a.Name).IsRequired().HasMaxLength(50);
+            b.Property(a => a.DisplayName).IsRequired().HasMaxLength(100);
+            b.Property(a => a.Description).HasColumnType("TEXT");
+
+            // Unique constraints
+            b.HasIndex(a => a.Name).IsUnique();
+        });
+
+        // RolePermission Entity Configuration
+        modelBuilder.Entity<RolePermission>(b =>
+        {
+            b.HasKey(rp => rp.Id);
+            
+            // Foreign Keys
+            b.HasOne(rp => rp.Role)
+                .WithMany(r => r.RolePermissions)
+                .HasForeignKey(rp => rp.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+            
+            b.HasOne(rp => rp.Resource)
+                .WithMany(r => r.RolePermissions)
+                .HasForeignKey(rp => rp.ResourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            
+            b.HasOne(rp => rp.Action)
+                .WithMany(a => a.RolePermissions)
+                .HasForeignKey(rp => rp.ActionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique constraint - one permission per role-resource-action combination
+            b.HasIndex(rp => new { rp.RoleId, rp.ResourceId, rp.ActionId }).IsUnique();
+        });
+
+        // UserRole Entity Configuration
+        modelBuilder.Entity<UserRole>(b =>
+        {
+            b.HasKey(ur => ur.Id);
+            
+            // Foreign Keys
+            b.HasOne(ur => ur.User)
+                .WithMany(u => u.UserRoles)
+                .HasForeignKey(ur => ur.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            
+            b.HasOne(ur => ur.Role)
+                .WithMany(r => r.UserRoles)
+                .HasForeignKey(ur => ur.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique constraint - one assignment per user-role combination
+            b.HasIndex(ur => new { ur.UserId, ur.RoleId }).IsUnique();
+            b.HasIndex(ur => ur.IsActive);
+            b.HasIndex(ur => ur.ExpiresAt);
         });
     }
 }

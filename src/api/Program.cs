@@ -253,6 +253,38 @@ builder.Services.AddHealthChecks()
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
+// Authentication and Authorization services
+builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IPasswordHashingService, Farm.Web.Api.Services.Authentication.PasswordHashingService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAuthenticationService, Farm.Web.Api.Services.Authentication.AuthenticationService>();
+
+// Add JWT Authentication
+builder.Services.AddAuthentication("Bearer")
+    .AddJwtBearer("Bearer", options =>
+    {
+        options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
+                System.Text.Encoding.UTF8.GetBytes(
+                    builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured"))),
+            ValidateIssuer = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer",
+            ValidateAudience = true,
+            ValidAudience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer",
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+// Add Authorization with custom policies
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
+});
+
+// Register authorization handlers
+builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Farm.Web.Api.Infrastructure.Authorization.PermissionAuthorizationHandler>();
+
 var app = builder.Build();
 
 // Database initialization with retry logic for resilient startup
@@ -287,6 +319,9 @@ using (var scope = app.Services.CreateScope())
     var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
     await seeder.SeedAllAsync();
 
+    // Seed authentication data (idempotent)
+    await Farm.Web.Api.Data.Seed.AuthenticationDataSeeder.SeedAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+
     // Validate configuration after services are built
     try
     {
@@ -312,6 +347,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("Default");
+
+// Authentication and Authorization
+app.UseAuthentication();
+app.UseAuthorization();
 
 // Static files for SPA
 app.UseSpaStaticFiles();

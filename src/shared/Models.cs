@@ -735,4 +735,132 @@ public class CompatiblePrinterDto
     public int CurrentQueueLength { get; set; }
 }
 
+// Authentication and User Management DTOs
+public record LoginRequest(
+    string Username,
+    string Password);
+
+public record RegisterRequest(
+    string Username,
+    string Email,
+    string Password,
+    string? FirstName = null,
+    string? LastName = null);
+
+public record AuthenticationResult(
+    bool Success,
+    string? Token = null,
+    DateTime? ExpiresAt = null,
+    UserDto? User = null,
+    string? Error = null);
+
+public record UserDto(
+    Guid Id,
+    string Username,
+    string Email,
+    string? FirstName = null,
+    string? LastName = null,
+    bool IsActive = true,
+    bool EmailConfirmed = false,
+    DateTime? LastLogin = null,
+    DateTime CreatedAt = default,
+    string[] Roles = null!,
+    string[] Permissions = null!);
+
+public record RoleDto(
+    Guid Id,
+    string Name,
+    string DisplayName,
+    string? Description = null,
+    bool IsSystemRole = false,
+    bool IsActive = true,
+    DateTime CreatedAt = default,
+    RolePermissionDto[] Permissions = null!);
+
+public record ResourceDto(
+    Guid Id,
+    string Name,
+    string DisplayName,
+    string? Description = null,
+    string ResourceType = "",
+    bool IsActive = true);
+
+public record ActionDto(
+    Guid Id,
+    string Name,
+    string DisplayName,
+    string? Description = null);
+
+public record RolePermissionDto(
+    Guid Id,
+    Guid RoleId,
+    Guid ResourceId,
+    Guid ActionId,
+    string ResourceName = "",
+    string ActionName = "",
+    bool Granted = true);
+
+public record UserRoleDto(
+    Guid Id,
+    Guid UserId,
+    Guid RoleId,
+    string RoleName = "",
+    DateTime AssignedAt = default,
+    DateTime? ExpiresAt = null,
+    bool IsActive = true);
+
+public class CreateUserRequest
+{
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public Guid[] RoleIds { get; set; } = [];
+}
+
+public class UpdateUserRequest
+{
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public bool? IsActive { get; set; }
+    public Guid[]? RoleIds { get; set; }
+}
+
+public class CreateRoleRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public RolePermissionRequestDto[] Permissions { get; set; } = [];
+}
+
+public class UpdateRoleRequest
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public RolePermissionRequestDto[] Permissions { get; set; } = [];
+}
+
+public record RolePermissionRequestDto(
+    Guid ResourceId,
+    Guid ActionId,
+    bool Granted = true);
+
+public class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}
+
+public class ResetPasswordRequest
+{
+    public string Token { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}
+
+public record ForgotPasswordRequest(string Email);
+
+public record ConfirmEmailRequest(string Token);
+
 #pragma warning restore CA1056
