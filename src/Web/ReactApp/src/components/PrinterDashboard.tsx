@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { PrinterCard } from './PrinterCard';
 import { AddPrinterButton } from './AddPrinterButton';
 import { PrinterDiscoveryModal } from './PrinterDiscoveryModal';
+import { SystemHealth } from './SystemHealth';
 import { 
   Printer, 
   CheckCircle, 
@@ -185,6 +186,7 @@ export function PrinterDashboard() {
         </div>
         
         <div className="flex flex-col sm:flex-row gap-3">
+          <SystemHealth />
           {hasPermission('printers', 'create') && (
             <>
               <button
