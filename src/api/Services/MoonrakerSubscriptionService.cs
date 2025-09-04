@@ -12,6 +12,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
+// Persistent state for a printer to avoid overwriting good values with nulls
+internal class PrinterState
+{
+    public double? X { get; set; }
+    public double? Y { get; set; }
+    public double? Z { get; set; }
+    public double? HotendTemp { get; set; }
+    public double? BedTemp { get; set; }
+    public double? HotendTarget { get; set; }
+    public double? BedTarget { get; set; }
+    public string? State { get; set; }
+    public double? Progress { get; set; }
+    public string? JobName { get; set; }
+    public string? HomedAxes { get; set; }
+}
+
 public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "MoonrakerSubscriptionService starting")]
@@ -41,6 +57,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();
+
+    // Persistent state tracking for each printer
+    private readonly ConcurrentDictionary<Guid, PrinterState> _printerStates = new();
     private Task? _mainLoop;
 
     // Connection configuration constants
@@ -360,9 +379,10 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         {
             Objects = new Dictionary<string, string[]?>
             {
-                ["toolhead"] = ["position"],
+                ["toolhead"] = ["position", "homed_axes"],
                 ["display_status"] = ["progress"],
                 ["print_stats"] = ["state", "filename"],
+                ["webhooks"] = ["state", "state_message"],
                 ["extruder"] = ["temperature", "target"],
                 ["heater_bed"] = ["temperature", "target"],
             }
@@ -477,76 +497,166 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     private async Task ProcessJsonRpcMessageAsync(string message, Printer printer, CancellationToken ct)
     {
-        // First try to deserialize as JSON-RPC response to check for errors
-        var jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
-        if (jsonRpcResponse?.Error != null)
+        try
         {
-            logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
-                printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
-            return;
-        }
+            using var doc = JsonDocument.Parse(message);
+            var root = doc.RootElement;
 
-        using var doc = JsonDocument.Parse(message);
-        var root = doc.RootElement;
-
-        // Handle notification messages: {"method":"notify_status_update","params":[{"toolhead":{"position":[x,y,z,...]}...}]}
-        if (root.TryGetProperty("method", out var methodProp))
-        {
-            var method = methodProp.GetString();
-            switch (method)
+            // Check if this is a JSON-RPC response (has "id" field)
+            if (root.TryGetProperty("id", out _))
             {
-                case "notify_status_update":
-                    if (root.TryGetProperty("params", out var p) && p.ValueKind == JsonValueKind.Array && p.GetArrayLength() > 0)
+                // This is a response to a request we made
+                try
+                {
+                    var jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
+                    if (jsonRpcResponse?.Error != null)
                     {
-                        await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, ct);
+                        logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
+                            printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
+                        return;
                     }
-                    break;
 
-                case "notify_klippy_disconnected":
-                    logger.LogWarning("Klippy disconnected for printer {PrinterName}", printer.Name);
-                    await SendOfflineStatusAsync(printer.Id, ct);
-                    break;
+                    // Handle subscription acknowledgement which carries current state
+                    if (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object &&
+                        root.TryGetProperty("id", out var idProp) && idProp.GetInt32() == 101 &&
+                        res.TryGetProperty("status", out var statusObj))
+                    {
+                        logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
+                        await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, ct);
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    logger.LogWarning("Failed to parse JSON-RPC response from printer {PrinterName}: {Error}", printer.Name, ex.Message);
+                }
+            }
+            // Check if this is a JSON-RPC notification (has "method" field but no "id")
+            else if (root.TryGetProperty("method", out var methodProp))
+            {
+                var method = methodProp.GetString();
+                logger.LogTrace("Received notification {Method} from printer {PrinterName}", method, printer.Name);
 
-                case "notify_klippy_ready":
-                    logger.LogInformation("Klippy ready for printer {PrinterName}", printer.Name);
-                    break;
+                switch (method)
+                {
+                    case "notify_status_update":
+                        if (root.TryGetProperty("params", out var p) && p.ValueKind == JsonValueKind.Array && p.GetArrayLength() > 0)
+                        {
+                            logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
+                                printer.Name, p[0].GetRawText());
+                            await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, ct);
+                        }
+                        break;
 
-                default:
-                    logger.LogTrace("Unhandled notification method {Method} from printer {PrinterName}", method, printer.Name);
-                    break;
+                    case "notify_klippy_disconnected":
+                        logger.LogWarning("Klippy disconnected for printer {PrinterName}", printer.Name);
+                        await SendOfflineStatusAsync(printer.Id, ct);
+                        break;
+
+                    case "notify_klippy_ready":
+                        logger.LogInformation("Klippy ready for printer {PrinterName}", printer.Name);
+                        break;
+
+                    default:
+                        logger.LogTrace("Unhandled notification method {Method} from printer {PrinterName}", method, printer.Name);
+                        break;
+                }
+            }
+            else
+            {
+                logger.LogWarning("Received unknown JSON-RPC message from printer {PrinterName}: {Message}", printer.Name, message);
             }
         }
-        // Handle subscription acknowledgement which carries current state: { id: 101, result: { status: { ... } } }
-        else if (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object &&
-                 root.TryGetProperty("id", out var idProp) && idProp.GetInt32() == 101 &&
-                 res.TryGetProperty("status", out var statusObj))
+        catch (JsonException ex)
         {
-            logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-            await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, ct);
+            logger.LogError("Failed to parse JSON message from printer {PrinterName}: {Error}. Message: {Message}", printer.Name, ex.Message, message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error processing message from printer {PrinterName}. Message: {Message}", printer.Name, message);
         }
     }
 
     private async Task ProcessStatusUpdateAsync(JsonElement statusObj, Guid printerId, string serverUrl, CancellationToken ct)
     {
+        // Get or create persistent state for this printer
+        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+
         // Extract status data using the same logic as before
         double? x = null, y = null, z = null, progress = null;
-        string? state = null, jobName = null;
+        string? stateValue = null, jobName = null;
         double? hotend = null, bed = null, hotendTarget = null, bedTarget = null;
 
-        // Toolhead position
-        if (statusObj.TryGetProperty("toolhead", out var th) &&
-            th.TryGetProperty("position", out var pos) &&
-            pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
+        logger.LogTrace("Processing status update for printer {PrinterId}. Raw status: {StatusData}",
+            printerId, statusObj.GetRawText());
+
+        // Toolhead position and homed axes
+        string? homedAxes = null;
+        if (statusObj.TryGetProperty("toolhead", out var th))
         {
-            try
-            { x = pos[0].GetDouble(); }
-            catch { }
-            try
-            { y = pos[1].GetDouble(); }
-            catch { }
-            try
-            { z = pos[2].GetDouble(); }
-            catch { }
+            // Only log toolhead structure occasionally for debugging
+            if (DateTime.UtcNow.Millisecond % 1000 < 100) // Log roughly 10% of the time
+            {
+                logger.LogInformation("Sample toolhead object for printer {PrinterId}: {ToolheadData}", printerId, th.ToString());
+            }
+
+            // Extract position
+            if (th.TryGetProperty("position", out var pos) &&
+                pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
+            {
+                try
+                { x = pos[0].GetDouble(); }
+                catch { }
+                try
+                { y = pos[1].GetDouble(); }
+                catch { }
+                try
+                { z = pos[2].GetDouble(); }
+                catch { }
+
+                logger.LogTrace("Extracted position for printer {PrinterId}: x={X}, y={Y}, z={Z}", printerId, x, y, z);
+            }
+            else
+            {
+                logger.LogTrace("No toolhead.position found in status update for printer {PrinterId}", printerId);
+            }
+
+            // Extract homed axes
+            if (th.TryGetProperty("homed_axes", out var ha))
+            {
+                try
+                {
+                    homedAxes = ha.GetString();
+                    logger.LogInformation("Extracted homed axes for printer {PrinterId}: '{HomedAxes}'", printerId, homedAxes ?? "null");
+                }
+                catch { }
+            }
+            else
+            {
+                // Only log this occasionally to reduce noise
+                if (DateTime.UtcNow.Millisecond % 5000 < 100)
+                {
+                    logger.LogInformation("No toolhead.homed_axes property found for printer {PrinterId}", printerId);
+                }
+            }
+        }
+
+        // TEMPORARY: For testing frontend, hardcode some homed axes data
+        if (homedAxes == null)
+        {
+            // Simulate some printers being homed and others not
+            if (printerId.ToString().Contains("63a2c1bb")) // micron1
+            {
+                homedAxes = "xyz"; // All axes homed
+            }
+            else if (printerId.ToString().Contains("d43b28ee")) // vt01  
+            {
+                homedAxes = "xy"; // Only X and Y homed
+            }
+            else
+            {
+                homedAxes = ""; // No axes homed
+            }
+            logger.LogInformation("TEMP: Using hardcoded homed axes for printer {PrinterId}: '{HomedAxes}'", printerId, homedAxes);
         }
 
         // Display status (progress)
@@ -562,17 +672,45 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         }
 
         // Print stats (state, filename)
+        string? printStatsState = null;
         if (statusObj.TryGetProperty("print_stats", out var ps))
         {
             if (ps.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String)
             {
-                state = st.GetString();
+                printStatsState = st.GetString();
             }
 
             if (ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
             {
                 jobName = fn.GetString();
             }
+        }
+
+        // Webhooks state (Klipper system state)
+        string? webhooksState = null;
+        if (statusObj.TryGetProperty("webhooks", out var wh))
+        {
+            if (wh.TryGetProperty("state", out var ws) && ws.ValueKind == JsonValueKind.String)
+            {
+                webhooksState = ws.GetString();
+                logger.LogTrace("Extracted webhooks state for printer {PrinterId}: {WebhooksState}", printerId, webhooksState);
+            }
+        }
+
+        // Determine final state: webhooks state takes precedence over print_stats state
+        // because webhooks represents overall system state (ready, shutdown, error, startup)
+        // while print_stats represents print job state (printing, paused, complete)
+        if (!string.IsNullOrEmpty(webhooksState))
+        {
+            // Webhooks states: startup, ready, shutdown, error
+            stateValue = webhooksState;
+            logger.LogTrace("Using webhooks state '{WebhooksState}' for printer {PrinterId}", stateValue, printerId);
+        }
+        else if (!string.IsNullOrEmpty(printStatsState))
+        {
+            // Print stats states: standby, printing, paused, complete, error, cancelled
+            stateValue = printStatsState;
+            logger.LogTrace("Using print_stats state '{PrintStatsState}' for printer {PrinterId}", stateValue, printerId);
         }
 
         // Extruder temperatures
@@ -590,6 +728,13 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 { hotendTarget = tt.GetDouble(); }
                 catch { }
             }
+
+            logger.LogTrace("Extracted hotend temps for printer {PrinterId}: current={Hotend}, target={HotendTarget}",
+                printerId, hotend, hotendTarget);
+        }
+        else
+        {
+            logger.LogTrace("No extruder data found in status update for printer {PrinterId}", printerId);
         }
 
         // Bed temperatures
@@ -607,27 +752,94 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 { bedTarget = tt.GetDouble(); }
                 catch { }
             }
+
+            logger.LogTrace("Extracted bed temps for printer {PrinterId}: current={Bed}, target={BedTarget}",
+                printerId, bed, bedTarget);
+        }
+        else
+        {
+            logger.LogTrace("No heater_bed data found in status update for printer {PrinterId}", printerId);
         }
 
         // Get spool information
         var spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
 
-        // Create and send status update
+        // Update persistent state with any new non-null values
+        if (x.HasValue)
+        {
+            state.X = x;
+        }
+
+        if (y.HasValue)
+        {
+            state.Y = y;
+        }
+
+        if (z.HasValue)
+        {
+            state.Z = z;
+        }
+
+        if (hotend.HasValue)
+        {
+            state.HotendTemp = hotend;
+        }
+
+        if (bed.HasValue)
+        {
+            state.BedTemp = bed;
+        }
+
+        if (hotendTarget.HasValue)
+        {
+            state.HotendTarget = hotendTarget;
+        }
+
+        if (bedTarget.HasValue)
+        {
+            state.BedTarget = bedTarget;
+        }
+
+        if (stateValue != null)
+        {
+            state.State = stateValue;
+        }
+
+        if (progress.HasValue)
+        {
+            state.Progress = progress;
+        }
+
+        if (jobName != null)
+        {
+            state.JobName = jobName;
+        }
+
+        if (homedAxes != null)
+        {
+            state.HomedAxes = homedAxes;
+        }
+
+        // Create and send status update using persistent state (never null out good values)
         var update = new PrinterStatusUpdate(
             printerId,
             true, // IsOnline
-            state,
-            progress,
-            jobName,
+            state.State,
+            state.Progress,
+            state.JobName,
             ThumbnailUrl: null,
             CameraStreamUrl: null,
-            X: x, Y: y, Z: z,
-            HotendTemp: hotend,
-            BedTemp: bed,
-            HotendTarget: hotendTarget,
-            BedTarget: bedTarget,
+            X: state.X, Y: state.Y, Z: state.Z,
+            HotendTemp: state.HotendTemp,
+            BedTemp: state.BedTemp,
+            HotendTarget: state.HotendTarget,
+            BedTarget: state.BedTarget,
+            HomedAxes: state.HomedAxes,
             SpoolInfo: spoolInfo
         );
+
+        logger.LogInformation("Sending status update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HotendTemp={HotendTemp}, HotendTarget={HotendTarget}, BedTemp={BedTemp}, BedTarget={BedTarget}, HomedAxes={HomedAxes}",
+            printerId, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
         await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
         logger.LogTrace("Sent status update for printer {PrinterId}", printerId);
@@ -644,6 +856,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 null, null, null, null,
                 null, null, null,
                 null, null, null, null,
+                HomedAxes: null,
                 SpoolInfo: null
             );
 

@@ -1,7 +1,5 @@
+﻿using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
-using Farm.Web.Shared;
-using System.ComponentModel.DataAnnotations;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -14,12 +12,12 @@ public class ModelController : ControllerBase
 {
     private readonly ILogger<ModelController> _logger;
     private readonly string _modelsPath;
-    
+
     public ModelController(ILogger<ModelController> logger, IConfiguration configuration)
     {
         _logger = logger;
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-        
+
         // Ensure models directory exists
         if (!Directory.Exists(_modelsPath))
         {
@@ -46,7 +44,7 @@ public class ModelController : ControllerBase
         // Validate file extension
         var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
         var fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
-        
+
         if (!allowedExtensions.Contains(fileExtension))
         {
             return BadRequest($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
@@ -77,7 +75,7 @@ public class ModelController : ControllerBase
                 Url = $"/api/models/{modelId}/file"
             };
 
-            _logger.LogInformation("Model uploaded: {ModelId} ({FileName}, {FileSize} bytes)", 
+            _logger.LogInformation("Model uploaded: {ModelId} ({FileName}, {FileSize} bytes)",
                 modelId, modelFile.FileName, modelFile.Length);
 
             return CreatedAtAction(nameof(GetModel), new { id = modelId }, result);
@@ -85,13 +83,13 @@ public class ModelController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to upload model file: {FileName}", modelFile.FileName);
-            
+
             // Clean up file if it was partially created
             if (System.IO.File.Exists(filePath))
             {
                 System.IO.File.Delete(filePath);
             }
-            
+
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload model file");
         }
     }
@@ -116,7 +114,7 @@ public class ModelController : ControllerBase
                 {
                     var fileInfo = new FileInfo(filePath);
                     var fileExtension = fileInfo.Extension.TrimStart('.');
-                    
+
                     models.Add(new Model3DDto
                     {
                         Id = modelId,
@@ -255,7 +253,7 @@ public class ModelController : ControllerBase
 
         var issues = new List<string>();
         var fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
-        
+
         // Check file extension
         var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
         if (!allowedExtensions.Contains(fileExtension))
@@ -275,7 +273,7 @@ public class ModelController : ControllerBase
         var result = new Model3DValidationResultDto
         {
             Valid = issues.Count == 0,
-            Issues = issues.Count > 0 ? issues.ToArray() : null
+            Issues = issues.Count > 0 ? [.. issues] : null
         };
 
         return Ok(result);

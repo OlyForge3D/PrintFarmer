@@ -110,6 +110,7 @@ public record PrinterStatusUpdate(
     double? BedTemp,
     double? HotendTarget,
     double? BedTarget,
+    string? HomedAxes,
     PrinterSpoolInfoDto? SpoolInfo);
 
 public class CreatePrinterDto

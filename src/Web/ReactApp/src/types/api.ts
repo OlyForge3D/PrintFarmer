@@ -112,6 +112,7 @@ export interface PrinterStatusUpdate {
   bedTemp?: number;
   hotendTarget?: number;
   bedTarget?: number;
+  homedAxes?: string;
   spoolInfo?: PrinterSpoolInfo;
 }
 
@@ -407,4 +408,17 @@ export interface DiscoveredPrinterDto {
   model?: string;
   firmware?: string;
   version?: string;
+}
+
+// Printer control types
+export interface MoveRequest {
+  x?: number;
+  y?: number;
+  z?: number;
+  f?: number;
+}
+
+export interface CommandResult {
+  success: boolean;
+  error?: string;
 }

@@ -8,6 +8,9 @@ import {
   ManufacturerDto, 
   ModelDto, 
   FilamentPresets,
+  TempTargets,
+  MoveRequest,
+  CommandResult,
   ResolveHostnameRequest,
   ResolveHostnameResponse,
   GcodeFile,
@@ -89,6 +92,53 @@ export class ApiClient {
 
   async discoverPrinters(): Promise<DiscoveredPrinterDto[]> {
     const response = await this.client.get<DiscoveredPrinterDto[]>('/printers/discover');
+    return response.data;
+  }
+
+  // ============ Printer Control API methods ============
+
+  async setTemperatures(printerId: string, targets: TempTargets): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/temps`, targets);
+    return response.data;
+  }
+
+  async movePrinter(printerId: string, move: MoveRequest): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/move`, move);
+    return response.data;
+  }
+
+  async movePrinterTo(printerId: string, position: MoveRequest): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/moveto`, position);
+    return response.data;
+  }
+
+  async homePrinter(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/home`);
+    return response.data;
+  }
+
+  async homeXY(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/homexy`);
+    return response.data;
+  }
+
+  async homeZ(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/homez`);
+    return response.data;
+  }
+
+  async pausePrint(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/pause`);
+    return response.data;
+  }
+
+  async resumePrint(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/resume`);
+    return response.data;
+  }
+
+  async emergencyStop(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/emergency-stop`);
     return response.data;
   }
 

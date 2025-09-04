@@ -643,7 +643,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
-            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified 
+            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified
                 ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
                 : dto.DateAcquired,
             Backend = (int)dto.Backend,
@@ -657,13 +657,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Get manufacturer and model names for the response
         string? manufacturerName = null;
         string? modelName = null;
-        
+
         if (manufacturerId.HasValue)
         {
             var manufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Id == manufacturerId, ct);
             manufacturerName = manufacturer?.Name;
         }
-        
+
         if (modelId.HasValue)
         {
             var model = await db.Models.FirstOrDefaultAsync(m => m.Id == modelId, ct);
@@ -794,7 +794,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
-        p.DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified 
+        p.DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified
             ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
             : dto.DateAcquired;
         if (dto.Backend.HasValue)
@@ -1920,7 +1920,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
-            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified 
+            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified
                 ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
                 : dto.DateAcquired,
             Backend = (int)dto.Backend,
