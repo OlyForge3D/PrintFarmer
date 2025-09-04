@@ -1,45 +1,69 @@
 # syntax=docker/dockerfile:1
-# Multi-stage build for PrintFarmer (Blazor WASM hosted, .NET 9)
+# Multi-stage build for PrintFarmer React + ASP.NET Core
 
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+# Stage 1: Build React application
+FROM node:18-alpine AS react-build
 WORKDIR /app
-# Kestrel default in container; override to 0.0.0.0 so it is reachable
-ENV ASPNETCORE_URLS=http://0.0.0.0:8080
-EXPOSE 8080
 
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+# Copy package files first for better caching
+COPY src/Web/ReactApp/package*.json ./
+RUN npm install --silent
+
+# Copy React source code
+COPY src/Web/ReactApp/ ./
+
+# Build React application for production
+RUN npm run build
+
+# Stage 2: Build .NET API
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS dotnet-build
 WORKDIR /src
 
-# Prereqs for Emscripten toolchain used by wasm-tools (needs `python` on PATH)
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends python3 \
-	&& ln -s /usr/bin/python3 /usr/local/bin/python \
-	&& rm -rf /var/lib/apt/lists/*
+# Copy project files for dependency restoration
+COPY src/shared/*.csproj ./shared/
+COPY src/api/*.csproj ./api/
+COPY Directory.Build.props ./
 
-# Copy solution first for better layer caching
-COPY src/farm-web.sln ./
-# Mirror the solution's folder casing (Linux is case-sensitive)
-# Source on host may be lowercase; copy into the expected uppercase dirs in the container
-COPY src/server/ ./server/
-COPY src/client/ ./client/
-COPY src/shared/ ./shared/
+# Restore dependencies
+RUN dotnet restore ./api/Farm.Web.Api.csproj
 
-# Restore only the server project (and its project references) to avoid needing test projects
-RUN dotnet restore ./server/Farm.Web.Server.csproj
+# Copy source code
+COPY src/ ./
 
-# Ensure Blazor WebAssembly tooling is available in the SDK image
-RUN dotnet workload install wasm-tools
+# Publish the API
+RUN dotnet publish ./api/Farm.Web.Api.csproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    --verbosity minimal
 
-# Publish the server (which hosts the client)
-WORKDIR /src/server
-RUN dotnet publish Farm.Web.Server.csproj -c Release -o /app/publish --no-restore
-
-FROM base AS final
+# Stage 3: Final runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
-COPY --from=build /app/publish .
 
-# Important: The server hosts the Blazor WASM client from wwwroot when published
-# If the app uses SQLite, the DB file will live inside the container filesystem
-# unless mounted as a volume by the user.
+# Install curl for health checks
+RUN apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["dotnet", "Farm.Web.Server.dll"]
+# Copy .NET application
+COPY --from=dotnet-build /app/publish .
+
+# Copy React build output to wwwroot
+COPY --from=react-build /app/dist ./wwwroot
+
+# Create directories for file storage
+RUN mkdir -p /app/uploads /app/gcode /app/slicers /data
+
+# Set environment variables
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+# Expose ports
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]

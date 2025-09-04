@@ -2,8 +2,8 @@ import { PrinterBackend } from '@/types/api';
 import type { Printer } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthContext';
+import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { 
-  MoreVertical,
   Cog,
   Play,
   Pause,
@@ -14,9 +14,18 @@ import { formatDistanceToNow } from 'date-fns';
 interface PrinterCardProps {
   printer: Printer;
   viewMode?: 'grid' | 'list' | 'detailed';
+  onEdit?: (printer: Printer) => void;
+  onDelete?: (printer: Printer) => void;
+  onManage?: (printer: Printer) => void;
 }
 
-export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
+export function PrinterCard({ 
+  printer, 
+  viewMode = 'grid',
+  onEdit = () => {},
+  onDelete = () => {},
+  onManage = () => {}
+}: PrinterCardProps) {
   const { hasPermission } = useAuth();
   const { getPrinterStatus } = usePrinterStatusUpdates();
   const realtimeStatus = getPrinterStatus(printer.id);
@@ -215,9 +224,12 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
           </div>
           
           {hasPermission('printers', 'update') && (
-            <button className="flex-shrink-0 text-pf-text-tertiary hover:text-pf-accent transition-colors">
-              <MoreVertical className="w-5 h-5" />
-            </button>
+            <PrinterActionsDropdown
+              printer={printer}
+              onEdit={onEdit}
+              onDelete={() => onDelete(printer)}
+              onManage={onManage}
+            />
           )}
         </div>
 
@@ -293,7 +305,10 @@ export function PrinterCard({ printer, viewMode = 'grid' }: PrinterCardProps) {
 
         {/* Action buttons */}
         <div className="flex space-x-2">
-          <button className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-pf-border-light shadow-sm text-sm leading-4 font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors">
+          <button 
+            onClick={() => onManage(printer)}
+            className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-pf-border-light shadow-sm text-sm leading-4 font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors"
+          >
             <Cog className="h-4 w-4 mr-1.5" />
             Manage
           </button>

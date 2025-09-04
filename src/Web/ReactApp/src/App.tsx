@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
+import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
 import { ModelsPage } from '@/pages/ModelsPage';
 import { HarvestPage } from '@/pages/HarvestPage';
 import { FilesPage } from '@/pages/FilesPage';
@@ -42,6 +43,7 @@ function App() {
                 <Route path="/" element={<PrinterDashboard />} />
                 <Route path="/dashboard" element={<PrinterDashboard />} />
                 <Route path="/printers" element={<PrinterDashboard />} />
+                <Route path="/printers/table" element={<PrinterTableViewPage />} />
                 <Route path="/models" element={<ModelsPage />} />
                 <Route path="/harvest" element={<HarvestPage />} />
                 <Route path="/files" element={<FilesPage />} />

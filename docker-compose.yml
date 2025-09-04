@@ -3,16 +3,18 @@ services:
   printfarmer:
     build:
       context: .
-      dockerfile: Dockerfile.react
+      dockerfile: Dockerfile
     image: printfarmer-react:latest
     container_name: printfarmer-app
+    ports:
+      - "5080:8080"
     environment:
       # Database Configuration - PostgreSQL recommended for React architecture
       - DB_PROVIDER=Postgres
       - ASPNETCORE_URLS=http://0.0.0.0:8080
       - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
-      - ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
+      - ConnectionStrings__Default=Host=printfarmer-postgres:5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
+      - ConnectionStrings__Postgres=Host=printfarmer-postgres:5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
       - DB_INIT_MODE=EnsureCreated
       
       # Authentication & Security
@@ -22,11 +24,11 @@ services:
       - JWT_EXPIRE_HOURS=24
       
       # CORS Configuration for React SPA
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://localhost:5173
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://localhost:5173,http://localhost:5080,http://localhost:8080
       - ALLOW_LOCAL_NETWORK=true
       
       # SignalR Configuration
-      - SIGNALR_REDIS_CONNECTION=redis:6379
+      - SIGNALR_REDIS_CONNECTION=printfarmer-redis:6379
       
       # File Storage
       - UPLOAD_PATH=/app/uploads
@@ -43,25 +45,12 @@ services:
       - PRUSA_SLICER_PATH=/app/slicers/prusa-slicer
       - ORCA_SLICER_PATH=/app/slicers/orca-slicer
       
-    ports:
-      - "5080:8080"
-      - "5081:8443"
-    extra_hosts:
-      # Enable container to access host network for printer discovery
-      - "host.docker.internal:host-gateway"
     volumes:
       # Persistent storage for application data
       - printfarmer-data:/data
       - printfarmer-uploads:/app/uploads
       - printfarmer-gcode:/app/gcode
       - printfarmer-slicers:/app/slicers
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - printfarmer-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -69,6 +58,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - printfarmer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   # PostgreSQL Database (Recommended for React architecture)
   postgres:

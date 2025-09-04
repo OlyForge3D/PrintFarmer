@@ -1,20 +1,18 @@
-import { useMemo, useState } from 'react';
-import { usePrinters } from '@/hooks/useApi';
+import React, { useMemo, useState } from 'react';
+import { usePrinters, useDeletePrinter } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { useAuth } from '@/contexts/AuthContext';
-import { PrinterCard } from './PrinterCard';
-import { EnhancedPrinterCard } from './EnhancedPrinterCard';
+import { ExpandablePrinterCard } from './ExpandablePrinterCard';
 import { AddPrinterButton } from './AddPrinterButton';
 import { PrinterDiscoveryModal } from './PrinterDiscoveryModal';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import { SystemHealth } from './SystemHealth';
+import type { Printer } from '@/types/api';
 import { 
-  Printer, 
+  Printer as PrinterIcon, 
   CheckCircle, 
   Play, 
   Pause,
   Search,
-  List,
-  Grid3X3,
   Settings
 } from 'lucide-react';
 
@@ -55,92 +53,88 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 }
 
 export function PrinterDashboard() {
-  const { hasPermission } = useAuth();
-  const { data: printers, isLoading, error, refetch } = usePrinters();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
-  
+  const { 
+    data: printers, 
+    isLoading, 
+    error,
+    refetch: refetchPrinters
+  } = usePrinters();
+  const deletePrinterMutation = useDeletePrinter();
   const [showDiscovery, setShowDiscovery] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'detailed'>('grid');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean;
+    printer?: Printer;
+  }>({ isOpen: false });
+  
+  const { getPrinterStatus } = usePrinterStatusUpdates();
 
-  // Calculate printer statistics
-  const printerStats = useMemo(() => {
-    if (!printers) return { total: 0, online: 0, printing: 0, idle: 0 };
-    
-    return printers.reduce((stats, printer) => {
-      const status = getPrinterStatus(printer.id);
-      const isOnline = status?.isOnline ?? printer.isOnline;
-      const state = status?.state ?? printer.state;
-      
-      stats.total++;
-      
-      if (isOnline) {
-        stats.online++;
-        
-        if (state === 'printing') {
-          stats.printing++;
-        } else if (state === 'operational' || state === 'ready' || state === 'idle') {
-          stats.idle++;
-        }
-      }
-      
-      return stats;
-    }, { total: 0, online: 0, printing: 0, idle: 0 });
-  }, [printers, getPrinterStatus]);
+  // Filter printers for the current user (for now show all printers since userId isn't on Printer)
+  const userPrinters = useMemo(() => {
+    return printers || [];
+  }, [printers]);
 
-  // Filter printers based on search and status
-  const filteredPrinters = useMemo(() => {
-    if (!printers) return [];
-    
-    return printers.filter(printer => {
-      const matchesSearch = !searchQuery || 
-        printer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        printer.manufacturerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        printer.modelName?.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      if (!matchesSearch) return false;
-      
-      if (!statusFilter) return true;
-      
-      const status = getPrinterStatus(printer.id);
-      const isOnline = status?.isOnline ?? printer.isOnline;
-      const state = status?.state ?? printer.state;
-      
-      switch (statusFilter) {
-        case 'online': return isOnline;
-        case 'offline': return !isOnline;
-        case 'printing': return isOnline && state === 'printing';
-        case 'idle': return isOnline && (state === 'operational' || state === 'ready' || state === 'idle');
-        default: return true;
-      }
-    });
-  }, [printers, searchQuery, statusFilter, getPrinterStatus]);
+  // Statistics calculations
+  const stats = useMemo(() => {
+    const total = userPrinters.length;
+    const online = userPrinters.filter(p => {
+      const status = getPrinterStatus(p.id);
+      return status?.state?.toLowerCase().includes('operational') || 
+             status?.state?.toLowerCase().includes('ready') ||
+             status?.state?.toLowerCase().includes('idle') ||
+             p.isOnline;
+    }).length;
+    const printing = userPrinters.filter(p => {
+      const status = getPrinterStatus(p.id);
+      return status?.state?.toLowerCase().includes('printing') ||
+             p.state?.toLowerCase().includes('printing');
+    }).length;
+    const paused = userPrinters.filter(p => {
+      const status = getPrinterStatus(p.id);
+      return status?.state?.toLowerCase().includes('paused') ||
+             p.state?.toLowerCase().includes('paused');
+    }).length;
+
+    return {
+      total,
+      online,
+      printing,
+      paused,
+      offline: total - online
+    };
+  }, [userPrinters, getPrinterStatus]);
+
+  const handleDeleteClick = (printer: Printer) => {
+    setDeleteConfirmation({ isOpen: true, printer });
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (deleteConfirmation.printer) {
+      await deletePrinterMutation.mutateAsync(deleteConfirmation.printer.id);
+      setDeleteConfirmation({ isOpen: false });
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteConfirmation({ isOpen: false });
+  };
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        {/* Header skeleton */}
-        <div className="flex justify-between items-center">
-          <div className="space-y-2">
-            <div className="h-8 w-32 bg-gray-200 rounded animate-pulse"></div>
-            <div className="h-4 w-64 bg-gray-200 rounded animate-pulse"></div>
+      <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="animate-pulse">
+            <div className="h-8 bg-pf-bg-1 rounded w-48 mb-4"></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-24 bg-pf-bg-1 rounded-xl"></div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-80 bg-pf-bg-1 rounded-xl"></div>
+              ))}
+            </div>
           </div>
-          <div className="h-10 w-32 bg-gray-200 rounded animate-pulse"></div>
-        </div>
-
-        {/* Stats skeleton */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-24 bg-gray-200 rounded animate-pulse"></div>
-          ))}
-        </div>
-
-        {/* Cards skeleton */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-64 bg-gray-200 rounded animate-pulse"></div>
-          ))}
         </div>
       </div>
     );
@@ -148,28 +142,17 @@ export function PrinterDashboard() {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-md p-4">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium text-red-800">
-              Error loading printers
-            </h3>
-            <div className="mt-2 text-sm text-red-700">
-              <p>{error.message}</p>
-            </div>
-            <div className="mt-4">
-              <button
-                onClick={() => refetch()}
-                className="bg-red-100 hover:bg-red-200 text-red-800 font-medium py-2 px-4 rounded text-sm transition-colors"
-              >
-                Try again
-              </button>
-            </div>
+      <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-pf-text-primary mb-4">Error Loading Printers</h2>
+            <p className="text-pf-text-secondary mb-4">{error.message}</p>
+            <button
+              onClick={() => refetchPrinters()}
+              className="px-4 py-2 bg-pf-primary-500 text-white rounded-lg hover:bg-pf-primary-600 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         </div>
       </div>
@@ -177,199 +160,81 @@ export function PrinterDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Dashboard</h1>
-          <p className="mt-1 text-sm text-pf-text-secondary">
-            Monitor and manage your 3D printer farm
-          </p>
-        </div>
-        
-        <div className="flex flex-col sm:flex-row gap-3">
-          <SystemHealth />
-          {hasPermission('printers', 'create') && (
-            <>
-              <button
-                onClick={() => setShowDiscovery(true)}
-                className="inline-flex items-center px-4 py-2 border border-pf-border-light shadow-sm text-sm font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2"
-              >
-                <Search className="h-4 w-4 mr-2" />
-                Discover Printers
-              </button>
-              <AddPrinterButton onSuccess={() => refetch()} />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatsCard
-          title="Total Printers"
-          value={printerStats.total}
-          icon={Printer}
-          color="blue"
-        />
-        <StatsCard
-          title="Online"
-          value={printerStats.online}
-          icon={CheckCircle}
-          color="green"
-        />
-        <StatsCard
-          title="Printing"
-          value={printerStats.printing}
-          icon={Play}
-          color="yellow"
-        />
-        <StatsCard
-          title="Idle"
-          value={printerStats.idle}
-          icon={Pause}
-          color="gray"
-        />
-      </div>
-
-      {/* Filters and Controls */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 shadow-lg">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex flex-col sm:flex-row gap-4 flex-1">
-            {/* Search */}
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
-              <input
-                type="text"
-                placeholder="Search printers..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-pf-border-medium bg-pf-panel rounded-md focus:ring-pf-accent focus:border-pf-accent w-full text-pf-text-primary placeholder-pf-text-tertiary"
-              />
-            </div>
-            
-            {/* Status Filter */}
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 border border-pf-border-medium bg-pf-panel rounded-md focus:ring-pf-accent focus:border-pf-accent text-pf-text-primary"
-            >
-              <option value="">All Status</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
-              <option value="printing">Printing</option>
-              <option value="idle">Idle</option>
-            </select>
+    <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-pf-text-primary">Printer Dashboard</h1>
+            <p className="text-pf-text-secondary mt-1">Monitor and manage your 3D printers</p>
           </div>
           
-          {/* View Mode Toggle */}
-          <div className="flex border border-pf-border-medium rounded-md">
+          <div className="flex items-center space-x-3">
             <button
-              onClick={() => setViewMode('grid')}
-              className={`px-3 py-2 text-sm font-medium rounded-l-md ${
-                viewMode === 'grid'
-                  ? 'bg-pf-accent bg-opacity-20 text-pf-accent border-r border-pf-accent'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary border-r border-pf-border-medium bg-pf-panel'
-              }`}
+              onClick={() => setShowDiscovery(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
             >
-              <Grid3X3 className="h-4 w-4" />
+              <Search className="h-4 w-4" />
+              <span>Discover</span>
             </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`px-3 py-2 text-sm font-medium ${
-                viewMode === 'list'
-                  ? 'bg-pf-accent bg-opacity-20 text-pf-accent border-r border-pf-accent'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary border-r border-pf-border-medium bg-pf-panel'
-              }`}
-            >
-              <List className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('detailed')}
-              className={`px-3 py-2 text-sm font-medium rounded-r-md ${
-                viewMode === 'detailed'
-                  ? 'bg-pf-accent bg-opacity-20 text-pf-accent'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary bg-pf-panel'
-              }`}
-            >
-              <Settings className="h-4 w-4" />
-            </button>
+            
+            <AddPrinterButton onSuccess={refetchPrinters} />
           </div>
         </div>
-      </div>
 
-      {/* Printers Grid/List */}
-      {filteredPrinters.length > 0 ? (
-        <div className={
-          viewMode === 'detailed'
-            ? 'space-y-6'
-            : viewMode === 'grid'
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
-            : 'space-y-4'
-        }>
-          {filteredPrinters.map((printer) => (
-            viewMode === 'detailed' ? (
-              <EnhancedPrinterCard 
-                key={printer.id} 
-                printer={printer}
-                viewMode={viewMode}
-              />
-            ) : (
-              <PrinterCard 
-                key={printer.id} 
-                printer={printer}
-                viewMode={viewMode}
-              />
-            )
-          ))}
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
+          <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircle} />
+          <StatsCard title="Printing" value={stats.printing} color="yellow" icon={Play} />
+          <StatsCard title="Paused" value={stats.paused} color="yellow" icon={Pause} />
+          <StatsCard title="Offline" value={stats.offline} color="gray" icon={Settings} />
         </div>
-      ) : (
-        <div className="text-center py-12">
-          <svg
-            className="mx-auto h-12 w-12 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              vectorEffect="non-scaling-stroke"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            {searchQuery || statusFilter ? 'No printers match your criteria' : 'No printers found'}
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {searchQuery || statusFilter 
-              ? 'Try adjusting your search or filters'
-              : 'Get started by adding your first 3D printer.'
-            }
-          </p>
-          {!searchQuery && !statusFilter && hasPermission('printers', 'create') && (
-            <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
-              <button
-                onClick={() => setShowDiscovery(true)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <Search className="h-4 w-4 mr-2" />
-                Discover Printers
-              </button>
-              <AddPrinterButton onSuccess={() => refetch()} />
+
+        <SystemHealth />
+
+        {/* Printer Cards Grid */}
+        <div className="space-y-6">
+          {userPrinters.length === 0 ? (
+            <div className="text-center py-12">
+              <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
+              <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer.</p>
+              <div className="flex justify-center space-x-4">
+                <AddPrinterButton onSuccess={refetchPrinters} />
+                <button
+                  onClick={() => setShowDiscovery(true)}
+                  className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
+                >
+                  <Search className="h-4 w-4" />
+                  <span>Discover Printers</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+              {userPrinters.map((printer) => (
+                <ExpandablePrinterCard
+                  key={printer.id}
+                  printer={printer}
+                  onDelete={() => handleDeleteClick(printer)}
+                />
+              ))}
             </div>
           )}
         </div>
-      )}
 
-      {/* Discovery Modal */}
-      <PrinterDiscoveryModal
-        isOpen={showDiscovery}
-        onClose={() => setShowDiscovery(false)}
-        onSuccess={() => refetch()}
-      />
+        {/* Modals */}
+        <PrinterDiscoveryModal
+          isOpen={showDiscovery}
+          onClose={() => setShowDiscovery(false)}
+          onSuccess={refetchPrinters}
+        />        <DeleteConfirmationModal
+          isOpen={deleteConfirmation.isOpen}
+          printers={deleteConfirmation.printer ? [deleteConfirmation.printer] : []}
+          onConfirm={handleDeleteConfirm}
+          onCancel={handleDeleteCancel}
+        />
+      </div>
     </div>
   );
 }
