@@ -71,7 +71,7 @@ export class SignalRService {
     });
 
     // Business event handlers
-    this.connection.on('PrinterStatusUpdate', (status: PrinterStatusUpdate) => {
+    this.connection.on('PrinterUpdated', (status: PrinterStatusUpdate) => {
       this.printerStatusCallbacks.forEach(callback => {
         try {
           callback(status);
