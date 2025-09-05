@@ -142,6 +142,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async firmwareRestart(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/firmware-restart`);
+    return response.data;
+  }
+
   // ============ Catalog API methods ============
 
   async getManufacturers(): Promise<ManufacturerDto[]> {

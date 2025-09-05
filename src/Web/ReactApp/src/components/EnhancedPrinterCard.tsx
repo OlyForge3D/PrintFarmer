@@ -18,6 +18,7 @@ import {
   ExternalLink,
   History,
   Thermometer,
+  RotateCcw,
   Move,
   FileText
 } from 'lucide-react';
@@ -125,6 +126,7 @@ export function EnhancedPrinterCard({ printer, viewMode = 'grid' }: EnhancedPrin
 
   const isPrinting = currentStatus.isOnline && currentStatus.state === 'printing';
   const isPaused = currentStatus.isOnline && currentStatus.state === 'paused';
+  const isShutdown = currentStatus.state === 'shutdown';
 
   // API Actions
   const handlePause = useCallback(async () => {
@@ -148,6 +150,14 @@ export function EnhancedPrinterCard({ printer, viewMode = 'grid' }: EnhancedPrin
       await fetch(`/api/printers/${printer.id}/emergency-stop`, { method: 'POST' });
     } catch (error) {
       console.error('Failed to emergency stop printer:', error);
+    }
+  }, [printer.id]);
+
+  const handleFirmwareRestart = useCallback(async () => {
+    try {
+      await fetch(`/api/printers/${printer.id}/firmware-restart`, { method: 'POST' });
+    } catch (error) {
+      console.error('Failed to restart firmware:', error);
     }
   }, [printer.id]);
 
@@ -307,11 +317,15 @@ export function EnhancedPrinterCard({ printer, viewMode = 'grid' }: EnhancedPrin
                   <Play className="h-4 w-4" />
                 </button>
                 <button
-                  onClick={handleEmergencyStop}
-                  className="p-2 text-red-500 hover:text-red-700"
-                  title="Emergency Stop"
+                  onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
+                  className={`p-2 ${
+                    isShutdown 
+                      ? 'text-amber-600 hover:text-amber-700'
+                      : 'text-red-500 hover:text-red-700'
+                  }`}
+                  title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                 >
-                  <StopIcon className="h-4 w-4" />
+                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}
                 </button>
               </>
             )}
@@ -667,12 +681,16 @@ export function EnhancedPrinterCard({ printer, viewMode = 'grid' }: EnhancedPrin
               Resume
             </button>
             <button
-              onClick={handleEmergencyStop}
+              onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
               disabled={!currentStatus.isOnline}
-              className="px-3 py-1 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"
+              className={`px-3 py-1 text-sm font-medium text-white rounded flex items-center disabled:bg-gray-300 disabled:cursor-not-allowed ${
+                isShutdown 
+                  ? 'bg-amber-600 hover:bg-amber-700'
+                  : 'bg-red-600 hover:bg-red-700'
+              }`}
             >
-              <StopIcon className="h-3 w-3 mr-1" />
-              Stop
+              {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <StopIcon className="h-3 w-3 mr-1" />}
+              {isShutdown ? 'Restart' : 'Stop'}
             </button>
           </div>
         </div>

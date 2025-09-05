@@ -461,7 +461,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
         }
         catch { }
-        var state = job?.PrintState ?? status.State; // prefer print job state when available
+        var state = status.State ?? job?.PrintState; // prefer system state (ready/shutdown/error) over print job state
         // Query temps
         double? hotend = null, bed = null, hotendT = null, bedT = null;
         try
@@ -595,6 +595,15 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
     public async Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodeAsync(baseUrl, "M112", ct);
+
+    public async Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodeAsync(baseUrl, "FIRMWARE_RESTART", ct);
+
+    public Task<bool> FirmwareRestartAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return FirmwareRestartAsync(baseUrl.ToString(), ct);
+    }
 
     private async Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default)
         => await SendGcodeAsync(baseUrl, new[] { gcode }, ct);

@@ -1104,6 +1104,28 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return new CommandResult(ok, ok ? null : "Failed to emergency stop");
     }
 
+    [HttpPost("{id:guid}/firmware-restart")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FindAsync([id], ct);
+        if (p is null)
+        {
+            return NotFound();
+        }
+
+        // Only Moonraker/Klipper supports firmware restart
+        if (p.Backend != 0) // Not Moonraker
+        {
+            return BadRequest("Firmware restart is only supported for Moonraker/Klipper printers");
+        }
+
+        bool ok = await moon.FirmwareRestartAsync(p.ServerUrl, ct);
+        return new CommandResult(ok, ok ? null : "Failed to restart firmware");
+    }
+
     // Print job control
     [HttpPost("{id:guid}/print/start")]
     [ProducesResponseType(typeof(CommandResult), 200)]

@@ -144,7 +144,7 @@ public class MoonrakerClientTests
 
         var cs = await client.GetCompositeStatusAsync(Base);
         cs.IsOnline.Should().BeTrue();
-        cs.State.Should().Be("standby");
+        cs.State.Should().Be("ready"); // webhooks.state (system state) takes priority over print_stats.state (job state)
         cs.X.Should().Be(10.0);
         cs.Y.Should().Be(20.0);
         cs.Z.Should().Be(5.0);

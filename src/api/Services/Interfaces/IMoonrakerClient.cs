@@ -158,6 +158,15 @@ public interface IMoonrakerClient
     Task<bool> EmergencyStopAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
+    /// Restarts the Klipper firmware, reinitializing the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the firmware restart command was successfully sent</returns>
+    Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default);
+    Task<bool> FirmwareRestartAsync(Uri baseUrl, CancellationToken ct = default);
+
+    /// <summary>
     /// Starts printing a G-code file by name.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>

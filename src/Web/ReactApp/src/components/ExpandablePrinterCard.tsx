@@ -13,7 +13,8 @@ import {
   Pause,
   Square,
   Home,
-  Minus
+  Minus,
+  RotateCcw
 } from 'lucide-react';
 
 interface ExpandablePrinterCardProps {
@@ -47,6 +48,7 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
   const state = status?.state ?? printer.state;
   const isPrinting = state === 'printing';
   const isPaused = state === 'paused';
+  const isShutdown = state === 'shutdown';
 
   // Update last known values when new data is available
   useEffect(() => {
@@ -219,7 +221,7 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
     setIsExpanded(!isExpanded);
   };
 
-  const handleControlAction = async (action: 'pause' | 'resume' | 'stop') => {
+  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
     try {
       let result;
       switch (action) {
@@ -231,6 +233,9 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
           break;
         case 'stop':
           result = await apiClient.emergencyStop(printer.id);
+          break;
+        case 'firmware-restart':
+          result = await apiClient.firmwareRestart(printer.id);
           break;
       }
       
@@ -440,12 +445,17 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
             Resume
           </button>
           <button
-            onClick={() => handleControlAction('stop')}
+            onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
             disabled={!isOnline}
-            className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-red-700 text-white bg-red-700 rounded hover:bg-red-600 hover:border-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`inline-flex items-center px-3 py-1.5 text-xs font-medium border rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+              isShutdown 
+                ? 'border-amber-700 text-white bg-amber-700 hover:bg-amber-600 hover:border-amber-600'
+                : 'border-red-700 text-white bg-red-700 hover:bg-red-600 hover:border-red-600'
+            }`}
+            title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
-            <Square className="h-3 w-3 mr-1" />
-            Stop
+            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <Square className="h-3 w-3 mr-1" />}
+            {isShutdown ? 'Restart' : 'Stop'}
           </button>
         </div>
       </div>
@@ -733,12 +743,16 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                   <Play className="h-4 w-4" />
                 </button>
                 <button 
-                  className="w-11 h-11 p-0 flex items-center justify-center border border-red-700 text-white rounded bg-red-700 hover:bg-red-600 hover:border-red-600 disabled:opacity-50"
+                  className={`w-11 h-11 p-0 flex items-center justify-center border rounded disabled:opacity-50 ${
+                    isShutdown 
+                      ? 'border-amber-700 text-white bg-amber-700 hover:bg-amber-600 hover:border-amber-600'
+                      : 'border-red-700 text-white bg-red-700 hover:bg-red-600 hover:border-red-600'
+                  }`}
                   disabled={!isOnline}
-                  onClick={() => handleControlAction('stop')}
-                  title="Emergency Stop"
+                  onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
+                  title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                 >
-                  <Square className="h-4 w-4" />
+                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                 </button>
               </div>
               

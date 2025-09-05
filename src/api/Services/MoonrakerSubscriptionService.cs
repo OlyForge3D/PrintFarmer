@@ -60,11 +60,27 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     // Persistent state tracking for each printer
     private readonly ConcurrentDictionary<Guid, PrinterState> _printerStates = new();
+    private readonly ConcurrentDictionary<Guid, int> _parseErrorCounts = new();
+    private readonly ConcurrentDictionary<Guid, DateTime> _lastHttpPollTimes = new();
+    private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusUpdateTimes = new();
+    
+    // Track polling strategy per printer based on Klippy state
+    private readonly ConcurrentDictionary<Guid, PollingMode> _pollingModes = new();
+    
+    private enum PollingMode
+    {
+        WebSocketRealTime,  // Use WebSocket for real-time updates (normal operation)
+        HttpPollingOnly,    // Use HTTP polling only (Klippy disconnected/shutdown)
+        WebSocketWithFallback // Use WebSocket but ready to fallback (transition states)
+    }
     private Task? _mainLoop;
 
     // Connection configuration constants
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
     private const int MaxReconnectAttempts = 10;
+    private const int MaxParseErrorsBeforeFallback = 5;
+    private static readonly TimeSpan HttpPollInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan StaleConnectionThreshold = TimeSpan.FromSeconds(60); // Trigger fallback if no status updates for 60 seconds
 
     // Client identification for Moonraker
     private const string ClientName = "PrintFarmer";
@@ -139,6 +155,16 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             {
                 logger.LogError(ex, "Error enumerating printers for subscription");
             }
+            
+            try
+            {
+                await CheckForStaleConnectionsAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error checking for stale connections");
+            }
+            
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(10), ct);
@@ -166,6 +192,32 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
         }
 #pragma warning restore IDISP013
+    }
+
+    private async Task CheckForStaleConnectionsAsync(CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var staleThreshold = now - StaleConnectionThreshold;
+        
+        foreach (var (printerId, lastUpdate) in _lastStatusUpdateTimes.ToList())
+        {
+            if (lastUpdate < staleThreshold)
+            {
+                logger.LogWarning("Detected stale connection for printer {PrinterId}, last update was {LastUpdate:O}. Triggering HTTP polling fallback.", 
+                    printerId, lastUpdate);
+                
+                // Find the printer to trigger fallback
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var printer = await db.Printers.AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+                
+                if (printer != null)
+                {
+                    await TriggerHttpPollingFallbackAsync(printer, ct);
+                }
+            }
+        }
     }
 
     private static Uri BuildWsUri(string httpBase)
@@ -252,6 +304,10 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
                 // Connection successful - reset metrics
                 metrics.Reset();
+                
+                // Initialize status update tracking
+                _lastStatusUpdateTimes[id] = DateTime.UtcNow;
+                
                 logger.LogInformation("Successfully established monitored connection to printer {PrinterName}", printer.Name);
 
                 // Step 4: Message processing loop
@@ -502,6 +558,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             using var doc = JsonDocument.Parse(message);
             var root = doc.RootElement;
 
+            // Reset parse error count on successful JSON parsing - this indicates WebSocket connection is healthy
+            _parseErrorCounts.TryRemove(printer.Id, out _);
+
             // Check if this is a JSON-RPC response (has "id" field)
             if (root.TryGetProperty("id", out _))
             {
@@ -513,6 +572,20 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     {
                         logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
                             printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
+                            
+                        // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
+                        if (jsonRpcResponse.Error.Code == -32700)
+                        {
+                            _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
+                            var errorCount = _parseErrorCounts[printer.Id];
+                            
+                            if (errorCount >= MaxParseErrorsBeforeFallback)
+                            {
+                                logger.LogWarning("JSON-RPC parse error threshold ({Threshold}) exceeded for printer {PrinterName}. Triggering HTTP polling fallback.",
+                                    MaxParseErrorsBeforeFallback, printer.Name);
+                                await TriggerHttpPollingFallbackAsync(printer, ct);
+                            }
+                        }
                         return;
                     }
 
@@ -528,6 +601,17 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 catch (JsonException ex)
                 {
                     logger.LogWarning("Failed to parse JSON-RPC response from printer {PrinterName}: {Error}", printer.Name, ex.Message);
+                    
+                    // Track parse errors and trigger fallback if threshold exceeded
+                    _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
+                    var errorCount = _parseErrorCounts[printer.Id];
+                    
+                    if (errorCount >= MaxParseErrorsBeforeFallback)
+                    {
+                        logger.LogWarning("Parse error threshold ({Threshold}) exceeded for printer {PrinterName}. Triggering HTTP polling fallback.",
+                            MaxParseErrorsBeforeFallback, printer.Name);
+                        await TriggerHttpPollingFallbackAsync(printer, ct);
+                    }
                 }
             }
             // Check if this is a JSON-RPC notification (has "method" field but no "id")
@@ -548,12 +632,20 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                         break;
 
                     case "notify_klippy_disconnected":
-                        logger.LogWarning("Klippy disconnected for printer {PrinterName}", printer.Name);
+                        logger.LogWarning("Klippy disconnected for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                        SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy disconnected");
                         await SendOfflineStatusAsync(printer.Id, ct);
                         break;
 
                     case "notify_klippy_ready":
-                        logger.LogInformation("Klippy ready for printer {PrinterName}", printer.Name);
+                        logger.LogInformation("Klippy ready for printer {PrinterName}, switching to WebSocket real-time mode", printer.Name);
+                        SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
+                        break;
+
+                    case "notify_klippy_shutdown":
+                        logger.LogWarning("Klippy shutdown for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                        SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy shutdown");
+                        await SendShutdownStatusAsync(printer.Id, ct);
                         break;
 
                     default:
@@ -841,6 +933,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         logger.LogInformation("Sending status update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HotendTemp={HotendTemp}, HotendTarget={HotendTarget}, BedTemp={BedTemp}, BedTarget={BedTarget}, HomedAxes={HomedAxes}",
             printerId, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
+        // Track successful status update time
+        _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
+
         await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
         logger.LogTrace("Sent status update for printer {PrinterId}", printerId);
     }
@@ -867,6 +962,69 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         {
             logger.LogError(ex, "Failed to send offline status for printer {PrinterId}", printerId);
         }
+    }
+
+    private async Task SendShutdownStatusAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            var shutdownUpdate = new PrinterStatusUpdate(
+                printerId,
+                false, // IsOnline
+                "Shutdown",
+                null, null, null, null,
+                null, null, null,
+                null, null, null, null,
+                HomedAxes: null,
+                SpoolInfo: null
+            );
+
+            await hub.Clients.All.SendAsync("PrinterUpdated", shutdownUpdate, ct);
+            logger.LogDebug("Sent shutdown status for printer {PrinterId}", printerId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to send shutdown status for printer {PrinterId}", printerId);
+        }
+    }
+
+    /// <summary>
+    /// Sets the polling mode for a specific printer based on Klippy state changes
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="mode">The polling mode to set</param>
+    /// <param name="reason">The reason for the polling mode change</param>
+    private void SetPollingMode(Guid printerId, PollingMode mode, string reason)
+    {
+        try
+        {
+            _pollingModes.AddOrUpdate(printerId, mode, (key, oldValue) => mode);
+            
+            logger.LogInformation("Set polling mode for printer {PrinterId} to {PollingMode}: {Reason}", 
+                printerId, mode, reason);
+
+            // Log state transition if mode changed
+            if (_pollingModes.TryGetValue(printerId, out var previousMode) && previousMode != mode)
+            {
+                logger.LogDebug("Polling mode transition for printer {PrinterId}: {PreviousMode} -> {NewMode}", 
+                    printerId, previousMode, mode);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set polling mode for printer {PrinterId} to {PollingMode}", 
+                printerId, mode);
+        }
+    }
+
+    /// <summary>
+    /// Gets the current polling mode for a printer, defaulting to WebSocketWithFallback
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <returns>The current polling mode</returns>
+    private PollingMode GetPollingMode(Guid printerId)
+    {
+        return _pollingModes.GetValueOrDefault(printerId, PollingMode.WebSocketWithFallback);
     }
 
     // Helper method to get spool information for Moonraker printers
@@ -915,6 +1073,79 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             logger.LogError(ex, "GetSpoolInfoAsync: Exception occurred during spool detection for {ServerUrl}", serverUrl);
             // If any operations fail, just return no spool info
             return new PrinterSpoolInfoDto(HasActiveSpool: false);
+        }
+    }
+
+    /// <summary>
+    /// Triggers HTTP polling fallback when WebSocket parse errors exceed threshold
+    /// </summary>
+    private async Task TriggerHttpPollingFallbackAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            var lastPollTime = _lastHttpPollTimes.GetValueOrDefault(printer.Id, DateTime.MinValue);
+            var timeSinceLastPoll = DateTime.UtcNow - lastPollTime;
+
+            // Only poll if enough time has passed since last poll
+            if (timeSinceLastPoll < HttpPollInterval)
+            {
+                return;
+            }
+
+            logger.LogDebug("Starting HTTP polling fallback for printer {PrinterName}", printer.Name);
+
+            // Use existing MoonrakerClient to fetch status via HTTP
+            using var scope = scopeFactory.CreateScope();
+            var serviceProvider = scope.ServiceProvider;
+            var moonrakerClient = serviceProvider.GetRequiredService<IMoonrakerClient>();
+            
+            // Get comprehensive status using existing HTTP endpoint
+            var compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.ServerUrl, ct);
+
+            if (compositeStatus != null && compositeStatus.IsOnline)
+            {
+                // Convert CompositeStatus to StatusUpdate format and send via existing logic
+                logger.LogDebug("HTTP polling fallback retrieved status for printer {PrinterName}: State={State}, IsOnline={IsOnline}",
+                    printer.Name, compositeStatus.State, compositeStatus.IsOnline);
+
+                // Create a status update using the composite status data
+                var spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
+                
+                var statusUpdate = new PrinterStatusUpdate(
+                    printer.Id,
+                    compositeStatus.IsOnline,
+                    compositeStatus.State,
+                    compositeStatus.Progress,
+                    compositeStatus.JobName,
+                    compositeStatus.ThumbnailUrl,
+                    compositeStatus.CameraStreamUrl,
+                    compositeStatus.X,
+                    compositeStatus.Y,
+                    compositeStatus.Z,
+                    compositeStatus.HotendTemp,
+                    compositeStatus.BedTemp,
+                    compositeStatus.HotendTarget,
+                    compositeStatus.BedTarget,
+                    null, // HomedAxes - Not available in CompositeStatus
+                    spoolInfo
+                );
+
+                await hub.Clients.All.SendAsync("PrinterUpdated", statusUpdate, ct);
+                
+                // Update last poll time and reset parse error count since HTTP polling succeeded
+                _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;
+                _parseErrorCounts.TryRemove(printer.Id, out _);
+                
+                logger.LogDebug("HTTP polling fallback successful for printer {PrinterName}", printer.Name);
+            }
+            else
+            {
+                logger.LogWarning("HTTP polling fallback failed for printer {PrinterName} - no status returned or offline", printer.Name);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during HTTP polling fallback for printer {PrinterName}", printer.Name);
         }
     }
 }
