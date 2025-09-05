@@ -12,4 +12,5 @@ public record CreateModelRequest(
     double? MaxX,
     double? MaxY,
     double? MaxZ,
-    PrinterBackend? DefaultBackend);
+    PrinterBackend? DefaultBackend,
+    Guid[]? SupportedFilamentTypeIds);

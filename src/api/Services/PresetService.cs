@@ -41,11 +41,14 @@ public class PresetService : IPresetService
     }
 
     private static FilamentPresetsDto Default() => new(
-        Abs: new TempTargets(230, 100),
-        Asa: new TempTargets(245, 100),
-        Pla: new TempTargets(205, 60),
-        Pc: new TempTargets(260, 110),
-        Pctg: new TempTargets(235, 80),
-        Petg: new TempTargets(240, 85)
+        Presets: new Dictionary<string, TempTargets>
+        {
+            ["ABS"] = new TempTargets(230, 100),
+            ["ASA"] = new TempTargets(245, 100),
+            ["PLA"] = new TempTargets(205, 60),
+            ["PC"] = new TempTargets(260, 110),
+            ["PCTG"] = new TempTargets(235, 80),
+            ["PETG"] = new TempTargets(240, 85)
+        }
     );
 }

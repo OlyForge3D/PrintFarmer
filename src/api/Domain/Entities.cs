@@ -70,6 +70,25 @@ public class PrinterModel
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
     public int? DefaultBackend { get; set; } // Default backend for this model: 0=Moonraker, 1=PrusaLink, 2=SDCP
+    public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = [];
+}
+
+public class FilamentType
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public double? DefaultHotendTemp { get; set; }
+    public double? DefaultBedTemp { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public ICollection<PrinterModelFilamentType> PrinterModels { get; } = [];
+}
+
+public class PrinterModelFilamentType
+{
+    public Guid PrinterModelId { get; set; }
+    public PrinterModel? PrinterModel { get; set; }
+    public Guid FilamentTypeId { get; set; }
+    public FilamentType? FilamentType { get; set; }
 }
 
 public class SpoolmanConfig

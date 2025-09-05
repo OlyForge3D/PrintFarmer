@@ -9,6 +9,10 @@ import {
   ModelDto, 
   FilamentPresets,
   TempTargets,
+  FilamentTypeDto,
+  CreateFilamentTypeRequest,
+  UpdateFilamentTypeRequest,
+  UpdateModelRequest,
   MoveRequest,
   CommandResult,
   ResolveHostnameRequest,
@@ -179,9 +183,14 @@ export class ApiClient {
     return response.data;
   }
 
-  async updateModel(id: string, name: string): Promise<ModelDto> {
-    const response = await this.client.put<ModelDto>(`/catalog/models/${id}`, { name });
+  async updateModel(id: string, request: UpdateModelRequest): Promise<ModelDto> {
+    const response = await this.client.put<ModelDto>(`/catalog/models/${id}`, request);
     return response.data;
+  }
+
+  // Legacy method for simple name updates
+  async updateModelName(id: string, name: string): Promise<ModelDto> {
+    return this.updateModel(id, { name });
   }
 
   async deleteModel(id: string): Promise<void> {
@@ -190,13 +199,33 @@ export class ApiClient {
 
   // ============ Settings API methods ============
 
-  async getFilamentPresets(): Promise<FilamentPresets> {
-    const response = await this.client.get<FilamentPresets>('/presets');
+  // ============ Filament Type API methods ============
+
+  async getFilamentTypes(): Promise<FilamentTypeDto[]> {
+    const response = await this.client.get<FilamentTypeDto[]>('/filamenttype');
     return response.data;
   }
 
+  async createFilamentType(filamentType: CreateFilamentTypeRequest): Promise<FilamentTypeDto> {
+    const response = await this.client.post<FilamentTypeDto>('/filamenttype', filamentType);
+    return response.data;
+  }
+
+  async updateFilamentType(id: string, filamentType: UpdateFilamentTypeRequest): Promise<void> {
+    await this.client.put(`/filamenttype/${id}`, filamentType);
+  }
+
+  async deleteFilamentType(id: string): Promise<void> {
+    await this.client.delete(`/filamenttype/${id}`);
+  }
+
+  async getFilamentPresets(): Promise<FilamentPresets> {
+    const response = await this.client.get<{ presets: FilamentPresets }>('/filamenttype/presets');
+    return response.data.presets;
+  }
+
   async saveFilamentPresets(presets: FilamentPresets): Promise<void> {
-    await this.client.post('/presets', presets);
+    await this.client.post('/filamenttype/presets', { presets });
   }
 
   // ============ Network utilities ============

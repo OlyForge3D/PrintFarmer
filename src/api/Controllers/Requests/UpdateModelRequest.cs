@@ -2,4 +2,4 @@
 
 using Farm.Web.Shared;
 
-public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend);
+public record UpdateModelRequest(string Name, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend, Guid[]? SupportedFilamentTypeIds);

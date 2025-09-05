@@ -158,6 +158,7 @@ export interface ModelDto {
   maxY?: number;
   maxZ?: number;
   defaultBackend?: PrinterBackend;
+  supportedFilamentTypes?: string[];
 }
 
 // Printer details for edit page
@@ -186,14 +187,42 @@ export interface TempTargets {
   bed: number;
 }
 
-// Filament temperature presets
+// Dynamic filament presets
 export interface FilamentPresets {
-  abs: TempTargets;
-  asa: TempTargets;
-  pla: TempTargets;
-  pc: TempTargets;
-  pctg: TempTargets;
-  petg: TempTargets;
+  [filamentType: string]: TempTargets;
+}
+
+// Filament type management
+export interface FilamentType {
+  id: string;
+  name: string;
+  defaultTemperatures: TempTargets;
+}
+
+export interface FilamentTypeDto {
+  id: string;
+  name: string;
+  defaultHotendTemp: number;
+  defaultBedTemp: number;
+}
+
+export interface CreateFilamentTypeRequest {
+  name: string;
+  defaultTemperatures: TempTargets;
+}
+
+export interface UpdateFilamentTypeRequest {
+  name: string;
+  defaultTemperatures: TempTargets;
+}
+
+export interface UpdateModelRequest {
+  name: string;
+  maxX?: number;
+  maxY?: number;
+  maxZ?: number;
+  defaultBackend?: PrinterBackend;
+  supportedFilamentTypeIds?: string[];
 }
 
 // Resolve hostname/IP utility

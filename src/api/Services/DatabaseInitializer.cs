@@ -1,4 +1,5 @@
 ﻿using Farm.Web.Api.Data;
+using Farm.Web.Api.Data.Seed;
 
 namespace Farm.Web.Api.Services;
 
@@ -35,17 +36,16 @@ public class DatabaseInitializer
                 await _context.Database.CanConnectAsync();
                 _logger.LogInformation("[DB] Database connection established successfully");
 
-                // Perform migrations or ensure creation
+                // For MVP development, use EnsureCreated instead of migrations.
+                // This approach automatically handles schema changes during development.
                 try
                 {
-                    // For MVP development, use EnsureCreated instead of migrations.
-                    // This simplifies schema changes during rapid development.
                     await _context.Database.EnsureCreatedAsync();
-                    _logger.LogInformation("[DB] Database schema creation completed successfully");
+                    _logger.LogInformation("[DB] Database schema ensured successfully");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[DB] Database creation failed: {Message}", ex.Message);
+                    _logger.LogWarning(ex, "[DB] Database schema creation failed: {Message}", ex.Message);
                     throw; // Re-throw to trigger retry mechanism
                 }
 

@@ -125,9 +125,44 @@ public class DatabaseSeeder : IDatabaseSeeder
         }
     }
 
+    public async Task SeedFilamentTypesAsync()
+    {
+        // Default filament types to ensure exist
+        var filamentTypes = new (string Name, int HotendTemp, int BedTemp)[]
+        {
+            ("PLA", 205, 60),
+            ("ABS", 230, 100),
+            ("PETG", 240, 85),
+            ("ASA", 245, 100),
+            ("PC", 260, 110),
+            ("PCTG", 235, 80),
+            ("TPU", 220, 60),
+            ("Wood", 210, 65)
+        };
+
+        foreach (var (name, hotendTemp, bedTemp) in filamentTypes)
+        {
+            var existing = await _context.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name);
+            if (existing == null)
+            {
+                var filamentType = new FilamentType
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    DefaultHotendTemp = hotendTemp,
+                    DefaultBedTemp = bedTemp
+                };
+                _context.FilamentTypes.Add(filamentType);
+            }
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
     public async Task SeedAllAsync()
     {
         await SeedSpoolmanConfigAsync();
         await SeedCatalogDataAsync();
+        await SeedFilamentTypesAsync();
     }
 }

@@ -66,7 +66,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<ModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<ModelDto>>> GetModelsAsync([FromQuery] Guid? manufacturerId, CancellationToken ct)
     {
-        var q = db.Models.AsNoTracking().AsQueryable();
+        var q = db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
         if (manufacturerId is Guid mid)
         {
             q = q.Where(m => m.ManufacturerId == mid);
@@ -74,7 +74,8 @@ public class CatalogController(AppDbContext db) : ControllerBase
 
         var list = await q.OrderBy(m => m.Name)
             .Select(m => new ModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ,
-                m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null)).ToListAsync(ct);
+                m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null,
+                m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray())).ToListAsync(ct);
         return Ok(list);
     }
 
@@ -124,6 +125,25 @@ public class CatalogController(AppDbContext db) : ControllerBase
             DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null
         };
         db.Models.Add(model);
+
+        // Add supported filament types if provided
+        if (req.SupportedFilamentTypeIds?.Length > 0)
+        {
+            var validFilamentTypeIds = await db.FilamentTypes.AsNoTracking()
+                .Where(f => req.SupportedFilamentTypeIds.Contains(f.Id))
+                .Select(f => f.Id)
+                .ToListAsync(ct);
+
+            foreach (var filamentTypeId in validFilamentTypeIds)
+            {
+                db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                {
+                    PrinterModelId = model.Id,
+                    FilamentTypeId = filamentTypeId
+                });
+            }
+        }
+
         try
         {
             await db.SaveChangesAsync(ct);
@@ -133,8 +153,15 @@ public class CatalogController(AppDbContext db) : ControllerBase
             // Likely a FK or unique constraint violation
             return BadRequest("Invalid request: constraint failed (check ManufacturerId and uniqueness).");
         }
+
+        // Load the model with filament types for response
+        var createdModel = await db.Models.AsNoTracking()
+            .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            .FirstOrDefaultAsync(m => m.Id == model.Id, ct);
+
         return CreatedAtAction(nameof(GetModelsAsync), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
-                model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null));
+                model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
+                createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
     }
 
     [HttpPut("models/{id:guid}")]
@@ -147,7 +174,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
         {
             return BadRequest("Request body is required");
         }
-        var model = await db.Models.FindAsync([id], ct);
+        var model = await db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null)
         {
             return NotFound();
@@ -162,6 +189,32 @@ public class CatalogController(AppDbContext db) : ControllerBase
         model.MaxY = req.MaxY;
         model.MaxZ = req.MaxZ;
         model.DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null;
+
+        // Update supported filament types
+        if (req.SupportedFilamentTypeIds != null)
+        {
+            // Remove existing relationships
+            db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
+
+            // Add new relationships
+            if (req.SupportedFilamentTypeIds.Length > 0)
+            {
+                var validFilamentTypeIds = await db.FilamentTypes.AsNoTracking()
+                    .Where(f => req.SupportedFilamentTypeIds.Contains(f.Id))
+                    .Select(f => f.Id)
+                    .ToListAsync(ct);
+
+                foreach (var filamentTypeId in validFilamentTypeIds)
+                {
+                    db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                    {
+                        PrinterModelId = model.Id,
+                        FilamentTypeId = filamentTypeId
+                    });
+                }
+            }
+        }
+
         await db.SaveChangesAsync(ct);
         return NoContent();
     }

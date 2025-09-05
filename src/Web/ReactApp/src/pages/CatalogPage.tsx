@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { Plus, Edit, Trash2, Save, X } from 'lucide-react';
-import type { ManufacturerDto, ModelDto } from '@/types/api';
+import { Plus, Edit, Trash2, Save, X, Settings } from 'lucide-react';
+import type { ManufacturerDto, ModelDto, FilamentTypeDto } from '@/types/api';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
   const [models, setModels] = useState<ModelDto[]>([]);
+  const [filamentTypes, setFilamentTypes] = useState<FilamentTypeDto[]>([]);
   const [selectedManufacturer, setSelectedManufacturer] = useState<ManufacturerDto | null>(null);
+  const [selectedModel, setSelectedModel] = useState<ModelDto | null>(null);
   const [newManufacturer, setNewManufacturer] = useState('');
   const [newModel, setNewModel] = useState('');
   const [editingManufacturer, setEditingManufacturer] = useState<{ id: string; name: string } | null>(null);
   const [editingModel, setEditingModel] = useState<{ id: string; name: string } | null>(null);
+  const [showFilamentEditor, setShowFilamentEditor] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,12 +24,14 @@ export function CatalogPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [manufacturersData, modelsData] = await Promise.all([
+      const [manufacturersData, modelsData, filamentTypesData] = await Promise.all([
         apiClient.getManufacturers(),
-        apiClient.getModels()
+        apiClient.getModels(),
+        apiClient.getFilamentTypes()
       ]);
       setManufacturers(manufacturersData);
       setModels(modelsData);
+      setFilamentTypes(filamentTypesData);
       setError(null);
     } catch (err) {
       setError('Failed to load catalog data');
@@ -87,12 +92,36 @@ export function CatalogPage() {
 
   const updateModel = async (id: string, name: string) => {
     try {
-      await apiClient.updateModel(id, name);
+      await apiClient.updateModelName(id, name);
       setModels(models.map(m => m.id === id ? { ...m, name } : m));
       setEditingModel(null);
     } catch (err) {
       setError('Failed to update model');
       console.error('Error updating model:', err);
+    }
+  };
+
+  const updateModelFilamentTypes = async (modelId: string, filamentTypeNames: string[]) => {
+    try {
+      // Get filament type IDs from names
+      const filamentTypeIds = filamentTypes
+        .filter(ft => filamentTypeNames.includes(ft.name))
+        .map(ft => ft.id);
+
+      const model = models.find(m => m.id === modelId);
+      if (!model) return;
+
+      await apiClient.updateModel(modelId, {
+        name: model.name,
+        maxX: model.maxX,
+        maxY: model.maxY,
+        maxZ: model.maxZ,
+        defaultBackend: model.defaultBackend,
+        supportedFilamentTypeIds: filamentTypeIds
+      });
+    } catch (err) {
+      setError('Failed to update model filament types');
+      console.error('Error updating model filament types:', err);
     }
   };
 
@@ -122,6 +151,11 @@ export function CatalogPage() {
       setError('Failed to delete model');
       console.error('Error deleting model:', err);
     }
+  };
+
+  const toggleFilamentTypes = (model: ModelDto) => {
+    setSelectedModel(selectedModel?.id === model.id ? null : model);
+    setShowFilamentEditor(selectedModel?.id !== model.id);
   };
 
   if (loading) {
@@ -276,54 +310,114 @@ export function CatalogPage() {
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {selectedManufacturer ? (
               getFilteredModels().map((model) => (
-                <div
-                  key={model.id}
-                  className="p-3 border border-pf-border rounded hover:bg-pf-bg-2 transition-colors"
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      {editingModel?.id === model.id ? (
-                        <div className="flex gap-2">
-                          <input
-                            value={editingModel.name}
-                            onChange={(e) => setEditingModel({ ...editingModel, name: e.target.value })}
-                            className="px-2 py-1 bg-pf-bg-0 border border-pf-border rounded text-sm"
-                            autoFocus
-                          />
+                <div key={model.id} className="space-y-2">
+                  <div className="p-3 border border-pf-border rounded hover:bg-pf-bg-2 transition-colors">
+                    <div className="flex justify-between items-center">
+                      <div className="flex-1">
+                        {editingModel?.id === model.id ? (
+                          <div className="flex gap-2">
+                            <input
+                              value={editingModel.name}
+                              onChange={(e) => setEditingModel({ ...editingModel, name: e.target.value })}
+                              className="px-2 py-1 bg-pf-bg-0 border border-pf-border rounded text-sm"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => updateModel(editingModel.id, editingModel.name)}
+                              className="text-green-400 hover:text-green-300"
+                            >
+                              <Save className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => setEditingModel(null)}
+                              className="text-red-400 hover:text-red-300"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="font-medium text-pf-text-primary">{model.name}</div>
+                            {model.supportedFilamentTypes && model.supportedFilamentTypes.length > 0 && (
+                              <div className="text-sm text-pf-text-secondary mt-1">
+                                Filament types: {model.supportedFilamentTypes.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {editingModel?.id !== model.id && (
+                        <div className="flex gap-1">
                           <button
-                            onClick={() => updateModel(editingModel.id, editingModel.name)}
-                            className="text-green-400 hover:text-green-300"
+                            onClick={() => toggleFilamentTypes(model)}
+                            className="text-gray-400 hover:text-gray-300"
+                            title="Manage filament types"
                           >
-                            <Save className="h-4 w-4" />
+                            <Settings className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => setEditingModel(null)}
+                            onClick={() => setEditingModel({ id: model.id, name: model.name })}
+                            className="text-blue-400 hover:text-blue-300"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteModel(model.id)}
                             className="text-red-400 hover:text-red-300"
                           >
-                            <X className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
-                      ) : (
-                        <div className="font-medium text-pf-text-primary">{model.name}</div>
                       )}
                     </div>
-                    {editingModel?.id !== model.id && (
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => setEditingModel({ id: model.id, name: model.name })}
-                          className="text-blue-400 hover:text-blue-300"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => deleteModel(model.id)}
-                          className="text-red-400 hover:text-red-300"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
                   </div>
+                  
+                  {/* Filament Type Editor */}
+                  {selectedModel?.id === model.id && showFilamentEditor && (
+                    <div className="ml-4 p-3 bg-pf-bg-0 border border-pf-border rounded">
+                      <h4 className="text-sm font-semibold text-pf-text-primary mb-2">
+                        Supported Filament Types
+                      </h4>
+                      <div className="space-y-2">
+                        {filamentTypes.map((filamentType) => {
+                          const isSupported = model.supportedFilamentTypes?.includes(filamentType.name) || false;
+                          return (
+                            <label key={filamentType.id} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={isSupported}
+                                onChange={async (e) => {
+                                  const updatedTypes = e.target.checked
+                                    ? [...(model.supportedFilamentTypes || []), filamentType.name]
+                                    : (model.supportedFilamentTypes || []).filter(t => t !== filamentType.name);
+                                  
+                                  // Update local state optimistically
+                                  setModels(models.map(m => 
+                                    m.id === model.id 
+                                      ? { ...m, supportedFilamentTypes: updatedTypes }
+                                      : m
+                                  ));
+                                  
+                                  // Update via API
+                                  await updateModelFilamentTypes(model.id, updatedTypes);
+                                }}
+                                className="rounded border-pf-border"
+                              />
+                              <span className="text-pf-text-primary">{filamentType.name}</span>
+                              <span className="text-pf-text-secondary text-xs">
+                                ({filamentType.defaultHotendTemp}°C / {filamentType.defaultBedTemp}°C)
+                              </span>
+                            </label>
+                          );
+                        })}
+                        {filamentTypes.length === 0 && (
+                          <div className="text-sm text-pf-text-secondary">
+                            No filament types available. Add some in Settings first.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (

@@ -9,6 +9,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Spool> Spools => Set<Spool>();
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
     public DbSet<PrinterModel> Models => Set<PrinterModel>();
+    public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
+    public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
     // G-code Library & Job Queue
@@ -78,6 +80,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(m => m.MaxX);
             b.Property(m => m.MaxY);
             b.Property(m => m.MaxZ);
+        });
+
+        modelBuilder.Entity<FilamentType>(b =>
+        {
+            b.HasKey(f => f.Id);
+            var isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+            var nameProp = b.Property(f => f.Name).IsRequired().HasMaxLength(64);
+            if (isSqlite)
+            {
+                nameProp.UseCollation("NOCASE");
+            }
+            b.HasIndex(f => f.Name).IsUnique();
+            b.Property(f => f.DefaultHotendTemp);
+            b.Property(f => f.DefaultBedTemp);
+            b.Property(f => f.CreatedAt).IsRequired();
+        });
+
+        modelBuilder.Entity<PrinterModelFilamentType>(b =>
+        {
+            b.HasKey(pf => new { pf.PrinterModelId, pf.FilamentTypeId });
+            b.HasOne(pf => pf.PrinterModel)
+             .WithMany(p => p.SupportedFilamentTypes)
+             .HasForeignKey(pf => pf.PrinterModelId)
+             .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(pf => pf.FilamentType)
+             .WithMany(f => f.PrinterModels)
+             .HasForeignKey(pf => pf.FilamentTypeId)
+             .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Spool>(b =>

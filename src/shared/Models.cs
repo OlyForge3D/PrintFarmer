@@ -182,7 +182,12 @@ public record PrinterSpoolInfoDto(
 
 // Catalog (Manufacturers / Models)
 public record ManufacturerDto(Guid Id, string Name);
-public record ModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null);
+public record ModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null, string[]? SupportedFilamentTypes = null);
+
+// Filament type management
+public record FilamentTypeDto(Guid Id, string Name, TempTargets DefaultTemperatures);
+public record CreateFilamentTypeRequest(string Name, TempTargets DefaultTemperatures);
+public record UpdateFilamentTypeRequest(string Name, TempTargets DefaultTemperatures);
 
 // Printer details for edit page
 public record PrinterDetailsDto(
@@ -203,14 +208,8 @@ public record PrinterDetailsDto(
     string? OriginalServerUrl = null,
     string? IpAddress = null);
 
-// Filament temperature presets (admin-configurable)
-public record FilamentPresetsDto(
-    TempTargets Abs,
-    TempTargets Asa,
-    TempTargets Pla,
-    TempTargets Pc,
-    TempTargets Pctg,
-    TempTargets Petg);
+// Filament temperature presets (admin-configurable) - now dynamic
+public record FilamentPresetsDto(Dictionary<string, TempTargets> Presets);
 
 // Resolve hostname/IP utility
 public record ResolveHostnameRequest(string ServerUrl, PrinterBackend Backend);
