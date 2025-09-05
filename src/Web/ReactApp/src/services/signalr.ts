@@ -4,12 +4,15 @@ import {
   HubConnectionState,
   LogLevel 
 } from '@microsoft/signalr';
-import { PrinterStatusUpdate } from '@/types/api';
+import { PrinterStatusUpdate, DiscoveryProgressDto, DiscoveryPrinterFoundDto, DiscoveryCompletedDto } from '@/types/api';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: any) => void;
 type JobQueueUpdateCallback = (update: any) => void;
 type ConnectionStateCallback = (connected: boolean) => void;
+type DiscoveryProgressCallback = (progress: DiscoveryProgressDto) => void;
+type DiscoveryPrinterFoundCallback = (found: DiscoveryPrinterFoundDto) => void;
+type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
 
 export class SignalRService {
   private connection: HubConnection | null = null;
@@ -23,14 +26,20 @@ export class SignalRService {
   private harvestUpdateCallbacks: HarvestUpdateCallback[] = [];
   private jobQueueUpdateCallbacks: JobQueueUpdateCallback[] = [];
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
+  private discoveryProgressCallbacks: DiscoveryProgressCallback[] = [];
+  private discoveryPrinterFoundCallbacks: DiscoveryPrinterFoundCallback[] = [];
+  private discoveryCompletedCallbacks: DiscoveryCompletedCallback[] = [];
 
   constructor() {
     this.buildConnection();
   }
 
   private buildConnection(): void {
+    // Use environment variable for SignalR URL, fallback to relative path for monolithic deployment
+    const signalrUrl = import.meta.env.REACT_APP_SIGNALR_URL || '/hubs/printers';
+    
     this.connection = new HubConnectionBuilder()
-      .withUrl('/hubs/printers')
+      .withUrl(signalrUrl)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           // Exponential backoff with jitter
@@ -101,6 +110,37 @@ export class SignalRService {
         }
       });
     });
+
+    // Discovery event handlers
+    this.connection.on('DiscoveryProgress', (progress: DiscoveryProgressDto) => {
+      this.discoveryProgressCallbacks.forEach(callback => {
+        try {
+          callback(progress);
+        } catch (error) {
+          console.error('Error in discovery progress callback:', error);
+        }
+      });
+    });
+
+    this.connection.on('DiscoveryPrinterFound', (found: DiscoveryPrinterFoundDto) => {
+      this.discoveryPrinterFoundCallbacks.forEach(callback => {
+        try {
+          callback(found);
+        } catch (error) {
+          console.error('Error in discovery printer found callback:', error);
+        }
+      });
+    });
+
+    this.connection.on('DiscoveryCompleted', (completed: DiscoveryCompletedDto) => {
+      this.discoveryCompletedCallbacks.forEach(callback => {
+        try {
+          callback(completed);
+        } catch (error) {
+          console.error('Error in discovery completed callback:', error);
+        }
+      });
+    });
   }
 
   private notifyConnectionState(connected: boolean): void {
@@ -120,6 +160,17 @@ export class SignalRService {
 
     if (this.connection!.state === HubConnectionState.Connected) {
       console.info('SignalR already connected');
+      return;
+    }
+
+    if (this.connection!.state === HubConnectionState.Connecting) {
+      console.info('SignalR already connecting, waiting...');
+      return;
+    }
+
+    // Only start if we're in Disconnected state
+    if (this.connection!.state !== HubConnectionState.Disconnected) {
+      console.warn('SignalR connection is in unexpected state:', this.connection!.state);
       return;
     }
 
@@ -203,6 +254,41 @@ export class SignalRService {
     };
   }
 
+  // ============ Discovery Event Subscriptions ============
+
+  onDiscoveryProgress(callback: DiscoveryProgressCallback): () => void {
+    this.discoveryProgressCallbacks.push(callback);
+    
+    return () => {
+      const index = this.discoveryProgressCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.discoveryProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onDiscoveryPrinterFound(callback: DiscoveryPrinterFoundCallback): () => void {
+    this.discoveryPrinterFoundCallbacks.push(callback);
+    
+    return () => {
+      const index = this.discoveryPrinterFoundCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.discoveryPrinterFoundCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onDiscoveryCompleted(callback: DiscoveryCompletedCallback): () => void {
+    this.discoveryCompletedCallbacks.push(callback);
+    
+    return () => {
+      const index = this.discoveryCompletedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.discoveryCompletedCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   // ============ Server Method Calls ============
 
   async joinPrinterGroup(printerId: string): Promise<void> {
@@ -237,12 +323,29 @@ export class SignalRService {
     return this.connection?.connectionId ?? null;
   }
 
+  // ============ Discovery Group Methods ============
+
+  async joinDiscoveryGroup(sessionId: string): Promise<void> {
+    if (this.connection && this.connection.state === HubConnectionState.Connected) {
+      await this.connection.invoke('JoinDiscoveryGroupAsync', sessionId);
+    }
+  }
+
+  async leaveDiscoveryGroup(sessionId: string): Promise<void> {
+    if (this.connection && this.connection.state === HubConnectionState.Connected) {
+      await this.connection.invoke('LeaveDiscoveryGroupAsync', sessionId);
+    }
+  }
+
   // Clean up all resources
   dispose(): void {
     this.printerStatusCallbacks = [];
     this.harvestUpdateCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
+    this.discoveryProgressCallbacks = [];
+    this.discoveryPrinterFoundCallbacks = [];
+    this.discoveryCompletedCallbacks = [];
     
     if (this.connection) {
       this.connection.stop();

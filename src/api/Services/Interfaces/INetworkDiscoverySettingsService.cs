@@ -18,10 +18,4 @@ public interface INetworkDiscoverySettingsService
     /// </summary>
     /// <param name="settings">Network discovery settings including CIDR ranges, timeouts, and ports</param>
     void SaveSettings(NetworkDiscoverySettingsDto settings);
-
-    /// <summary>
-    /// Gets network ranges dynamically based on the current server's network interfaces.
-    /// </summary>
-    /// <returns>Read-only list of CIDR network ranges detected from active network interfaces</returns>
-    IReadOnlyList<string> GetDynamicNetworkRanges();
 }

@@ -1,6 +1,4 @@
-﻿using System.Net;
-using System.Net.Sockets;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 
@@ -41,13 +39,12 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             return _settings;
         }
 
-        // If no settings exist or no ranges configured, return settings with dynamic ranges
-        var dynamicRanges = GetDynamicNetworkRanges();
+        // If no user settings exist, return empty settings - user must configure ranges
         return new NetworkDiscoverySettingsDto(
-            dynamicRanges.Count > 0 ? [.. dynamicRanges] : [.. GetFallbackNetworkRanges()],
-            _settings?.TimeoutMs ?? 100,
-            _settings?.MaxConcurrentScans ?? 20,
-            _settings?.Ports ?? [80, 7125]
+            [], // Empty - user must specify network ranges
+            100, // Default timeout: 100ms per host
+            15,  // Default max concurrent scans
+            [80, 7125] // Default ports: HTTP and Moonraker
         );
     }
 
@@ -64,102 +61,5 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         {
             _logger.LogError(ex, "Failed to save network discovery settings to {Path}", _path);
         }
-    }
-
-    public IReadOnlyList<string> GetDynamicNetworkRanges()
-    {
-        var networks = new List<string>();
-
-        try
-        {
-            // Use a simpler approach to detect current network
-            var hostName = Dns.GetHostName();
-            var hostEntry = Dns.GetHostEntry(hostName);
-
-            foreach (var address in hostEntry.AddressList)
-            {
-                if (address.AddressFamily == AddressFamily.InterNetwork &&
-                    !IPAddress.IsLoopback(address) &&
-                    IsPrivateNetwork(address))
-                {
-                    // Assume /24 subnet for private networks
-                    var networkAddr = GetNetworkAddressForPrivateIP(address);
-                    if (networkAddr != null && !networks.Contains(networkAddr))
-                    {
-                        networks.Add(networkAddr);
-                        _logger.LogDebug("Detected network from host IP: {IP} -> {Network}", address, networkAddr);
-                    }
-                }
-            }
-
-            _logger.LogInformation("Detected {Count} network ranges from host interfaces: {Networks}",
-                networks.Count, string.Join(", ", networks));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to detect network ranges from host interfaces");
-            return GetFallbackNetworkRanges();
-        }
-
-        return networks.Count > 0 ? networks : GetFallbackNetworkRanges();
-    }
-
-    private static bool IsPrivateNetwork(IPAddress address)
-    {
-        var bytes = address.GetAddressBytes();
-
-        // 10.0.0.0/8
-        if (bytes[0] == 10)
-        {
-            return true;
-        }
-
-        // 172.16.0.0/12
-        if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-        {
-            return true;
-        }
-
-        // 192.168.0.0/16
-        if (bytes[0] == 192 && bytes[1] == 168)
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string? GetNetworkAddressForPrivateIP(IPAddress address)
-    {
-        var bytes = address.GetAddressBytes();
-
-        // For private networks, assume common subnet masks
-        if (bytes[0] == 10)
-        {
-            // 10.x.x.x -> assume /24 (10.x.x.0/24)
-            return $"10.{bytes[1]}.{bytes[2]}.0/24";
-        }
-        else if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-        {
-            // 172.16-31.x.x -> assume /24 (172.x.x.0/24) 
-            return $"172.{bytes[1]}.{bytes[2]}.0/24";
-        }
-        else if (bytes[0] == 192 && bytes[1] == 168)
-        {
-            // 192.168.x.x -> assume /24 (192.168.x.0/24)
-            return $"192.168.{bytes[2]}.0/24";
-        }
-
-        return null;
-    }
-
-    private static IReadOnlyList<string> GetFallbackNetworkRanges()
-    {
-        return [
-            "10.0.0.0/24",
-            "192.168.1.0/24",
-            "192.168.0.0/24",
-            "192.168.2.0/24"
-        ];
     }
 }

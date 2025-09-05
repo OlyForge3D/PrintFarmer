@@ -170,7 +170,10 @@ export function PrinterDashboard() {
           
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => setShowDiscovery(true)}
+              onClick={() => {
+                console.log('Discover button clicked - setting showDiscovery to true');
+                setShowDiscovery(true);
+              }}
               className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
             >
               <Search className="h-4 w-4" />

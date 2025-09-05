@@ -202,8 +202,7 @@ export interface FilamentType {
 export interface FilamentTypeDto {
   id: string;
   name: string;
-  defaultHotendTemp: number;
-  defaultBedTemp: number;
+  defaultTemperatures: TempTargets;
 }
 
 export interface CreateFilamentTypeRequest {
@@ -437,6 +436,39 @@ export interface DiscoveredPrinterDto {
   model?: string;
   firmware?: string;
   version?: string;
+}
+
+// Discovery streaming types
+export enum DiscoveryStatus {
+  Starting = 'Starting',
+  Scanning = 'Scanning',
+  Completed = 'Completed',
+  Cancelled = 'Cancelled',
+  Error = 'Error'
+}
+
+export interface DiscoveryProgressDto {
+  sessionId: string;
+  currentNetwork: string;
+  currentIp: string;
+  totalIps: number;
+  scannedIps: number;
+  printersFound: number;
+  progressPercentage: number;
+  status: DiscoveryStatus;
+  message?: string;
+}
+
+export interface DiscoveryPrinterFoundDto {
+  sessionId: string;
+  printer: DiscoveredPrinterDto;
+}
+
+export interface DiscoveryCompletedDto {
+  sessionId: string;
+  totalPrintersFound: number;
+  duration: number; // milliseconds
+  wasCancelled?: boolean;
 }
 
 // Printer control types

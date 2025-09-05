@@ -240,18 +240,23 @@ builder.Services.AddHostedService<GracefulShutdownService>();
 // SignalR for real-time updates
 builder.Services.AddSignalR();
 
-// SPA services for React
-builder.Services.AddSpaStaticFiles(configuration =>
-{
-    configuration.RootPath = "wwwroot";
-});
-
 // Health checks
 builder.Services.AddHealthChecks()
-    .AddCheck<ComprehensiveHealthCheck>("comprehensive");
+    .AddCheck<ComprehensiveHealthCheck>("comprehensive")
+    .AddCheck<SignalRHealthCheck>("signalr");
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// SPA services (only for monolithic deployments)
+var isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+if (isMonolithicDeployment)
+{
+    builder.Services.AddSpaStaticFiles(configuration =>
+    {
+        configuration.RootPath = "wwwroot";
+    });
+}
 
 // Authentication and Authorization services
 builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IPasswordHashingService, Farm.Web.Api.Services.Authentication.PasswordHashingService>();
@@ -352,9 +357,6 @@ app.UseCors("Default");
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Static files for SPA
-app.UseSpaStaticFiles();
-
 // Configure API routing and SignalR hubs
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
@@ -393,20 +395,38 @@ app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] Filam
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
 app.MapPost("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
-app.MapGet("/api/network-discovery/dynamic-ranges", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetDynamicNetworkRanges()));
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
-// Configure React SPA fallback routing
-app.UseSpa(spa =>
+// Configure SPA only for monolithic deployments (not microservices)
+if (isMonolithicDeployment)
 {
-    spa.Options.SourcePath = "wwwroot";
+    app.UseStaticFiles();
+    app.UseSpa(spa =>
+    {
+        spa.Options.SourcePath = "wwwroot";
 
-    // Note: We're serving pre-built static files from wwwroot, 
-    // so we don't need the development proxy even in Development mode
-    // The React app is built at container build time, not runtime
-});
+        if (app.Environment.IsDevelopment())
+        {
+            var reactDevUrl = builder.Configuration.GetValue<string>("SPA_DEV_URL") ?? "http://localhost:3002";
+            spa.UseProxyToSpaDevelopmentServer(reactDevUrl);
+        }
+        else
+        {
+            spa.Options.DefaultPageStaticFileOptions = new StaticFileOptions
+            {
+                OnPrepareResponse = ctx =>
+                {
+                    // Set cache headers for SPA shell
+                    ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+                    ctx.Context.Response.Headers.Append("Pragma", "no-cache");
+                    ctx.Context.Response.Headers.Append("Expires", "0");
+                }
+            };
+        }
+    });
+}
 
 await app.RunAsync();
 

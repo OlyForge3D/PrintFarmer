@@ -231,6 +231,40 @@ public class DiscoveredPrinterDto
     public DateTime DiscoveredAt { get; set; }
 }
 
+// Discovery progress events for SignalR streaming
+public record DiscoveryProgressDto(
+    string SessionId,
+    string CurrentNetwork,
+    string CurrentIp,
+    int TotalIps,
+    int ScannedIps,
+    int PrintersFound,
+    double ProgressPercentage,
+    DiscoveryStatus Status,
+    string? Message = null
+);
+
+public record DiscoveryPrinterFoundDto(
+    string SessionId,
+    DiscoveredPrinterDto Printer
+);
+
+public record DiscoveryCompletedDto(
+    string SessionId,
+    int TotalPrintersFound,
+    TimeSpan Duration,
+    bool WasCancelled = false
+);
+
+public enum DiscoveryStatus
+{
+    Starting,
+    Scanning,
+    Completed,
+    Cancelled,
+    Error
+}
+
 // File operations results (upload/print)
 public record UploadGcodeResultDto(string Message, string Filename);
 public record StartPrintResultDto(string Message, string Filename);

@@ -1,4 +1,6 @@
 ﻿using System.Net;
+using Microsoft.AspNetCore.SignalR;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 
@@ -7,12 +9,14 @@ namespace Farm.Web.Api.Services;
 public interface INetworkDiscoveryService
 {
     Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default);
+    Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default);
 }
 
 public partial class NetworkDiscoveryService(
     MoonrakerClient moonrakerClient,
     PrusaLinkClient prusaLinkClient,
     INetworkDiscoverySettingsService settingsService,
+    IHubContext<PrinterHub> hubContext,
     ILogger<NetworkDiscoveryService> logger) : INetworkDiscoveryService
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting printer network discovery...")]
@@ -104,6 +108,70 @@ public partial class NetworkDiscoveryService(
         return [.. discovered.OrderBy(p => p.IpAddress)];
     }
 
+    public async Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        LogDiscoveryStarting(logger);
+
+        var settings = settingsService.GetSettings();
+        LogDiscoverySettings(logger, string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
+
+        var totalIps = 0;
+        var scannedIps = 0;
+        var foundPrinters = 0;
+
+        // Calculate total IPs to scan
+        foreach (var network in settings.NetworkRanges)
+        {
+            try
+            {
+                var (networkAddr, cidr) = ParseCidr(network);
+                var hosts = GetHostsInRange(networkAddr, cidr);
+                totalIps += hosts.Count;
+            }
+            catch
+            {
+                // Skip invalid networks
+            }
+        }
+
+        // Send initial progress
+        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", new DiscoveryProgressDto(
+            sessionId,
+            settings.NetworkRanges.FirstOrDefault() ?? "",
+            "",
+            totalIps,
+            0,
+            0,
+            0.0,
+            DiscoveryStatus.Starting
+        ), cancellationToken);
+
+        foreach (var network in settings.NetworkRanges)
+        {
+            LogScanningNetwork(logger, network);
+            
+            // Calculate hosts count for this network to properly track scanned IPs
+            var (networkAddr, cidr) = ParseCidr(network);
+            var hosts = GetHostsInRange(networkAddr, cidr);
+            
+            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, sessionId, totalIps, scannedIps, foundPrinters, cancellationToken);
+            scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
+            foundPrinters += networkPrinters.Count;
+            
+            LogNetworkScanCompleted(logger, network, networkPrinters.Count);
+        }
+
+        // Send completion signal
+        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryCompleted", new DiscoveryCompletedDto(
+            sessionId,
+            foundPrinters,
+            TimeSpan.Zero, // Will be calculated on client side
+            cancellationToken.IsCancellationRequested
+        ), cancellationToken);
+
+        LogDiscoveryCompleted(logger, foundPrinters);
+    }
+
     private async Task<List<DiscoveredPrinterDto>> ScanNetworkAsync(string network, NetworkDiscoverySettingsDto settings, CancellationToken cancellationToken)
     {
         var discovered = new List<DiscoveredPrinterDto>();
@@ -125,6 +193,85 @@ public partial class NetworkDiscoveryService(
                     if (result != null)
                     {
                         LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
+                    }
+                    return result;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }).ToArray();
+
+            var results = await Task.WhenAll(tasks);
+            discovered.AddRange(results.Where(r => r != null)!);
+        }
+        catch (FormatException ex)
+        {
+            LogNetworkScanError(logger, ex, network);
+        }
+        catch (ArgumentException ex)
+        {
+            LogNetworkScanError(logger, ex, network);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogNetworkScanError(logger, ex, network);
+        }
+
+        return discovered;
+    }
+
+    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, CancellationToken cancellationToken)
+    {
+        var discovered = new List<DiscoveredPrinterDto>();
+        var scannedCount = 0;
+        var foundCount = 0;
+
+        try
+        {
+            var (networkAddr, cidr) = ParseCidr(network);
+            var hosts = GetHostsInRange(networkAddr, cidr);
+            LogNetworkHostCount(logger, network, hosts.Count);
+
+            using var semaphore = new SemaphoreSlim(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
+            var tasks = hosts.Select(async host =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    LogScanningHost(logger, host);
+                    
+                    // Send progress update for current IP
+                    var currentScanned = Interlocked.Increment(ref scannedCount);
+                    await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", new DiscoveryProgressDto(
+                        sessionId,
+                        network,
+                        host,
+                        totalIps,
+                        currentScannedStart + currentScanned,
+                        currentFoundStart + foundCount,
+                        (double)(currentScannedStart + currentScanned) / totalIps * 100,
+                        DiscoveryStatus.Scanning
+                    ), cancellationToken);
+
+                    var result = await ScanHostAsync(host, settings, cancellationToken);
+                    if (result != null)
+                    {
+                        LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
+                        
+                        // Increment found printers count
+                        Interlocked.Increment(ref foundCount);
+                        
+                        // Send printer found event
+                        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(
+                            sessionId,
+                            result
+                        ), cancellationToken);
                     }
                     return result;
                 }

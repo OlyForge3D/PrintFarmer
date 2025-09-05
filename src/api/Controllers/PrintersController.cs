@@ -2061,9 +2061,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             logger.LogInformation("Starting network printer discovery...");
 
-            // Set a reasonable timeout for HTTP requests
+            // Set timeout for network discovery - with 100ms per IP, 254 IPs * 2 ports = ~51 seconds + overhead
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(30)); // 30 second total timeout
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(5)); // 5 minute total timeout for full network scan
 
             var discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
 
@@ -2097,6 +2097,50 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             logger.LogError(ex, "Failed to discover printers on network");
             return StatusCode(500, "Failed to discover printers. Please try again.");
+        }
+    }
+
+    [HttpPost("discover/stream")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> StartDiscoveryStreamAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Generate a unique session ID for this discovery session
+            var sessionId = Guid.NewGuid().ToString();
+            
+            logger.LogInformation("Starting streaming network printer discovery with session ID: {SessionId}", sessionId);
+
+            // Start the discovery process in the background
+            // The progress and results will be sent via SignalR
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeoutCts.CancelAfter(TimeSpan.FromMinutes(5)); // 5 minute total timeout
+                    
+                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, timeoutCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    logger.LogWarning("Streaming printer discovery was cancelled for session {SessionId}", sessionId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to discover printers in streaming mode for session {SessionId}", sessionId);
+                }
+            }, ct);
+
+            // Return the session ID immediately so client can join the SignalR group
+            return Ok(new { sessionId, message = "Discovery started. Connect to SignalR hub to receive updates." });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to start streaming printer discovery");
+            return StatusCode(500, "Failed to start discovery stream. Please try again.");
         }
     }
 

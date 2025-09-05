@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useDiscoverPrinters, useCreatePrinter } from '@/hooks/useApi';
+import { useStartDiscoveryStream, useCreatePrinter } from '@/hooks/useApi';
+import { useDiscoveryStream } from '@/hooks/useSignalR';
 import { DiscoveredPrinterDto, PrinterBackend } from '@/types/api';
 import { X, Search } from 'lucide-react';
 
@@ -10,29 +11,36 @@ interface PrinterDiscoveryModalProps {
 }
 
 export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDiscoveryModalProps) {
+  console.log('PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
-  const [discoveredPrinters, setDiscoveredPrinters] = useState<DiscoveredPrinterDto[]>([]);
 
-  const discoverMutation = useDiscoverPrinters();
+  const startDiscoveryMutation = useStartDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
+  
+  // Use the discovery stream hook to listen for real-time updates
+  const { progress, foundPrinters, completed, resetDiscovery, isActive, isCompleted } = useDiscoveryStream(sessionId || undefined);
 
   if (!isOpen) return null;
 
-  const handleDiscoverPrinters = async () => {
+  const handleStartDiscovery = async () => {
     try {
-      const results = await discoverMutation.mutateAsync();
-      setDiscoveredPrinters(results);
+      console.log('handleStartDiscovery called - starting network scan');
+      resetDiscovery(); // Clear previous results
+      const result = await startDiscoveryMutation.mutateAsync();
+      console.log('Discovery stream started with sessionId:', result.sessionId);
+      setSessionId(result.sessionId);
       setSelectedPrinters(new Set());
     } catch (error) {
-      console.error('Discovery failed:', error);
+      console.error('Failed to start discovery stream:', error);
     }
   };
 
   const handleSelectAll = () => {
-    if (selectedPrinters.size === discoveredPrinters.length) {
+    if (selectedPrinters.size === foundPrinters.length) {
       setSelectedPrinters(new Set());
     } else {
-      setSelectedPrinters(new Set(discoveredPrinters.map(p => p.serverUrl)));
+      setSelectedPrinters(new Set(foundPrinters.map(p => p.serverUrl)));
     }
   };
 
@@ -47,7 +55,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   };
 
   const handleAddSelected = async () => {
-    const printersToAdd = discoveredPrinters.filter(p => selectedPrinters.has(p.serverUrl));
+    const printersToAdd = foundPrinters.filter(p => selectedPrinters.has(p.serverUrl));
     
     try {
       for (const printer of printersToAdd) {
@@ -106,7 +114,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
             <div className="w-full">
               <div className="text-center sm:text-left">
                 <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
-                  Discover Printers
+                  Discover Printers (Debug: {Math.random().toString(36).substr(2, 5)})
                 </h3>
                 
                 <div className="mb-6">
@@ -114,47 +122,57 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                     Scan your network for compatible 3D printers (Moonraker, PrusaLink, and SDCP)
                   </p>
                   
-                  <button
-                    onClick={handleDiscoverPrinters}
-                    disabled={discoverMutation.isPending}
+                                    <button
+                    onClick={handleStartDiscovery}
+                    disabled={startDiscoveryMutation.isPending || !!isActive}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Search className="h-4 w-4 mr-2" />
-                    {discoverMutation.isPending ? 'Scanning...' : 'Start Network Scan'}
+                    {isActive ? 'Scanning...' : 'Start Network Scan'}
                   </button>
                 </div>
 
-                {discoverMutation.isPending && (
-                  <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                    <p className="text-gray-600">Scanning network for printers...</p>
-                  </div>
-                )}
-
-                {discoverMutation.error && (
-                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                    <p className="text-sm text-red-800">
-                      Failed to scan network: {discoverMutation.error.message}
+                {isActive && progress && (
+                  <div className="text-center py-4 mb-4">
+                    <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                        style={{ width: `${progress.progressPercentage}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">
+                      Scanning {progress.currentNetwork} - {progress.currentIp}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
                     </p>
                   </div>
                 )}
 
-                {discoveredPrinters.length > 0 && (
+                {startDiscoveryMutation.error && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p className="text-sm text-red-800">
+                      Failed to start network scan: {startDiscoveryMutation.error.message}
+                    </p>
+                  </div>
+                )}
+
+                {foundPrinters.length > 0 && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h4 className="text-md font-medium text-gray-900">
-                        Found {discoveredPrinters.length} printer{discoveredPrinters.length !== 1 ? 's' : ''}
+                        Found {foundPrinters.length} printer{foundPrinters.length !== 1 ? 's' : ''}
                       </h4>
                       <button
                         onClick={handleSelectAll}
                         className="text-sm text-blue-600 hover:text-blue-800"
                       >
-                        {selectedPrinters.size === discoveredPrinters.length ? 'Deselect All' : 'Select All'}
+                        {selectedPrinters.size === foundPrinters.length ? 'Deselect All' : 'Select All'}
                       </button>
                     </div>
 
                     <div className="max-h-96 overflow-y-auto space-y-2 border rounded-md p-2">
-                      {discoveredPrinters.map((printer) => (
+                      {foundPrinters.map((printer) => (
                         <div
                           key={printer.serverUrl}
                           className={`p-4 border rounded-lg cursor-pointer transition-all ${
@@ -223,7 +241,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   </div>
                 )}
 
-                {!discoverMutation.isPending && discoveredPrinters.length === 0 && !discoverMutation.error && (
+                {!isActive && foundPrinters.length === 0 && !startDiscoveryMutation.error && !sessionId && (
                   <div className="text-center py-8 text-gray-500">
                     Click "Start Network Scan" to search for printers on your network
                   </div>

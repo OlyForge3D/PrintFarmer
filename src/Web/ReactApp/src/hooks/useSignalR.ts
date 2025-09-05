@@ -286,3 +286,102 @@ export function useSignalR(options: {
     jobQueueUpdates,
   };
 }
+
+// ============ Discovery Hooks ============
+
+export function useDiscoveryProgress(
+  sessionId?: string,
+  onProgress?: (progress: import('@/types/api').DiscoveryProgressDto) => void
+) {
+  const [progress, setProgress] = useState<import('@/types/api').DiscoveryProgressDto | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const unsubscribe = signalRService.onDiscoveryProgress((progressUpdate) => {
+      if (progressUpdate.sessionId === sessionId) {
+        setProgress(progressUpdate);
+        onProgress?.(progressUpdate);
+      }
+    });
+
+    return unsubscribe;
+  }, [sessionId, onProgress]);
+
+  return { progress };
+}
+
+export function useDiscoveryPrinterFound(
+  sessionId?: string,
+  onPrinterFound?: (found: import('@/types/api').DiscoveryPrinterFoundDto) => void
+) {
+  const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterDto[]>([]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const unsubscribe = signalRService.onDiscoveryPrinterFound((found) => {
+      if (found.sessionId === sessionId) {
+        setFoundPrinters(prev => [...prev, found.printer]);
+        onPrinterFound?.(found);
+      }
+    });
+
+    return unsubscribe;
+  }, [sessionId, onPrinterFound]);
+
+  return { foundPrinters, setFoundPrinters };
+}
+
+export function useDiscoveryCompleted(
+  sessionId?: string,
+  onCompleted?: (completed: import('@/types/api').DiscoveryCompletedDto) => void
+) {
+  const [completed, setCompleted] = useState<import('@/types/api').DiscoveryCompletedDto | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const unsubscribe = signalRService.onDiscoveryCompleted((completedUpdate) => {
+      if (completedUpdate.sessionId === sessionId) {
+        setCompleted(completedUpdate);
+        onCompleted?.(completedUpdate);
+      }
+    });
+
+    return unsubscribe;
+  }, [sessionId, onCompleted]);
+
+  return { completed };
+}
+
+export function useDiscoveryStream(sessionId?: string) {
+  const { progress } = useDiscoveryProgress(sessionId);
+  const { foundPrinters, setFoundPrinters } = useDiscoveryPrinterFound(sessionId);
+  const { completed } = useDiscoveryCompleted(sessionId);
+
+  // Join/leave discovery group when sessionId changes
+  useEffect(() => {
+    if (!sessionId) return;
+
+    signalRService.joinDiscoveryGroup(sessionId);
+
+    return () => {
+      signalRService.leaveDiscoveryGroup(sessionId);
+    };
+  }, [sessionId]);
+
+  // Reset found printers when starting a new session
+  const resetDiscovery = useCallback(() => {
+    setFoundPrinters([]);
+  }, [setFoundPrinters]);
+
+  return {
+    progress,
+    foundPrinters,
+    completed,
+    resetDiscovery,
+    isActive: progress && !completed,
+    isCompleted: !!completed,
+  };
+}

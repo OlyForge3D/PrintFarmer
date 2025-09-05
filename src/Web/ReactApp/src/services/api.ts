@@ -32,8 +32,11 @@ export class ApiClient {
   private client: AxiosInstance;
 
   constructor() {
+    // Use environment variable for API base URL, fallback to relative path for monolithic deployment
+    const apiBaseUrl = import.meta.env.REACT_APP_API_BASE_URL || '/api';
+    
     this.client = axios.create({
-      baseURL: '/api',
+      baseURL: apiBaseUrl,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -96,6 +99,11 @@ export class ApiClient {
 
   async discoverPrinters(): Promise<DiscoveredPrinterDto[]> {
     const response = await this.client.get<DiscoveredPrinterDto[]>('/printers/discover');
+    return response.data;
+  }
+
+  async startDiscoveryStream(): Promise<{ sessionId: string; message: string }> {
+    const response = await this.client.post<{ sessionId: string; message: string }>('/printers/discover/stream');
     return response.data;
   }
 

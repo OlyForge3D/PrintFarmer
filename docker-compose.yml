@@ -1,158 +1,90 @@
+version: '3.8'
+
 services:
-  # React + ASP.NET Core Application (Unified Single Container)
-  printfarmer:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: printfarmer-react:latest
-    container_name: printfarmer-app
-    ports:
-      - "5080:8080"
-    environment:
-      # Database Configuration - PostgreSQL recommended for React architecture
-      - DB_PROVIDER=Postgres
-      - ASPNETCORE_URLS=http://0.0.0.0:8080
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__Default=Host=printfarmer-postgres:5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
-      - ConnectionStrings__Postgres=Host=printfarmer-postgres:5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD:-PrintFarm123!}
-      - DB_INIT_MODE=EnsureCreated
-      
-      # Authentication & Security
-      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-minimum-32-chars}
-      - JWT_ISSUER=PrintFarmer
-      - JWT_AUDIENCE=PrintFarmerClient
-      - JWT_EXPIRE_HOURS=24
-      
-      # CORS Configuration for React SPA
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://localhost:5173,http://localhost:5080,http://localhost:8080
-      - ALLOW_LOCAL_NETWORK=true
-      
-      # SignalR Configuration
-      - SIGNALR_REDIS_CONNECTION=printfarmer-redis:6379
-      
-      # File Storage
-      - UPLOAD_PATH=/app/uploads
-      - GCODE_PATH=/app/gcode
-      - MAX_FILE_SIZE=100MB
-      
-      # Printer Discovery
-      - PRINTER_DISCOVERY_ENABLED=true
-      - MOONRAKER_TIMEOUT=5000
-      - PRUSALINK_TIMEOUT=5000
-      
-      # Slicer Integration
-      - SLICER_ENGINES_PATH=/app/slicers
-      - PRUSA_SLICER_PATH=/app/slicers/prusa-slicer
-      - ORCA_SLICER_PATH=/app/slicers/orca-slicer
-      
-    volumes:
-      # Persistent storage for application data
-      - printfarmer-data:/data
-      - printfarmer-uploads:/app/uploads
-      - printfarmer-gcode:/app/gcode
-      - printfarmer-slicers:/app/slicers
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - printfarmer-net
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # PostgreSQL Database (Recommended for React architecture)
-  postgres:
-    image: postgres:15-alpine
-    container_name: printfarmer-postgres
-    environment:
-      - POSTGRES_DB=printfarmer
-      - POSTGRES_USER=printfarmer
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-PrintFarm123!}
-      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks:
-      - printfarmer-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    command: >
-      postgres 
-      -c shared_preload_libraries=pg_stat_statements
-      -c pg_stat_statements.max=10000
-      -c pg_stat_statements.track=all
-
   # Redis for caching and SignalR backplane
   redis:
     image: redis:7-alpine
-    container_name: printfarmer-redis
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    networks:
-      - printfarmer-net
-    restart: unless-stopped
+    network_mode: host
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    volumes:
+      - redis_data:/data
 
-  # Optional: Nginx reverse proxy for production deployments
-  # Uncomment if you need SSL termination, load balancing, or custom routing
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: printfarmer-nginx
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./deploy/nginx/ssl:/etc/nginx/ssl:ro
-  #   depends_on:
-  #     - printfarmer
-  #   networks:
-  #     - printfarmer-net
-  #   restart: unless-stopped
+  # .NET API Backend - Enhanced host networking for macOS Docker Desktop
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    privileged: true  # Required for enhanced network access on macOS
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5001
+      - DB_PROVIDER=Sqlite
+      - ConnectionStrings__DefaultConnection=Data Source=/data/farm.db
+      - Redis__ConnectionString=localhost:6379
+      - CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080,http://localhost:5001
+      - DEPLOYMENT_MODE=microservices
+      - ALLOW_LOCAL_NETWORK=true
+      - ALLOWED_NETWORK_RANGES=10.0.0.0/24,172.16.0.0/12
+      - DOCKER_HOST_NETWORK=true
+      - ENABLE_LOCAL_NETWORK_ACCESS=true
+    volumes:
+      - app_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:5001/healthz && curl -f http://localhost:5001/health | grep -q 'Healthy' && curl -f http://localhost:5001/api/signalrtest/connection-stats"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 40s
+
+  # React Frontend with Nginx
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:8080/api
+      - REACT_APP_SIGNALR_URL=http://localhost:5001/hubs/printers
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: Load balancer for production
+  nginx-proxy:
+    image: nginx:alpine
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
-  # Persistent volume for application data
-  printfarmer-data:
-    driver: local
-  # Persistent volume for PostgreSQL database
-  postgres-data:
-    driver: local
-  # Persistent volume for Redis data
-  redis-data:
-    driver: local
-  # Persistent volumes for file storage
-  printfarmer-uploads:
-    driver: local
-  printfarmer-gcode:
-    driver: local
-  printfarmer-slicers:
-    driver: local
-  # Legacy volumes for backward compatibility
-  sqlserver-data:
-    driver: local
-  mysql-data:
-    driver: local
-
-networks:
-  printfarmer-net:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
+  redis_data:
+  app_data:

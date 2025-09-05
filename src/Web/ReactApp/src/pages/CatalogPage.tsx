@@ -405,7 +405,7 @@ export function CatalogPage() {
                               />
                               <span className="text-pf-text-primary">{filamentType.name}</span>
                               <span className="text-pf-text-secondary text-xs">
-                                ({filamentType.defaultHotendTemp}°C / {filamentType.defaultBedTemp}°C)
+                                ({filamentType.defaultTemperatures.hotend}°C / {filamentType.defaultTemperatures.bed}°C)
                               </span>
                             </label>
                           );

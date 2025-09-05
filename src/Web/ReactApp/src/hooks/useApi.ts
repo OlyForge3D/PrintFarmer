@@ -106,6 +106,12 @@ export function useDiscoverPrinters() {
   });
 }
 
+export function useStartDiscoveryStream() {
+  return useMutation({
+    mutationFn: () => apiClient.startDiscoveryStream(),
+  });
+}
+
 // ============ Catalog Hooks ============
 
 export function useManufacturers(options?: UseQueryOptions<ManufacturerDto[], ApiError>) {
