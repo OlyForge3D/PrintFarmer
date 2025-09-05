@@ -6,6 +6,9 @@ import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
 import { ModelsPage } from '@/pages/ModelsPage';
 import { HarvestPage } from '@/pages/HarvestPage';
 import { FilesPage } from '@/pages/FilesPage';
+import { CatalogPage } from '@/pages/CatalogPage';
+import { SettingsPage } from '@/pages/SettingsPage';
+import { SpoolsPage } from '@/pages/SpoolsPage';
 import { Layout } from '@/components/Layout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -47,6 +50,9 @@ function App() {
                 <Route path="/models" element={<ModelsPage />} />
                 <Route path="/harvest" element={<HarvestPage />} />
                 <Route path="/files" element={<FilesPage />} />
+                <Route path="/catalog" element={<CatalogPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/spools" element={<SpoolsPage />} />
                 {/* Add more routes as needed */}
               </Routes>
             </Layout>

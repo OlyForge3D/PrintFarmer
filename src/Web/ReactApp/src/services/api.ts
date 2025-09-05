@@ -159,6 +159,15 @@ export class ApiClient {
     return response.data;
   }
 
+  async updateManufacturer(id: string, name: string): Promise<ManufacturerDto> {
+    const response = await this.client.put<ManufacturerDto>(`/catalog/manufacturers/${id}`, { name });
+    return response.data;
+  }
+
+  async deleteManufacturer(id: string): Promise<void> {
+    await this.client.delete(`/catalog/manufacturers/${id}`);
+  }
+
   async getModels(manufacturerId?: string): Promise<ModelDto[]> {
     const params = manufacturerId ? { manufacturerId } : {};
     const response = await this.client.get<ModelDto[]>('/catalog/models', { params });
@@ -168,6 +177,15 @@ export class ApiClient {
   async createModel(model: Omit<ModelDto, 'id'>): Promise<ModelDto> {
     const response = await this.client.post<ModelDto>('/catalog/models', model);
     return response.data;
+  }
+
+  async updateModel(id: string, name: string): Promise<ModelDto> {
+    const response = await this.client.put<ModelDto>(`/catalog/models/${id}`, { name });
+    return response.data;
+  }
+
+  async deleteModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/models/${id}`);
   }
 
   // ============ Settings API methods ============

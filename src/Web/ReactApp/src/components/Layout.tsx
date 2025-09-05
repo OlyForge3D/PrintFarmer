@@ -65,6 +65,17 @@ const navigation: NavigationItem[] = [
     requiredPermission: { resource: 'gcode_harvest', action: 'read' }
   },
   { 
+    name: 'Admin', 
+    href: '#', 
+    icon: Settings,
+    requiredRole: 'farm_admin',
+    children: [
+      { name: 'Catalog', href: '/catalog', icon: Layers },
+      { name: 'Settings', href: '/settings', icon: Settings },
+      { name: 'Spools', href: '/spools', icon: Box }
+    ]
+  },
+  { 
     name: 'User Management', 
     href: '/admin/users', 
     icon: Users,
