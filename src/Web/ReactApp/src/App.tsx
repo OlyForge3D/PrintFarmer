@@ -84,7 +84,11 @@ function App() {
   if (!setupComplete) {
     return (
       <ErrorBoundary>
-        <SetupWizard onComplete={handleSetupComplete} />
+        <ThemeProvider>
+          <AuthProvider>
+            <SetupWizard onComplete={handleSetupComplete} />
+          </AuthProvider>
+        </ThemeProvider>
       </ErrorBoundary>
     );
   }
@@ -108,6 +112,14 @@ function App() {
                   <Route path="/catalog" element={<CatalogPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/spools" element={<SpoolsPage />} />
+                  <Route 
+                    path="/admin/users" 
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <UserManagementPage />
+                      </ProtectedRoute>
+                    } 
+                  />
                   {/* Add more routes as needed */}
                 </Routes>
               </Layout>
@@ -116,36 +128,6 @@ function App() {
           </QueryClientProvider>
         </AuthProvider>
       </ThemeProvider>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <Router>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<PrinterDashboard />} />
-                <Route path="/dashboard" element={<PrinterDashboard />} />
-                <Route path="/printers" element={<PrinterDashboard />} />
-                <Route path="/printers/table" element={<PrinterTableViewPage />} />
-                <Route path="/models" element={<ModelsPage />} />
-                <Route path="/harvest" element={<HarvestPage />} />
-                <Route path="/files" element={<FilesPage />} />
-                <Route path="/catalog" element={<CatalogPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/spools" element={<SpoolsPage />} />
-                <Route 
-                  path="/admin/users" 
-                  element={
-                    <ProtectedRoute requiredRole="farm_admin">
-                      <UserManagementPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                {/* Add more routes as needed */}
-              </Routes>
-            </Layout>
-          </Router>
-          <ReactQueryDevtools initialIsOpen={false} />
-        </QueryClientProvider>
-      </AuthProvider>
     </ErrorBoundary>
   );
 }
