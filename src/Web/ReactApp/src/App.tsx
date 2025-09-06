@@ -12,6 +12,7 @@ import { SpoolsPage } from '@/pages/SpoolsPage';
 import { Layout } from '@/components/Layout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import './App.css';
 
 // Create a query client for React Query
@@ -38,28 +39,30 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <Router>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<PrinterDashboard />} />
-                <Route path="/dashboard" element={<PrinterDashboard />} />
-                <Route path="/printers" element={<PrinterDashboard />} />
-                <Route path="/printers/table" element={<PrinterTableViewPage />} />
-                <Route path="/models" element={<ModelsPage />} />
-                <Route path="/harvest" element={<HarvestPage />} />
-                <Route path="/files" element={<FilesPage />} />
-                <Route path="/catalog" element={<CatalogPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/spools" element={<SpoolsPage />} />
-                {/* Add more routes as needed */}
-              </Routes>
-            </Layout>
-          </Router>
-          <ReactQueryDevtools initialIsOpen={false} />
-        </QueryClientProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <QueryClientProvider client={queryClient}>
+            <Router>
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<PrinterDashboard />} />
+                  <Route path="/dashboard" element={<PrinterDashboard />} />
+                  <Route path="/printers" element={<PrinterDashboard />} />
+                  <Route path="/printers/table" element={<PrinterTableViewPage />} />
+                  <Route path="/models" element={<ModelsPage />} />
+                  <Route path="/harvest" element={<HarvestPage />} />
+                  <Route path="/files" element={<FilesPage />} />
+                  <Route path="/catalog" element={<CatalogPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/spools" element={<SpoolsPage />} />
+                  {/* Add more routes as needed */}
+                </Routes>
+              </Layout>
+            </Router>
+            <ReactQueryDevtools initialIsOpen={false} />
+          </QueryClientProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

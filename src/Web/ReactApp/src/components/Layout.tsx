@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useSignalRConnection } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthContext';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { 
   Home,
   Printer, 
@@ -145,6 +146,9 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Right side - Status and user */}
           <div className="flex items-center space-x-4">
+            {/* Theme toggle */}
+            <ThemeToggle size="sm" />
+            
             {/* Connection status */}
             <div className="flex items-center space-x-2">
               <div className={`h-2 w-2 rounded-full ${
