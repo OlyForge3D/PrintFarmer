@@ -377,26 +377,42 @@ export function SpoolsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Spools</h1>
-        <div className="flex gap-2 items-center">
-          {viewMode === 'table' && (
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Configure columns"
-                title="Configure columns"
-                aria-haspopup="dialog"
-                onClick={() => setShowColumnConfig(v => !v)}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 text-sm flex items-center justify-center"
-              >
-                <Settings2 className="h-4 w-4" />
-              </button>
+  <div className="flex gap-2 items-center">
+          <div className="relative">
+              {showColumnConfig ? (
+                <button
+                  type="button"
+                  aria-label="Configure columns"
+                  title="Configure columns"
+                  aria-haspopup="dialog"
+                  aria-expanded="true"
+                  aria-controls="column-config-panel"
+                  onClick={() => setShowColumnConfig(false)}
+      className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 text-sm flex items-center justify-center transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <Settings2 className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  aria-label="Configure columns"
+                  title="Configure columns"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                  aria-controls="column-config-panel"
+                  onClick={() => setShowColumnConfig(true)}
+      className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 text-sm flex items-center justify-center transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <Settings2 className="h-4 w-4" />
+                </button>
+              )}
               {showColumnConfig && (
-                <div className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
+                <div id="column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
                   <div className="flex justify-between items-center mb-1">
                     <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
                     <button
                       type="button"
-                      className="text-xs text-pf-text-secondary hover:text-pf-text-primary"
+          className="text-xs text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 rounded px-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       onClick={() => setShowColumnConfig(false)}
                       aria-label="Close column configuration"
                     >✕</button>
@@ -428,14 +444,14 @@ export function SpoolsPage() {
                             onClick={() => moveColumn(c.id, -1)}
                             disabled={i === 0}
                             aria-label={`Move ${c.label} up`}
-                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2"
+                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2 active:bg-pf-bg-3 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
                           >▲</button>
                           <button
                             type="button"
                             onClick={() => moveColumn(c.id, 1)}
                             disabled={i === tableColumns.length - 1}
                             aria-label={`Move ${c.label} down`}
-                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2"
+                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2 active:bg-pf-bg-3 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
                           >▼</button>
                         </div>
                       </li>
@@ -445,13 +461,12 @@ export function SpoolsPage() {
                 </div>
               )}
             </div>
-          )}
           <div className="flex rounded overflow-hidden border border-pf-border">
             <button
               type="button"
               aria-label="Card view"
               title="Card view"
-              className={`px-3 py-2 text-sm flex items-center gap-1 ${viewMode === 'cards' ? 'bg-blue-600 text-white' : 'bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2'}`}
+              className={`px-3 py-2 text-sm flex items-center gap-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 ${viewMode === 'cards' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2'}`}
               onClick={() => setViewMode('cards')}
             >
               <LayoutGrid className="h-4 w-4" />
@@ -460,7 +475,7 @@ export function SpoolsPage() {
               type="button"
               aria-label="Table view"
               title="Table view"
-              className={`px-3 py-2 text-sm flex items-center gap-1 ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2'}`}
+              className={`px-3 py-2 text-sm flex items-center gap-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 ${viewMode === 'table' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2'}`}
               onClick={() => setViewMode('table')}
             >
               <TableIcon className="h-4 w-4" />
@@ -471,7 +486,7 @@ export function SpoolsPage() {
             disabled={loading || !spoolmanBaseUrl}
             aria-label="Refresh spools"
             title="Refresh spools"
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 flex items-center gap-2 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -480,7 +495,7 @@ export function SpoolsPage() {
               href={spoolmanBaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 flex items-center gap-1"
+              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 flex items-center gap-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
               aria-label="Open Spoolman"
               title="Open Spoolman"
             >
@@ -617,12 +632,12 @@ export function SpoolsPage() {
                   type="button"
                   aria-label="Toggle sort direction"
                   onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className="px-2 py-1 text-xs bg-pf-bg-0 border border-pf-border rounded hover:bg-pf-bg-2"
+                  className="px-2 py-1 text-xs bg-pf-bg-0 border border-pf-border rounded hover:bg-pf-bg-2 active:bg-pf-bg-3 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >{sortDir === 'asc' ? '▲' : '▼'}</button>
                 <button
                   type="button"
                   onClick={handleExportCsv}
-                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 active:bg-green-800 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >Export CSV</button>
               </div>
             </div>
