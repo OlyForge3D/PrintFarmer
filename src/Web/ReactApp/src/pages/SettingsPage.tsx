@@ -1,20 +1,13 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
-import type { FilamentPresets, TempTargets, FilamentType } from '@/types/api';
+import type { FilamentType } from '@/types/api';
 
 interface NetworkRange {
   cidr: string;
 }
 
-interface SettingsData {
-  spoolmanBaseUrl?: string;
-  networkRanges?: string[];
-  discoveryTimeout?: number;
-  maxConcurrentScans?: number;
-  scanPorts?: number[];
-  filamentPresets?: FilamentPresets;
-}
+// (SettingsData interface removed - unused)
 
 export function SettingsPage() {
   const [spoolmanBase, setSpoolmanBase] = useState('');
@@ -72,25 +65,33 @@ export function SettingsPage() {
 
   const testSpoolman = async () => {
     if (!normalizedUrl) return;
-    
+
     setTesting(true);
     setTestOk(null);
     setTestMessage('');
-    
+
     try {
-      // Test Spoolman connection by trying to fetch spools
-      const response = await fetch(`${normalizedUrl}/api/v1/spool`, {
-        method: 'HEAD',
-        mode: 'cors'
+      // Persist config server-side first so backend knows the URL
+      const saveResp = await fetch('/api/spoolman/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl: normalizedUrl })
       });
-      
-      if (response.ok) {
-        setTestOk(true);
-        setTestMessage('Connection successful!');
-      } else {
-        setTestOk(false);
-        setTestMessage(`HTTP ${response.status}: ${response.statusText}`);
+      if (!saveResp.ok && saveResp.status !== 204) {
+        throw new Error(`Failed to persist config (HTTP ${saveResp.status})`);
       }
+
+      // Use backend proxy endpoint instead of direct browser -> Spoolman (avoids CORS)
+      const spoolsResp = await fetch('/api/spoolman/spools', { headers: { 'Accept': 'application/json' } });
+      if (!spoolsResp.ok) {
+        setTestOk(false);
+        setTestMessage(`Backend test failed: HTTP ${spoolsResp.status}`);
+        return;
+      }
+      const data = await spoolsResp.json();
+      const count = Array.isArray(data) ? data.length : (Array.isArray(data?.items) ? data.items.length : 0);
+      setTestOk(true);
+      setTestMessage(`Connection successful (${count} spool${count === 1 ? '' : 's'})`);
     } catch (err) {
       setTestOk(false);
       setTestMessage(`Connection failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -102,8 +103,18 @@ export function SettingsPage() {
   const saveSpoolman = async () => {
     try {
       localStorage.setItem('spoolman-base-url', normalizedUrl);
-      // TODO: Implement API endpoint to save Spoolman settings server-side
+      // Persist configuration to backend so all server-side features can use it
+      const resp = await fetch('/api/spoolman/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl: normalizedUrl })
+      });
+      if (!resp.ok && resp.status !== 204) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
       setError(null);
+      // Optionally re-run a quick connectivity test automatically
+      await testSpoolman();
     } catch (err) {
       setError('Failed to save Spoolman settings');
       console.error('Error saving Spoolman settings:', err);
@@ -357,6 +368,7 @@ export function SettingsPage() {
                   type="number"
                   value={newFilamentType.hotend}
                   onChange={(e) => setNewFilamentType(prev => ({ ...prev, hotend: Number(e.target.value) }))}
+                  aria-label="New filament hotend temperature"
                   className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
                 />
               </div>
@@ -366,6 +378,7 @@ export function SettingsPage() {
                   type="number"
                   value={newFilamentType.bed}
                   onChange={(e) => setNewFilamentType(prev => ({ ...prev, bed: Number(e.target.value) }))}
+                  aria-label="New filament bed temperature"
                   className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
                 />
               </div>
@@ -398,10 +411,11 @@ export function SettingsPage() {
             <div key={filamentType.id} className="flex items-center justify-between p-3 bg-pf-bg-0 border border-pf-border rounded">
               {editingFilamentType?.id === filamentType.id ? (
                 <div className="flex items-center gap-4 flex-1">
-                  <input
+                    <input
                     type="text"
                     value={editingFilamentType.name}
                     onChange={(e) => setEditingFilamentType(prev => prev ? { ...prev, name: e.target.value } : null)}
+                      aria-label="Filament type name"
                     className="w-32 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
                   />
                   <div className="flex items-center gap-2">
@@ -413,6 +427,7 @@ export function SettingsPage() {
                         ...prev,
                         defaultTemperatures: { ...prev.defaultTemperatures, hotend: Number(e.target.value) }
                       } : null)}
+                      aria-label="Hotend temperature"
                       className="w-16 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
                     />
                     <span className="text-sm text-pf-text-secondary">°C</span>
@@ -426,6 +441,7 @@ export function SettingsPage() {
                         ...prev,
                         defaultTemperatures: { ...prev.defaultTemperatures, bed: Number(e.target.value) }
                       } : null)}
+                      aria-label="Bed temperature"
                       className="w-16 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
                     />
                     <span className="text-sm text-pf-text-secondary">°C</span>
@@ -548,6 +564,7 @@ export function SettingsPage() {
                 onChange={(e) => setDiscoveryTimeout(Number(e.target.value))}
                 min={1000}
                 max={10000}
+                    aria-label="Discovery timeout"
                 className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
               />
             </div>
@@ -562,6 +579,7 @@ export function SettingsPage() {
                 onChange={(e) => setMaxConcurrentScans(Number(e.target.value))}
                 min={1}
                 max={100}
+                    aria-label="Max concurrent scans"
                 className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
               />
             </div>
@@ -580,6 +598,7 @@ export function SettingsPage() {
                     onChange={(e) => updateScanPort(index, Number(e.target.value))}
                     min={1}
                     max={65535}
+                    aria-label="Scan port"
                     className="w-24 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
                   />
                   <button

@@ -287,13 +287,43 @@ public class SpoolmanService : ISpoolmanService
             }
         }
 
+        // Extended numeric fields (weight/length)
+        var initialWeight = TryGetDoubleNullable(el, "initial_weight", "initial_weight_g", "initial_weight_grams");
+        var usedWeight = TryGetDoubleNullable(el, "used_weight", "used_weight_g", "used_weight_grams");
+        var spoolWeight = TryGetDoubleNullable(el, "spool_weight", "empty_spool_weight");
+        var remainingLength = TryGetDoubleNullable(el, "remaining_length", "remaining_length_mm");
+        var usedLength = TryGetDoubleNullable(el, "used_length", "used_length_mm");
+
+        // Location, lot/batch and archived
+        var location = TryGetString(el, "location", "storage_location");
+        var lotNumber = TryGetString(el, "lot_nr", "lot", "batch", "batch_nr");
+        var archivedFlag = TryGetBool(el, "archived");
+
         // Dates: registered, first used, last used (tolerant to various names and formats)
         var registeredAt = TryGetDateTime(el, "registered");
         var firstUsedAt = TryGetDateTime(el, "first_used");
         var lastUsedAt = TryGetDateTime(el, "last_used");
 
-        return new SpoolmanSpoolDto(id, name, material, remaining, color, inUse ?? false, filamentName, vendor,
-                registeredAt, firstUsedAt, lastUsedAt);
+        return new SpoolmanSpoolDto(
+            Id: id,
+            Name: name,
+            Material: material,
+            RemainingWeightG: remaining,
+            ColorHex: color,
+            InUse: inUse ?? false,
+            FilamentName: filamentName,
+            Vendor: vendor,
+            RegisteredAt: registeredAt,
+            FirstUsedAt: firstUsedAt,
+            LastUsedAt: lastUsedAt,
+            InitialWeightG: initialWeight,
+            UsedWeightG: usedWeight,
+            SpoolWeightG: spoolWeight,
+            RemainingLengthMm: remainingLength,
+            UsedLengthMm: usedLength,
+            Location: location,
+            LotNumber: lotNumber,
+            Archived: archivedFlag);
     }
 
     private static int TryGetInt(JsonElement el, params string[] names)

@@ -155,7 +155,7 @@ public partial record SpoolmanConfigDto
 {
     [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null);
 }
-public record SpoolmanSpoolDto(
+public partial record SpoolmanSpoolDto(
     int Id,
     string Name,
     string Material,
@@ -166,7 +166,43 @@ public record SpoolmanSpoolDto(
     string? Vendor = null,
     DateTime? RegisteredAt = null,
     DateTime? FirstUsedAt = null,
-    DateTime? LastUsedAt = null);
+    DateTime? LastUsedAt = null,
+    // Newly added extended fields (optional to preserve backward compatibility)
+    double? InitialWeightG = null,
+    double? UsedWeightG = null,
+    double? SpoolWeightG = null,
+    double? RemainingLengthMm = null,
+    double? UsedLengthMm = null,
+    string? Location = null,
+    string? LotNumber = null,
+    bool? Archived = null);
+
+public partial record SpoolmanSpoolDto
+{
+    public double? UsedPercent
+    {
+        get
+        {
+            if (InitialWeightG.HasValue && InitialWeightG.Value > 0)
+            {
+                if (UsedWeightG.HasValue)
+                {
+                    return (UsedWeightG.Value / InitialWeightG.Value) * 100.0;
+                }
+                if (RemainingWeightG.HasValue)
+                {
+                    return ((InitialWeightG.Value - RemainingWeightG.Value) / InitialWeightG.Value) * 100.0;
+                }
+            }
+            return null;
+        }
+    }
+
+    public double? RemainingPercent
+        => InitialWeightG.HasValue && InitialWeightG.Value > 0 && RemainingWeightG.HasValue
+            ? (RemainingWeightG.Value / InitialWeightG.Value) * 100.0
+            : null;
+}
 
 // Printer spool information for Moonraker printers
 public record PrinterSpoolInfoDto(

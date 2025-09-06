@@ -22,7 +22,8 @@
       "@/hooks/*": ["./src/hooks/*"],
       "@/services/*": ["./src/services/*"],
       "@/types/*": ["./src/types/*"],
-      "@/utils/*": ["./src/utils/*"]
+  "@/utils/*": ["./src/utils/*"],
+  "@/pages/*": ["./src/pages/*"]
     },
 
     /* Linting */
@@ -39,5 +40,5 @@
     "resolveJsonModule": true
   },
   "include": ["src"],
-  "exclude": ["src/test/**/*", "**/*.test.*", "**/*.spec.*"]
+  "exclude": ["**/*.spec.e2e.*"]
 }

@@ -54,7 +54,15 @@ public class ServiceInterfaceExampleTests
                 ColorHex: "#FF0000",
                 InUse: false,
                 FilamentName: "Premium PLA",
-                Vendor: "Test Vendor"
+                Vendor: "Test Vendor",
+                InitialWeightG: 1000.0,
+                UsedWeightG: 500.0,
+                SpoolWeightG: 140.0,
+                RemainingLengthMm: null,
+                UsedLengthMm: null,
+                Location: null,
+                LotNumber: null,
+                Archived: false
             ),
             new SpoolmanSpoolDto(
                 Id: 2,
@@ -64,7 +72,15 @@ public class ServiceInterfaceExampleTests
                 ColorHex: "#00FF00",
                 InUse: true,
                 FilamentName: "Premium PETG",
-                Vendor: "Test Vendor"
+                Vendor: "Test Vendor",
+                InitialWeightG: 1000.0,
+                UsedWeightG: 250.0,
+                SpoolWeightG: 140.0,
+                RemainingLengthMm: null,
+                UsedLengthMm: null,
+                Location: null,
+                LotNumber: null,
+                Archived: false
             )
         };
 
