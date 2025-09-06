@@ -32,70 +32,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const initializeAuth = async () => {
       const token = localStorage.getItem('auth-token');
       
-      // Check if this is a mock development token
-      if (token === 'mock-dev-token') {
-        // Use mock user without calling API
-        const mockUser: UserDto = {
-          id: 'mock-user-id',
-          username: 'admin',
-          email: 'admin@printfarmer.local',
-          firstName: 'Admin',
-          lastName: 'User',
-          isActive: true,
-          emailConfirmed: true,
-          createdAt: new Date(),
-          roles: ['farm_admin'],
-          permissions: ['printers:read', 'printers:create', 'printers:update', 'printers:delete', 'gcode_harvest:read']
-        };
-        
-        setUser(mockUser);
-        setIsLoading(false);
-        return;
-      }
-      
       if (!token) {
-        // For development, create a mock user if no token exists
-        const mockUser: UserDto = {
-          id: 'mock-user-id',
-          username: 'admin',
-          email: 'admin@printfarmer.local',
-          firstName: 'Admin',
-          lastName: 'User',
-          isActive: true,
-          emailConfirmed: true,
-          createdAt: new Date(),
-          roles: ['farm_admin'],
-          permissions: ['printers:read', 'printers:create', 'printers:update', 'printers:delete', 'gcode_harvest:read']
-        };
-        
-        localStorage.setItem('auth-token', 'mock-dev-token');
-        setUser(mockUser);
         setIsLoading(false);
         return;
       }
 
       try {
-        // Try to get current user from API for real tokens
+        // Try to get current user from API
         const userData = await apiClient.getCurrentUser();
         setUser(userData);
         setError(null);
       } catch (err) {
         console.error('Failed to get current user:', err);
-        // Fallback to mock user for development
-        const mockUser: UserDto = {
-          id: 'mock-user-id',
-          username: 'admin',
-          email: 'admin@printfarmer.local',
-          firstName: 'Admin',
-          lastName: 'User',
-          isActive: true,
-          emailConfirmed: true,
-          createdAt: new Date(),
-          roles: ['farm_admin'],
-          permissions: ['printers:read', 'printers:create', 'printers:update', 'printers:delete', 'gcode_harvest:read']
-        };
-        
-        setUser(mockUser);
+        // Remove invalid token
+        localStorage.removeItem('auth-token');
+        setUser(null);
         setError(null);
       } finally {
         setIsLoading(false);
