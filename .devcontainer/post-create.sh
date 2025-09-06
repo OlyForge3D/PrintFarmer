@@ -55,12 +55,13 @@ fi
 echo "🔗 Setting up development aliases..."
 cat >> ~/.bashrc << 'EOF'
 
-# PrintFarmer development aliases
-alias pf-api='cd /workspaces/PrintFarmer/src/api && dotnet watch run'
-alias pf-react='cd /workspaces/PrintFarmer/src/Web/ReactApp && npm run dev'
-alias pf-build='cd /workspaces/PrintFarmer && ./scripts/build.sh'
-alias pf-deploy='cd /workspaces/PrintFarmer && ./scripts/deploy.sh'
-alias pf-dev='cd /workspaces/PrintFarmer && ./scripts/dev.sh'
+# PrintFarmer development aliases (use DEVCONTAINER_WORKSPACE_FOLDER if available)
+WORKSPACE_DIR=${DEVCONTAINER_WORKSPACE_FOLDER:-/workspaces/$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo PrintFarmer)")}
+alias pf-api='cd "$WORKSPACE_DIR"/src && dotnet watch --project api/Farm.Web.Api.csproj run'
+alias pf-react='cd "$WORKSPACE_DIR"/src/Web/ReactApp && npm run dev'
+alias pf-build='cd "$WORKSPACE_DIR" && ./scripts/build.sh'
+alias pf-deploy='cd "$WORKSPACE_DIR" && ./scripts/deploy.sh'
+alias pf-dev='cd "$WORKSPACE_DIR" && ./scripts/dev-monolithic.sh'
 alias pf-logs='docker-compose logs -f'
 alias pf-ps='docker-compose ps'
 EOF
@@ -132,9 +133,9 @@ echo "   • pf-react  - Start React dev server (after Phase 1)"
 echo "   • pf-build  - Build Docker images"
 echo ""
 echo "🔗 Useful URLs (after starting services):"
-echo "   • React App: http://localhost:5173"
-echo "   • API: http://localhost:5000"
-echo "   • Health Check: http://localhost:5000/health"
+echo "   • React App: http://localhost:3000"
+echo "   • API: http://localhost:5245"
+echo "   • Health Check: http://localhost:5245/health"
 echo ""
 echo "📚 Documentation:"
 echo "   • React Migration: ./REACT_MIGRATION_README.md"

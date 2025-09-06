@@ -3,7 +3,7 @@
   "image": "mcr.microsoft.com/devcontainers/typescript-node:18-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/dotnet:2": {
-      "version": "9.0",
+      "version": "9.0.302",
       "installUsingApt": false
     },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
@@ -111,7 +111,7 @@
     "VITE_API_BASE_URL": "http://localhost:5245",
     "VITE_SIGNALR_URL": "http://localhost:5245/hubs/printers"
   },
-  "remoteUser": "vscode",
+  "remoteUser": "node",
   "postCreateCommand": ".devcontainer/post-create.sh",
   "forwardPorts": [5245, 3000, 5432, 6379, 8080],
   "portsAttributes": {
