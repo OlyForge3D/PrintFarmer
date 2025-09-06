@@ -7,6 +7,7 @@ public interface IDiscoveryProgressCache
 {
     void Set(string sessionId, DiscoveryProgressDto progress);
     bool TryGet(string sessionId, out DiscoveryProgressDto? progress);
+    void Remove(string sessionId);
 }
 
 public class DiscoveryProgressCache : IDiscoveryProgressCache
@@ -23,5 +24,10 @@ public class DiscoveryProgressCache : IDiscoveryProgressCache
         var found = _cache.TryGetValue(sessionId, out var value);
         progress = value;
         return found;
+    }
+
+    public void Remove(string sessionId)
+    {
+        _cache.TryRemove(sessionId, out _);
     }
 }

@@ -30,7 +30,13 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  // When modal is being closed, reset session so a new discovery can start fresh next open
+  if (!isOpen) {
+    if (sessionId) {
+      setSessionId(null);
+    }
+    return null;
+  }
 
   const handleStartDiscovery = async () => {
     try {

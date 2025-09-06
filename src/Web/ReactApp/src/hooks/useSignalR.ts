@@ -296,7 +296,11 @@ export function useDiscoveryProgress(
   const [progress, setProgress] = useState<import('@/types/api').DiscoveryProgressDto | null>(null);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      // Clear stale progress when ending a session
+      setProgress(null);
+      return;
+    }
 
     const unsubscribe = signalRService.onDiscoveryProgress((progressUpdate) => {
       if (progressUpdate.sessionId === sessionId) {
@@ -318,7 +322,11 @@ export function useDiscoveryPrinterFound(
   const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterDto[]>([]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      // Reset previously found printers when session ends
+      setFoundPrinters([]);
+      return;
+    }
 
     const unsubscribe = signalRService.onDiscoveryPrinterFound((found) => {
       if (found.sessionId === sessionId) {
@@ -340,7 +348,11 @@ export function useDiscoveryCompleted(
   const [completed, setCompleted] = useState<import('@/types/api').DiscoveryCompletedDto | null>(null);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      // Clear completion marker when session resets
+      setCompleted(null);
+      return;
+    }
 
     const unsubscribe = signalRService.onDiscoveryCompleted((completedUpdate) => {
       if (completedUpdate.sessionId === sessionId) {

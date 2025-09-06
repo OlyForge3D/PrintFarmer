@@ -168,26 +168,26 @@ public partial class NetworkDiscoveryService(
         }
 
         // Send initial progress
-            var initialProgress = new DiscoveryProgressDto(
-                sessionId,
-                settings.NetworkRanges.FirstOrDefault() ?? string.Empty,
-                string.Empty,
-                totalIps,
-                0,
-                0,
-                0d,
-                DiscoveryStatus.Starting,
-                null,
-                settings.NetworkRanges,
-                autoDetectedNetworks
-            );
-            progressCache.Set(sessionId, initialProgress);
-            await hubContext.Clients
-                .Group($"discovery-{sessionId}")
-                .SendAsync(
-                    "DiscoveryProgress",
-                    initialProgress,
-                    cancellationToken);
+        var initialProgress = new DiscoveryProgressDto(
+            sessionId,
+            settings.NetworkRanges.FirstOrDefault() ?? string.Empty,
+            string.Empty,
+            totalIps,
+            0,
+            0,
+            0d,
+            DiscoveryStatus.Starting,
+            null,
+            settings.NetworkRanges,
+            autoDetectedNetworks
+        );
+        progressCache.Set(sessionId, initialProgress);
+        await hubContext.Clients
+            .Group($"discovery-{sessionId}")
+            .SendAsync(
+                "DiscoveryProgress",
+                initialProgress,
+                cancellationToken);
 
         foreach (var network in settings.NetworkRanges)
         {
@@ -204,20 +204,45 @@ public partial class NetworkDiscoveryService(
             LogNetworkScanCompleted(logger, network, networkPrinters.Count);
         }
 
-        // Send completion signal
+        // Emit a final progress snapshot with Completed status for clients that only listen to progress stream
+        if (totalIps > 0)
+        {
+            var finalProgress = new DiscoveryProgressDto(
+                sessionId,
+                string.Empty,
+                string.Empty,
+                totalIps,
+                totalIps,
+                foundPrinters,
+                100d,
+                DiscoveryStatus.Completed,
+                null,
+                settings.NetworkRanges,
+                autoDetectedNetworks
+            );
+            progressCache.Set(sessionId, finalProgress);
             await hubContext.Clients
                 .Group($"discovery-{sessionId}")
-                .SendAsync(
-                    "DiscoveryCompleted",
-                    new DiscoveryCompletedDto(
-                        sessionId,
-                        foundPrinters,
-                        TimeSpan.Zero, // Will be calculated on client side
-                        cancellationToken.IsCancellationRequested,
-                        settings.NetworkRanges,
-                        autoDetectedNetworks
-                    ),
-                    cancellationToken);
+                .SendAsync("DiscoveryProgress", finalProgress, cancellationToken);
+        }
+
+        // Send completion signal
+        await hubContext.Clients
+            .Group($"discovery-{sessionId}")
+            .SendAsync(
+                "DiscoveryCompleted",
+                new DiscoveryCompletedDto(
+                    sessionId,
+                    foundPrinters,
+                    TimeSpan.Zero, // Will be calculated on client side
+                    cancellationToken.IsCancellationRequested,
+                    settings.NetworkRanges,
+                    autoDetectedNetworks
+                ),
+                cancellationToken);
+
+        // Clear cached progress so a new discovery can start fresh (avoid stale 'in progress' UI on reopen)
+        progressCache.Remove(sessionId);
 
         LogDiscoveryCompleted(logger, foundPrinters);
     }
