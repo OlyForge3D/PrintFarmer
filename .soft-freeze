@@ -1,0 +1,6 @@
+{
+  "startedAt": "2025-09-06T00:00:00Z",
+  "reason": "MVP stabilization",
+  "approvedBy": "maintainers",
+  "notes": "Remove this file in PR to exit soft freeze."
+}
