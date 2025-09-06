@@ -1,5 +1,5 @@
 {
-  "name": "PrintFarmer (React + .NET 9 + PostgreSQL)",
+  "name": "PrintFarmer (React + .NET 9, SQLite default)",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:18-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/dotnet:2": {
@@ -46,6 +46,8 @@
         "eamodio.gitlens",
         "editorconfig.editorconfig",
         "ms-vscode.vscode-yaml",
+  // Testing Tools
+  "ZixuanChen.vitest-explorer",
         
         // Docker Extensions
         "ms-azuretools.vscode-docker",
@@ -102,16 +104,23 @@
       }
     }
   },
+  "containerEnv": {
+    "ASPNETCORE_ENVIRONMENT": "Development",
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    // Used by vite build/preview (not needed for vite dev due to proxy)
+    "VITE_API_BASE_URL": "http://localhost:5245",
+    "VITE_SIGNALR_URL": "http://localhost:5245/hubs/printers"
+  },
   "remoteUser": "vscode",
   "postCreateCommand": ".devcontainer/post-create.sh",
-  "forwardPorts": [5000, 5173, 5432, 6379, 8080],
+  "forwardPorts": [5245, 3000, 5432, 6379, 8080],
   "portsAttributes": {
-    "5000": { 
-      "label": "PrintFarmer API",
+    "5245": { 
+      "label": "PrintFarmer API (Dev)",
       "requireLocalPort": false 
     },
-    "5173": { 
-      "label": "Vite Dev Server",
+    "3000": { 
+      "label": "Vite Dev Server (React)",
       "requireLocalPort": false 
     },
     "5432": { 
@@ -123,7 +132,7 @@
       "requireLocalPort": false 
     },
     "8080": { 
-      "label": "Docker App",
+      "label": "Nginx/Proxy or App",
       "requireLocalPort": false 
     }
   },
