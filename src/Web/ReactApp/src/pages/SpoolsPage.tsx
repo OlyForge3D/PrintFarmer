@@ -724,11 +724,8 @@ export function SpoolsPage() {
                         {spool.vendor || 'Unknown Vendor'}
                       </div>
                       <div className="text-xs text-pf-text-secondary text-right whitespace-nowrap">
-                        {(spool.material || 'Unknown')}{(() => { const c = classifyColor(spool.colorHex); return c && c !== 'Unknown' ? ` • ${c}` : ''; })()}
+                        {spool.filamentName || spool.name || 'Unnamed'} [ {(spool.material || 'Unknown Material')} ]
                       </div>
-                    </div>
-                    <div className="text-xs text-pf-text-secondary truncate">
-                      {spool.filamentName || spool.name || 'Unnamed'}
                     </div>
                   </div>
 
