@@ -96,10 +96,21 @@ export function SpoolsPage() {
     try {
       const raw = localStorage.getItem('spool-table-columns');
       if (raw) {
-        const parsed = JSON.parse(raw) as { id: string; visible: boolean }[];
-        // Merge with defaults to keep labels/order from defaults where missing
-        const map = new Map(parsed.map(p => [p.id, p.visible] as const));
-        return defaultColumns.map(dc => ({ ...dc, visible: map.has(dc.id) ? !!map.get(dc.id) : dc.visible }));
+        const parsed = JSON.parse(raw) as { id: string; visible: boolean }[]; // ordered array
+        const used = new Set<string>();
+        const result: TableColumn[] = [];
+        for (const p of parsed) {
+          const def = defaultColumns.find(d => d.id === p.id);
+            if (def) {
+              result.push({ ...def, visible: p.visible });
+              used.add(def.id);
+            }
+        }
+        // Append any new defaults not previously stored
+        for (const def of defaultColumns) {
+          if (!used.has(def.id)) result.push(def);
+        }
+        if (result.length) return result;
       }
     } catch { /* ignore */ }
     return defaultColumns;
@@ -124,6 +135,37 @@ export function SpoolsPage() {
       copy.splice(newIdx, 0, item);
       return copy;
     });
+  };
+
+  // Drag & drop support
+  const [dragColId, setDragColId] = useState<string | null>(null);
+  const onDragStart = (e: React.DragEvent<HTMLLIElement>, id: string) => {
+    setDragColId(id);
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', id); } catch { /* ignore */ }
+  };
+  const onDragOver = (e: React.DragEvent<HTMLLIElement>) => {
+    e.preventDefault();
+    try {
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+    } catch { /* ignore */ }
+  };
+  const onDrop = (e: React.DragEvent<HTMLLIElement>, targetId: string) => {
+    e.preventDefault();
+    const sourceId = dragColId || (() => { try { return e.dataTransfer.getData('text/plain'); } catch { return ''; } })();
+    if (!sourceId || sourceId === targetId) return;
+    setTableColumns(cols => {
+      const sourceIdx = cols.findIndex(c => c.id === sourceId);
+      const targetIdx = cols.findIndex(c => c.id === targetId);
+      if (sourceIdx === -1 || targetIdx === -1) return cols;
+      const copy = [...cols];
+      const [moved] = copy.splice(sourceIdx, 1);
+      copy.splice(targetIdx, 0, moved);
+      return copy;
+    });
+    setDragColId(null);
   };
 
   const toggleColumnVisibility = (id: string) => {
@@ -380,9 +422,19 @@ export function SpoolsPage() {
                       aria-label="Close column configuration"
                     >✕</button>
                   </div>
-                  <ul className="space-y-1 max-h-64 overflow-auto">
+                  <ul className="space-y-1 max-h-64 overflow-auto" aria-label="Column list">
                     {tableColumns.map((c, i) => (
-                      <li key={c.id} className="flex items-center gap-2 group">
+                      <li
+                        key={c.id}
+                        className={`flex items-center gap-2 group rounded ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
+                        draggable
+                        onDragStart={(e) => onDragStart(e, c.id)}
+                        onDragOver={onDragOver}
+                        onDrop={(e) => onDrop(e, c.id)}
+                        data-col-id={c.id}
+                        data-dragging={dragColId === c.id ? 'true' : 'false'}
+                        role="listitem"
+                      >
                         <input
                           type="checkbox"
                           checked={c.visible}
