@@ -1,0 +1,284 @@
+name: Containers
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ${{ github.repository_owner }}
+  API_IMAGE_NAME: printfarmer-api
+  FRONTEND_IMAGE_NAME: printfarmer-frontend
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      matrix:
+        component: [ api, frontend ]
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.component == 'api' && env.API_IMAGE_NAME || env.FRONTEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}},prefix=v
+            type=semver,pattern={{major}}.{{minor}},prefix=v
+
+      - name: Select Dockerfile / context
+        id: paths
+        run: |
+          if [ "${{ matrix.component }}" = "api" ]; then
+            echo "dockerfile=Dockerfile.api" >> $GITHUB_OUTPUT
+            echo "context=./" >> $GITHUB_OUTPUT
+          else
+            # Frontend build (React)
+            if [ -f Dockerfile.frontend ]; then
+              echo "dockerfile=Dockerfile.frontend" >> $GITHUB_OUTPUT
+              echo "context=./" >> $GITHUB_OUTPUT
+            else
+              echo "dockerfile=Dockerfile.react" >> $GITHUB_OUTPUT
+              echo "context=./" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Load security policy
+        id: sec
+        run: |
+          if [ -f security-config.json ]; then
+            echo "policy=$(cat security-config.json | tr -d '\n' | sed 's/\"/\\\"/g')" >> $GITHUB_OUTPUT
+          else
+            echo "policy={}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build (PR) / Build & Push (main/tags)
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.paths.outputs.context }}
+          file: ${{ steps.paths.outputs.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: ${{ env.PLATFORMS }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_VERSION=${{ github.ref_name }}
+          provenance: true
+          sbom: true
+
+      - name: Record image digest
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "DIGEST=${{ steps.build.outputs.digest }}" >> $GITHUB_ENV
+          echo "Image digest: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.build.outputs.digest }}" > digest-${{ matrix.component }}.txt
+
+      - name: Upload digest artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.component }}
+          path: digest-${{ matrix.component }}.txt
+
+      - name: Consolidate digests (matrix append)
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p digests
+          cp digest-${{ matrix.component }}.txt digests/${{ matrix.component }}.digest
+          # Package partial (will be overwritten/merged last run wins but contents additive)
+          tar -cf digests-${{ matrix.component }}.tar digests || true
+        continue-on-error: true
+      - name: Upload consolidated digests (per-matrix)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digests-${{ matrix.component }}
+          path: digests/${{ matrix.component }}.digest
+
+      - name: Export SBOM artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.component }}
+          path: sbom/**
+          if-no-files-found: ignore
+
+      - name: Security Scan (Trivy)
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@v0.20.0
+        with:
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          format: 'table'
+          exit-code: ${{ github.ref == 'refs/heads/main' && fromJSON(steps.sec.outputs.policy).failOnHigh && '1' || '0' }}
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Security Scan (Trivy JSON)
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@v0.20.0
+        with:
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          format: 'json'
+          output: trivy-${{ matrix.component }}.json
+          exit-code: '0'
+          vuln-type: 'os,library'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+      - name: Upload Trivy JSON
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-json-${{ matrix.component }}
+          path: trivy-${{ matrix.component }}.json
+
+      - name: Generate SBOM (Syft)
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          format: 'spdx-json'
+          output-file: sbom/syft-${{ matrix.component }}.spdx.json
+
+      - name: Upload Syft SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: syft-sbom-${{ matrix.component }}
+          path: sbom/syft-${{ matrix.component }}.spdx.json
+
+      - name: Vulnerability Scan (Grype)
+        if: github.event_name != 'pull_request'
+        uses: anchore/scan-action@v4
+        with:
+          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          fail-build: ${{ github.ref == 'refs/heads/main' && fromJSON(steps.sec.outputs.policy).failOnHigh }}
+          severity-cutoff: high
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.4'
+
+      - name: Sign image (keyless fallback)
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          set -e
+          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          # If a private key is provided, use it; else use keyless OIDC
+          if [ -n "${{ secrets.COSIGN_PRIVATE_KEY }}" ] && [ -n "${{ secrets.COSIGN_PASSWORD }}" ]; then
+            echo "Using key-based signing"
+            printf '%s' "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
+            COSIGN_PASSWORD='${{ secrets.COSIGN_PASSWORD }}' cosign sign --key cosign.key --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}"
+          else
+            echo "Using keyless signing"
+            cosign sign --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}"
+          fi
+          cosign verify "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "Verification (non-fatal) failed"
+
+      - name: Attest SBOM (Syft)
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          set -e
+          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          SBOM_FILE=sbom/syft-${{ matrix.component }}.spdx.json
+          if [ -f "$SBOM_FILE" ]; then
+            cosign attest --predicate "$SBOM_FILE" --predicate-type spdxjson --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "SBOM attestation failed"
+          fi
+
+      - name: Attest Vulnerability Scan (Trivy JSON)
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          set -e
+            FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+            VULN_FILE=trivy-${{ matrix.component }}.json
+            if [ -f "$VULN_FILE" ]; then
+              cosign attest --predicate "$VULN_FILE" --predicate-type cyclonedx --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "Vuln attestation failed"
+            fi
+      - name: Attest Provenance (SLSA predicate)
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          cat > provenance.json <<'EOF'
+          {
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [{"name": "image","digest": {"sha256": "${{ steps.build.outputs.digest }}"}}],
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {"builder": {"id": "github-actions"}, "buildType": "containers", "invocation": {"parameters": {}}, "metadata": {"buildInvocationID": "${{ github.run_id }}"}}
+          }
+          EOF
+          cosign attest --predicate provenance.json --predicate-type slsa-provenance --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "Provenance attestation failed"
+
+      - name: Summary
+        run: |
+          echo "Built image for component: ${{ matrix.component }}" >> $GITHUB_STEP_SUMMARY
+          echo "Tags:" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.meta.outputs.tags }}' >> $GITHUB_STEP_SUMMARY
+          echo "Primary tag used for scan: $(echo '${{ steps.meta.outputs.tags }}' | head -n1)" >> $GITHUB_STEP_SUMMARY
+          echo "Security policy: ${{ steps.sec.outputs.policy }}" >> $GITHUB_STEP_SUMMARY
+
+  manifest-combined:
+    name: Create Combined Manifest (optional)
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest placeholders
+        run: |
+          echo "(Optional) Add manifest aggregation here if multi-arch later."
+
+      # Placeholder for future multi-arch expansion
+      # - name: Build multi-arch
+      #   run: echo "Add multi-arch manifest creation when arm64 images available"

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { usePrinters, useDeletePrinter } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { ExpandablePrinterCard } from './ExpandablePrinterCard';
+import { EditPrinterModal } from './EditPrinterModal';
 import { AddPrinterButton } from './AddPrinterButton';
 import { PrinterDiscoveryModal } from './PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
@@ -61,6 +62,8 @@ export function PrinterDashboard() {
   } = usePrinters();
   const deletePrinterMutation = useDeletePrinter();
   const [showDiscovery, setShowDiscovery] = useState(false);
+  const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     printer?: Printer;
@@ -221,6 +224,7 @@ export function PrinterDashboard() {
                   key={printer.id}
                   printer={printer}
                   onDelete={() => handleDeleteClick(printer)}
+                  onEdit={() => { setEditPrinterId(printer.id); setShowEditModal(true); }}
                 />
               ))}
             </div>
@@ -237,6 +241,12 @@ export function PrinterDashboard() {
           printers={deleteConfirmation.printer ? [deleteConfirmation.printer] : []}
           onConfirm={handleDeleteConfirm}
           onCancel={handleDeleteCancel}
+        />
+        <EditPrinterModal
+          printerId={editPrinterId}
+          isOpen={showEditModal}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={() => { setShowEditModal(false); refetchPrinters(); }}
         />
       </div>
     </div>

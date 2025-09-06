@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (vX.Y.Z)'
+        required: true
+      prerelease:
+        description: 'Is prerelease? (true/false)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  tag-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version
+        run: |
+          if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be vX.Y.Z"; exit 1; fi
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Create tag
+        run: |
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@github.com'
+          git tag ${GITHUB_EVENT_INPUTS_VERSION:-${{ github.event.inputs.version }}}
+          git push origin ${GITHUB_EVENT_INPUTS_VERSION:-${{ github.event.inputs.version }}}
+      - name: Call container workflow (API)
+        run: echo "Containers workflow will run automatically on tag push."
+  generate-release:
+    runs-on: ubuntu-latest
+    needs: tag-and-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Determine previous tag
+        id: prev
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' --exclude "${{ github.event.inputs.version }}" 2>/dev/null || true)
+          echo "prev_tag=$PREV" >> $GITHUB_OUTPUT
+      - name: Generate changelog (git-cliff)
+        id: cliff
+        uses: orhun/git-cliff-action@v2
+        with:
+          config: cliff.toml
+          args: --current-tag ${{ github.event.inputs.version }} ${{ steps.prev.outputs.prev_tag && format('--previous-tag {0}', steps.prev.outputs.prev_tag) || '' }}
+      - name: Wait for image build
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.inputs.version }}
+          check-name: 'Build & Push Images'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 30
+      - name: Download artifacts (digests, SBOMs)
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Gather release notes skeleton
+        run: |
+          echo "## Release ${VERSION}" > RELEASE_NOTES.md
+          echo "Images built and signed." >> RELEASE_NOTES.md
+          echo "### Digests" >> RELEASE_NOTES.md
+          grep -R "^sha256:" -h artifacts/digest-*/* >> RELEASE_NOTES.md || true
+          echo "### SBOM Files" >> RELEASE_NOTES.md
+          find artifacts -name '*.spdx.json' -maxdepth 4 -print >> RELEASE_NOTES.md || true
+          echo "### Changes" >> RELEASE_NOTES.md
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' --exclude ${VERSION} 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            echo "Comparing $PREV_TAG...${VERSION}" >> RELEASE_NOTES.md
+            git log --pretty=format:'- %s (%h)' $PREV_TAG..HEAD >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            echo "### Detailed Diff" >> RELEASE_NOTES.md
+            echo "https://github.com/${{ github.repository }}/compare/$PREV_TAG...${VERSION}" >> RELEASE_NOTES.md
+          else
+            echo "Initial tagged release." >> RELEASE_NOTES.md
+          fi
+          echo "### Conventional Commit Summary" >> RELEASE_NOTES.md
+          git log --pretty=format:'%s' $(git rev-list --max-parents=0 HEAD)..HEAD | \
+            awk '/^feat/ {feat++} /^fix/ {fix++} /^docs/ {docs++} /^refactor/ {ref++} END {print "- Features: " feat "\n- Fixes: " fix "\n- Docs: " docs "\n- Refactors: " ref}' >> RELEASE_NOTES.md
+          echo "\n### Changelog (git-cliff)" >> RELEASE_NOTES.md
+          echo '${{ steps.cliff.outputs.changelog }}' >> RELEASE_NOTES.md
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+
+      - name: Verify image signatures (best-effort)
+        run: |
+          set -e
+          DIGEST_LINES=$(grep -R '^sha256:' -h artifacts/digest-*/* || true)
+          if [ -z "$DIGEST_LINES" ]; then echo "No digests found to verify"; exit 0; fi
+          echo "$DIGEST_LINES" | while read d; do
+            for IMG in printfarmer-api printfarmer-frontend; do
+              cosign verify ghcr.io/${{ github.repository_owner }}/$IMG@${d} || echo "Verify failed for $IMG@$d"
+            done
+          done || true
+
+      - name: Enforce verification (fail on missing signatures)
+        run: |
+          set -e
+          MISSING=0
+          for IMG in printfarmer-api printfarmer-frontend; do
+            if ! cosign verify ghcr.io/${{ github.repository_owner }}/$IMG:${{ github.event.inputs.version }} \
+              --certificate-identity-regexp 'https://github.com/${{ github.repository }}' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null 2>&1; then
+              echo "Missing or invalid signature for $IMG:${{ github.event.inputs.version }}"; MISSING=1; fi
+          done
+          if [ $MISSING -eq 1 ]; then echo "Signature enforcement failed"; exit 1; fi
+          echo "All images have valid signatures" >> RELEASE_NOTES.md
+
+      - name: Append verification note
+        run: echo "Signatures verified (non-fatal) where possible." >> RELEASE_NOTES.md
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2.3.1
+        with:
+          results_file: scorecard.json
+          results_format: json
+          publish_results: false
+
+      - name: Append Scorecard summary
+        run: |
+          if [ -f scorecard.json ]; then
+            SCORE=$(jq -r '.score' scorecard.json 2>/dev/null || echo 'N/A')
+            echo "### OpenSSF Scorecard" >> RELEASE_NOTES.md
+            echo "Overall Score: ${SCORE}" >> RELEASE_NOTES.md
+            echo "Key Checks:" >> RELEASE_NOTES.md
+            jq -r '.checks[] | select(.name=="Code-Review" or .name=="Vulnerabilities" or .name=="Dependency-Update-Tool" or .name=="Branch-Protection") | "- " + .name + ": " + (.score|tostring)' scorecard.json >> RELEASE_NOTES.md || true
+          fi
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.event.inputs.version }}
+          tag_name: ${{ github.event.inputs.version }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: |
+            artifacts/**/*.spdx.json
+            artifacts/digest-*/*.txt

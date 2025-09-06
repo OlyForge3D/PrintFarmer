@@ -26,7 +26,8 @@ import {
   AuthenticationResult,
   UserDto,
   DiscoveredPrinterDto,
-  GetGcodeFilesResponse 
+  GetGcodeFilesResponse, 
+  HealthStatus 
 } from '@/types/api';
 
 export class ApiClient {
@@ -392,9 +393,9 @@ export class ApiClient {
 
   // ============ Health checks ============
 
-  async getHealthStatus(): Promise<Record<string, unknown>> {
-    const response = await this.client.get('/health');
-    return response.data;
+  async getHealthStatus(): Promise<HealthStatus> {
+    const response = await this.client.get<HealthStatus>('/health');
+    return response.data as HealthStatus;
   }
 
   async getBasicHealth(): Promise<{ status: string }> {
