@@ -26,6 +26,9 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetModels_ShouldReturnEmptyList_WhenNoModelsExist()
     {
+        // Arrange - Clean database
+        await CleanDatabaseAsync();
+        
         // Act
         var response = await _client.GetAsync("/api/models");
 
@@ -382,5 +385,24 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Create generic model content for different file types
         return Encoding.UTF8.GetBytes("Model content for testing");
+    }
+    
+    /// <summary>
+    /// Clean the database by removing all test data
+    /// </summary>
+    private async Task CleanDatabaseAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // Remove data in dependency order
+        dbContext.PrintJobs.RemoveRange(dbContext.PrintJobs);
+        dbContext.PrinterCapabilities.RemoveRange(dbContext.PrinterCapabilities);
+        dbContext.Printers.RemoveRange(dbContext.Printers);
+        dbContext.GcodeFiles.RemoveRange(dbContext.GcodeFiles);
+        dbContext.Models3D.RemoveRange(dbContext.Models3D);
+        dbContext.SlicerProfiles.RemoveRange(dbContext.SlicerProfiles);
+        
+        await dbContext.SaveChangesAsync();
     }
 }

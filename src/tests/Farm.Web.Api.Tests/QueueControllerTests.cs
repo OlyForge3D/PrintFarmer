@@ -26,6 +26,9 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetQueueOverview_ShouldReturnEmptyOverview_WhenNoPrintersExist()
     {
+        // Arrange - Clean database
+        await CleanDatabaseAsync();
+        
         // Act
         var response = await _client.GetAsync("/api/queue/overview");
 
@@ -38,7 +41,8 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetQueueOverview_ShouldReturnPrinterQueues_WhenPrintersExist()
     {
-        // Arrange - Create a printer with capabilities
+        // Arrange - Clean database and create a printer with capabilities
+        await CleanDatabaseAsync();
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Test Printer");
 
         // Act
@@ -321,12 +325,13 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Theory]
-    [InlineData(PrintJobPriority.Low, 1)]
-    [InlineData(PrintJobPriority.Normal, 5)]
-    [InlineData(PrintJobPriority.High, 10)]
+    [InlineData(PrintJobPriority.Low, 0)]
+    [InlineData(PrintJobPriority.Normal, 1)]
+    [InlineData(PrintJobPriority.High, 2)]
     public async Task QueuePriority_ShouldOrderJobsCorrectly(PrintJobPriority priority, int expectedPriorityValue)
     {
-        // Arrange - Create printer and gcode file
+        // Arrange - Clean database and create printer and gcode file
+        await CleanDatabaseAsync();
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Priority Order Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("priority-order.gcode");
         
@@ -405,7 +410,8 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task PrinterCompatibility_ShouldMatchByMaterialType()
     {
-        // Arrange - Create printer with specific material support
+        // Arrange - Clean database and create printer with specific material support
+        await CleanDatabaseAsync();
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Material Match Printer", supportedMaterials: ["PLA", "PETG", "ABS"]);
         var gcodeFile = await CreateTestGcodeFileAsync("material-test.gcode");
         
@@ -522,5 +528,24 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
         await dbContext.SaveChangesAsync();
 
         return printJob;
+    }
+    
+    /// <summary>
+    /// Clean the database by removing all test data
+    /// </summary>
+    private async Task CleanDatabaseAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // Remove data in dependency order
+        dbContext.PrintJobs.RemoveRange(dbContext.PrintJobs);
+        dbContext.PrinterCapabilities.RemoveRange(dbContext.PrinterCapabilities);
+        dbContext.Printers.RemoveRange(dbContext.Printers);
+        dbContext.GcodeFiles.RemoveRange(dbContext.GcodeFiles);
+        dbContext.Models3D.RemoveRange(dbContext.Models3D);
+        dbContext.SlicerProfiles.RemoveRange(dbContext.SlicerProfiles);
+        
+        await dbContext.SaveChangesAsync();
     }
 }

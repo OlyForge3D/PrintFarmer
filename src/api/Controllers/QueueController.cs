@@ -213,7 +213,7 @@ public class QueueController : ControllerBase
             };
 
             _logger.LogInformation("Job added to queue: {JobId} for printer {PrinterId}", printJob.Id, assignedPrinterId);
-            return CreatedAtAction(nameof(GetJobAsync), new { id = printJob.Id }, result);
+            return Created($"/api/queue/jobs/{printJob.Id}", result);
         }
         catch (Exception ex)
         {
