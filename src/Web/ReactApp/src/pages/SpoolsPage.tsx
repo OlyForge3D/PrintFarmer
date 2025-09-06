@@ -59,6 +59,83 @@ export function SpoolsPage() {
   const [sortField, setSortField] = useState<string>('id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [showColumnConfig, setShowColumnConfig] = useState(false);
+
+  interface TableColumn {
+    id: string;
+    label: string;
+    visible: boolean;
+    sortable?: boolean;
+    render: (spool: SpoolmanSpoolDto) => React.ReactNode;
+    sortValue?: (spool: SpoolmanSpoolDto) => string | number;
+  }
+
+  const defaultColumns: TableColumn[] = [
+    { id: 'id', label: 'ID', visible: true, sortable: true, render: s => s.id, sortValue: s => s.id },
+    { id: 'color', label: 'Color', visible: true, sortable: true, render: s => <ColorSwatch color={getRepresentativeHex(classifyColor(s.colorHex))} label={classifyColor(s.colorHex)} />, sortValue: s => classifyColor(s.colorHex).toLowerCase() },
+    { id: 'vendor', label: 'Vendor', visible: true, sortable: true, render: s => (s.vendor || '—'), sortValue: s => (s.vendor || '').toLowerCase() },
+    { id: 'material', label: 'Material', visible: true, sortable: true, render: s => (s.material || '—'), sortValue: s => (s.material || '').toLowerCase() },
+    { id: 'name', label: 'Name', visible: true, sortable: true, render: s => (s.filamentName || s.name || '—'), sortValue: s => (s.filamentName || s.name || '').toLowerCase() },
+    { id: 'remaining', label: 'Remaining', visible: true, sortable: true, render: s => formatWeight(s.remainingWeightG), sortValue: s => (s.remainingWeightG ?? -Infinity) },
+    { id: 'usedPercent', label: 'Used %', visible: true, sortable: true, render: s => getUsagePercentage(s).toFixed(1), sortValue: s => getUsagePercentage(s) },
+    { id: 'location', label: 'Location', visible: true, sortable: true, render: s => (s.location || ''), sortValue: s => (s.location || '').toLowerCase() },
+    { id: 'archived', label: 'Archived', visible: true, sortable: true, render: s => (s.archived ? 'Yes' : ''), sortValue: s => (s.archived ? 1 : 0) },
+    { id: 'edit', label: 'Edit', visible: true, sortable: false, render: s => (
+      <a
+        href={spoolmanBaseUrl ? `${spoolmanBaseUrl.replace(/\/$/, '')}/spool/edit/${s.id}` : `/spool/edit/${s.id}`}
+        target={spoolmanBaseUrl ? '_blank' : undefined}
+        rel={spoolmanBaseUrl ? 'noopener noreferrer' : undefined}
+        className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1"
+      >
+        <Pencil className="h-3 w-3" /> Edit
+      </a>
+    ) }
+  ];
+
+  const [tableColumns, setTableColumns] = useState<TableColumn[]>(() => {
+    try {
+      const raw = localStorage.getItem('spool-table-columns');
+      if (raw) {
+        const parsed = JSON.parse(raw) as { id: string; visible: boolean }[];
+        // Merge with defaults to keep labels/order from defaults where missing
+        const map = new Map(parsed.map(p => [p.id, p.visible] as const));
+        return defaultColumns.map(dc => ({ ...dc, visible: map.has(dc.id) ? !!map.get(dc.id) : dc.visible }));
+      }
+    } catch { /* ignore */ }
+    return defaultColumns;
+  });
+
+  // Persist visibility/order (order in array) excluding heavy render funcs (just id+visible)
+  useEffect(() => {
+    try {
+      const minimal = tableColumns.map(c => ({ id: c.id, visible: c.visible }));
+      localStorage.setItem('spool-table-columns', JSON.stringify(minimal));
+    } catch { /* ignore */ }
+  }, [tableColumns]);
+
+  const moveColumn = (id: string, dir: -1 | 1) => {
+    setTableColumns(cols => {
+      const idx = cols.findIndex(c => c.id === id);
+      if (idx === -1) return cols;
+      const newIdx = idx + dir;
+      if (newIdx < 0 || newIdx >= cols.length) return cols;
+      const copy = [...cols];
+      const [item] = copy.splice(idx, 1);
+      copy.splice(newIdx, 0, item);
+      return copy;
+    });
+  };
+
+  const toggleColumnVisibility = (id: string) => {
+    setTableColumns(cols => {
+      const visibleCount = cols.filter(c => c.visible).length;
+      return cols.map(c => {
+        if (c.id !== id) return c;
+        if (c.visible && visibleCount === 1) return c; // prevent hiding last
+        return { ...c, visible: !c.visible };
+      });
+    });
+  };
   // Removed gradient hack – replaced by custom ColorFamilySelect component.
 
   const loadSpools = async () => {
@@ -128,7 +205,10 @@ export function SpoolsPage() {
     let filtered = getFilteredSpools();
     filtered = [...filtered].sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1;
-      const val = (f: SpoolmanSpoolDto): unknown => {
+      // Column-based sort if defined
+      const col = tableColumns.find(c => c.id === sortField);
+      const val = (f: SpoolmanSpoolDto): string | number => {
+        if (col?.sortValue) return col.sortValue(f);
         switch (sortField) {
           case 'vendor': return (f.vendor || '').toLowerCase();
           case 'material': return (f.material || '').toLowerCase();
@@ -136,13 +216,15 @@ export function SpoolsPage() {
           case 'usedPercent': return getUsagePercentage(f);
           case 'color': return classifyColor(f.colorHex).toLowerCase();
           case 'location': return (f.location || '').toLowerCase();
+          case 'name': return (f.filamentName || f.name || '').toLowerCase();
+          case 'archived': return f.archived ? 1 : 0;
           default: return f.id;
         }
       };
-  const av = val(a) as (string | number);
-  const bv = val(b) as (string | number);
-  if (av < bv) return -1 * dir;
-  if (av > bv) return 1 * dir;
+      const av = val(a);
+      const bv = val(b);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
       return 0;
     });
     if (filters.pageSize === 'All') return filtered;
@@ -251,7 +333,7 @@ export function SpoolsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Spools</h1>
-        <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center">
           <div className="flex rounded overflow-hidden border border-pf-border">
             <button
               type="button"
@@ -278,6 +360,61 @@ export function SpoolsPage() {
             <RefreshCw className="h-4 w-4" />
             Refresh
           </button>
+          {viewMode === 'table' && (
+            <div className="relative">
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={showColumnConfig ? 'true' : 'false'}
+                onClick={() => setShowColumnConfig(v => !v)}
+                className="px-4 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 text-sm"
+              >Columns</button>
+              {showColumnConfig && (
+                <div className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
+                  <div className="flex justify-between items-center mb-1">
+                    <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
+                    <button
+                      type="button"
+                      className="text-xs text-pf-text-secondary hover:text-pf-text-primary"
+                      onClick={() => setShowColumnConfig(false)}
+                      aria-label="Close column configuration"
+                    >✕</button>
+                  </div>
+                  <ul className="space-y-1 max-h-64 overflow-auto">
+                    {tableColumns.map((c, i) => (
+                      <li key={c.id} className="flex items-center gap-2 group">
+                        <input
+                          type="checkbox"
+                          checked={c.visible}
+                          onChange={() => toggleColumnVisibility(c.id)}
+                          aria-label={`Toggle column ${c.label}`}
+                          className="rounded border-pf-border bg-pf-bg-0"
+                        />
+                        <span className="text-xs flex-1 truncate">{c.label}</span>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(c.id, -1)}
+                            disabled={i === 0}
+                            aria-label={`Move ${c.label} up`}
+                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2"
+                          >▲</button>
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(c.id, 1)}
+                            disabled={i === tableColumns.length - 1}
+                            aria-label={`Move ${c.label} down`}
+                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2"
+                          >▼</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-[10px] text-pf-text-secondary pt-1 border-t border-pf-border">Reorder with arrows. At least one column must remain visible.</div>
+                </div>
+              )}
+            </div>
+          )}
           {spoolmanBaseUrl && (
             <a
               href={spoolmanBaseUrl}
@@ -412,6 +549,8 @@ export function SpoolsPage() {
                   <option value="usedPercent">Used %</option>
                   <option value="color">Color</option>
                   <option value="location">Location</option>
+                  <option value="name">Name</option>
+                  <option value="archived">Archived</option>
                 </select>
                 <button
                   type="button"
@@ -513,44 +652,42 @@ export function SpoolsPage() {
           </div>
           )}
           {viewMode === 'table' && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto relative">
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="text-left bg-pf-bg-2">
-                    <th className="px-3 py-2 font-medium">ID</th>
-                    <th className="px-3 py-2 font-medium">Color</th>
-                    <th className="px-3 py-2 font-medium">Vendor</th>
-                    <th className="px-3 py-2 font-medium">Material</th>
-                    <th className="px-3 py-2 font-medium">Name</th>
-                    <th className="px-3 py-2 font-medium">Remaining</th>
-                    <th className="px-3 py-2 font-medium">Used %</th>
-                    <th className="px-3 py-2 font-medium">Location</th>
-                    <th className="px-3 py-2 font-medium">Archived</th>
-                    <th className="px-3 py-2 font-medium">Edit</th>
+                    {tableColumns.filter(c => c.visible).map(c => {
+                      const isSorted = sortField === c.id;
+                      const ariaSort: 'none' | 'ascending' | 'descending' = isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+                      return (
+                        <th
+                          key={c.id}
+                          data-col-id={c.id}
+                          className={`px-3 py-2 font-medium ${c.sortable ? 'cursor-pointer select-none' : ''}`}
+                          onClick={() => {
+                            if (!c.sortable) return; 
+                            setSortField(prev => prev === c.id ? prev : c.id);
+                            setSortDir(prev => (isSorted ? (prev === 'asc' ? 'desc' : 'asc') : 'asc'));
+                          }}
+                          aria-sort={ariaSort}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            {c.label}
+                            {c.sortable && isSorted && (
+                              <span className="text-[10px]">{sortDir === 'asc' ? '▲' : '▼'}</span>
+                            )}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
                   {getDisplayedSpools().map(spool => (
                     <tr key={spool.id} className="border-t border-pf-border hover:bg-pf-bg-1">
-                      <td className="px-3 py-2">{spool.id}</td>
-                      <td className="px-3 py-2"><ColorSwatch color={getRepresentativeHex(classifyColor(spool.colorHex))} label={classifyColor(spool.colorHex)} /></td>
-                      <td className="px-3 py-2">{spool.vendor || '—'}</td>
-                      <td className="px-3 py-2">{spool.material || '—'}</td>
-                      <td className="px-3 py-2">{spool.filamentName || spool.name || '—'}</td>
-                      <td className="px-3 py-2">{formatWeight(spool.remainingWeightG)}</td>
-                      <td className="px-3 py-2">{getUsagePercentage(spool).toFixed(1)}</td>
-                      <td className="px-3 py-2">{spool.location || ''}</td>
-                      <td className="px-3 py-2">{spool.archived ? 'Yes' : ''}</td>
-                      <td className="px-3 py-2">
-                        <a
-                          href={spoolmanBaseUrl ? `${spoolmanBaseUrl.replace(/\/$/, '')}/spool/edit/${spool.id}` : `/spool/edit/${spool.id}`}
-                          target={spoolmanBaseUrl ? '_blank' : undefined}
-                          rel={spoolmanBaseUrl ? 'noopener noreferrer' : undefined}
-                          className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1"
-                        >
-                          <Pencil className="h-3 w-3" /> Edit
-                        </a>
-                      </td>
+                      {tableColumns.filter(c => c.visible).map(c => (
+                        <td key={c.id} className="px-3 py-2" data-col-id={c.id}>{c.render(spool)}</td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>
