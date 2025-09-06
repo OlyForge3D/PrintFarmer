@@ -99,7 +99,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
-        result.Error.Should().Contain("already exists");
+        result.Error.Should().Contain("already taken");
     }
 
     [Fact]

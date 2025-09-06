@@ -214,7 +214,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         
         var responseContent = await response.Content.ReadAsStringAsync();
-        responseContent.Should().Contain("already exists");
+        responseContent.Should().Contain("already taken");
     }
 
     [Fact]

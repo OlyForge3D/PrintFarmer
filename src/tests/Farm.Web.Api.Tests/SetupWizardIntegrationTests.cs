@@ -217,7 +217,7 @@ public class SetupWizardIntegrationTests : IClassFixture<CustomWebApplicationFac
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         
         var responseContent = await response.Content.ReadAsStringAsync();
-        responseContent.Should().Contain("already exists");
+        responseContent.Should().Contain("already taken");
     }
 
     [Fact]
