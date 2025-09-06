@@ -32,7 +32,7 @@ interface ThemeProviderProps {
  */
 export function ThemeProvider({ 
   children, 
-  defaultTheme = 'system',
+  defaultTheme = 'dark',
   storageKey = 'pf-theme'
 }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<ThemeName>(defaultTheme);

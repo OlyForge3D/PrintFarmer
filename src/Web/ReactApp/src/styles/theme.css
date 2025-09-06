@@ -173,38 +173,8 @@
   }
 }
 
-/* System color scheme detection */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    /* Apply light theme when system preference is light and no explicit theme is set */
-    --pf-theme-name: 'light';
-    --pf-bg-0: #ffffff;
-    --pf-bg-1: #f8fafc;
-    --pf-bg-2: #f1f5f9;
-    --pf-panel: #f8fafc;
-    
-    --pf-border: #e2e8f0;
-    --pf-border-light: #cbd5e1;
-    --pf-border-medium: #94a3b8;
-    --pf-border-dark: #64748b;
-    
-    --pf-text-primary: #1e293b;
-    --pf-text-secondary: #475569;
-    --pf-text-tertiary: #64748b;
-    --pf-text-light: #475569;
-    --pf-text-muted: #64748b;
-    
-    --pf-accent: #059669;
-    --pf-accent-2: #1d4ed8;
-    --pf-success: #059669;
-    --pf-success-hover: #047857;
-    --pf-link: #1d4ed8;
-    
-    --pf-focus-ring-offset: #ffffff;
-    --pf-hover-overlay: rgba(0, 0, 0, 0.05);
-    --pf-active-overlay: rgba(0, 0, 0, 0.1);
-  }
-}
+/* Note: Dark theme is the default. System preference detection is handled by ThemeContext.
+   Users can manually select light theme if desired. */
 
 /* =============================================================================
    Accessibility Enhancements
