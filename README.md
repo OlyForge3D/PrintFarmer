@@ -6,7 +6,9 @@
 ![Codecov](https://img.shields.io/codecov/c/github/jpapiez/PrintFarmer)
 ![Scorecard](https://img.shields.io/ossf-scorecard/github.com/jpapiez/PrintFarmer?label=openssf-scorecard)
 ![CodeQL](https://github.com/jpapiez/PrintFarmer/actions/workflows/codeql.yml/badge.svg)
+<!-- SOFT_FREEZE_BADGE_START -->
 ![Soft Freeze](https://img.shields.io/badge/soft%20freeze-active-red)
+<!-- SOFT_FREEZE_BADGE_END -->
 
 A React TypeScript dashboard for managing multiple 3D printers.
 
