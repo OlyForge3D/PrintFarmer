@@ -8,6 +8,7 @@ using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using FluentValidation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -709,17 +710,17 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     /// <param name="id">The unique identifier of the printer to update</param>
     /// <param name="dto">The updated printer data</param>
     /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>No content if successful</returns>
-    /// <response code="204">If the printer was successfully updated</response>
+    /// <returns>The updated printer</returns>
+    /// <response code="200">Returns the updated printer</response>
     /// <response code="400">If the update data is invalid</response>
     /// <response code="404">If the printer with the specified ID was not found</response>
     /// <response code="500">If there was an error updating the printer</response>
     [HttpPut("{id:guid}")]
-    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<IActionResult> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
+    public async Task<ActionResult<PrinterDto>> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
     {
         if (dto is null)
         {
@@ -809,7 +810,49 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
 
         await db.SaveChangesAsync(ct);
-        return NoContent();
+
+        // Build updated manufacturer/model names
+        string? manufacturerName = null;
+        string? modelName = null;
+        if (p.ManufacturerId.HasValue)
+        {
+            var man = await db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(m => m.Id == p.ManufacturerId, ct);
+            manufacturerName = man?.Name;
+        }
+        if (p.ModelId.HasValue)
+        {
+            var mod = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == p.ModelId, ct);
+            modelName = mod?.Name;
+        }
+
+        var dtoResponse = new PrinterDto(
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            IsOnline: false,
+            State: "Unknown",
+            ManufacturerName: manufacturerName,
+            ModelName: modelName,
+            Progress: null,
+            JobName: null,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            CameraSnapshotUrl: null,
+            X: null,
+            Y: null,
+            Z: null,
+            HotendTemp: null,
+            BedTemp: null,
+            HotendTarget: null,
+            BedTarget: null,
+            Backend: (PrinterBackend)p.Backend,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress
+        );
+
+        return Ok(dtoResponse);
     }
 
     /// <summary>

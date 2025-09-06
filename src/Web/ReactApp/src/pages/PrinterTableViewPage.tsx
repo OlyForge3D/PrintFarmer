@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { usePrinters } from '@/hooks/useApi';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthContext';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
@@ -8,20 +7,22 @@ import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import type { Printer } from '@/types/api';
 import { Search } from 'lucide-react';
+import { EditPrinterModal } from '@/components/EditPrinterModal';
 
 export function PrinterTableViewPage() {
   const { hasPermission } = useAuth();
   const { data: printers, isLoading, error, refetch } = usePrinters();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
   
   const [showDiscovery, setShowDiscovery] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [printersToDelete, setPrintersToDelete] = useState<Printer[]>([]);
+  const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Handler functions
   const handleEditPrinter = (printer: Printer) => {
-    console.log('Edit printer:', printer.name);
-    // TODO: Navigate to edit page or open edit modal
+    setEditPrinterId(printer.id);
+    setShowEditModal(true);
   };
 
   const handleDeletePrinters = (printers: Printer[]) => {
@@ -195,6 +196,16 @@ export function PrinterTableViewPage() {
         printers={printersToDelete}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteModalOpen(false)}
+      />
+
+      <EditPrinterModal
+        printerId={editPrinterId}
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        onSuccess={() => {
+          setShowEditModal(false);
+          refetch();
+        }}
       />
     </div>
   );

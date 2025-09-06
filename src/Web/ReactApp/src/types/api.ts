@@ -199,6 +199,15 @@ export interface FilamentType {
   defaultTemperatures: TempTargets;
 }
 
+// Health status response shape (partial, extensible)
+export interface HealthStatus {
+  status: string;
+  checks?: Record<string, unknown>;
+  duration?: string;
+  entries?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface FilamentTypeDto {
   id: string;
   name: string;

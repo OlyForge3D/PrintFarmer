@@ -1,0 +1,20 @@
+# CODEOWNERS: enforce reviews for critical paths
+# Pattern order matters; last matching pattern wins.
+
+# Backend API
+/src/api/ @jpapiez
+
+# React frontend
+/src/Web/ReactApp/ @jpapiez
+
+# Workflows and DevOps
+/.github/workflows/ @jpapiez
+
+# Shared models
+/src/shared/ @jpapiez
+
+# Tools
+/src/tools/ @jpapiez
+
+# Catch-all
+* @jpapiez

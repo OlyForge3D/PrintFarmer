@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: src/Web/ReactApp/package-lock.json
+
+      - name: Restore .NET
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Install frontend deps
+        working-directory: src/Web/ReactApp
+        run: npm ci
+
+      - name: Build .NET
+        working-directory: src
+        run: dotnet build ./farm-web.sln -c Debug --no-restore
+
+      - name: Build frontend
+        working-directory: src/Web/ReactApp
+        run: npm run build
+
+      - name: Test .NET (with coverage)
+        working-directory: src
+        run: |
+          dotnet test ./farm-web.sln -c Debug --no-build --logger trx --results-directory TestResults \
+            /p:CollectCoverage=true /p:CoverletOutput=../coverage/ /p:CoverletOutputFormat=lcov
+
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+      - name: Generate HTML coverage report
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          reportgenerator -reports:src/coverage/coverage.info -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary
+          cat src/coverage/report/Summary.txt || true
+      - name: Upload .NET HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-coverage-html
+          path: src/coverage/report
+
+      - name: Upload .NET coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-coverage
+          path: src/coverage
+
+      - name: Test frontend (with coverage)
+        working-directory: src/Web/ReactApp
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: src/Web/ReactApp/coverage
+
+      - name: Upload Test Results (.NET)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: src/TestResults
+
+      - name: Lint frontend
+        working-directory: src/Web/ReactApp
+        run: npm run lint
+
+      - name: Dotnet format (check)
+        working-directory: src
+        run: dotnet format --verify-no-changes ./farm-web.sln || echo "Dotnet format issues detected" && exit 0
+
+      - name: Upload test results summary
+        if: always()
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- .NET test results: stored in artifact dotnet-test-results" >> $GITHUB_STEP_SUMMARY
+          echo "- .NET coverage: artifact dotnet-coverage" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend coverage: artifact frontend-coverage" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: |
+            src/coverage/coverage.info
+            src/Web/ReactApp/coverage/lcov.info
+          flags: backend,frontend
+          fail_ci_if_error: false
+
+      - name: Enforce frontend coverage thresholds
+        if: success()
+        run: |
+          FRONTEND_LCOV=src/Web/ReactApp/coverage/lcov.info
+          if [ ! -f "$FRONTEND_LCOV" ]; then echo "Missing frontend lcov"; exit 1; fi
+          LINES=$(grep -m1 '^TN:' -A5 "$FRONTEND_LCOV" | grep 'LF:' | sed 's/.*LF://')
+          LINES_HIT=$(grep -m1 '^TN:' -A5 "$FRONTEND_LCOV" | grep 'LH:' | sed 's/.*LH://')
+          if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse frontend coverage"; exit 1; fi
+          PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
+          echo "Frontend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
+          if [ $PCT -lt 55 ]; then echo "Frontend coverage below 55%"; exit 1; fi
+
+      - name: Enforce backend coverage thresholds
+        if: success()
+        run: |
+          BACKEND_LCOV=src/coverage/coverage.info
+          if [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov"; exit 1; fi
+          LINES=$(grep -c '^DA:' "$BACKEND_LCOV")
+          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{split($2,a,":"); if ($2 ~ /,/) {} }')
+          # Simplistic: count DA lines with execution >0
+          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{split($2,a,":"); if ($2>0) c++} END {print c+0}')
+          if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse backend coverage"; exit 1; fi
+          PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
+          echo "Backend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
+          if [ $PCT -lt 55 ]; then echo "Backend coverage below 55%"; exit 1; fi

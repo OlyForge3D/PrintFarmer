@@ -1,0 +1,8 @@
+{
+  "failOnHigh": true,
+  "failOnCritical": true,
+  "enforceOnPr": false,
+  "requireSbomAttestation": true,
+  "requireVulnAttestation": true,
+  "requireSignature": true
+}

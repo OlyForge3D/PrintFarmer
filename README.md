@@ -1,6 +1,13 @@
 # PrintFarmer
 
-A React TypeScript dashboard for managing ## Detailed Documentation
+![CI](https://github.com/jpapiez/PrintFarmer/actions/workflows/ci.yml/badge.svg)
+![Containers](https://github.com/jpapiez/PrintFarmer/actions/workflows/containers.yml/badge.svg)
+![Dependency Review](https://github.com/jpapiez/PrintFarmer/actions/workflows/dependency-review.yml/badge.svg)
+![Codecov](https://img.shields.io/codecov/c/github/jpapiez/PrintFarmer)
+![Scorecard](https://img.shields.io/ossf-scorecard/github.com/jpapiez/PrintFarmer?label=openssf-scorecard)
+![CodeQL](https://github.com/jpapiez/PrintFarmer/actions/workflows/codeql.yml/badge.svg)
+
+A React TypeScript dashboard for managing multiple 3D printers.
 
 **📋 [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
 **🔧 [Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging  
@@ -16,6 +23,8 @@ A React TypeScript dashboard for managing ## Detailed Documentation
 - **Flexible Database**: SQLite, PostgreSQL, SQL Server, MySQL support
 - **Docker Ready**: Production deployment with containers
 - **WiFi Friendly**: Works with WiFi-connected printers (local development)
+- **Signed Images**: Cosign-signed container images (keyless OIDC or key-based)
+- **Provenance Attestations**: SLSA provenance tying digests to build workflow
 
 ## Quick Start - Choose Your Path
 
@@ -204,6 +213,31 @@ curl -X POST http://localhost:5245/api/printers/discover-streaming
 
 # Test React app
 curl http://localhost:3000/
+
+# Verify signed container image (requires cosign installed)
+cosign verify ghcr.io/jpapiez/printfarmer-api:latest \
+  --certificate-identity-regexp 'https://github.com/jpapiez/PrintFarmer' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Fetch provenance artifact reference (example)
+gh api repos/jpapiez/PrintFarmer/actions/runs --jq '.workflow_runs[0].id' # then download artifacts from that run
+```
+
+### Attestations
+
+SBOM and vulnerability scan results are attached as cosign attestations:
+```bash
+FIRST_TAG=ghcr.io/jpapiez/printfarmer-api:latest
+cosign verify-attestation $FIRST_TAG \
+  --certificate-identity-regexp 'https://github.com/jpapiez/PrintFarmer' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com | jq '.'
+
+### Supply Chain Verification Workflow
+To verify a released tag (example v1.2.3):
+```bash
+gh workflow run verify-supply-chain.yml -f tag=v1.2.3
+```
+Then inspect the workflow run logs for signature and attestation verification.
 ```
 
 ## Configuration

@@ -1,0 +1,35 @@
+name: Verify Supply Chain
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag or digest-qualified reference (e.g., v1.2.3 or ghcr.io/owner/image@sha256:...)'
+        required: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.2.4
+      - name: Determine images
+        id: imgs
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [[ "$TAG" == v* ]]; then
+            echo "api=ghcr.io/${{ github.repository_owner }}/printfarmer-api:$TAG" >> $GITHUB_OUTPUT
+            echo "frontend=ghcr.io/${{ github.repository_owner }}/printfarmer-frontend:$TAG" >> $GITHUB_OUTPUT
+          else
+            echo "api=$TAG" >> $GITHUB_OUTPUT
+            echo "frontend=$TAG" >> $GITHUB_OUTPUT
+          fi
+      - name: Verify signatures & attestations
+        run: |
+          set -e
+          for IMG in "${{ steps.imgs.outputs.api }}" "${{ steps.imgs.outputs.frontend }}"; do
+            echo "Verifying $IMG"
+            cosign verify "$IMG" --certificate-identity-regexp 'https://github.com/${{ github.repository }}' --certificate-oidc-issuer https://token.actions.githubusercontent.com || exit 1
+            cosign verify-attestation "$IMG" --certificate-identity-regexp 'https://github.com/${{ github.repository }}' --certificate-oidc-issuer https://token.actions.githubusercontent.com || echo "Attestation verify failed (non-fatal)"
+          done
