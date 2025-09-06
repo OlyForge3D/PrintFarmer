@@ -9,6 +9,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/moonraker-test")]
+[Tags("Moonraker Diagnostics")]
 public class MoonrakerDiagnosticsController : ControllerBase
 {
     private readonly IMoonrakerClient _moonrakerClient;

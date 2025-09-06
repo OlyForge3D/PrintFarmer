@@ -11,6 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Print Job Queue")]
 public class JobQueueController(AppDbContext db, ILogger<JobQueueController> logger) : ControllerBase
 {
     /// <summary>

@@ -194,6 +194,9 @@ public class GcodeHarvestOperation
     public bool IncludeSubdirectories { get; set; } = true;
     public long? MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024; // 100MB default
     public DateTime? ModifiedAfter { get; set; } // Only harvest files modified after this date
+    public string[]? FileExtensions { get; set; } // JSON stored list of allowed extensions (without dot)
+    public long? MinFileSizeBytes { get; set; }
+    public string? DuplicateHandling { get; set; }
 }
 
 public enum GcodeHarvestStatus

@@ -9,6 +9,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Slicer Integration")]
 public class SlicerController : ControllerBase
 {
     private readonly ILogger<SlicerController> _logger;

@@ -12,6 +12,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Catalog")]
 public class CatalogController(AppDbContext db) : ControllerBase
 {
     /// <summary>

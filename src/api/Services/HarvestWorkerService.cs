@@ -189,11 +189,44 @@ public class HarvestWorkerService : BackgroundService
 
                 if (existingFile != null)
                 {
-                    _logger.LogInformation("File {FileName} already exists in library with ID {ExistingId}",
-                        job.FileName, existingFile.Id);
-                    discoveredFile.AlreadyInLibrary = true;
-                    discoveredFile.ExistingLibraryFileId = existingFile.Id;
-                    await IncrementSkippedCountAsync(db, operation);
+                    var handling = operation.DuplicateHandling?.ToLowerInvariant() ?? "skip";
+                    switch (handling)
+                    {
+                        case "overwrite":
+                            _logger.LogInformation("Overwriting duplicate file {FileName} (Existing ID {ExistingId}) per policy", job.FileName, existingFile.Id);
+                            // Treat as added (new metadata snapshot) but reference existing file id
+                            fileContent.Position = 0;
+                            var overwriteMeta = await ExtractMetadataAsync(fileContent);
+                            ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
+                            discoveredFile.AlreadyInLibrary = false;
+                            discoveredFile.ExistingLibraryFileId = existingFile.Id;
+                            await IncrementAddedCountAsync(db, operation);
+                            break;
+                        case "rename":
+                            _logger.LogInformation("Renaming duplicate file {FileName} per policy", job.FileName);
+                            // Generate a new unique name with -copy suffix (in discovered scope)
+                            var baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
+                            var ext = System.IO.Path.GetExtension(discoveredFile.FileName);
+                            int copyIndex = 1;
+                            string candidate;
+                            do
+                            {
+                                candidate = $"{baseName}-copy{copyIndex}{ext}";
+                                copyIndex++;
+                            } while (await db.DiscoveredGcodeFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
+                            discoveredFile.FileName = candidate;
+                            fileContent.Position = 0;
+                            var renameMeta = await ExtractMetadataAsync(fileContent);
+                            ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
+                            await IncrementAddedCountAsync(db, operation);
+                            break;
+                        default: // skip
+                            _logger.LogInformation("Skipping duplicate file {FileName} (Existing ID {ExistingId}) per policy", job.FileName, existingFile.Id);
+                            discoveredFile.AlreadyInLibrary = true;
+                            discoveredFile.ExistingLibraryFileId = existingFile.Id;
+                            await IncrementSkippedCountAsync(db, operation);
+                            break;
+                    }
                 }
                 else
                 {
@@ -373,9 +406,9 @@ public class HarvestWorkerService : BackgroundService
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
 
         var linesRead = 0;
-        const int maxLinesToRead = 100; // Limit header scanning
+    var maxLinesToRead = 100; // Limit header scanning
 
-        while (linesRead < maxLinesToRead && await reader.ReadLineAsync() is { } line)
+    while (linesRead < maxLinesToRead && await reader.ReadLineAsync() is { } line)
         {
             linesRead++;
 

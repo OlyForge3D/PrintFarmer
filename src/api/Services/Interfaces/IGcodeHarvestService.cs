@@ -23,6 +23,11 @@ public interface IGcodeHarvestService
     Task<DiscoveredGcodeFileDto[]> GetDiscoveredFilesAsync(Guid operationId, CancellationToken ct = default);
 
     /// <summary>
+    /// Get discovered files (paged) with optional name filter
+    /// </summary>
+    Task<PagedResult<DiscoveredGcodeFileDto>> GetDiscoveredFilesPagedAsync(Guid operationId, int page = 1, int pageSize = 50, string? search = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Import selected discovered files to the library
     /// </summary>
     Task<GcodeHarvestResultDto> ImportSelectedFilesAsync(ImportSelectedGcodeFilesDto request, CancellationToken ct = default);

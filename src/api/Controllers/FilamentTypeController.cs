@@ -11,6 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Filament Types")]
 public class FilamentTypeController(AppDbContext db) : ControllerBase
 {
     /// <summary>

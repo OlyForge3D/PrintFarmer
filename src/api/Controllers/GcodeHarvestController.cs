@@ -9,6 +9,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/gcode-harvest")]
+[Tags("G-code Harvesting")]
 public class GcodeHarvestController : ControllerBase
 {
     private readonly IGcodeHarvestService _harvestService;
@@ -25,11 +26,23 @@ public class GcodeHarvestController : ControllerBase
     /// <summary>
     /// Start a G-code harvest operation for a specific printer
     /// </summary>
-    /// <param name="request">Harvest configuration</param>
+    /// <param name="request">Harvest configuration (IncludeSubdirectories, MaxFileSizeBytes, ModifiedAfter, FileExtensions, MinFileSizeBytes, DuplicateHandling: skip|overwrite|rename)</param>
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">Harvest operation started successfully</response>
     /// <response code="400">Invalid request parameters</response>
     /// <response code="404">Printer not found</response>
+    /// <remarks>
+    /// Sample request:
+    /// {
+    ///   "printerId": "11111111-1111-1111-1111-111111111111",
+    ///   "includeSubdirectories": true,
+    ///   "fileExtensions": ["gcode","gco"],
+    ///   "minFileSizeBytes": 1024,
+    ///   "maxFileSizeBytes": 104857600,
+    ///   "modifiedAfter": "2025-09-01T00:00:00Z",
+    ///   "duplicateHandling": "skip"
+    /// }
+    /// </remarks>
     [HttpPost("start")]
     [ProducesResponseType(typeof(GcodeHarvestResultDto), 200)]
     [ProducesResponseType(400)]
@@ -106,6 +119,42 @@ public class GcodeHarvestController : ControllerBase
         {
             _logger.LogError(ex, "Failed to get discovered files for operation {OperationId}", operationId);
             return StatusCode(500, "Failed to retrieve discovered files");
+        }
+    }
+
+    /// <summary>
+    /// Get discovered files (paged) for a harvest operation
+    /// </summary>
+    /// <param name="operationId">Harvest operation ID</param>
+    /// <param name="page">Page number (1-based)</param>
+    /// <param name="pageSize">Page size (max 500)</param>
+    /// <param name="search">Optional case-sensitive filename substring filter</param>
+    /// <param name="ct">Cancellation token</param>
+    [HttpGet("operations/{operationId:guid}/files/paged")]
+    [ProducesResponseType(typeof(PagedResult<DiscoveredGcodeFileDto>), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PagedResult<DiscoveredGcodeFileDto>>> GetDiscoveredFilesPagedAsync(
+        Guid operationId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var op = await _harvestService.GetHarvestOperationAsync(operationId, ct);
+            if (op == null)
+            {
+                return NotFound();
+            }
+            var result = await _harvestService.GetDiscoveredFilesPagedAsync(operationId, page, pageSize, search, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get paged discovered files for operation {OperationId}", operationId);
+            return StatusCode(500, "Failed to retrieve discovered files (paged)");
         }
     }
 

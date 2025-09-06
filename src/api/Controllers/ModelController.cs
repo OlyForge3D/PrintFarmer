@@ -16,6 +16,7 @@ public class ModelController : ControllerBase
     public ModelController(ILogger<ModelController> logger, IConfiguration configuration)
     {
         _logger = logger;
+        ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
 
         // Ensure models directory exists
@@ -43,7 +44,8 @@ public class ModelController : ControllerBase
 
         // Validate file extension
         var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
-        var fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
+        var originalName = modelFile.FileName ?? string.Empty;
+        var fileExtension = Path.GetExtension(originalName).ToLowerInvariant();
 
         if (!allowedExtensions.Contains(fileExtension))
         {
@@ -54,6 +56,10 @@ public class ModelController : ControllerBase
         var modelId = Guid.NewGuid();
         var fileName = $"{modelId}{fileExtension}";
         var filePath = Path.Combine(_modelsPath, fileName);
+        if (!IsSafePath(filePath, _modelsPath))
+        {
+            return BadRequest("Unsafe file path generated");
+        }
 
         try
         {
@@ -67,8 +73,8 @@ public class ModelController : ControllerBase
             var result = new Model3DUploadResultDto
             {
                 Id = modelId,
-                Name = Path.GetFileNameWithoutExtension(modelFile.FileName),
-                FileName = modelFile.FileName,
+                Name = Path.GetFileNameWithoutExtension(originalName),
+                FileName = originalName,
                 FileSize = modelFile.Length,
                 FileType = fileExtension.TrimStart('.'),
                 UploadedAt = DateTime.UtcNow,
@@ -85,7 +91,7 @@ public class ModelController : ControllerBase
             _logger.LogError(ex, "Failed to upload model file: {FileName}", modelFile.FileName);
 
             // Clean up file if it was partially created
-            if (System.IO.File.Exists(filePath))
+            if (IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
             {
                 System.IO.File.Delete(filePath);
             }
@@ -154,6 +160,10 @@ public class ModelController : ControllerBase
         }
 
         var filePath = possibleFiles[0];
+        if (!IsSafePath(filePath, _modelsPath))
+        {
+            return NotFound();
+        }
         var fileInfo = new FileInfo(filePath);
         var fileExtension = fileInfo.Extension.TrimStart('.');
 
@@ -188,6 +198,10 @@ public class ModelController : ControllerBase
         }
 
         var filePath = possibleFiles[0];
+        if (!IsSafePath(filePath, _modelsPath))
+        {
+            return NotFound();
+        }
         var fileName = Path.GetFileName(filePath);
         var fileExtension = Path.GetExtension(filePath);
 
@@ -223,7 +237,10 @@ public class ModelController : ControllerBase
         {
             foreach (var filePath in possibleFiles)
             {
-                System.IO.File.Delete(filePath);
+                if (IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
+                {
+                    System.IO.File.Delete(filePath);
+                }
             }
 
             _logger.LogInformation("Model deleted: {ModelId}", id);
@@ -277,5 +294,19 @@ public class ModelController : ControllerBase
         };
 
         return Ok(result);
+    }
+
+    private static bool IsSafePath(string candidatePath, string root)
+    {
+        try
+        {
+            var fullRoot = Path.GetFullPath(root);
+            var fullCandidate = Path.GetFullPath(candidatePath);
+            return fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

@@ -8,6 +8,7 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Authentication")]
 public class AuthController : ControllerBase
 {
     private readonly IAuthenticationService _authService;
@@ -22,6 +23,10 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
     {
+        if (request is null)
+        {
+            return BadRequest(new AuthenticationResult(false, Error: "Request body is required"));
+        }
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         {
             return BadRequest(new AuthenticationResult(false, Error: "Username and password are required"));
@@ -40,6 +45,10 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<AuthenticationResult>> RegisterAsync([FromBody] RegisterRequest request)
     {
+        if (request is null)
+        {
+            return BadRequest(new AuthenticationResult(false, Error: "Request body is required"));
+        }
         if (string.IsNullOrWhiteSpace(request.Username) ||
             string.IsNullOrWhiteSpace(request.Email) ||
             string.IsNullOrWhiteSpace(request.Password))
@@ -97,6 +106,10 @@ public class AuthController : ControllerBase
     [Authorize]
     public async Task<IActionResult> ChangePasswordAsync([FromBody] ChangePasswordRequest request)
     {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
         var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {

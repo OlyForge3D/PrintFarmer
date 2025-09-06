@@ -1,28 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { formatDistanceToNow } from 'date-fns';
-import { 
-  ClockIcon, 
-  PlayIcon, 
-  CheckCircleIcon, 
-  ExclamationCircleIcon, 
-  XCircleIcon,
-  ChevronDownIcon 
-} from '@heroicons/react/24/outline';
+// Icons removed (unused after refactor)
 
 import { 
   Printer, 
   HarvestOptions, 
-  GcodeHarvestOperation, 
-  StartBulkHarvestRequest,
-  HarvestProgress,
-  GcodeHarvestStatus
+  GcodeHarvestStatus,
+  GcodeHarvestOperation
 } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePrinters } from '@/hooks/useApi';
-import { useHarvestUpdates } from '@/hooks/useSignalR';
+import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/signalr';
 import { apiClient } from '@/services/api';
 import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
@@ -30,7 +20,7 @@ import { AccessDenied } from '@/components/common/AccessDenied';
 
 export const HarvestPage: React.FC = () => {
   const { hasPermission } = useAuth();
-  const queryClient = useQueryClient();
+  // const queryClient = useQueryClient(); // not used here currently
   const [selectedPrinters, setSelectedPrinters] = useState<string[]>([]);
   const [harvestOptions, setHarvestOptions] = useState<HarvestOptions>({
     includeSubfolders: true,
@@ -39,23 +29,32 @@ export const HarvestPage: React.FC = () => {
     maxFileAge: undefined, // No age limit
     duplicateHandling: 'skip'
   });
+  // Optimistic operations started on client before server push/update arrives
+  const [optimisticOps, setOptimisticOps] = useState<GcodeHarvestOperation[]>([]);
 
   const { data: printers } = usePrinters();
+  // Real-time printer status (SignalR)
+  const { getPrinterStatus } = usePrinterStatusUpdates();
   const { data: harvestOperations, refetch: refetchOperations } = useQuery({
     queryKey: ['harvest-operations'],
     queryFn: () => apiClient.getHarvestOperations(),
     refetchInterval: 2000, // Frequent updates during active operations
   });
 
+  type StartHarvestPayload = { printerIds: string[]; options: { includeSubfolders?: boolean; maxFileAge?: number; fileTypes?: string[]; minFileSize?: number; duplicateHandling?: string } };
   const startHarvestMutation = useMutation({
-    mutationFn: ({ printerIds, options }: { printerIds: string[], options: HarvestOptions }) =>
+    mutationFn: ({ printerIds, options }: StartHarvestPayload) =>
       apiClient.startBulkHarvest(printerIds, options),
     onSuccess: () => {
       refetchOperations();
       toast.success('Harvest operations started successfully');
       setSelectedPrinters([]);
+      // Clear optimistic placeholders once real data expected shortly
+      setTimeout(() => setOptimisticOps([]), 4000);
     },
     onError: (error) => {
+      // Roll back optimistic placeholders
+      setOptimisticOps([]);
       toast.error('Failed to start harvest operations');
       console.error('Harvest error:', error);
     }
@@ -65,8 +64,7 @@ export const HarvestPage: React.FC = () => {
   useEffect(() => {
     signalRService.connect();
     
-    const unsubscribe = signalRService.onHarvestUpdate((operationId: string, progress: HarvestProgress) => {
-      // Update UI with progress information
+    const unsubscribe = signalRService.onHarvestUpdate(() => {
       refetchOperations();
     });
 
@@ -80,24 +78,75 @@ export const HarvestPage: React.FC = () => {
       toast.error('Please select at least one printer');
       return;
     }
-
-    startHarvestMutation.mutate({
-      printerIds: selectedPrinters,
-      options: harvestOptions
+    // Add optimistic operation entries for each selected printer
+    const now = new Date();
+    const optimistic: GcodeHarvestOperation[] = selectedPrinters.map(pid => {
+      const printer = printersWithLive.find(p => p.id === pid)!;
+      return {
+        id: `optimistic-${pid}-${now.getTime()}`,
+        printerId: pid,
+        printerName: printer?.name || 'Printer',
+        status: GcodeHarvestStatus.Starting,
+        filesFound: 0,
+        filesProcessed: 0,
+        filesAdded: 0,
+        filesSkipped: 0,
+        filesErrored: 0,
+        duplicatesSkipped: 0,
+        totalSizeBytes: 0,
+        startedAt: now,
+        options: harvestOptions
+      };
     });
+    setOptimisticOps(optimistic);
+
+    startHarvestMutation.mutate({ printerIds: selectedPrinters, options: {
+      includeSubfolders: harvestOptions.includeSubfolders,
+      maxFileAge: harvestOptions.maxFileAge,
+      fileTypes: harvestOptions.fileTypes,
+      minFileSize: harvestOptions.minFileSize,
+      duplicateHandling: harvestOptions.duplicateHandling
+    }});
   };
 
   if (!hasPermission('gcode_harvest', 'execute')) {
     return <AccessDenied />;
   }
 
-  const activeOperations = harvestOperations?.filter(op => 
-    op.status === GcodeHarvestStatus.Running || op.status === GcodeHarvestStatus.Starting
-  ) || [];
+  const activeOperations = [
+    ...optimisticOps,
+    ...((harvestOperations?.filter(op => 
+      op.status === GcodeHarvestStatus.Running || op.status === GcodeHarvestStatus.Starting
+    )) || [])
+  ];
 
   const completedOperations = harvestOperations?.filter(op =>
     op.status === GcodeHarvestStatus.Completed || op.status === GcodeHarvestStatus.Failed
   )?.slice(0, 10) || [];
+
+  // Merge live status into base printer data
+  const printersWithLive = (printers || []).map(p => {
+    const status = getPrinterStatus(p.id);
+    if (!status) return p;
+    return {
+      ...p,
+      isOnline: status.isOnline,
+      isReachable: status.isOnline || p.isReachable, // preserve reachable if previously true
+      state: status.state ?? p.state,
+      progress: status.progress ?? p.progress,
+      jobName: status.jobName ?? p.jobName,
+      hotendTemp: status.hotendTemp ?? p.hotendTemp,
+      bedTemp: status.bedTemp ?? p.bedTemp,
+      hotendTarget: status.hotendTarget ?? p.hotendTarget,
+      bedTarget: status.bedTarget ?? p.bedTarget,
+      x: status.x ?? p.x,
+      y: status.y ?? p.y,
+      z: status.z ?? p.z,
+    } as Printer;
+  });
+
+  // Recompute selected printers if a printer went offline (keep selection but disable start button logic uses isReachable)
+  // const reachableSelectedCount = selectedPrinters.filter(id => printersWithLive.find(p => p.id === id && (p.isReachable || p.isOnline))).length;
 
   return (
     <div className="p-6 space-y-6">
@@ -105,13 +154,19 @@ export const HarvestPage: React.FC = () => {
         <h1 className="text-2xl font-bold text-gray-900">G-code Harvest</h1>
         
         {hasPermission('gcode_harvest', 'create') && (
-          <button
-            onClick={handleStartHarvest}
-            disabled={selectedPrinters.length === 0 || startHarvestMutation.isPending}
-            className="btn btn-primary"
-          >
-            {startHarvestMutation.isPending ? 'Starting...' : 'Start Harvest'}
-          </button>
+          <div className="flex flex-col items-end">
+            <button
+              onClick={handleStartHarvest}
+              disabled={startHarvestMutation.isPending}
+              title={selectedPrinters.length === 0 ? 'Select at least one reachable printer first' : undefined}
+              className={`btn btn-primary transition-opacity ${startHarvestMutation.isPending ? 'opacity-60 cursor-not-allowed' : ''}`}
+            >
+              {startHarvestMutation.isPending ? 'Starting...' : 'Start Harvest'}
+            </button>
+            {selectedPrinters.length === 0 && !startHarvestMutation.isPending && (
+              <span className="mt-1 text-xs text-gray-500">Select one or more printers below</span>
+            )}
+          </div>
         )}
       </div>
 
@@ -147,7 +202,7 @@ export const HarvestPage: React.FC = () => {
               </div>
 
               <div className="space-y-2 max-h-96 overflow-y-auto">
-                {printers?.map((printer: Printer) => (
+                {printersWithLive.map((printer: Printer) => (
                   <label
                     key={printer.id}
                     className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${
@@ -242,6 +297,7 @@ export const HarvestPage: React.FC = () => {
                   Minimum File Size
                 </label>
                 <select
+                  aria-label="Minimum file size"
                   value={harvestOptions.minFileSize}
                   onChange={(e) => setHarvestOptions(prev => ({
                     ...prev,
@@ -262,6 +318,7 @@ export const HarvestPage: React.FC = () => {
                   Duplicate Handling
                 </label>
                 <select
+                  aria-label="Duplicate handling"
                   value={harvestOptions.duplicateHandling}
                   onChange={(e) => setHarvestOptions(prev => ({
                     ...prev,

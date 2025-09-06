@@ -95,6 +95,45 @@ src/
 - `GET /api/network-discovery/settings` — Network discovery configuration
 - **SignalR Hub**: `/hubs/printers` — Real-time printer status updates
 
+### G-code Harvesting
+
+Core endpoints:
+- `POST /api/gcode-harvest/start` – Start a harvest for a printer (body: StartGcodeHarvestDto)
+- `GET /api/gcode-harvest/{operationId}` – Get operation details
+- `GET /api/gcode-harvest/active/{printerId}` – Active operation for a printer
+- `GET /api/gcode-harvest/recent/{printerId}?count=10` – Recent operations
+- `GET /api/gcode-harvest/active` – All active operations
+
+Start payload (selected fields):
+```
+{
+  printerId: Guid,
+  includeSubdirectories: bool,            // default: true
+  maxFileSizeBytes: long?                 // upper size filter
+  minFileSizeBytes: long?                 // lower size filter
+  modifiedAfter: string? (ISO 8601),      // only files modified after this timestamp
+  fileExtensions: string[]?               // extension list without dot, e.g. ["gcode","gco"]
+  duplicateHandling: "skip"|"overwrite"|"rename" // default: skip
+}
+```
+
+Duplicate handling semantics:
+- `skip`: Do not import if a matching file (same hash or name heuristic) already exists; increments FilesSkipped.
+- `overwrite`: Replace existing library entry metadata & content; increments FilesAdded.
+- `rename`: Import as a new file; auto-appends `-copy`, `-copy2`, etc. to avoid collisions; increments FilesAdded.
+
+Filtering order during discovery:
+1. Extension allowlist (if provided)
+2. Size range (min / max)
+3. Modified-after cutoff
+
+Progress fields on `GcodeHarvestOperation`:
+`filesFound`, `filesAdded`, `filesSkipped`, `filesErrored`, `totalBytesProcessed`, plus status (`Running|Completed|Failed|Cancelled`).
+
+Real-time updates are delivered over the existing `/hubs/printers` SignalR connection (harvest operations broadcast alongside printer status events).
+
+Development note: Schema currently uses `EnsureCreated()` (no active EF migrations). A temporary migration was generated and removed (2025-09-06) to retain rapid iteration.
+
 ## Network Discovery Features
 
 **Automatic Printer Detection:**

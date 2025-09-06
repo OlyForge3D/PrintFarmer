@@ -9,6 +9,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/gcode-harvest")]
+[Tags("G-code Harvesting Diagnostics")]
 public class GcodeHarvestDiagnosticsController : ControllerBase
 {
     private readonly ILogger<GcodeHarvestDiagnosticsController> _logger;

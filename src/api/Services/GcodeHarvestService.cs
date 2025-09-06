@@ -73,6 +73,9 @@ public class GcodeHarvestService : IGcodeHarvestService
             IncludeSubdirectories = request.IncludeSubdirectories,
             MaxFileSizeBytes = request.MaxFileSizeBytes,
             ModifiedAfter = request.ModifiedAfter,
+            FileExtensions = request.FileExtensions,
+            MinFileSizeBytes = request.MinFileSizeBytes,
+            DuplicateHandling = request.DuplicateHandling,
             FilesFound = 0,
             FilesAdded = 0,
             FilesSkipped = 0,
@@ -181,10 +184,49 @@ public class GcodeHarvestService : IGcodeHarvestService
             scopedLogger.LogInformation("Discovered {FileCount} files for operation {OperationId}",
                 fileList.Count, operation.Id);
 
-            // Count how many are G-code files
-            int gcodeFileCount = fileList.Count(f => f.Name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase));
-            scopedLogger.LogInformation("Found {GcodeFileCount} G-code files out of {TotalFileCount} total files",
-                gcodeFileCount, fileList.Count);
+            // Determine allowed extensions (default to gcode if none specified)
+            var allowedExts = (operation.FileExtensions != null && operation.FileExtensions.Length > 0
+                ? operation.FileExtensions
+                : new[] { "gcode" })
+                .Select(e => e.StartsWith('.') ? e.ToLowerInvariant() : "." + e.ToLowerInvariant())
+                .ToArray();
+
+            // Apply filtering for extensions & size constraints for preliminary count
+            bool PassesInitialFilters(PrinterFileInfo f)
+            {
+                var nameLower = f.Name.ToLowerInvariant();
+                var extOk = false;
+                foreach (var ext in allowedExts)
+                {
+                    if (nameLower.EndsWith(ext))
+                    {
+                        extOk = true;
+                        break;
+                    }
+                }
+                if (!extOk)
+                {
+                    return false;
+                }
+                if (operation.MinFileSizeBytes.HasValue && f.Size < operation.MinFileSizeBytes.Value)
+                {
+                    return false;
+                }
+                if (operation.MaxFileSizeBytes.HasValue && f.Size > operation.MaxFileSizeBytes.Value)
+                {
+                    return false;
+                }
+                if (operation.ModifiedAfter.HasValue && f.ModifiedAt.HasValue && f.ModifiedAt < operation.ModifiedAfter)
+                {
+                    return false;
+                }
+                return true;
+            }
+
+            var filteredFiles = fileList.Where(PassesInitialFilters).ToList();
+            int gcodeFileCount = filteredFiles.Count;
+            scopedLogger.LogInformation("Filtered to {FilteredCount} candidate files (from {TotalFileCount}). Extensions: {AllowedExts}",
+                gcodeFileCount, fileList.Count, string.Join(',', allowedExts));
 
             // Update files found count immediately
             var dbOperation = await scopedDb.GcodeHarvestOperations
@@ -203,14 +245,8 @@ public class GcodeHarvestService : IGcodeHarvestService
 
             // Queue each G-code file for processing
             int queuedCount = 0;
-            foreach (var fileInfo in fileList)
+            foreach (var fileInfo in filteredFiles)
             {
-                if (!fileInfo.Name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
-                {
-                    scopedLogger.LogDebug("Skipping non-G-code file: {FileName}", fileInfo.Name);
-                    continue;
-                }
-
                 var job = new HarvestFileJob
                 {
                     OperationId = operation.Id,
@@ -429,6 +465,53 @@ public class GcodeHarvestService : IGcodeHarvestService
             files.Length, operationId);
 
         return [.. files.Select(MapToDto)];
+    }
+
+    public async Task<PagedResult<DiscoveredGcodeFileDto>> GetDiscoveredFilesPagedAsync(Guid operationId, int page = 1, int pageSize = 50, string? search = null, CancellationToken ct = default)
+    {
+        if (page < 1)
+        {
+            page = 1;
+        }
+        if (pageSize < 1)
+        {
+            pageSize = 1;
+        }
+        if (pageSize > 500)
+        {
+            pageSize = 500; // guardrail
+        }
+
+        var baseQuery = _db.DiscoveredGcodeFiles.AsQueryable().Where(d => d.HarvestOperationId == operationId);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            baseQuery = baseQuery.Where(d => d.FileName.Contains(term));
+        }
+
+        var total = await baseQuery.CountAsync(ct);
+        var totalPages = (int)Math.Ceiling(total / (double)pageSize);
+        if (totalPages == 0)
+        {
+            totalPages = 1;
+        }
+        if (page > totalPages)
+        {
+            page = totalPages;
+        }
+
+        var items = await baseQuery
+            .OrderBy(d => d.FileName)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(ct);
+
+        return new PagedResult<DiscoveredGcodeFileDto>(
+            [.. items.Select(MapToDto)],
+            total,
+            page,
+            pageSize,
+            totalPages);
     }
 
     public async Task<GcodeHarvestResultDto> ImportSelectedFilesAsync(ImportSelectedGcodeFilesDto request, CancellationToken ct = default)

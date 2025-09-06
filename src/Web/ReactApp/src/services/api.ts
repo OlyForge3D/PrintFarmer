@@ -25,7 +25,8 @@ import {
   RegisterRequest,
   AuthenticationResult,
   UserDto,
-  DiscoveredPrinterDto 
+  DiscoveredPrinterDto,
+  GetGcodeFilesResponse 
 } from '@/types/api';
 
 export class ApiClient {
@@ -277,18 +278,33 @@ export class ApiClient {
 
   // ============ G-code harvest operations ============
 
-  async startHarvestOperation(printerId: string): Promise<GcodeHarvestOperation> {
-    const response = await this.client.post<GcodeHarvestOperation>(`/printers/${printerId}/harvest`);
-    return response.data;
+  async startHarvestOperation(printerId: string, opts?: { includeSubdirectories?: boolean; maxFileSizeBytes?: number; modifiedAfter?: Date | string; fileExtensions?: string[]; minFileSizeBytes?: number; duplicateHandling?: string }): Promise<{ operationId: string }> {
+    const payload = {
+      printerId,
+      includeSubdirectories: opts?.includeSubdirectories ?? true,
+      maxFileSizeBytes: opts?.maxFileSizeBytes ?? 100 * 1024 * 1024,
+      modifiedAfter: opts?.modifiedAfter ? (typeof opts.modifiedAfter === 'string' ? opts.modifiedAfter : opts.modifiedAfter.toISOString()) : undefined,
+      fileExtensions: opts?.fileExtensions,
+      minFileSizeBytes: opts?.minFileSizeBytes,
+      duplicateHandling: opts?.duplicateHandling
+    };
+    const response = await this.client.post('/gcode-harvest/start', payload);
+    return response.data as { operationId: string };
   }
 
-  async startBulkHarvest(printerIds: string[], options: any): Promise<{ operationIds: string[] }> {
-    // For now, start individual harvests for each printer
-    // In the future, the API could be extended to support true bulk operations
-    const operations = await Promise.all(
-      printerIds.map(printerId => this.startHarvestOperation(printerId))
-    );
-    return { operationIds: operations.map(op => op.id) };
+  async startBulkHarvest(printerIds: string[], options: { includeSubfolders?: boolean; maxFileAge?: number; fileTypes?: string[]; minFileSize?: number; duplicateHandling?: string } = {}): Promise<{ operationIds: string[] }> {
+    const modifiedAfter = options.maxFileAge ? new Date(Date.now() - options.maxFileAge) : undefined;
+    const results = await Promise.all(printerIds.map(pid => this.startHarvestOperation(pid, {
+      includeSubdirectories: options?.includeSubfolders ?? true,
+      modifiedAfter,
+      fileExtensions: options.fileTypes,
+      minFileSizeBytes: options.minFileSize,
+      duplicateHandling: options.duplicateHandling,
+    }).catch(err => {
+      console.error('Failed to start harvest for printer', pid, err);
+      return null;
+    })));
+    return { operationIds: results.filter(r => r !== null).map(r => (r as { operationId: string }).operationId) };
   }
 
   async getHarvestOperations(printerId?: string): Promise<GcodeHarvestOperation[]> {
@@ -302,8 +318,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async getGcodeFilesWithFilter(request: any): Promise<any> {
-    const response = await this.client.get('/gcode-files', { params: request });
+  async getGcodeFilesWithFilter(request: Record<string, unknown>): Promise<GetGcodeFilesResponse> {
+    const response = await this.client.get<GetGcodeFilesResponse>('/gcode-files', { params: request });
     return response.data;
   }
 
@@ -376,7 +392,7 @@ export class ApiClient {
 
   // ============ Health checks ============
 
-  async getHealthStatus(): Promise<any> {
+  async getHealthStatus(): Promise<Record<string, unknown>> {
     const response = await this.client.get('/health');
     return response.data;
   }

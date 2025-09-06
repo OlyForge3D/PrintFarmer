@@ -11,6 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Printer Capabilities")]
 public class PrinterCapabilitiesController(AppDbContext db, ILogger<PrinterCapabilitiesController> logger) : ControllerBase
 {
     /// <summary>

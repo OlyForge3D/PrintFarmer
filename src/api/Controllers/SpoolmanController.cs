@@ -9,6 +9,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Spoolman Integration")]
 public class SpoolmanController(SpoolmanService spoolman) : ControllerBase
 {
     /// <summary>

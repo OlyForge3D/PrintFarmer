@@ -19,6 +19,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Tags("Printers")]
 public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
