@@ -1065,6 +1065,24 @@ public class SlicerProfileResponseDto
     public DateTime UpdatedAt { get; set; }
 }
 
+// Queue Management DTOs
+public class QueueOverviewDto
+{
+    public Guid PrinterId { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+    public string PrinterModel { get; set; } = string.Empty;
+    public bool IsAvailable { get; set; }
+    public int QueuedJobsCount { get; set; }
+    public Guid? CurrentJobId { get; set; }
+    public string? CurrentJobName { get; set; }
+    public DateTime? EstimatedCompletionTime { get; set; }
+}
+
+public class UpdateJobPriorityDto
+{
+    public int Priority { get; set; }
+}
+
 /// <summary>
 /// Internal tracking DTO for active / completed slicing jobs.
 /// </summary>
