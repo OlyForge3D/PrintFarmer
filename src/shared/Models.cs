@@ -277,7 +277,9 @@ public record DiscoveryProgressDto(
     int PrintersFound,
     double ProgressPercentage,
     DiscoveryStatus Status,
-    string? Message = null
+    string? Message = null,
+    IReadOnlyList<string>? NetworkRanges = null,
+    bool AutoDetectedNetworks = false
 );
 
 public record DiscoveryPrinterFoundDto(
@@ -289,7 +291,9 @@ public record DiscoveryCompletedDto(
     string SessionId,
     int TotalPrintersFound,
     TimeSpan Duration,
-    bool WasCancelled = false
+    bool WasCancelled = false,
+    IReadOnlyList<string>? NetworkRanges = null,
+    bool AutoDetectedNetworks = false
 );
 
 public enum DiscoveryStatus
@@ -315,7 +319,7 @@ public record NetworkDiscoverySettingsDto(
     int MaxConcurrentScans = 20,
     List<int> Ports = null!)
 {
-    public NetworkDiscoverySettingsDto() : this(new List<string>(), 3000, 20, new List<int> { 80, 7125 })
+    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [80, 7125])
     {
     }
 }
@@ -336,7 +340,7 @@ public class HistoryJob
     public double FilamentUsed { get; set; }
     public string Filename { get; set; } = string.Empty;
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO used for JSON serialization; setter required for deserialization")]
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; set; } = [];
     public double PrintDuration { get; set; }
     public string Status { get; set; } = string.Empty;
     public double StartTime { get; set; }

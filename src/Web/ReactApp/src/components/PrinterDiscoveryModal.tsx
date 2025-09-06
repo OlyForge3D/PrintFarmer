@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter } from '@/hooks/useApi';
 import { useDiscoveryStream } from '@/hooks/useSignalR';
-import { DiscoveredPrinterDto, PrinterBackend } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
+import { signalRService } from '@/services/signalr';
 import { X, Search } from 'lucide-react';
 
 interface PrinterDiscoveryModalProps {
@@ -19,7 +21,14 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   const createPrinterMutation = useCreatePrinter();
   
   // Use the discovery stream hook to listen for real-time updates
-  const { progress, foundPrinters, completed, resetDiscovery, isActive, isCompleted } = useDiscoveryStream(sessionId || undefined);
+  const { progress, foundPrinters, resetDiscovery, isActive } = useDiscoveryStream(sessionId || undefined);
+
+  // Ensure SignalR connection when modal opens so we can receive events immediately
+  useEffect(() => {
+    if (isOpen) {
+      signalRService.connect();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -103,6 +112,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           <div className="absolute top-0 right-0 pt-4 pr-4">
             <button
               type="button"
+              aria-label="Close discovery modal"
+              title="Close"
               className="bg-white rounded-md text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               onClick={onClose}
             >
@@ -134,12 +145,25 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
                 {isActive && progress && (
                   <div className="text-center py-4 mb-4">
-                    <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
-                        style={{ width: `${progress.progressPercentage}%` }}
-                      />
+                    <div
+                      className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar"
+                      role="progressbar"
+                      aria-label="Network discovery progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(progress.progressPercentage)}
+                    >
+                      {(() => {
+                        const pct = Math.min(100, Math.max(0, Math.round(progress.progressPercentage)));
+                        return <div className={`pf-progress-fill pf-w-${pct} bg-blue-600 h-2 rounded-full transition-all duration-300`} />;
+                      })()}
                     </div>
+                    <p className="text-xs text-gray-500 mb-2">Session: {progress.sessionId}</p>
+                    {progress.networkRanges && progress.networkRanges.length > 0 && (
+                      <p className="text-xs text-gray-500 mb-2">
+                        Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
+                      </p>
+                    )}
                     <p className="text-sm text-gray-600 mb-2">
                       Scanning {progress.currentNetwork} - {progress.currentIp}
                     </p>
@@ -210,6 +234,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                             <div className="flex items-center">
                               <input
                                 type="checkbox"
+                                aria-label={`Select printer ${printer.name || printer.serverUrl}`}
+                                title={`Select printer ${printer.name || printer.serverUrl}`}
                                 checked={selectedPrinters.has(printer.serverUrl)}
                                 onChange={() => handleToggleSelection(printer.serverUrl)}
                                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"

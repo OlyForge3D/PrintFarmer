@@ -457,6 +457,8 @@ export interface DiscoveryProgressDto {
   progressPercentage: number;
   status: DiscoveryStatus;
   message?: string;
+  networkRanges?: string[];
+  autoDetectedNetworks?: boolean;
 }
 
 export interface DiscoveryPrinterFoundDto {
@@ -469,6 +471,8 @@ export interface DiscoveryCompletedDto {
   totalPrintersFound: number;
   duration: number; // milliseconds
   wasCancelled?: boolean;
+  networkRanges?: string[];
+  autoDetectedNetworks?: boolean;
 }
 
 // Printer control types

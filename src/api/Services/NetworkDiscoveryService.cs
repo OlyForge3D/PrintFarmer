@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.NetworkInformation;
 using Microsoft.AspNetCore.SignalR;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
@@ -92,6 +93,21 @@ public partial class NetworkDiscoveryService(
         LogDiscoveryStarting(logger);
 
         var settings = settingsService.GetSettings();
+        // Auto-detect network ranges if none configured
+    if (settings.NetworkRanges.Count == 0)
+        {
+            var autoRanges = DetectLocalNetworks().ToList();
+            if (autoRanges.Count > 0)
+            {
+                settings.NetworkRanges.AddRange(autoRanges);
+                logger.LogInformation("Auto-detected {Count} network range(s) for discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
+            }
+            else
+            {
+                logger.LogWarning("No network ranges configured and none could be auto-detected. Discovery will return empty result.");
+                return [];
+            }
+        }
         LogDiscoverySettings(logger, string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
 
         var discovered = new List<DiscoveredPrinterDto>();
@@ -113,6 +129,20 @@ public partial class NetworkDiscoveryService(
         LogDiscoveryStarting(logger);
 
         var settings = settingsService.GetSettings();
+        // Auto-detect network ranges if none configured
+    if (settings.NetworkRanges.Count == 0)
+        {
+            var autoRanges = DetectLocalNetworks().ToList();
+            if (autoRanges.Count > 0)
+            {
+                settings.NetworkRanges.AddRange(autoRanges);
+                logger.LogInformation("Auto-detected {Count} network range(s) for streaming discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
+            }
+            else
+            {
+                logger.LogWarning("No network ranges configured and none could be auto-detected. Streaming discovery will send immediate completion.");
+            }
+        }
         LogDiscoverySettings(logger, string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
 
         var totalIps = 0;
@@ -135,16 +165,24 @@ public partial class NetworkDiscoveryService(
         }
 
         // Send initial progress
-        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", new DiscoveryProgressDto(
-            sessionId,
-            settings.NetworkRanges.FirstOrDefault() ?? "",
-            "",
-            totalIps,
-            0,
-            0,
-            0.0,
-            DiscoveryStatus.Starting
-        ), cancellationToken);
+            await hubContext.Clients
+                .Group($"discovery-{sessionId}")
+                .SendAsync(
+                    "DiscoveryProgress",
+                    new DiscoveryProgressDto(
+                        sessionId,
+                        settings.NetworkRanges.FirstOrDefault() ?? string.Empty,
+                        string.Empty,
+                        totalIps,
+                        0,
+                        0,
+                        0d,
+                        DiscoveryStatus.Starting,
+                        null,
+                        settings.NetworkRanges,
+                        settings.NetworkRanges.Count > 0
+                    ),
+                    cancellationToken);
 
         foreach (var network in settings.NetworkRanges)
         {
@@ -162,14 +200,109 @@ public partial class NetworkDiscoveryService(
         }
 
         // Send completion signal
-        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryCompleted", new DiscoveryCompletedDto(
-            sessionId,
-            foundPrinters,
-            TimeSpan.Zero, // Will be calculated on client side
-            cancellationToken.IsCancellationRequested
-        ), cancellationToken);
+            await hubContext.Clients
+                .Group($"discovery-{sessionId}")
+                .SendAsync(
+                    "DiscoveryCompleted",
+                    new DiscoveryCompletedDto(
+                        sessionId,
+                        foundPrinters,
+                        TimeSpan.Zero, // Will be calculated on client side
+                        cancellationToken.IsCancellationRequested,
+                        settings.NetworkRanges,
+                        settings.NetworkRanges.Count > 0
+                    ),
+                    cancellationToken);
 
         LogDiscoveryCompleted(logger, foundPrinters);
+    }
+
+    private static HashSet<string> DetectLocalNetworks()
+    {
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up)
+                {
+                    continue;
+                }
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                {
+                    continue;
+                }
+                if (ni.Description.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase) ||
+                    ni.Description.Contains("VMware", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var ipProps = ni.GetIPProperties();
+                foreach (var ua in ipProps.UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        // IPv4 only
+                        continue;
+                    }
+                    var address = ua.Address;
+                    var mask = ua.IPv4Mask;
+                    if (mask == null)
+                    {
+                        continue;
+                    }
+                    var cidr = MaskToCidr(mask);
+                    if (cidr <= 0 || cidr > 32)
+                    {
+                        continue;
+                    }
+                    var networkAddress = GetNetworkAddress(address, mask);
+                    var cidrString = $"{networkAddress}/{cidr}";
+                    results.Add(cidrString);
+                }
+            }
+        }
+        catch
+        {
+            // Swallow exceptions - auto-detection is best-effort
+        }
+        return results;
+    }
+
+    private static int MaskToCidr(IPAddress mask)
+    {
+        var bytes = mask.GetAddressBytes();
+        var bits = 0;
+        foreach (var b in bytes)
+        {
+            var value = b;
+            for (int i = 0; i < 8; i++)
+            {
+                if ((value & 0x80) == 0x80)
+                {
+                    bits++;
+                    value <<= 1;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+        return bits;
+    }
+
+    private static IPAddress GetNetworkAddress(IPAddress address, IPAddress mask)
+    {
+        var ipBytes = address.GetAddressBytes();
+        var maskBytes = mask.GetAddressBytes();
+        var networkBytes = new byte[ipBytes.Length];
+        for (int i = 0; i < ipBytes.Length; i++)
+        {
+            networkBytes[i] = (byte)(ipBytes[i] & maskBytes[i]);
+        }
+        return new IPAddress(networkBytes);
     }
 
     private async Task<List<DiscoveredPrinterDto>> ScanNetworkAsync(string network, NetworkDiscoverySettingsDto settings, CancellationToken cancellationToken)

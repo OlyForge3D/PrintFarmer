@@ -356,20 +356,40 @@ export function useDiscoveryCompleted(
 }
 
 export function useDiscoveryStream(sessionId?: string) {
+  // Ensure we have a connection state to react to (will trigger connect on mount)
+  const { isConnected, connectionState } = useSignalRConnection();
   const { progress } = useDiscoveryProgress(sessionId);
   const { foundPrinters, setFoundPrinters } = useDiscoveryPrinterFound(sessionId);
   const { completed } = useDiscoveryCompleted(sessionId);
 
-  // Join/leave discovery group when sessionId changes
+  // Attempt to join discovery group when we have both a sessionId and an active connection.
   useEffect(() => {
     if (!sessionId) return;
+    if (!isConnected) {
+      // Wait until connection is established
+      return;
+    }
 
-    signalRService.joinDiscoveryGroup(sessionId);
+    let cancelled = false;
+    (async () => {
+      try {
+        console.debug('[Discovery] Joining SignalR discovery group', { sessionId });
+        await signalRService.joinDiscoveryGroup(sessionId);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('[Discovery] Failed to join discovery group, will retry on next connection state change', err);
+        }
+      }
+    })();
 
     return () => {
-      signalRService.leaveDiscoveryGroup(sessionId);
+      cancelled = true;
+      if (isConnected) {
+        console.debug('[Discovery] Leaving SignalR discovery group', { sessionId });
+        signalRService.leaveDiscoveryGroup(sessionId);
+      }
     };
-  }, [sessionId]);
+  }, [sessionId, isConnected, connectionState]);
 
   // Reset found printers when starting a new session
   const resetDiscovery = useCallback(() => {
