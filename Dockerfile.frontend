@@ -1,0 +1,29 @@
+# Standalone React Frontend Dockerfile
+FROM node:18-alpine AS build
+
+WORKDIR /app
+
+# Copy package files
+COPY src/Web/ReactApp/package*.json ./
+RUN npm install --silent
+
+# Copy source and build
+COPY src/Web/ReactApp/ ./
+RUN npm run build
+
+# Production stage with Nginx
+FROM nginx:alpine
+
+# Copy built app to nginx
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY deploy/nginx/nginx-frontend.conf /etc/nginx/nginx.conf
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:80/ || exit 1
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

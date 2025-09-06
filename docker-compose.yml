@@ -39,6 +39,9 @@ services:
       - ENABLE_LOCAL_NETWORK_ACCESS=true
     volumes:
       - app_data:/data
+      - model_uploads:/app/uploads
+      - gcode_storage:/app/gcode
+      - slicer_profiles:/app/profiles
     depends_on:
       redis:
         condition: service_healthy
@@ -88,3 +91,6 @@ services:
 volumes:
   redis_data:
   app_data:
+  model_uploads:
+  gcode_storage:
+  slicer_profiles:

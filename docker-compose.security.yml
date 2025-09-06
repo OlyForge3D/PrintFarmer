@@ -1,0 +1,81 @@
+# Production Security Docker Compose Override
+version: '3.8'
+
+services:
+  api:
+    environment:
+      # Security headers
+      - ENABLE_SECURITY_HEADERS=true
+      - HSTS_MAX_AGE=31536000
+      - CSP_POLICY=default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'
+      
+      # Rate limiting
+      - ENABLE_RATE_LIMITING=true
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=100
+      - RATE_LIMIT_BURST=20
+      
+      # Input validation
+      - ENABLE_STRICT_VALIDATION=true
+      - MAX_REQUEST_SIZE_MB=10
+      
+      # Audit logging
+      - ENABLE_AUDIT_LOGGING=true
+      - AUDIT_LOG_SENSITIVE_DATA=false
+      
+      # HTTPS enforcement
+      - REQUIRE_HTTPS=true
+      - HTTPS_PORT=443
+      
+    # Additional security volumes
+    volumes:
+      - ssl_certificates:/app/certificates:ro
+      - audit_logs:/app/logs/audit
+    
+    # Run as non-root user
+    user: "1000:1000"
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/tmp
+
+  frontend:
+    # Security headers for Nginx
+    volumes:
+      - ./deploy/nginx/security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro
+    
+    # Run as non-root
+    user: "101:101"
+    
+    security_opt:
+      - no-new-privileges:true
+
+  # Secrets management service
+  vault:
+    image: vault:1.15
+    container_name: printfarmer-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: myroot
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault_data:/vault/data
+    networks:
+      - security
+
+volumes:
+  ssl_certificates:
+  audit_logs:
+  vault_data:
+
+networks:
+  security:
+    driver: bridge
