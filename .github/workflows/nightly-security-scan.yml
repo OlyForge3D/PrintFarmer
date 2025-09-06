@@ -18,7 +18,7 @@ jobs:
       - name: Pull latest Frontend image
         run: docker pull ghcr.io/${{ github.repository_owner }}/printfarmer-frontend:latest || true
       - name: Trivy scan API
-        uses: aquasecurity/trivy-action@v0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/printfarmer-api:latest
           format: 'table'
@@ -26,7 +26,7 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
       - name: Trivy scan API JSON
-        uses: aquasecurity/trivy-action@v0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/printfarmer-api:latest
           format: 'json'
@@ -35,7 +35,7 @@ jobs:
           vuln-type: 'os,library'
           severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
       - name: Trivy scan Frontend
-        uses: aquasecurity/trivy-action@v0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/printfarmer-frontend:latest
           format: 'table'
@@ -43,7 +43,7 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
       - name: Trivy scan Frontend JSON
-        uses: aquasecurity/trivy-action@v0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/printfarmer-frontend:latest
           format: 'json'
