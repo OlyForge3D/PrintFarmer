@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import { SpoolsPage } from '../../pages/SpoolsPage';
 import { BrowserRouter } from 'react-router-dom';
 
@@ -44,24 +44,28 @@ describe('SpoolsPage column config', () => {
     await waitFor(() => expect(screen.getByText(/Red PLA/)).toBeTruthy());
 
     // Switch to table view
-    fireEvent.click(screen.getByRole('button', { name: /Table view/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Table view/i }));
+    });
 
     // Open column config
-    fireEvent.click(screen.getByRole('button', { name: /Columns/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Columns/i }));
+    });
 
   const vendorHeader = screen.getAllByText('Vendor').find(el => el.tagName === 'TH' || el.closest('th'));
   expect(vendorHeader).toBeTruthy();
 
     // Uncheck vendor column
   const vendorToggle = screen.getAllByLabelText(/Toggle column Vendor/i)[0];
-    fireEvent.click(vendorToggle);
+    await act(async () => { fireEvent.click(vendorToggle); });
 
     // Vendor header should disappear
   const vendorAfterHide = screen.getAllByText('Vendor').find(el => el.tagName === 'TH' || el.closest('th'));
   expect(vendorAfterHide).toBeUndefined();
 
     // Re-check vendor column
-  fireEvent.click(vendorToggle);
+  await act(async () => { fireEvent.click(vendorToggle); });
   const vendorAfterShow = screen.getAllByText('Vendor').find(el => el.tagName === 'TH' || el.closest('th'));
   expect(vendorAfterShow).toBeTruthy();
   });
@@ -74,11 +78,11 @@ describe('SpoolsPage column config', () => {
 
     render(wrapper(<SpoolsPage />));
     await waitFor(() => expect(screen.getByText(/Red PLA/)).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /Table view/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Columns/i }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Table view/i })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Columns/i })); });
 
   const locationToggle = screen.getAllByLabelText(/Toggle column Location/i)[0];
-    fireEvent.click(locationToggle); // hide it
+    await act(async () => { fireEvent.click(locationToggle); }); // hide it
   const locHeaderHidden = screen.getAllByText('Location').find(el => el.tagName === 'TH' || el.closest('th'));
   expect(locHeaderHidden).toBeUndefined();
 
@@ -86,7 +90,7 @@ describe('SpoolsPage column config', () => {
   cleanup();
   render(wrapper(<SpoolsPage />));
     await waitFor(() => expect(screen.getAllByText(/Red PLA/).length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: /Table view/i }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Table view/i })); });
     // Location header should still be hidden
   const locHeaderPersist = screen.getAllByText('Location').find(el => el.tagName === 'TH' || el.closest('th'));
   expect(locHeaderPersist).toBeUndefined();
@@ -100,8 +104,8 @@ describe('SpoolsPage column config', () => {
 
     render(wrapper(<SpoolsPage />));
     await waitFor(() => expect(screen.getByText(/Red PLA/)).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /Table view/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Columns/i }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Table view/i })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Columns/i })); });
 
     // Simulate drag: move 'Name' column (id name) before 'Vendor'
     const list = screen.getByRole('dialog', { name: /Column configuration/i });
@@ -130,15 +134,14 @@ describe('SpoolsPage column config', () => {
       target.dispatchEvent(event);
     };
 
-    // start drag on name
-    fireDrag('dragstart', nameItem!, { 'text/plain': 'name' });
-    // over vendor
-    fireDrag('dragover', vendorItem!);
-    // drop on vendor
-    fireDrag('drop', vendorItem!, { 'text/plain': 'name' });
+    await act(async () => {
+      fireDrag('dragstart', nameItem!, { 'text/plain': 'name' });
+      fireDrag('dragover', vendorItem!);
+      fireDrag('drop', vendorItem!, { 'text/plain': 'name' });
+    });
 
     // Close config popover
-    fireEvent.click(screen.getByRole('button', { name: /Close column configuration/i }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Close column configuration/i })); });
 
     // Inspect header order in table
     const headers = Array.from(screen.getAllByRole('columnheader')).map(h => h.textContent?.trim());

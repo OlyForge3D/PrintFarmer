@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { BrowserRouter } from 'react-router-dom';
 
@@ -101,8 +101,8 @@ describe('SpoolsPage', () => {
     // Empty spool hidden by default
     expect(screen.queryByText(/Green PLA/)).toBeNull();
     // Toggle show empty
-    const showEmpty = screen.getByLabelText(/Show empty spools/i);
-    showEmpty.click();
+  const showEmpty = screen.getByLabelText(/Show empty spools/i);
+  await act(async () => { showEmpty.click(); });
     expect(await screen.findByText(/Green PLA/)).toBeTruthy();
   });
 });

@@ -1,0 +1,72 @@
+name: Soft Freeze Guard
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip if no soft freeze
+        id: freeze
+        run: |
+          if [ ! -f .soft-freeze ]; then
+            echo "active=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Soft freeze active";
+          echo "active=true" >> $GITHUB_OUTPUT
+
+      - name: Check label override
+        id: label
+        if: steps.freeze.outputs.active == 'true'
+        run: |
+          echo "Labels: ${{ join(github.event.pull_request.labels.*.name, ',') }}"
+          if echo "${{ join(github.event.pull_request.labels.*.name, ',') }}" | grep -q 'allow-freeze-exception'; then
+            echo "override=true" >> $GITHUB_OUTPUT
+          else
+            echo "override=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Detect restricted changes
+        if: steps.freeze.outputs.active == 'true' && steps.label.outputs.override == 'false'
+        run: |
+          BASE_SHA='${{ github.event.pull_request.base.sha }}'
+          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          echo "Diffing $BASE_SHA..$HEAD_SHA"
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "$CHANGED" | sed 's/^/changed: /'
+          REGEX='^(package.json|package-lock.json|global.json|.*\.csproj|Directory.Build.props|vite.config\..*|vitest.config\..*|tsconfig\..*|Dockerfile.*|docker-compose.*\.yml|.github/workflows/.*|scripts/.*)'
+          VIOLATIONS=$(echo "$CHANGED" | grep -E "$REGEX" || true)
+          if [ -z "$VIOLATIONS" ]; then
+            echo "No restricted file changes"
+            exit 0
+          fi
+          if git log --pretty=%B -n 20 | grep -q '\[freeze-exception\]'; then
+            echo "Found [freeze-exception] marker in recent commits — allowing."
+            exit 0
+          fi
+          echo "Restricted files modified under soft freeze:" >&2
+          echo "$VIOLATIONS" >&2
+          echo "Add label allow-freeze-exception or commit marker [freeze-exception]." >&2
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Soft Freeze Guard" >> $GITHUB_STEP_SUMMARY
+          if [ '${{ steps.freeze.outputs.active }}' != 'true' ]; then
+            echo "Inactive (no .soft-freeze file)." >> $GITHUB_STEP_SUMMARY
+          else
+            if [ '${{ steps.label.outputs.override }}' = 'true' ]; then
+              echo "Override label present." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "Checked restricted files." >> $GITHUB_STEP_SUMMARY
+            fi
+          fi

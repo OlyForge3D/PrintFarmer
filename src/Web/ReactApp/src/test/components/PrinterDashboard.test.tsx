@@ -5,15 +5,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 
 // Mock the API hooks
-vi.mock('@/hooks/useApi', async () => {
-  return {
-    usePrinters: vi.fn(),
+vi.mock('@/hooks/useApi', async () => ({
+  usePrinters: vi.fn(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreatePrinter: () => ({ mutateAsync: vi.fn() }),
-    useBasicHealth: () => ({ data: { status: 'ok' }, isLoading: false, error: null }),
-  };
-});
+  useBasicHealth: () => ({ data: { status: 'ok' }, isLoading: false, error: null }),
+  usePrinterDetails: vi.fn(() => ({ data: undefined })),
+  useManufacturers: vi.fn(() => ({ data: [] })),
+  useModels: vi.fn(() => ({ data: [] })),
+  useUpdatePrinter: () => ({ mutateAsync: vi.fn() }),
+}));
 
 vi.mock('@/hooks/useSignalR', () => ({
   usePrinterStatusUpdates: vi.fn(() => ({ getPrinterStatus: () => undefined })),

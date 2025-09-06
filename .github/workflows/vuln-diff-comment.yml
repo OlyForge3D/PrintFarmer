@@ -37,7 +37,7 @@ jobs:
           output-file: sbom-pr.json
 
       - name: Trivy scan (current branch)
-        uses: aquasecurity/trivy-action@v0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: fs
           scan-ref: .
