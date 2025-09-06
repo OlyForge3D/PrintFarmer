@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useSignalRConnection } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthContext';
+import { LoginModal } from '@/components/auth/LoginModal';
+import { RegisterModal } from '@/components/auth/RegisterModal';
 import { 
   Home,
   Printer, 
@@ -16,6 +18,7 @@ import {
   User,
   UserCheck,
   LogOut,
+  LogIn,
   Settings,
   Layers
 } from 'lucide-react';
@@ -85,38 +88,42 @@ const navigation: NavigationItem[] = [
 
 export function Layout({ children }: LayoutProps) {
   const { isConnected } = useSignalRConnection();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
 
-  // TEMPORARILY DISABLE AUTH - Show all navigation items
-  const filteredNavigation = navigation;
+  // Filter navigation based on user permissions
+  const filteredNavigation = navigation.filter(item => {
+    if (item.requiredRole && !hasRole(item.requiredRole)) {
+      return false;
+    }
+    if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) {
+      return false;
+    }
+    return true;
+  });
 
   const handleLogout = async () => {
     await logout();
     setUserMenuOpen(false);
   };
 
-  // TEMPORARILY DISABLE AUTH CHECK - Always show the main layout
-  /* if (!isAuthenticated) {
-    // For now, show a simple login prompt - in production this would be a proper login form
-    return (
-      <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center">
-        <div className="max-w-md w-full bg-pf-bg-1 border border-pf-border shadow-lg rounded-xl p-6">
-          <h2 className="text-2xl font-bold text-center mb-4 text-pf-text-primary font-bebas uppercase">PrintFarmer</h2>
-          <p className="text-pf-text-secondary text-center">
-            Please log in to access the printer management system.
-          </p>
-          <div className="mt-4 p-3 bg-pf-loading bg-opacity-10 rounded border border-pf-loading-border">
-            <p className="text-sm text-pf-loading">
-              <strong>Development Note:</strong> Authentication is not fully implemented yet. 
-              The system will work with mock authentication for now.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  } */
+  const handleLoginSuccess = () => {
+    setShowLoginModal(false);
+    setShowRegisterModal(false);
+  };
+
+  const switchToRegister = () => {
+    setShowLoginModal(false);
+    setShowRegisterModal(true);
+  };
+
+  const switchToLogin = () => {
+    setShowRegisterModal(false);
+    setShowLoginModal(true);
+  };
 
   return (
     <div className="min-h-screen bg-pf-bg-0">
@@ -191,7 +198,7 @@ export function Layout({ children }: LayoutProps) {
                           className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
                         >
                           <Settings className="h-4 w-4 mr-2" />
-                          Settings
+                          Profile
                         </button>
                         <button
                           onClick={handleLogout}
@@ -202,9 +209,28 @@ export function Layout({ children }: LayoutProps) {
                         </button>
                       </>
                     ) : (
-                      <div className="px-4 py-2 text-sm text-pf-text-secondary">
-                        Not signed in
-                      </div>
+                      <>
+                        <button
+                          onClick={() => {
+                            setShowLoginModal(true);
+                            setUserMenuOpen(false);
+                          }}
+                          className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
+                        >
+                          <LogIn className="h-4 w-4 mr-2" />
+                          Sign In
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowRegisterModal(true);
+                            setUserMenuOpen(false);
+                          }}
+                          className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
+                        >
+                          <User className="h-4 w-4 mr-2" />
+                          Register
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -349,6 +375,18 @@ export function Layout({ children }: LayoutProps) {
           onClick={() => setUserMenuOpen(false)}
         />
       )}
+
+      {/* Authentication Modals */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSwitchToRegister={switchToRegister}
+      />
+      <RegisterModal
+        isOpen={showRegisterModal}
+        onClose={() => setShowRegisterModal(false)}
+        onSwitchToLogin={switchToLogin}
+      />
     </div>
   );
 }
