@@ -454,6 +454,7 @@ export interface DiscoveryProgressDto {
   totalIps: number;
   scannedIps: number;
   printersFound: number;
+  printersExcluded: number;
   progressPercentage: number;
   status: DiscoveryStatus;
   message?: string;
@@ -469,6 +470,7 @@ export interface DiscoveryPrinterFoundDto {
 export interface DiscoveryCompletedDto {
   sessionId: string;
   totalPrintersFound: number;
+  totalPrintersExcluded: number;
   duration: number; // milliseconds
   wasCancelled?: boolean;
   networkRanges?: string[];

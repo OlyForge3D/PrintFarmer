@@ -19,6 +19,7 @@ public partial class NetworkDiscoveryService(
     INetworkDiscoverySettingsService settingsService,
     IHubContext<PrinterHub> hubContext,
     IDiscoveryProgressCache progressCache,
+    IServiceScopeFactory scopeFactory,
     ILogger<NetworkDiscoveryService> logger) : INetworkDiscoveryService
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting printer network discovery...")]
@@ -93,9 +94,12 @@ public partial class NetworkDiscoveryService(
     {
         LogDiscoveryStarting(logger);
 
+    // Gather existing printers to exclude from results (fresh scope for safety)
+    var existingServerUrls = LoadExistingPrinterUrlsSafe();
+
         var settings = settingsService.GetSettings();
         // Auto-detect network ranges if none configured
-    if (settings.NetworkRanges.Count == 0)
+        if (settings.NetworkRanges.Count == 0)
         {
             var autoRanges = DetectLocalNetworks().ToList();
             if (autoRanges.Count > 0)
@@ -116,7 +120,7 @@ public partial class NetworkDiscoveryService(
         foreach (var network in settings.NetworkRanges)
         {
             LogScanningNetwork(logger, network);
-            var networkPrinters = await ScanNetworkAsync(network, settings, cancellationToken);
+            var networkPrinters = await ScanNetworkAsync(network, settings, existingServerUrls, cancellationToken);
             LogNetworkScanCompleted(logger, network, networkPrinters.Count);
             discovered.AddRange(networkPrinters);
         }
@@ -129,16 +133,19 @@ public partial class NetworkDiscoveryService(
     {
         LogDiscoveryStarting(logger);
 
+    // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
+    var existingServerUrls = LoadExistingPrinterUrlsSafe();
+
         var settings = settingsService.GetSettings();
-    var autoDetectedNetworks = false;
+        var autoDetectedNetworks = false;
         // Auto-detect network ranges if none configured
-    if (settings.NetworkRanges.Count == 0)
+        if (settings.NetworkRanges.Count == 0)
         {
             var autoRanges = DetectLocalNetworks().ToList();
             if (autoRanges.Count > 0)
             {
                 settings.NetworkRanges.AddRange(autoRanges);
-        autoDetectedNetworks = true;
+                autoDetectedNetworks = true;
                 logger.LogInformation("Auto-detected {Count} network range(s) for streaming discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
             }
             else
@@ -175,6 +182,7 @@ public partial class NetworkDiscoveryService(
             totalIps,
             0,
             0,
+            0,
             0d,
             DiscoveryStatus.Starting,
             null,
@@ -189,7 +197,9 @@ public partial class NetworkDiscoveryService(
                 initialProgress,
                 cancellationToken);
 
-        foreach (var network in settings.NetworkRanges)
+        var excludedPrinters = 0; // count of printers skipped because already present
+
+    foreach (var network in settings.NetworkRanges)
         {
             LogScanningNetwork(logger, network);
             
@@ -197,7 +207,7 @@ public partial class NetworkDiscoveryService(
             var (networkAddr, cidr) = ParseCidr(network);
             var hosts = GetHostsInRange(networkAddr, cidr);
             
-            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, cancellationToken);
+            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, existingServerUrls, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, ( ) => Interlocked.Increment(ref excludedPrinters), cancellationToken);
             scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
             foundPrinters += networkPrinters.Count;
             
@@ -214,6 +224,7 @@ public partial class NetworkDiscoveryService(
                 totalIps,
                 totalIps,
                 foundPrinters,
+                excludedPrinters,
                 100d,
                 DiscoveryStatus.Completed,
                 null,
@@ -234,15 +245,17 @@ public partial class NetworkDiscoveryService(
                 new DiscoveryCompletedDto(
                     sessionId,
                     foundPrinters,
-                    TimeSpan.Zero, // Will be calculated on client side
+                    excludedPrinters,
+                    TimeSpan.Zero, // client calculates
                     cancellationToken.IsCancellationRequested,
                     settings.NetworkRanges,
                     autoDetectedNetworks
                 ),
                 cancellationToken);
 
-        // Clear cached progress so a new discovery can start fresh (avoid stale 'in progress' UI on reopen)
-        progressCache.Remove(sessionId);
+    // NOTE: Do not clear the cached progress immediately. Leaving the final Completed snapshot
+    // allows late group joiners (e.g. tests or UI racing right after start) to still receive a
+    // DiscoveryProgress event. A new discovery run will overwrite this entry anyway.
 
         LogDiscoveryCompleted(logger, foundPrinters);
     }
@@ -335,7 +348,7 @@ public partial class NetworkDiscoveryService(
         return new IPAddress(networkBytes);
     }
 
-    private async Task<List<DiscoveredPrinterDto>> ScanNetworkAsync(string network, NetworkDiscoverySettingsDto settings, CancellationToken cancellationToken)
+    private async Task<List<DiscoveredPrinterDto>> ScanNetworkAsync(string network, NetworkDiscoverySettingsDto settings, HashSet<string> existingServerUrls, CancellationToken cancellationToken)
     {
         var discovered = new List<DiscoveredPrinterDto>();
 
@@ -352,10 +365,12 @@ public partial class NetworkDiscoveryService(
                 try
                 {
                     LogScanningHost(logger, host);
-                    var result = await ScanHostAsync(host, settings, cancellationToken);
-                    if (result != null)
+                    var result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
+                    if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
                         LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
+                        // Exclude from future duplicates (within same run) in case multiple ports map
+                        existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
                     }
                     return result;
                 }
@@ -389,7 +404,7 @@ public partial class NetworkDiscoveryService(
         return discovered;
     }
 
-    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, bool autoDetectedNetworks, CancellationToken cancellationToken)
+    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, HashSet<string> existingServerUrls, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, bool autoDetectedNetworks, Action? onExcluded, CancellationToken cancellationToken)
     {
         var discovered = new List<DiscoveredPrinterDto>();
         var scannedCount = 0;
@@ -418,6 +433,7 @@ public partial class NetworkDiscoveryService(
                         totalIps,
                         currentScannedStart + currentScanned,
                         currentFoundStart + foundCount,
+                        0, // excluded count not tracked per-IP; real-time excluded aggregate not essential here
                         (double)(currentScannedStart + currentScanned) / totalIps * 100,
                         DiscoveryStatus.Scanning,
                         null,
@@ -427,8 +443,8 @@ public partial class NetworkDiscoveryService(
                     progressCache.Set(sessionId, progressDto);
                     await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", progressDto, cancellationToken);
 
-                    var result = await ScanHostAsync(host, settings, cancellationToken);
-                    if (result != null)
+                    var result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
+                    if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
                         LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
                         
@@ -436,10 +452,15 @@ public partial class NetworkDiscoveryService(
                         Interlocked.Increment(ref foundCount);
                         
                         // Send printer found event
-                        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(
-                            sessionId,
-                            result
-                        ), cancellationToken);
+                        // Mark as seen to avoid duplicate notifications
+                        existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
+
+                        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(sessionId, result), cancellationToken);
+                    }
+                    else if (result != null)
+                    {
+                        // It was discovered but excluded
+                        onExcluded?.Invoke();
                     }
                     return result;
                 }
@@ -514,7 +535,7 @@ public partial class NetworkDiscoveryService(
         return hosts;
     }
 
-    private async Task<DiscoveredPrinterDto?> ScanHostAsync(string ipAddress, NetworkDiscoverySettingsDto settings, CancellationToken cancellationToken)
+    private async Task<DiscoveredPrinterDto?> ScanHostAsync(string ipAddress, NetworkDiscoverySettingsDto settings, HashSet<string> existingServerUrls, CancellationToken cancellationToken)
     {
         try
         {
@@ -529,6 +550,11 @@ public partial class NetworkDiscoveryService(
                 var discovered = await TryDiscoverPrinterAsync(ipAddress, port, settings.TimeoutMs, cancellationToken);
                 if (discovered != null)
                 {
+                    // Filter out printers already in the system
+                    if (existingServerUrls.Contains(NormalizeUrl(discovered.ServerUrl)))
+                    {
+                        continue;
+                    }
                     return discovered;
                 }
             }
@@ -756,5 +782,43 @@ public partial class NetworkDiscoveryService(
         public string? Model { get; set; }
         public string? Firmware { get; set; }
         public string? Version { get; set; }
+    }
+
+    private static string NormalizeUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+        url = url.Trim();
+        if (url.EndsWith('/'))
+        {
+            url = url.TrimEnd('/');
+        }
+        return url.ToLowerInvariant();
+    }
+
+    private HashSet<string> LoadExistingPrinterUrlsSafe()
+    {
+        var existingServerUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            // Prefer a fresh scope so we don't depend on the lifetime of the injected scoped context (especially for background discovery)
+            using var scope = scopeFactory.CreateScope();
+            var ctx = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            var urls = ctx.Printers.Select(p => p.ServerUrl).ToList();
+            foreach (var p in urls)
+            {
+                if (!string.IsNullOrWhiteSpace(p))
+                {
+                    existingServerUrls.Add(NormalizeUrl(p));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed loading existing printers for exclusion; proceeding without filter");
+        }
+        return existingServerUrls;
     }
 }

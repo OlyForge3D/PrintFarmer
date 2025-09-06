@@ -275,6 +275,7 @@ public record DiscoveryProgressDto(
     int TotalIps,
     int ScannedIps,
     int PrintersFound,
+    int PrintersExcluded,
     double ProgressPercentage,
     DiscoveryStatus Status,
     string? Message = null,
@@ -290,6 +291,7 @@ public record DiscoveryPrinterFoundDto(
 public record DiscoveryCompletedDto(
     string SessionId,
     int TotalPrintersFound,
+    int TotalPrintersExcluded,
     TimeSpan Duration,
     bool WasCancelled = false,
     IReadOnlyList<string>? NetworkRanges = null,

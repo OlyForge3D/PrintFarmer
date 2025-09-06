@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
 import type { FilamentType } from '@/types/api';
@@ -113,11 +114,13 @@ export function SettingsPage() {
         throw new Error(`HTTP ${resp.status}`);
       }
       setError(null);
+  toast.success('Spoolman settings saved');
       // Optionally re-run a quick connectivity test automatically
       await testSpoolman();
     } catch (err) {
       setError('Failed to save Spoolman settings');
       console.error('Error saving Spoolman settings:', err);
+  toast.error('Failed to save Spoolman settings');
     }
   };
 
@@ -156,9 +159,11 @@ export function SettingsPage() {
       ).sort((a, b) => a.name.localeCompare(b.name)));
       setEditingFilamentType(null);
       setError(null);
+  toast.success('Filament type updated');
     } catch (err) {
       setError('Failed to update filament type');
       console.error('Error updating filament type:', err);
+  toast.error('Failed to update filament type');
     }
   };
 
@@ -209,9 +214,11 @@ export function SettingsPage() {
       localStorage.setItem('scan-ports', JSON.stringify(scanPorts));
       // TODO: Implement API endpoints to save these server-side
       setError(null);
+  toast.success('Network discovery settings saved');
     } catch (err) {
       setError('Failed to save network settings');
       console.error('Error saving network settings:', err);
+  toast.error('Failed to save network settings');
     }
   };
 

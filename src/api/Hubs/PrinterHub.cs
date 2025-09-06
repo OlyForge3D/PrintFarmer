@@ -11,10 +11,22 @@ public class PrinterHub(IDiscoveryProgressCache progressCache) : Hub
     public async Task JoinDiscoveryGroupAsync(string sessionId)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, $"discovery-{sessionId}");
-        // After joining, replay latest cached progress if available to mitigate race with initial emission
-        if (progressCache.TryGet(sessionId, out var progress) && progress != null)
+        // After joining, replay latest cached progress if available. There is a narrow race where the
+        // controller returns the session id before the discovery service has published & cached the
+        // initial progress snapshot. To mitigate, perform a brief bounded retry.
+        for (var i = 0; i < 5; i++)
         {
-            await Clients.Caller.SendAsync("DiscoveryProgress", progress);
+            if (progressCache.TryGet(sessionId, out var progress) && progress != null)
+            {
+                await Clients.Caller.SendAsync("DiscoveryProgress", progress);
+                break;
+            }
+            // If cancelled/connection aborted stop early
+            if (Context.ConnectionAborted.IsCancellationRequested)
+            {
+                break;
+            }
+            await Task.Delay(100, Context.ConnectionAborted);
         }
     }
 

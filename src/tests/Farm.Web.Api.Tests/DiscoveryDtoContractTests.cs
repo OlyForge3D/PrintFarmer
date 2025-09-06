@@ -19,6 +19,7 @@ public class DiscoveryDtoContractTests
             TotalIps: 254,
             ScannedIps: 10,
             PrintersFound: 2,
+            PrintersExcluded: 1,
             ProgressPercentage: 3.93,
             Status: DiscoveryStatus.Scanning,
             Message: null,
@@ -37,6 +38,7 @@ public class DiscoveryDtoContractTests
         var dto = new DiscoveryCompletedDto(
             SessionId: "sess-2",
             TotalPrintersFound: 5,
+            TotalPrintersExcluded: 2,
             Duration: TimeSpan.FromSeconds(12),
             WasCancelled: false,
             NetworkRanges: new [] {"10.0.0.0/24","192.168.0.0/24"},
