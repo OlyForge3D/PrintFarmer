@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Filter, RefreshCw, ExternalLink, Package, Pencil, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import { classifyColor, getRepresentativeHex } from '@/utils/colorFamilies';
+import { ColorFamilySelect } from '@/components/ColorFamilySelect';
 import { ColorSwatch } from '@/components/ColorSwatch';
 import { SpoolUsageBar } from '@/components/SpoolUsageBar';
 import { Skeleton } from '@/components/Skeleton';
@@ -38,6 +39,7 @@ interface FilterState {
   pageSize: string;
   location: string;
   showArchived: string; // 'all' | 'active' | 'archived'
+  showEmpty: boolean; // include empty (0 remaining) spools
 }
 
 export function SpoolsPage() {
@@ -51,11 +53,13 @@ export function SpoolsPage() {
     color: '',
   pageSize: '50',
   location: '',
-  showArchived: 'active'
+	showArchived: 'active',
+  showEmpty: false
   });
   const [sortField, setSortField] = useState<string>('id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  // Removed gradient hack – replaced by custom ColorFamilySelect component.
 
   const loadSpools = async () => {
     try {
@@ -111,6 +115,12 @@ export function SpoolsPage() {
 	if (filters.location && !(spool.location || '').toLowerCase().includes(filters.location.toLowerCase())) return false;
 	if (filters.showArchived === 'active' && spool.archived) return false;
 	if (filters.showArchived === 'archived' && !spool.archived) return false;
+    if (!filters.showEmpty) {
+      const remaining = typeof spool.remainingWeightG === 'number' ? spool.remainingWeightG : (spool.initialWeightG != null && spool.usedWeightG != null ? (spool.initialWeightG - spool.usedWeightG) : null);
+      if (remaining != null && remaining <= 0) return false;
+      // Fallback: if remaining percent available
+      if (remaining == null && typeof spool.remainingPercent === 'number' && spool.remainingPercent <= 0) return false;
+    }
     return true;
   });
 
@@ -333,17 +343,12 @@ export function SpoolsPage() {
                 ))}
               </select>
 
-              <select
-                aria-label="Filter by color family"
+              <ColorFamilySelect
                 value={filters.color}
-                onChange={(e) => setFilters(prev => ({ ...prev, color: e.target.value }))}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm"
-              >
-                <option value="">All Colors</option>
-                {getColorFamilyOptions().map(fam => (
-                  <option key={fam} value={fam}>{fam}</option>
-                ))}
-              </select>
+                onChange={(val) => setFilters(prev => ({ ...prev, color: val }))}
+                options={getColorFamilyOptions()}
+                placeholder="All Colors"
+              />
 
               <select
                 aria-label="Select page size"
@@ -382,6 +387,16 @@ export function SpoolsPage() {
 
               <div className="ml-auto flex items-center gap-2 text-sm text-pf-text-secondary">
                 <span>Showing {getDisplayedSpools().length} of {getFilteredSpools().length} spools</span>
+                <label className="flex items-center gap-1 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    aria-label="Show empty spools"
+                    checked={filters.showEmpty}
+                    onChange={e => setFilters(prev => ({ ...prev, showEmpty: e.target.checked }))}
+                    className="rounded border-pf-border bg-pf-bg-0"
+                  />
+                  Show empty
+                </label>
                 <label className="text-xs" htmlFor="sort-field">Sort:</label>
                 <select
                   id="sort-field"
@@ -528,7 +543,7 @@ export function SpoolsPage() {
                       <td className="px-3 py-2">{spool.archived ? 'Yes' : ''}</td>
                       <td className="px-3 py-2">
                         <a
-                          href={spoolmanBaseUrl ? `${spoolmanBaseUrl.replace(/\/$/, '')}/spools/edit/${spool.id}` : `/spools/edit/${spool.id}`}
+                          href={spoolmanBaseUrl ? `${spoolmanBaseUrl.replace(/\/$/, '')}/spool/edit/${spool.id}` : `/spool/edit/${spool.id}`}
                           target={spoolmanBaseUrl ? '_blank' : undefined}
                           rel={spoolmanBaseUrl ? 'noopener noreferrer' : undefined}
                           className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1"

@@ -17,6 +17,22 @@ export const colorFamilySwatches: Record<string, string> = {
   Unknown: '#4b5563'
 };
 
+// Tailwind-friendly background classes approximating representative colors.
+export const colorFamilyBgClass: Record<string, string> = {
+  Red: 'bg-red-500',
+  Orange: 'bg-orange-500',
+  Brown: 'bg-amber-700',
+  Yellow: 'bg-yellow-400',
+  Green: 'bg-green-500',
+  Teal: 'bg-teal-500',
+  Blue: 'bg-blue-500',
+  Purple: 'bg-purple-500',
+  Pink: 'bg-pink-500',
+  Gray: 'bg-gray-500',
+  Black: 'bg-gray-900',
+  White: 'bg-gray-100'
+};
+
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const cleaned = hex.replace('#', '').trim();
   if (!/^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(cleaned)) return null;

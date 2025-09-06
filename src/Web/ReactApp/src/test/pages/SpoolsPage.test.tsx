@@ -84,4 +84,25 @@ describe('SpoolsPage', () => {
   expect(pct90.length).toBeGreaterThan(0);
     });
   });
+
+  it('hides empty spools by default and shows when toggled', async () => {
+    mockFetchSequence([
+      { ok: true, body: { baseUrl: 'http://spoolman.local:7912' } },
+      { ok: true, body: [
+        { id: 1, name: 'Full Spool', material: 'PLA', remainingWeightG: 100, colorHex: '#ff0000', inUse: true, filamentName: 'Red PLA', vendor: 'VendorA', initialWeightG: 1000, usedWeightG: 900 },
+        { id: 2, name: 'Empty Spool', material: 'PLA', remainingWeightG: 0, colorHex: '#00ff00', inUse: false, filamentName: 'Green PLA', vendor: 'VendorB', initialWeightG: 750, usedWeightG: 750 }
+      ] }
+    ]);
+    render(wrapper(<SpoolsPage />));
+    // Wait for list
+    await waitFor(() => {
+      expect(screen.getByText(/Red PLA/)).toBeTruthy();
+    });
+    // Empty spool hidden by default
+    expect(screen.queryByText(/Green PLA/)).toBeNull();
+    // Toggle show empty
+    const showEmpty = screen.getByLabelText(/Show empty spools/i);
+    showEmpty.click();
+    expect(await screen.findByText(/Green PLA/)).toBeTruthy();
+  });
 });
