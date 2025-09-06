@@ -80,18 +80,30 @@ export function SpoolsPage() {
     { id: 'usedPercent', label: 'Used %', visible: true, sortable: true, render: s => getUsagePercentage(s).toFixed(1), sortValue: s => getUsagePercentage(s) },
     { id: 'location', label: 'Location', visible: true, sortable: true, render: s => (s.location || ''), sortValue: s => (s.location || '').toLowerCase() },
     { id: 'archived', label: 'Archived', visible: true, sortable: true, render: s => (s.archived ? 'Yes' : ''), sortValue: s => (s.archived ? 1 : 0) },
-    { id: 'edit', label: 'Edit', visible: true, sortable: false, render: s => (
-      <a
-        href={spoolmanBaseUrl ? `${spoolmanBaseUrl.replace(/\/$/, '')}/spool/edit/${s.id}` : `/spool/edit/${s.id}`}
-        target={spoolmanBaseUrl ? '_blank' : undefined}
-        rel={spoolmanBaseUrl ? 'noopener noreferrer' : undefined}
-  className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1"
-  aria-label={`Edit spool ${s.id}`}
-  title={`Edit spool ${s.id}`}
-      >
-        <Pencil className="h-3 w-3" />
-      </a>
-    ) }
+    { id: 'edit', label: 'Edit', visible: true, sortable: false, render: s => {
+      const normalizeBaseUrl = (url: string): string => {
+        if (!url) return '';
+        const trimmed = url.trim();
+        if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
+        return `http://${trimmed.replace(/\/$/, '')}`;
+      };
+      const base = normalizeBaseUrl(spoolmanBaseUrl);
+      const hasBase = !!base;
+      const editUrl = hasBase ? `${base}/spool/edit/${s.id}` : '/settings';
+      const title = hasBase ? `Edit spool ${s.id} in Spoolman` : 'Configure Spoolman URL first';
+      return (
+        <a
+          href={editUrl}
+          target={hasBase ? '_blank' : undefined}
+          rel={hasBase ? 'noopener noreferrer' : undefined}
+          className={`text-blue-400 underline inline-flex items-center gap-1 ${hasBase ? 'hover:text-blue-300' : 'opacity-60 hover:opacity-80'}`}
+          aria-label={title}
+          title={title}
+        >
+          <Pencil className="h-3 w-3" />
+        </a>
+      );
+    } }
   ];
 
   const [tableColumns, setTableColumns] = useState<TableColumn[]>(() => {
@@ -117,6 +129,40 @@ export function SpoolsPage() {
     } catch { /* ignore */ }
     return defaultColumns;
   });
+
+  // Update edit column render function when Spoolman base URL changes so links reflect latest config
+  useEffect(() => {
+    setTableColumns(cols => cols.map(c => {
+      if (c.id !== 'edit') return c;
+      return {
+        ...c,
+        render: (s: SpoolmanSpoolDto) => {
+          const normalizeBaseUrl = (url: string): string => {
+            if (!url) return '';
+            const trimmed = url.trim();
+            if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
+            return `http://${trimmed.replace(/\/$/, '')}`;
+          };
+          const base = normalizeBaseUrl(spoolmanBaseUrl);
+          const hasBase = !!base;
+          const editUrl = hasBase ? `${base}/spool/edit/${s.id}` : '/settings';
+          const title = hasBase ? `Edit spool ${s.id} in Spoolman` : 'Configure Spoolman URL first';
+          return (
+            <a
+              href={editUrl}
+              target={hasBase ? '_blank' : undefined}
+              rel={hasBase ? 'noopener noreferrer' : undefined}
+              className={`text-blue-400 underline inline-flex items-center gap-1 ${hasBase ? 'hover:text-blue-300' : 'opacity-60 hover:opacity-80'}`}
+              aria-label={title}
+              title={title}
+            >
+              <Pencil className="h-3 w-3" />
+            </a>
+          );
+        }
+      };
+    }));
+  }, [spoolmanBaseUrl]);
 
   // Persist visibility/order (order in array) excluding heavy render funcs (just id+visible)
   useEffect(() => {
@@ -673,11 +719,16 @@ export function SpoolsPage() {
 
                 <div className="space-y-2">
                   <div>
-                    <div className="text-sm font-medium text-pf-text-primary">
-                      {spool.vendor || 'Unknown Vendor'}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-sm font-medium text-pf-text-primary truncate">
+                        {spool.vendor || 'Unknown Vendor'}
+                      </div>
+                      <div className="text-xs text-pf-text-secondary text-right whitespace-nowrap">
+                        {(spool.material || 'Unknown')}{(() => { const c = classifyColor(spool.colorHex); return c && c !== 'Unknown' ? ` • ${c}` : ''; })()}
+                      </div>
                     </div>
-                    <div className="text-xs text-pf-text-secondary">
-                      {(spool.material || 'Unknown Material')} - {spool.filamentName || spool.name || 'Unnamed'}
+                    <div className="text-xs text-pf-text-secondary truncate">
+                      {spool.filamentName || spool.name || 'Unnamed'}
                     </div>
                   </div>
 
@@ -698,12 +749,17 @@ export function SpoolsPage() {
                       label={`Spool ${spool.id} usage`}
                     />
                     <div
-                      className="text-xs text-pf-text-secondary"
+                      className="text-xs text-pf-text-secondary flex justify-between items-center gap-2"
                       title={weightTooltip(spool)}
                       aria-label={weightTooltip(spool)}
                     >
-                      {getUsagePercentage(spool).toFixed(1)}% used / {getRemainingPercentage(spool).toFixed(1)}% left
-                      {spool.initialWeightG ? ` of ${spool.initialWeightG.toFixed(0)}g` : ''}
+                      <span>
+                        {getUsagePercentage(spool).toFixed(1)}% used / {getRemainingPercentage(spool).toFixed(1)}% left
+                        {spool.initialWeightG ? ` of ${spool.initialWeightG.toFixed(0)}g` : ''}
+                      </span>
+                      {spool.lastUsedAt && (
+                        <span className="whitespace-nowrap text-pf-text-secondary/80" title={`Last used: ${new Date(spool.lastUsedAt).toLocaleDateString()}`}>{`Last used: ${new Date(spool.lastUsedAt).toLocaleDateString()}`}</span>
+                      )}
                     </div>
                   </div>
 
@@ -717,11 +773,7 @@ export function SpoolsPage() {
                     <div className="text-xs text-pf-text-secondary">Lot: {spool.lotNumber}</div>
                   )}
 
-                  {spool.lastUsedAt && (
-                    <div className="text-xs text-pf-text-secondary">
-                      Last used: {new Date(spool.lastUsedAt).toLocaleDateString()}
-                    </div>
-                  )}
+                  {/* Last used date now shown inline with usage row above */}
                 </div>
               </div>
             ))}
