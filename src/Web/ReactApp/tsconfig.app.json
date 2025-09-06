@@ -40,5 +40,10 @@
     "resolveJsonModule": true
   },
   "include": ["src"],
-  "exclude": ["**/*.spec.e2e.*"]
+  "exclude": [
+    "**/*.spec.e2e.*",
+    "src/test/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
 }
