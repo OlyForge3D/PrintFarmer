@@ -1,0 +1,242 @@
+/* =============================================================================
+   PrintFarmer Theme System - CSS Custom Properties
+   ============================================================================= */
+
+/* Root theme variables - Dark theme (default) */
+:root {
+  /* Color system metadata */
+  --pf-theme-name: 'dark';
+  
+  /* Primary background colors */
+  --pf-bg-0: #0b1020;           /* Main page background */
+  --pf-bg-1: #0f172a;           /* Secondary background (cards) */
+  --pf-bg-2: #111827;           /* Tertiary background */
+  --pf-panel: #0e1528;          /* Panel background */
+  
+  /* Border and divider colors */
+  --pf-border: #243145;         /* Main border color */
+  --pf-border-light: #475569;   /* Light border */
+  --pf-border-medium: #334155;  /* Medium border */
+  --pf-border-dark: #1f2937;    /* Dark border */
+  --pf-border-gray: #64748b;    /* Gray border */
+  
+  /* Text colors with proper contrast ratios */
+  --pf-text-primary: #e5e7eb;   /* Primary text (4.5:1 on dark bg) */
+  --pf-text-secondary: #9ca3af; /* Secondary text (3:1 on dark bg) */
+  --pf-text-tertiary: #6b7280;  /* Tertiary text/muted */
+  --pf-text-light: #cbd5e1;     /* Light text */
+  --pf-text-muted: #94a3b8;     /* Muted text */
+  
+  /* Accent and brand colors - Separate values for text vs background usage */
+  --pf-accent: #10b981;         /* Bright accent for text on dark backgrounds */
+  --pf-accent-bg: #047857;      /* Dark accent for button backgrounds with white text */
+  --pf-accent-2: #1d4ed8;       /* Darker blue for better contrast */
+  --pf-success: #10b981;        /* Bright success for text */
+  --pf-success-bg: #047857;     /* Dark success for button backgrounds */
+  --pf-success-hover: #065f46;  /* Success hover state */
+  --pf-link: #60a5fa;           /* Lighter blue for links on dark */
+  
+  /* Semantic status colors */
+  --pf-status-online-bg: #064e3b;
+  --pf-status-online-text: #d1fae5;
+  --pf-status-online-border: #065f46;
+  --pf-status-offline-bg: #450a0a;
+  --pf-status-offline-text: #fee2e2;
+  --pf-status-offline-border: #7f1d1d;
+  
+  /* Error and warning colors - Updated for better accessibility */
+  --pf-error: #dc2626;          /* Darker red for better contrast */
+  --pf-error-bg: #450a0a;
+  --pf-error-text: #fee2e2;
+  --pf-error-border: #7f1d1d;
+  --pf-warning: #d97706;        /* Darker orange for better contrast */
+  --pf-warning-text: #fecaca;
+  
+  /* Loading and disabled states */
+  --pf-loading: #93c5fd;
+  --pf-loading-border: #2563eb;
+  --pf-disabled: #9ca3af;
+  
+  /* Gradient colors for buttons and cards - Updated for accessibility */
+  --pf-gradient-primary-start: #172036;
+  --pf-gradient-primary-end: #0f172a;
+  --pf-gradient-secondary-start: #1a2542;
+  --pf-gradient-secondary-end: #111b30;
+  --pf-gradient-success-start: #047857;    /* Updated to match accessible accent */
+  --pf-gradient-success-end: #065f46;      /* Updated to match accessible success-hover */
+  --pf-gradient-green-start: #16a34a;
+  --pf-gradient-green-end: #15803d;
+  --pf-gradient-green-active-start: #15803d;
+  --pf-gradient-green-active-end: #14532d;
+  --pf-gradient-gray-start: #64748b;
+  --pf-gradient-gray-end: #475569;
+  --pf-gradient-gray-dark-start: #4a5668;
+  --pf-gradient-gray-dark-end: #334155;
+  
+  /* Focus and interaction states */
+  --pf-focus-ring: rgba(37, 99, 235, 0.5);
+  --pf-focus-ring-offset: #0b1020;
+  --pf-hover-overlay: rgba(255, 255, 255, 0.05);
+  --pf-active-overlay: rgba(255, 255, 255, 0.1);
+}
+
+/* Light theme variant (for future implementation) */
+[data-theme="light"] {
+  --pf-theme-name: 'light';
+  
+  /* Light theme colors (inverted contrast) */
+  --pf-bg-0: #ffffff;
+  --pf-bg-1: #f8fafc;
+  --pf-bg-2: #f1f5f9;
+  --pf-panel: #f8fafc;
+  
+  --pf-border: #e2e8f0;
+  --pf-border-light: #cbd5e1;
+  --pf-border-medium: #94a3b8;
+  --pf-border-dark: #64748b;
+  --pf-border-gray: #94a3b8;
+  
+  --pf-text-primary: #1e293b;
+  --pf-text-secondary: #475569;
+  --pf-text-tertiary: #64748b;
+  --pf-text-light: #475569;
+  --pf-text-muted: #64748b;
+  
+  --pf-accent: #059669;
+  --pf-accent-2: #1d4ed8;
+  --pf-success: #059669;
+  --pf-success-hover: #047857;
+  --pf-link: #1d4ed8;
+  
+  --pf-status-online-bg: #d1fae5;
+  --pf-status-online-text: #064e3b;
+  --pf-status-online-border: #065f46;
+  --pf-status-offline-bg: #fee2e2;
+  --pf-status-offline-text: #7f1d1d;
+  --pf-status-offline-border: #fca5a5;
+  
+  --pf-error: #dc2626;
+  --pf-error-bg: #fee2e2;
+  --pf-error-text: #7f1d1d;
+  --pf-error-border: #fca5a5;
+  --pf-warning: #d97706;
+  --pf-warning-text: #92400e;
+  
+  --pf-loading: #3b82f6;
+  --pf-loading-border: #1d4ed8;
+  --pf-disabled: #94a3b8;
+  
+  --pf-gradient-primary-start: #f8fafc;
+  --pf-gradient-primary-end: #f1f5f9;
+  --pf-gradient-secondary-start: #e2e8f0;
+  --pf-gradient-secondary-end: #cbd5e1;
+  --pf-gradient-success-start: #d1fae5;
+  --pf-gradient-success-end: #a7f3d0;
+  --pf-gradient-green-start: #bbf7d0;
+  --pf-gradient-green-end: #86efac;
+  --pf-gradient-green-active-start: #86efac;
+  --pf-gradient-green-active-end: #4ade80;
+  --pf-gradient-gray-start: #e2e8f0;
+  --pf-gradient-gray-end: #cbd5e1;
+  --pf-gradient-gray-dark-start: #cbd5e1;
+  --pf-gradient-gray-dark-end: #94a3b8;
+  
+  --pf-focus-ring: rgba(37, 99, 235, 0.5);
+  --pf-focus-ring-offset: #ffffff;
+  --pf-hover-overlay: rgba(0, 0, 0, 0.05);
+  --pf-active-overlay: rgba(0, 0, 0, 0.1);
+}
+
+/* High contrast mode (accessibility enhancement) */
+@media (prefers-contrast: high) {
+  :root {
+    /* Increase contrast ratios for high contrast mode */
+    --pf-text-primary: #ffffff;
+    --pf-text-secondary: #d1d5db;
+    --pf-border: #4b5563;
+    --pf-border-light: #6b7280;
+  }
+  
+  [data-theme="light"] {
+    --pf-text-primary: #000000;
+    --pf-text-secondary: #374151;
+    --pf-border: #6b7280;
+    --pf-border-light: #4b5563;
+  }
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    /* Disable transitions for users who prefer reduced motion */
+    --pf-transition-duration: 0ms;
+  }
+}
+
+/* Note: Dark theme is the default. System preference detection is handled by ThemeContext.
+   Users can manually select light theme if desired. */
+
+/* =============================================================================
+   Accessibility Enhancements
+   ============================================================================= */
+
+/* Ensure focus rings are always visible */
+*:focus-visible {
+  outline: 2px solid var(--pf-accent-2);
+  outline-offset: 2px;
+}
+
+/* Improve focus visibility for interactive elements */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[tabindex]:focus-visible {
+  box-shadow: 0 0 0 2px var(--pf-focus-ring-offset), 0 0 0 4px var(--pf-focus-ring);
+}
+
+/* Skip to main content link for screen readers */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 6px;
+  background: var(--pf-accent);
+  color: white;
+  padding: 8px;
+  border-radius: 4px;
+  text-decoration: none;
+  z-index: 1000;
+  transition: top 0.3s;
+}
+
+.skip-link:focus {
+  top: 6px;
+}
+
+/* =============================================================================
+   CSS Custom Property Utilities
+   ============================================================================= */
+
+/* Utility classes that use CSS custom properties */
+.theme-aware-bg-primary { background-color: var(--pf-bg-0); }
+.theme-aware-bg-secondary { background-color: var(--pf-bg-1); }
+.theme-aware-text-primary { color: var(--pf-text-primary); }
+.theme-aware-text-secondary { color: var(--pf-text-secondary); }
+.theme-aware-border { border-color: var(--pf-border); }
+.theme-aware-accent { color: var(--pf-accent); }
+.theme-aware-accent-bg { background-color: var(--pf-accent); }
+
+/* Print styles */
+@media print {
+  :root {
+    /* Use high contrast colors for printing */
+    --pf-bg-0: #ffffff;
+    --pf-bg-1: #ffffff;
+    --pf-bg-2: #ffffff;
+    --pf-text-primary: #000000;
+    --pf-text-secondary: #333333;
+    --pf-border: #000000;
+  }
+}
