@@ -9,9 +9,11 @@ import { FilesPage } from '@/pages/FilesPage';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
+import { UserManagementPage } from '@/pages/UserManagementPage';
 import { Layout } from '@/components/Layout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import './App.css';
 
 // Create a query client for React Query
@@ -53,6 +55,14 @@ function App() {
                 <Route path="/catalog" element={<CatalogPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/spools" element={<SpoolsPage />} />
+                <Route 
+                  path="/admin/users" 
+                  element={
+                    <ProtectedRoute requiredRole="farm_admin">
+                      <UserManagementPage />
+                    </ProtectedRoute>
+                  } 
+                />
                 {/* Add more routes as needed */}
               </Routes>
             </Layout>
