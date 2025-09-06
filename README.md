@@ -75,6 +75,11 @@ src/
 - **Node.js 18+** and npm (for React frontend)
 - **macOS/Windows/Linux** (macOS recommended for WiFi device access)
 
+**Additional macOS Requirements:**
+- **Homebrew** - Package manager for installing development tools
+- **GNU Coreutils** - Provides `timeout` command for build scripts
+- *These will be automatically installed by the local setup script*
+
 ### Docker Deployment  
 - **Docker 20.10+** and Docker Compose v2
 - **Linux** (recommended for full networking), **Windows**, or **macOS**
@@ -82,8 +87,8 @@ src/
 
 ## Key API Endpoints
 
-- `GET /healthz` — Basic health check
-- `GET /health` — Comprehensive health status
+- `GET /healthz` (alias: `/api/healthz`) — Basic health check
+- `GET /health` (alias: `/api/health`) — Comprehensive health status
 - `GET /api/printers` — List all configured printers  
 - `POST /api/printers` — Add a new printer
 - `POST /api/printers/discover-streaming` — Real-time network discovery
@@ -150,8 +155,10 @@ cd src/Web/ReactApp && npm test
 
 ### Manual Verification
 ```bash
-# Test API health
+# Test API basic health (either original or alias path)
 curl http://localhost:5245/healthz
+# or
+curl http://localhost:5245/api/healthz
 
 # Test network discovery
 curl -X POST http://localhost:5245/api/printers/discover-streaming
@@ -207,7 +214,7 @@ ASPNETCORE_ENVIRONMENT=Production   # Optimized for performance
 
 **"External service unavailable"**
 - API server not running or wrong port
-- Check: `curl http://localhost:5245/healthz`
+- Check: `curl http://localhost:5245/healthz` (or `curl http://localhost:5245/api/healthz`)
 
 **Network discovery not finding printers**
 - Configure correct IP ranges in settings

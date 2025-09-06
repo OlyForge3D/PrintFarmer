@@ -1,3 +1,23 @@
+### Quick Monolithic Start
+
+Use the helper script to start both Vite (React) and the API with the SPA proxy safeguard:
+
+```bash
+chmod +x scripts/dev-monolithic.sh
+./scripts/dev-monolithic.sh
+```
+
+Environment variables you can override before running:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| DEPLOYMENT_MODE | monolithic | Enables SPA proxy logic |
+| SPA_DEV_URL | http://localhost:3000 | Vite dev server URL to probe/proxy |
+| SPA_PROXY_PROBE_TIMEOUT_MS | 500 | Probe timeout (ms) before skipping proxy |
+| ALLOWED_ORIGINS | http://localhost:3000 | CORS origin for React dev server |
+| ASPNETCORE_URLS | http://localhost:5245 | API listen address |
+
+If the dev server is not yet ready the backend logs `[SPA]` warning and you can just refresh once Vite finishes starting.
 # PrintFarmer - Local Development Guide
 
 This guide covers running PrintFarmer locally on your development machine **without Docker containers**. This is the recommended approach for active development, especially on macOS where Docker networking limitations can prevent WiFi device discovery.
@@ -8,6 +28,12 @@ This guide covers running PrintFarmer locally on your development machine **with
 - **.NET SDK 9.0+** (exactly 9.0.302 as specified in global.json)
 - **Node.js 18+** and npm (for React frontend)
 - **Git** for source control
+
+### Additional macOS Requirements
+- **Homebrew** - Package manager for installing development tools
+- **GNU Coreutils** - Provides `timeout` command required by build scripts
+
+**Note:** The automated setup script will install Homebrew and GNU coreutils automatically if missing.
 
 ### Verify Installation
 ```bash
@@ -156,8 +182,8 @@ npm run lint
 ## Key Endpoints
 
 ### API Server (http://localhost:5245)
-- `GET /healthz` - Basic health check
-- `GET /health` - Comprehensive health check with detailed status
+- `GET /healthz` (alias: `/api/healthz`) - Basic health check
+- `GET /health` (alias: `/api/health`) - Comprehensive health check with detailed status
 - `GET /api/printers` - List all configured printers
 - `POST /api/printers` - Add a new printer
 - `GET /api/network-discovery/settings` - Get network discovery configuration

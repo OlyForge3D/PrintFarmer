@@ -1,4 +1,5 @@
 ﻿using Moq;
+using System.Text.Json;
 
 namespace Farm.Web.Api.Tests;
 
@@ -18,7 +19,30 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         var resp = await client.GetAsync("/healthz");
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadFromJsonAsync<HealthzDto>();
-        body!.status.Should().Be("ok");
+    body!.Status.Should().Be("ok");
+    }
+
+    [Fact]
+    public async Task ApiHealthz_alias_should_return_okAsync()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.GetAsync("/api/healthz");
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadFromJsonAsync<HealthzDto>();
+    body!.Status.Should().Be("ok");
+    }
+
+    [Fact]
+    public async Task ApiHealth_alias_should_return_comprehensive_jsonAsync()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.GetAsync("/api/health");
+        resp.EnsureSuccessStatusCode();
+        var json = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        json.TryGetProperty("status", out var statusProp).Should().BeTrue();
+        statusProp.GetString().Should().NotBeNull();
+        json.TryGetProperty("results", out var resultsProp).Should().BeTrue();
+        resultsProp.ValueKind.Should().Be(JsonValueKind.Object);
     }
 
     [Fact]
@@ -215,7 +239,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         }
     }
 
-    private record HealthzDto(string status);
+    private record HealthzDto(string Status);
 }
 
 internal sealed record CameraUrlResultDto(string? StreamUrl, string? SnapshotUrl);

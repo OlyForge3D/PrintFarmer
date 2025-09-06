@@ -33,7 +33,7 @@ export class ApiClient {
 
   constructor() {
     // Use environment variable for API base URL, fallback to relative path for monolithic deployment
-    const apiBaseUrl = import.meta.env.REACT_APP_API_BASE_URL || '/api';
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
     
     this.client = axios.create({
       baseURL: apiBaseUrl,

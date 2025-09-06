@@ -30,7 +30,7 @@ dotnet build ./farm-web.sln -c Debug
 dotnet run --project ./server/Farm.Web.Server.csproj
 ```
 
-API at http://localhost:5088 with Swagger UI; health at /healthz.
+API at http://localhost:5088 with Swagger UI; health at /healthz (alias: /api/healthz).
 
 Hot reload:
 ```

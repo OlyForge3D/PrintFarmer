@@ -66,19 +66,24 @@ docker compose -f docker-compose.microservices.yml up -d
 
 **Monolithic (.env.monolithic):**
 ```bash
-# API base URL (relative for same origin)
-REACT_APP_API_BASE_URL=http://localhost:8080
-REACT_APP_SIGNALR_URL=http://localhost:8080/hubs/printers
+# API base URL (relative for same origin when served behind same host)
+VITE_API_BASE_URL=http://localhost:8080/api
+VITE_SIGNALR_URL=http://localhost:8080/hubs/printers
 
 # Deployment mode (omit or set to anything except "microservices")
 # DEPLOYMENT_MODE=monolithic
+
+# Optional: SPA dev server override (default http://localhost:3000)
+# SPA_DEV_URL=http://localhost:3000
+# Optional: Probe timeout in ms for deciding whether to enable SPA proxy
+# SPA_PROXY_PROBE_TIMEOUT_MS=500
 ```
 
 **Microservices (.env.microservices):**
 ```bash
 # API base URL (cross-origin)
-REACT_APP_API_BASE_URL=http://localhost:5000
-REACT_APP_SIGNALR_URL=http://localhost:5000/hubs/printers
+VITE_API_BASE_URL=http://localhost:5000
+VITE_SIGNALR_URL=http://localhost:5000/hubs/printers
 
 # Deployment mode
 DEPLOYMENT_MODE=microservices
@@ -106,6 +111,22 @@ DEPLOYMENT_MODE=microservices
 - Lower resource constraints
 
 ### Choose Microservices When:
+
+## SPA Dev Proxy Safeguard
+
+In monolithic development, the backend probes the Vite dev server (default `http://localhost:3000`). If it is not reachable within `SPA_PROXY_PROBE_TIMEOUT_MS` (default 500ms), the SPA proxy is skipped to prevent accidental 502 errors for SignalR negotiation. A warning log beginning with `[SPA]` is emitted when skipping.
+
+To force proxying (e.g., if startup races cause missed detection), increase timeout:
+```bash
+export SPA_PROXY_PROBE_TIMEOUT_MS=1500
+```
+
+Or explicitly set the dev server URL:
+```bash
+export SPA_DEV_URL=http://localhost:3001
+```
+
+If proxy is skipped, you can still access the React app directly on its dev server port.
 - Production environments with high load
 - Large applications with multiple teams
 - Need independent scaling of components

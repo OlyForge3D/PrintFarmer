@@ -90,15 +90,15 @@ public class ServiceInterfaceExampleTests
     {
         // Arrange
         var mockPresets = new Mock<IPresetService>();
-        var expectedPresets = new FilamentPresetsDto
-        (
-            Abs: new TempTargets(230, 100),
-            Asa: new TempTargets(245, 100),
-            Pla: new TempTargets(205, 60),
-            Pc: new TempTargets(260, 110),
-            Pctg: new TempTargets(235, 80),
-            Petg: new TempTargets(240, 85)
-        );
+        var expectedPresets = new FilamentPresetsDto(new Dictionary<string, TempTargets>
+        {
+            ["ABS"] = new TempTargets(230, 100),
+            ["ASA"] = new TempTargets(245, 100),
+            ["PLA"] = new TempTargets(205, 60),
+            ["PC"] = new TempTargets(260, 110),
+            ["PCTG"] = new TempTargets(235, 80),
+            ["PETG"] = new TempTargets(240, 85)
+        });
 
         mockPresets
             .Setup(p => p.GetPresets())
@@ -108,10 +108,10 @@ public class ServiceInterfaceExampleTests
         var result = mockPresets.Object.GetPresets();
 
         // Assert
-        Assert.Equal(205, result.Pla.Hotend);
-        Assert.Equal(60, result.Pla.Bed);
-        Assert.Equal(240, result.Petg.Hotend);
-        Assert.Equal(85, result.Petg.Bed);
+    Assert.Equal(205, result.Presets["PLA"].Hotend);
+    Assert.Equal(60, result.Presets["PLA"].Bed);
+    Assert.Equal(240, result.Presets["PETG"].Hotend);
+    Assert.Equal(85, result.Presets["PETG"].Bed);
     }
 
     /// <summary>

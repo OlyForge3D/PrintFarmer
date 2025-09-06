@@ -36,7 +36,7 @@ export class SignalRService {
 
   private buildConnection(): void {
     // Use environment variable for SignalR URL, fallback to relative path for monolithic deployment
-    const signalrUrl = import.meta.env.REACT_APP_SIGNALR_URL || '/hubs/printers';
+    const signalrUrl = import.meta.env.VITE_SIGNALR_URL || '/hubs/printers';
     
     this.connection = new HubConnectionBuilder()
       .withUrl(signalrUrl)

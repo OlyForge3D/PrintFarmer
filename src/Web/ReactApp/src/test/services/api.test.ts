@@ -56,7 +56,8 @@ describe('ApiClient', () => {
 
       const result = await apiClient.getPrinters();
 
-      expect(mockGet).toHaveBeenCalledWith('/printers');
+  // Updated endpoint now uses the faster summary list endpoint
+  expect(mockGet).toHaveBeenCalledWith('/printers/fast');
       expect(result).toEqual(mockResponse.data);
     });
   });

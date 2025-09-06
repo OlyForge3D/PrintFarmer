@@ -87,8 +87,8 @@ ASPNETCORE_ENVIRONMENT=Production
 # Build and start
 docker compose --env-file .env.monolithic up -d --build
 
-# Verify deployment
-curl http://localhost:8080/healthz
+# Verify deployment (basic health)
+curl http://localhost:8080/healthz   # or curl http://localhost:8080/api/healthz
 # Should return: {"status":"ok"}
 
 # Access application
@@ -131,9 +131,9 @@ sleep 10
 # Start application services
 docker compose --env-file .env.microservices up -d --build
 
-# Verify deployment
-curl http://localhost:8080/api/health
-# Should return detailed health status
+# Verify deployment (comprehensive health)
+curl http://localhost:8080/api/health   # or curl http://localhost:8080/health
+# Should return detailed health status (JSON)
 
 # Access application
 open http://localhost:8080
@@ -257,13 +257,14 @@ ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 
 ### Health Endpoints
 ```bash
-# Basic health check
+# Basic health check (either original or /api alias)
 curl http://localhost:8080/healthz
+# or
+curl http://localhost:8080/api/healthz
 
-# Comprehensive health check
+# Comprehensive health check (either original or /api alias)
 curl http://localhost:8080/health | jq '.'
-
-# API-specific health (microservices)
+# or
 curl http://localhost:8080/api/health | jq '.'
 ```
 
@@ -345,7 +346,7 @@ docker compose logs -t api
 docker compose ps
 
 # Check container health
-docker compose exec api curl localhost:5245/healthz
+docker compose exec api curl localhost:5245/healthz  # or localhost:5245/api/healthz
 
 # Restart unhealthy services
 docker compose restart api

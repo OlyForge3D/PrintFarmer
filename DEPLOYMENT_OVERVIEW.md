@@ -42,7 +42,7 @@ cd Web/ReactApp && npm run dev
 ### Access Points
 - **React App**: http://localhost:3000
 - **API Server**: http://localhost:5245
-- **API Health**: http://localhost:5245/healthz
+- **API Health**: http://localhost:5245/healthz (alias: http://localhost:5245/api/healthz)
 
 ### Advantages
 ✅ **Full WiFi Access** - Can discover printers on WiFi networks  
@@ -158,11 +158,15 @@ cp .env.template .env.monolithic
 
 ### Health Monitoring
 ```bash
-# Basic health check
+# Basic health check (either path works)
 curl http://localhost:8080/healthz
+# or
+curl http://localhost:8080/api/healthz
 
-# Comprehensive health status
+# Comprehensive health status (either path works)
 curl http://localhost:8080/health | jq '.'
+# or
+curl http://localhost:8080/api/health | jq '.'
 ```
 
 ### Log Management

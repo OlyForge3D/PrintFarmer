@@ -1,9 +1,9 @@
+/* Import component-specific styles to ensure all classes are available */
+@import './styles/components.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* Import component-specific styles to ensure all classes are available */
-@import './styles/components.css';
 
 /* Remove restrictive max-width to allow full-width layouts */
 #root {

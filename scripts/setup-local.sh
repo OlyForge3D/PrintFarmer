@@ -27,11 +27,72 @@ print_header() {
     echo
 }
 
+# Get the correct timeout command (handles macOS gtimeout vs Linux timeout)
+get_timeout_cmd() {
+    if command -v timeout &> /dev/null; then
+        echo "timeout"
+    elif command -v gtimeout &> /dev/null; then
+        echo "gtimeout"
+    else
+        print_error "Neither timeout nor gtimeout command found"
+        return 1
+    fi
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_header "🔍 Checking Prerequisites"
     
     local missing_deps=()
+    
+    # Check if we're on macOS and install required tools
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        print_info "Detected macOS - checking for required development tools..."
+        
+        # Check for Homebrew and install if missing
+        if ! command -v brew &> /dev/null; then
+            print_warning "Homebrew not found - installing..."
+            print_info "Homebrew is required for installing development tools on macOS"
+            
+            # Install Homebrew
+            if /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+                print_success "Homebrew installed successfully"
+                
+                # Add Homebrew to PATH for current session
+                if [[ -f "/opt/homebrew/bin/brew" ]]; then
+                    eval "$(/opt/homebrew/bin/brew shellenv)"
+                elif [[ -f "/usr/local/bin/brew" ]]; then
+                    eval "$(/usr/local/bin/brew shellenv)"
+                fi
+            else
+                print_error "Failed to install Homebrew"
+                missing_deps+=("homebrew")
+            fi
+        else
+            print_success "Homebrew found"
+        fi
+        
+        # Check for timeout command (from coreutils)
+        if ! command -v timeout &> /dev/null && ! command -v gtimeout &> /dev/null; then
+            print_warning "timeout command not found - installing GNU coreutils..."
+            print_info "GNU coreutils (including timeout) is required for build scripts"
+            
+            if command -v brew &> /dev/null; then
+                if brew install coreutils; then
+                    print_success "GNU coreutils installed successfully"
+                    print_info "The timeout command is available as 'gtimeout' or add GNU bin to PATH"
+                else
+                    print_error "Failed to install GNU coreutils"
+                    missing_deps+=("coreutils")
+                fi
+            else
+                print_error "Cannot install coreutils - Homebrew not available"
+                missing_deps+=("coreutils")
+            fi
+        else
+            print_success "timeout command found"
+        fi
+    fi
     
     # Check .NET SDK
     if command -v dotnet &> /dev/null; then
@@ -175,7 +236,8 @@ setup_project() {
     print_info "Restoring .NET dependencies..."
     print_warning "This may take 30-60 seconds on first run..."
     
-    if timeout 120 dotnet restore ./farm-web.sln; then
+    timeout_cmd=$(get_timeout_cmd)
+    if $timeout_cmd 120 dotnet restore ./farm-web.sln; then
         print_success ".NET dependencies restored"
     else
         print_error "Failed to restore .NET dependencies"
@@ -187,7 +249,7 @@ setup_project() {
     print_warning "This may take 30-60 seconds on first run..."
     
     cd Web/ReactApp
-    if timeout 120 npm install; then
+    if $timeout_cmd 120 npm install; then
         print_success "React dependencies installed"
     else
         print_error "Failed to install React dependencies"
@@ -205,7 +267,7 @@ build_projects() {
     print_info "Building .NET solution..."
     print_warning "This may take 60-90 seconds on first build..."
     
-    if timeout 150 dotnet build ./farm-web.sln -c Debug; then
+    if $timeout_cmd 150 dotnet build ./farm-web.sln -c Debug; then
         print_success ".NET solution built successfully"
     else
         print_error "Failed to build .NET solution"
@@ -217,7 +279,7 @@ build_projects() {
     print_warning "This may take 20-40 seconds..."
     
     cd Web/ReactApp
-    if timeout 90 npm run build; then
+    if $timeout_cmd 90 npm run build; then
         print_success "React application built successfully"
     else
         print_error "Failed to build React application"
@@ -231,8 +293,9 @@ build_projects() {
 run_tests() {
     print_header "🧪 Running Tests"
     
+    timeout_cmd=$(get_timeout_cmd)
     print_info "Running .NET API tests..."
-    if timeout 60 dotnet test ./farm-web.sln -c Debug --logger "console;verbosity=minimal"; then
+    if $timeout_cmd 60 dotnet test ./farm-web.sln -c Debug --logger "console;verbosity=minimal"; then
         print_success "API tests passed"
     else
         print_warning "Some API tests failed - check output above"
@@ -241,7 +304,7 @@ run_tests() {
     
     print_info "Running React tests..."
     cd Web/ReactApp
-    if timeout 30 npm test -- --run; then
+    if $timeout_cmd 30 npm test -- --run; then
         print_success "React tests passed"
     else
         print_warning "Some React tests failed - check output above"

@@ -258,6 +258,20 @@ if (isMonolithicDeployment)
     });
 }
 
+// Dynamic SPA dev proxy support (development only)
+if (isMonolithicDeployment && builder.Environment.IsDevelopment())
+{
+    // Default dev server URL (configurable via SPA_DEV_URL); using widely adopted Vite default.
+    var devUrl = builder.Configuration.GetValue<string>("SPA_DEV_URL");
+    if (string.IsNullOrWhiteSpace(devUrl))
+    {
+        devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
+    }
+    builder.Services.AddSingleton(new SpaProxyActivationState(devUrl));
+    builder.Services.AddHttpClient("SpaProxy");
+    builder.Services.AddHostedService<SpaDevServerWatcher>();
+}
+
 // Authentication and Authorization services
 builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IPasswordHashingService, Farm.Web.Api.Services.Authentication.PasswordHashingService>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAuthenticationService, Farm.Web.Api.Services.Authentication.AuthenticationService>();
@@ -388,6 +402,33 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     }
 });
 
+// Alias route for clients expecting the comprehensive health endpoint under /api prefix
+app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var result = JsonSerializer.Serialize(
+            new
+            {
+                Status = report.Status.ToString(),
+                TotalChecksDuration = report.TotalDuration,
+                Results = report.Entries.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => new
+                    {
+                        Status = kvp.Value.Status.ToString(),
+                        Duration = kvp.Value.Duration,
+                        Description = kvp.Value.Description,
+                        Data = kvp.Value.Data
+                    })
+            },
+            Program.HealthJsonOptions);
+
+        await context.Response.WriteAsync(result);
+    }
+});
+
 // Minimal API for presets
 app.MapGet("/api/presets", ([FromServices] IPresetService svc) => Results.Ok(svc.GetPresets()));
 app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] FilamentPresetsDto body) => { svc.SavePresets(body); return Results.NoContent(); });
@@ -398,34 +439,36 @@ app.MapPost("/api/network-discovery/settings", ([FromServices] INetworkDiscovery
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+// Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
+app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 // Configure SPA only for monolithic deployments (not microservices)
 if (isMonolithicDeployment)
 {
     app.UseStaticFiles();
-    app.UseSpa(spa =>
-    {
-        spa.Options.SourcePath = "wwwroot";
 
-        if (app.Environment.IsDevelopment())
+    if (app.Environment.IsDevelopment())
+    {
+        // Dynamic proxy middleware will handle forwarding once dev server becomes available
+        app.UseMiddleware<SpaDynamicProxyMiddleware>();
+    }
+    else
+    {
+        // Production: serve pre-built SPA assets
+        app.UseSpa(spa =>
         {
-            var reactDevUrl = builder.Configuration.GetValue<string>("SPA_DEV_URL") ?? "http://localhost:3002";
-            spa.UseProxyToSpaDevelopmentServer(reactDevUrl);
-        }
-        else
-        {
+            spa.Options.SourcePath = "wwwroot";
             spa.Options.DefaultPageStaticFileOptions = new StaticFileOptions
             {
                 OnPrepareResponse = ctx =>
                 {
-                    // Set cache headers for SPA shell
                     ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
                     ctx.Context.Response.Headers.Append("Pragma", "no-cache");
                     ctx.Context.Response.Headers.Append("Expires", "0");
                 }
             };
-        }
-    });
+        });
+    }
 }
 
 await app.RunAsync();

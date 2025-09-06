@@ -23,6 +23,14 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         _dbPath = Path.Combine(Path.GetTempPath(), dbFile);
         TryDelete();
 
+    // Set environment variables EARLY so Program.cs picks up the test-specific database path
+    // Minimal hosting reads configuration very early; relying only on ConfigureAppConfiguration
+    // meant the connection string was resolved before our in-memory override, causing usage of the default farm.db.
+    // Using environment variables guarantees the correct ephemeral file is used for each test factory instance.
+    Environment.SetEnvironmentVariable("ConnectionStrings__Default", $"Data Source={_dbPath}");
+    Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", $"Data Source={_dbPath}");
+    Environment.SetEnvironmentVariable("DISABLE_EF_MIGRATIONS", "true");
+
         // Initialize mocks
         MockNetworkDiscoveryService = new Mock<INetworkDiscoveryService>();
         MockMoonrakerClient = new Mock<IMoonrakerClient>();
@@ -43,6 +51,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             var dict = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = $"Data Source={_dbPath}",
+                ["ConnectionStrings:Sqlite"] = $"Data Source={_dbPath}",
                 // Avoid running EF Core Migrate() in tests when using ad-hoc SQLite files; rely on startup safety + EnsureCreated
                 ["DISABLE_EF_MIGRATIONS"] = "true"
             };
