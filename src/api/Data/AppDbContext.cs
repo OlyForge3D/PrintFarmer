@@ -20,6 +20,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<DiscoveredGcodeFile> DiscoveredGcodeFiles => Set<DiscoveredGcodeFile>();
 
+    // 3D Model Management & Slicer Integration
+    public DbSet<Model3D> Models3D => Set<Model3D>();
+    public DbSet<SlicerProfile> SlicerProfiles => Set<SlicerProfile>();
+
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
@@ -389,6 +393,69 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(ur => new { ur.UserId, ur.RoleId }).IsUnique();
             b.HasIndex(ur => ur.IsActive);
             b.HasIndex(ur => ur.ExpiresAt);
+        });
+
+        // Model3D Entity Configuration
+        modelBuilder.Entity<Model3D>(b =>
+        {
+            b.HasKey(m => m.Id);
+            b.Property(m => m.OriginalFileName).IsRequired().HasMaxLength(255);
+            b.Property(m => m.DisplayName).IsRequired().HasMaxLength(255);
+            b.Property(m => m.FilePath).IsRequired().HasMaxLength(512);
+            b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
+            b.Property(m => m.FileFormat).HasConversion<int>();
+            b.Property(m => m.FileSizeBytes).IsRequired();
+            b.Property(m => m.Tags).HasColumnType("TEXT");
+            b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
+
+            // Foreign Key
+            b.HasOne(m => m.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(m => m.UploadedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            b.HasIndex(m => m.FileHash).IsUnique();
+            b.HasIndex(m => m.UploadedAt);
+            b.HasIndex(m => m.FileFormat);
+            b.HasIndex(m => m.IsValid);
+            b.HasIndex(m => m.UploadedByUserId);
+        });
+
+        // SlicerProfile Entity Configuration
+        modelBuilder.Entity<SlicerProfile>(b =>
+        {
+            b.HasKey(p => p.Id);
+            b.Property(p => p.Name).IsRequired().HasMaxLength(255);
+            b.Property(p => p.Description).HasMaxLength(1000);
+            b.Property(p => p.SlicerType).HasConversion<int>();
+            b.Property(p => p.Quality).HasConversion<int>();
+            b.Property(p => p.Material).IsRequired().HasMaxLength(64);
+            b.Property(p => p.AdvancedSettings).HasColumnType("TEXT");
+
+            // Foreign Keys
+            b.HasOne(p => p.PrinterModel)
+                .WithMany()
+                .HasForeignKey(p => p.PrinterModelId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(p => p.SpecificPrinter)
+                .WithMany()
+                .HasForeignKey(p => p.SpecificPrinterId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(p => p.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(p => p.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            b.HasIndex(p => new { p.Name, p.SlicerType, p.PrinterModelId }).IsUnique();
+            b.HasIndex(p => p.SlicerType);
+            b.HasIndex(p => p.PrinterModelId);
+            b.HasIndex(p => p.IsDefault);
+            b.HasIndex(p => p.IsPublic);
+            b.HasIndex(p => p.CreatedByUserId);
         });
     }
 }

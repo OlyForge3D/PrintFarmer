@@ -1019,6 +1019,52 @@ public class SliceMetadataDto
     public double EstimatedCost { get; set; }
 }
 
+// Slicer Profile Management DTOs
+public class CreateSlicerProfileDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string SlicerType { get; set; } = "PrusaSlicer"; // PrusaSlicer, OrcaSlicer, etc.
+    public Guid? PrinterModelId { get; set; }
+    public Guid? SpecificPrinterId { get; set; }
+    public double LayerHeight { get; set; } = 0.2;
+    public int InfillPercentage { get; set; } = 20;
+    public double PrintSpeed { get; set; } = 50;
+    public int NozzleTemperature { get; set; } = 210;
+    public int BedTemperature { get; set; } = 60;
+    public bool EnableSupports { get; set; } = false;
+    public string Material { get; set; } = "PLA";
+    public string Quality { get; set; } = "Standard"; // Draft, Standard, Fine
+    public string? AdvancedSettings { get; set; }
+    public bool IsDefault { get; set; } = false;
+    public bool IsPublic { get; set; } = true;
+}
+
+public class SlicerProfileResponseDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string SlicerType { get; set; } = string.Empty;
+    public Guid? PrinterModelId { get; set; }
+    public string? PrinterModelName { get; set; }
+    public Guid? SpecificPrinterId { get; set; }
+    public string? SpecificPrinterName { get; set; }
+    public double LayerHeight { get; set; }
+    public int InfillPercentage { get; set; }
+    public int PrintSpeed { get; set; }
+    public int NozzleTemperature { get; set; }
+    public int BedTemperature { get; set; }
+    public bool EnableSupports { get; set; }
+    public string Material { get; set; } = string.Empty;
+    public string Quality { get; set; } = string.Empty;
+    public string? AdvancedSettings { get; set; }
+    public bool IsDefault { get; set; }
+    public bool IsPublic { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
 /// <summary>
 /// Internal tracking DTO for active / completed slicing jobs.
 /// </summary>

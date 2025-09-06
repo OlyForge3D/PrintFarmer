@@ -1,6 +1,9 @@
 ﻿using System.Text.Json;
 using Farm.Web.Shared;
+using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -13,12 +16,14 @@ namespace Farm.Web.Api.Controllers;
 public class SlicerController : ControllerBase
 {
     private readonly ILogger<SlicerController> _logger;
+    private readonly AppDbContext _context;
     private readonly string _tempPath;
     private readonly Dictionary<string, SlicingJobDto> _activeJobs = new();
 
-    public SlicerController(ILogger<SlicerController> logger, IConfiguration configuration)
+    public SlicerController(ILogger<SlicerController> logger, AppDbContext context, IConfiguration configuration)
     {
         _logger = logger;
+        _context = context;
         _tempPath = configuration["TempStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "temp");
 
         // Ensure temp directory exists
@@ -133,51 +138,234 @@ public class SlicerController : ControllerBase
     /// Get available slicer profiles for a printer
     /// </summary>
     /// <param name="printerId">Printer ID</param>
+    /// <param name="slicerType">Optional slicer type filter</param>
     /// <returns>Available slicer profiles</returns>
     [HttpGet("profiles")]
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileDto>), StatusCodes.Status200OK)]
-    public IActionResult GetAvailableProfiles([FromQuery] string printerId)
+    public async Task<IActionResult> GetAvailableProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
     {
-        // For now, return some default profiles
-        // In a real implementation, this would be based on printer capabilities
-        var profiles = new[]
+        try
         {
-            new SlicerProfileDto
+            var query = _context.SlicerProfiles
+                .Include(p => p.PrinterModel)
+                .Include(p => p.SpecificPrinter)
+                .Where(p => p.IsPublic || p.CreatedByUserId == null); // For now, return public profiles
+
+            // Filter by printer if specified
+            if (!string.IsNullOrEmpty(printerId) && Guid.TryParse(printerId, out var printerGuid))
             {
-                LayerHeight = 0.3,
-                InfillPercentage = 10,
-                PrintSpeed = 60,
-                NozzleTemperature = 210,
-                BedTemperature = 60,
-                Supports = false,
-                Material = "PLA",
-                Quality = "draft"
-            },
-            new SlicerProfileDto
-            {
-                LayerHeight = 0.2,
-                InfillPercentage = 20,
-                PrintSpeed = 50,
-                NozzleTemperature = 210,
-                BedTemperature = 60,
-                Supports = false,
-                Material = "PLA",
-                Quality = "standard"
-            },
-            new SlicerProfileDto
-            {
-                LayerHeight = 0.15,
-                InfillPercentage = 25,
-                PrintSpeed = 40,
-                NozzleTemperature = 210,
-                BedTemperature = 60,
-                Supports = true,
-                Material = "PLA",
-                Quality = "fine"
+                // Get printer and its model
+                var printer = await _context.Printers
+                    .Include(p => p.Model)
+                    .FirstOrDefaultAsync(p => p.Id == printerGuid);
+
+                if (printer != null)
+                {
+                    query = query.Where(p => 
+                        p.SpecificPrinterId == printerGuid || 
+                        (p.PrinterModelId == printer.ModelId && p.SpecificPrinterId == null) ||
+                        (p.PrinterModelId == null && p.SpecificPrinterId == null)); // Universal profiles
+                }
             }
+
+            // Filter by slicer type if specified
+            if (!string.IsNullOrEmpty(slicerType) && Enum.TryParse<SlicerType>(slicerType, true, out var slicerTypeEnum))
+            {
+                query = query.Where(p => p.SlicerType == slicerTypeEnum);
+            }
+
+            var profiles = await query
+                .OrderBy(p => p.IsDefault ? 0 : 1)
+                .ThenBy(p => p.Name)
+                .Select(p => new SlicerProfileDto
+                {
+                    LayerHeight = p.LayerHeight,
+                    InfillPercentage = p.InfillPercentage,
+                    PrintSpeed = (int)p.PrintSpeed,
+                    NozzleTemperature = p.NozzleTemperature,
+                    BedTemperature = p.BedTemperature,
+                    Supports = p.EnableSupports,
+                    Material = p.Material,
+                    Quality = p.Quality.ToString().ToLowerInvariant()
+                })
+                .ToListAsync();
+
+            // If no profiles found, return defaults
+            if (profiles.Count == 0)
+            {
+                profiles = GetDefaultProfiles();
+            }
+
+            return Ok(profiles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get available profiles");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get available profiles");
+        }
+    }
+
+    /// <summary>
+    /// Create a new slicer profile
+    /// </summary>
+    /// <param name="request">Profile creation request</param>
+    /// <returns>Created profile</returns>
+    [HttpPost("profiles")]
+    [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateProfileAsync([FromBody] CreateSlicerProfileDto request)
+    {
+        if (request == null)
+        {
+            return BadRequest("Profile data is required");
+        }
+
+        try
+        {
+            // Validate slicer type
+            if (!Enum.TryParse<SlicerType>(request.SlicerType, true, out var slicerType))
+            {
+                return BadRequest("Invalid slicer type");
+            }
+
+            // Validate quality
+            if (!Enum.TryParse<ProfileQuality>(request.Quality, true, out var quality))
+            {
+                return BadRequest("Invalid quality setting");
+            }
+
+            var profile = new SlicerProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = request.Name,
+                Description = request.Description,
+                SlicerType = slicerType,
+                PrinterModelId = request.PrinterModelId,
+                SpecificPrinterId = request.SpecificPrinterId,
+                LayerHeight = request.LayerHeight,
+                InfillPercentage = request.InfillPercentage,
+                PrintSpeed = request.PrintSpeed,
+                NozzleTemperature = request.NozzleTemperature,
+                BedTemperature = request.BedTemperature,
+                EnableSupports = request.EnableSupports,
+                Material = request.Material,
+                Quality = quality,
+                AdvancedSettings = request.AdvancedSettings,
+                IsDefault = request.IsDefault,
+                IsPublic = request.IsPublic,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _context.SlicerProfiles.Add(profile);
+            await _context.SaveChangesAsync();
+
+            var response = new SlicerProfileResponseDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                Description = profile.Description,
+                SlicerType = profile.SlicerType.ToString(),
+                LayerHeight = profile.LayerHeight,
+                InfillPercentage = profile.InfillPercentage,
+                PrintSpeed = (int)profile.PrintSpeed,
+                NozzleTemperature = profile.NozzleTemperature,
+                BedTemperature = profile.BedTemperature,
+                EnableSupports = profile.EnableSupports,
+                Material = profile.Material,
+                Quality = profile.Quality.ToString(),
+                IsDefault = profile.IsDefault,
+                IsPublic = profile.IsPublic,
+                CreatedAt = profile.CreatedAt
+            };
+
+            _logger.LogInformation("Slicer profile created: {ProfileId} ({Name})", profile.Id, profile.Name);
+            return CreatedAtAction(nameof(GetProfileAsync), new { id = profile.Id }, response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create slicer profile");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create slicer profile");
+        }
+    }
+
+    /// <summary>
+    /// Get a specific slicer profile
+    /// </summary>
+    /// <param name="id">Profile ID</param>
+    /// <returns>Slicer profile</returns>
+    [HttpGet("profiles/{id:guid}")]
+    [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetProfileAsync(Guid id)
+    {
+        var profile = await _context.SlicerProfiles
+            .Include(p => p.PrinterModel)
+            .Include(p => p.SpecificPrinter)
+            .FirstOrDefaultAsync(p => p.Id == id);
+
+        if (profile == null)
+        {
+            return NotFound();
+        }
+
+        var response = new SlicerProfileResponseDto
+        {
+            Id = profile.Id,
+            Name = profile.Name,
+            Description = profile.Description,
+            SlicerType = profile.SlicerType.ToString(),
+            PrinterModelId = profile.PrinterModelId,
+            PrinterModelName = profile.PrinterModel?.Name,
+            SpecificPrinterId = profile.SpecificPrinterId,
+            SpecificPrinterName = profile.SpecificPrinter?.Name,
+            LayerHeight = profile.LayerHeight,
+            InfillPercentage = profile.InfillPercentage,
+            PrintSpeed = (int)profile.PrintSpeed,
+            NozzleTemperature = profile.NozzleTemperature,
+            BedTemperature = profile.BedTemperature,
+            EnableSupports = profile.EnableSupports,
+            Material = profile.Material,
+            Quality = profile.Quality.ToString(),
+            AdvancedSettings = profile.AdvancedSettings,
+            IsDefault = profile.IsDefault,
+            IsPublic = profile.IsPublic,
+            CreatedAt = profile.CreatedAt,
+            UpdatedAt = profile.UpdatedAt
         };
 
-        return Ok(profiles);
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Delete a slicer profile
+    /// </summary>
+    /// <param name="id">Profile ID</param>
+    /// <returns>No content if successful</returns>
+    [HttpDelete("profiles/{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteProfileAsync(Guid id)
+    {
+        var profile = await _context.SlicerProfiles.FindAsync(id);
+        if (profile == null)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            _context.SlicerProfiles.Remove(profile);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Slicer profile deleted: {ProfileId}", id);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete slicer profile: {ProfileId}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete slicer profile");
+        }
     }
 
     /// <summary>
@@ -437,5 +625,45 @@ public class SlicerController : ControllerBase
         gcode.AppendLine("M84 ; Disable steppers");
 
         return gcode.ToString();
+    }
+
+    private static List<SlicerProfileDto> GetDefaultProfiles()
+    {
+        return
+        [
+            new SlicerProfileDto
+            {
+                LayerHeight = 0.3,
+                InfillPercentage = 10,
+                PrintSpeed = 60,
+                NozzleTemperature = 210,
+                BedTemperature = 60,
+                Supports = false,
+                Material = "PLA",
+                Quality = "draft"
+            },
+            new SlicerProfileDto
+            {
+                LayerHeight = 0.2,
+                InfillPercentage = 20,
+                PrintSpeed = 50,
+                NozzleTemperature = 210,
+                BedTemperature = 60,
+                Supports = false,
+                Material = "PLA",
+                Quality = "standard"
+            },
+            new SlicerProfileDto
+            {
+                LayerHeight = 0.15,
+                InfillPercentage = 25,
+                PrintSpeed = 40,
+                NozzleTemperature = 210,
+                BedTemperature = 60,
+                Supports = true,
+                Material = "PLA",
+                Quality = "fine"
+            }
+        ];
     }
 }
