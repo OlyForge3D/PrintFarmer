@@ -18,6 +18,7 @@ public partial class NetworkDiscoveryService(
     PrusaLinkClient prusaLinkClient,
     INetworkDiscoverySettingsService settingsService,
     IHubContext<PrinterHub> hubContext,
+    IDiscoveryProgressCache progressCache,
     ILogger<NetworkDiscoveryService> logger) : INetworkDiscoveryService
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting printer network discovery...")]
@@ -129,6 +130,7 @@ public partial class NetworkDiscoveryService(
         LogDiscoveryStarting(logger);
 
         var settings = settingsService.GetSettings();
+    var autoDetectedNetworks = false;
         // Auto-detect network ranges if none configured
     if (settings.NetworkRanges.Count == 0)
         {
@@ -136,6 +138,7 @@ public partial class NetworkDiscoveryService(
             if (autoRanges.Count > 0)
             {
                 settings.NetworkRanges.AddRange(autoRanges);
+        autoDetectedNetworks = true;
                 logger.LogInformation("Auto-detected {Count} network range(s) for streaming discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
             }
             else
@@ -165,23 +168,25 @@ public partial class NetworkDiscoveryService(
         }
 
         // Send initial progress
+            var initialProgress = new DiscoveryProgressDto(
+                sessionId,
+                settings.NetworkRanges.FirstOrDefault() ?? string.Empty,
+                string.Empty,
+                totalIps,
+                0,
+                0,
+                0d,
+                DiscoveryStatus.Starting,
+                null,
+                settings.NetworkRanges,
+                autoDetectedNetworks
+            );
+            progressCache.Set(sessionId, initialProgress);
             await hubContext.Clients
                 .Group($"discovery-{sessionId}")
                 .SendAsync(
                     "DiscoveryProgress",
-                    new DiscoveryProgressDto(
-                        sessionId,
-                        settings.NetworkRanges.FirstOrDefault() ?? string.Empty,
-                        string.Empty,
-                        totalIps,
-                        0,
-                        0,
-                        0d,
-                        DiscoveryStatus.Starting,
-                        null,
-                        settings.NetworkRanges,
-                        settings.NetworkRanges.Count > 0
-                    ),
+                    initialProgress,
                     cancellationToken);
 
         foreach (var network in settings.NetworkRanges)
@@ -192,7 +197,7 @@ public partial class NetworkDiscoveryService(
             var (networkAddr, cidr) = ParseCidr(network);
             var hosts = GetHostsInRange(networkAddr, cidr);
             
-            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, sessionId, totalIps, scannedIps, foundPrinters, cancellationToken);
+            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, cancellationToken);
             scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
             foundPrinters += networkPrinters.Count;
             
@@ -210,7 +215,7 @@ public partial class NetworkDiscoveryService(
                         TimeSpan.Zero, // Will be calculated on client side
                         cancellationToken.IsCancellationRequested,
                         settings.NetworkRanges,
-                        settings.NetworkRanges.Count > 0
+                        autoDetectedNetworks
                     ),
                     cancellationToken);
 
@@ -222,7 +227,7 @@ public partial class NetworkDiscoveryService(
         var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (ni.OperationalStatus != OperationalStatus.Up)
                 {
@@ -359,7 +364,7 @@ public partial class NetworkDiscoveryService(
         return discovered;
     }
 
-    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, CancellationToken cancellationToken)
+    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, bool autoDetectedNetworks, CancellationToken cancellationToken)
     {
         var discovered = new List<DiscoveredPrinterDto>();
         var scannedCount = 0;
@@ -381,7 +386,7 @@ public partial class NetworkDiscoveryService(
                     
                     // Send progress update for current IP
                     var currentScanned = Interlocked.Increment(ref scannedCount);
-                    await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", new DiscoveryProgressDto(
+                    var progressDto = new DiscoveryProgressDto(
                         sessionId,
                         network,
                         host,
@@ -389,8 +394,13 @@ public partial class NetworkDiscoveryService(
                         currentScannedStart + currentScanned,
                         currentFoundStart + foundCount,
                         (double)(currentScannedStart + currentScanned) / totalIps * 100,
-                        DiscoveryStatus.Scanning
-                    ), cancellationToken);
+                        DiscoveryStatus.Scanning,
+                        null,
+                        settings.NetworkRanges,
+                        autoDetectedNetworks
+                    );
+                    progressCache.Set(sessionId, progressDto);
+                    await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", progressDto, cancellationToken);
 
                     var result = await ScanHostAsync(host, settings, cancellationToken);
                     if (result != null)

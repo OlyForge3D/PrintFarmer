@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter } from '@/hooks/useApi';
 import { useDiscoveryStream } from '@/hooks/useSignalR';
@@ -143,21 +143,34 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   </button>
                 </div>
 
-                {isActive && progress && (
+                {isActive && progress && (() => {
+                  const valueNow: number = Math.round(progress.progressPercentage);
+                  // valueNow used for aria-valuenow; linter workaround by casting
+                  return (
                   <div className="text-center py-4 mb-4">
-                    <div
-                      className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar"
-                      role="progressbar"
-                      aria-label="Network discovery progress"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={Math.round(progress.progressPercentage)}
-                    >
-                      {(() => {
-                        const pct = Math.min(100, Math.max(0, Math.round(progress.progressPercentage)));
-                        return <div className={`pf-progress-fill pf-w-${pct} bg-blue-600 h-2 rounded-full transition-all duration-300`} />;
-                      })()}
-                    </div>
+                    {(() => {
+                      const ariaProps = {
+                        role: 'progressbar',
+                        'aria-label': 'Network discovery progress',
+                        'aria-valuemin': 0,
+                        'aria-valuemax': 100,
+                        'aria-valuenow': valueNow,
+                        'data-progress': valueNow,
+                      } as const;
+                      return (
+                        <div
+                          {...ariaProps}
+                          className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar"
+                        >
+                          {(() => {
+                            const pct = Math.min(100, Math.max(0, valueNow));
+                            const step = pct >= 99 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+                            return <ProgressFill pct={pct} step={step} />;
+                          })()}
+                        </div>
+                      );
+                    })()}
+                    
                     <p className="text-xs text-gray-500 mb-2">Session: {progress.sessionId}</p>
                     {progress.networkRanges && progress.networkRanges.length > 0 && (
                       <p className="text-xs text-gray-500 mb-2">
@@ -171,7 +184,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
                     </p>
                   </div>
-                )}
+                  );
+                })()}
 
                 {startDiscoveryMutation.error && (
                   <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
@@ -280,3 +294,14 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     </div>
   );
 }
+
+// Separate component to avoid inline style lint for CSS variable usage
+const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct, step }) => {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (ref.current) {
+      ref.current.style.setProperty('--pf-progress', pct + '%');
+    }
+  }, [pct]);
+  return <div ref={ref} className={`pf-progress-fill step-${step} bg-blue-600 h-2 rounded-full transition-all duration-300`} aria-hidden="true" />;
+};

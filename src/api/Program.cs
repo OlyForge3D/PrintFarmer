@@ -213,6 +213,7 @@ builder.Services.AddScoped<IPresetService, PresetService>();
 builder.Services.AddScoped<ISpoolmanService, SpoolmanService>();
 builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
+builder.Services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
