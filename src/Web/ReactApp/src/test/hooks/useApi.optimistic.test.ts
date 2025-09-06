@@ -90,14 +90,13 @@ describe('optimistic printer create', () => {
   const tempList = client.getQueryData<Printer[]>(queryKeys.printers);
     expect(tempList?.some(p => p.id.startsWith('temp-'))).toBe(true);
 
-    // Wait a bit for rejection processing
-    await new Promise(r => setTimeout(r, 15));
-
-    // Should rollback (empty list or undefined)
-  const postList = client.getQueryData<Printer[]>(queryKeys.printers);
-    if (postList) {
-      expect(postList.every(p => !p.id.startsWith('temp-'))).toBe(true);
-    }
+    // Should rollback (temp removed) eventually
+    await waitFor(() => {
+      const postList = client.getQueryData<Printer[]>(queryKeys.printers);
+      // success if list gone or no temp items remain
+      const hasTemp = postList?.some(p => p.id.startsWith('temp-')) ?? false;
+      expect(hasTemp).toBe(false);
+    });
   });
 });
 
@@ -121,7 +120,7 @@ describe('optimistic queue print job', () => {
 
     const queueSpy = vi.spyOn(apiClient, 'queuePrintJob').mockImplementation(async () => {
       await new Promise(r => setTimeout(r, 5));
-      return realJob;
+      return realJob as JobQueuePrintJob;
     });
 
     const { result } = renderHook(() => useQueuePrintJob(), { wrapper });

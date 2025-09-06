@@ -69,7 +69,7 @@ export function useCreatePrinter() {
   
   return useMutation({
     mutationFn: (printer: CreatePrinterDto) => apiClient.createPrinter(printer),
-    onMutate: async (printer) => {
+  onMutate: async (printer) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.printers });
       const previous = queryClient.getQueryData<Printer[]>(queryKeys.printers);
       const temp: Printer = {
@@ -92,21 +92,28 @@ export function useCreatePrinter() {
       } else {
         queryClient.setQueryData(queryKeys.printers, [temp]);
       }
-      return { previous };
+      return { previous, tempId: temp.id };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(queryKeys.printers, ctx.previous);
+      if (ctx?.previous) {
+        queryClient.setQueryData(queryKeys.printers, ctx.previous);
+      } else {
+        // Remove entire query to guarantee no stale temp remains
+        queryClient.removeQueries({ queryKey: queryKeys.printers });
+      }
       toast.error('Failed to create printer');
     },
-    onSuccess: (created) => {
+    onSuccess: (created, _vars, ctx) => {
       const list = queryClient.getQueryData<Printer[]>(queryKeys.printers);
       if (list) {
-        queryClient.setQueryData(queryKeys.printers, list.map(p => p.id.startsWith('temp-') && p.name === created.name ? created : p));
+        queryClient.setQueryData(queryKeys.printers, list.map(p => (ctx?.tempId && p.id === ctx.tempId) ? (created as Printer) : p));
       }
       toast.success(`Printer "${created.name}" created`);
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    onSettled: (_data, error) => {
+      if (!error) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+      }
     }
   });
 }
@@ -410,7 +417,7 @@ export function useQueuePrintJob() {
   return useMutation({
     mutationFn: ({ printerId, gcodeFileId, priority = 0 }: { printerId: string; gcodeFileId: string; priority?: number }) =>
       apiClient.queuePrintJob(printerId, gcodeFileId, priority),
-    onMutate: async (vars) => {
+  onMutate: async (vars) => {
       const { printerId, gcodeFileId, priority = 0 } = vars;
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue(printerId) });
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue() });
@@ -431,19 +438,29 @@ export function useQueuePrintJob() {
       } as JobQueuePrintJob;
       if (prevPrinterQueue) queryClient.setQueryData(printerQueueKey, [temp, ...prevPrinterQueue]); else queryClient.setQueryData(printerQueueKey, [temp]);
       if (prevGlobalQueue) queryClient.setQueryData(globalQueueKey, [temp, ...prevGlobalQueue]); else queryClient.setQueryData(globalQueueKey, [temp]);
-      return { prevPrinterQueue, prevGlobalQueue, printerQueueKey, globalQueueKey };
+      return { prevPrinterQueue, prevGlobalQueue, printerQueueKey, globalQueueKey, tempId: temp.id };
     },
     onError: (_e, vars, ctx) => {
-      if (ctx?.prevPrinterQueue && ctx.printerQueueKey) queryClient.setQueryData(ctx.printerQueueKey, ctx.prevPrinterQueue);
-      if (ctx?.prevGlobalQueue && ctx.globalQueueKey) queryClient.setQueryData(ctx.globalQueueKey, ctx.prevGlobalQueue);
+      if (ctx?.prevPrinterQueue && ctx.printerQueueKey) {
+        queryClient.setQueryData(ctx.printerQueueKey, ctx.prevPrinterQueue);
+      } else if (ctx?.printerQueueKey) {
+        const cur = queryClient.getQueryData<JobQueuePrintJob[]>(ctx.printerQueueKey);
+        if (cur) queryClient.setQueryData(ctx.printerQueueKey, cur.filter(j => j.id !== ctx?.tempId && !j.id.startsWith('temp-')) || undefined);
+      }
+      if (ctx?.prevGlobalQueue && ctx.globalQueueKey) {
+        queryClient.setQueryData(ctx.globalQueueKey, ctx.prevGlobalQueue);
+      } else if (ctx?.globalQueueKey) {
+        const cur = queryClient.getQueryData<JobQueuePrintJob[]>(ctx.globalQueueKey);
+        if (cur) queryClient.setQueryData(ctx.globalQueueKey, cur.filter(j => j.id !== ctx?.tempId && !j.id.startsWith('temp-')) || undefined);
+      }
       toast.error('Failed to queue print job');
     },
-    onSuccess: (job, vars) => {
+    onSuccess: (job, vars, ctx) => {
       const printerQueueKey = queryKeys.jobQueue(vars.printerId);
       const globalQueueKey = queryKeys.jobQueue();
       const upd = (key: readonly unknown[]) => {
         const list = queryClient.getQueryData<JobQueuePrintJob[]>(key);
-        if (list) queryClient.setQueryData<JobQueuePrintJob[]>(key, list.map(j => j.id.startsWith('temp-') ? job : j));
+        if (list) queryClient.setQueryData<JobQueuePrintJob[]>(key, list.map(j => (ctx?.tempId && j.id === ctx.tempId) ? job : j));
       };
       upd(printerQueueKey); upd(globalQueueKey);
       toast.success('Print job queued');

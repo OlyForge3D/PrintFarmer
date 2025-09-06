@@ -89,9 +89,10 @@ describe('optimistic manufacturer/model creation', () => {
     const tempModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-'))).toBe(true);
 
-    await new Promise(r => setTimeout(r, 15));
-    const finalModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
-    expect(finalModels?.some(m => m.id.startsWith('temp-'))).toBe(false);
+    await waitFor(() => {
+      const finalModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
+      expect(finalModels?.some(m => m.id.startsWith('temp-'))).toBe(false);
+    });
   });
 });
 
@@ -138,9 +139,10 @@ describe('optimistic job cancel/delete', () => {
     const key = queryKeys.jobQueue('p-err');
     const temp = client.getQueryData<JobQueuePrintJob[]>(key);
     expect(temp?.some(j => j.id.startsWith('temp-'))).toBe(true);
-    await new Promise(r => setTimeout(r,15));
-    const after = client.getQueryData<JobQueuePrintJob[]>(key);
-    expect(after?.some(j => j.id.startsWith('temp-'))).toBe(false);
+    await waitFor(() => {
+      const after = client.getQueryData<JobQueuePrintJob[]>(key);
+      expect(after?.some(j => j.id.startsWith('temp-'))).toBe(false);
+    });
   });
 
   it('cancel job rollback on error', async () => {
@@ -153,9 +155,10 @@ describe('optimistic job cancel/delete', () => {
     await act(async () => { result.current.mutate('job-cancel-err'); });
     const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
     expect(interim?.find(j => j.id === 'job-cancel-err')?.status).toBe(JobQueueStatus.Cancelled);
-    await new Promise(r => setTimeout(r,15));
-    const after = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-    expect(after?.find(j => j.id === 'job-cancel-err')?.status).toBe(JobQueueStatus.Pending);
+    await waitFor(() => {
+      const after = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
+      expect(after?.find(j => j.id === 'job-cancel-err')?.status).toBe(JobQueueStatus.Pending);
+    });
   });
 
   it('delete job rollback on error', async () => {
@@ -168,8 +171,9 @@ describe('optimistic job cancel/delete', () => {
     await act(async () => { result.current.mutate('job-del-err'); });
     const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
     expect(interim?.some(j => j.id === 'job-del-err')).toBe(false);
-    await new Promise(r => setTimeout(r,15));
-    const after = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-    expect(after?.some(j => j.id === 'job-del-err')).toBe(true);
+    await waitFor(() => {
+      const after = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
+      expect(after?.some(j => j.id === 'job-del-err')).toBe(true);
+    });
   });
 });
