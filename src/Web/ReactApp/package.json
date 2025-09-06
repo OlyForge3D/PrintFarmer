@@ -37,7 +37,7 @@
     "@eslint/js": "^9.33.0",
     "@react-three/drei": "^10.7.4",
     "@react-three/fiber": "^9.3.0",
-    "@tanstack/react-query-devtools": "^5.85.9",
+    "@tanstack/react-query-devtools": "^5.87.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.3.0",
