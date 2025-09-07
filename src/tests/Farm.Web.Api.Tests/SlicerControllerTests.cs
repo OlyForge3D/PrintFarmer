@@ -1,13 +1,11 @@
-using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
-using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 using Farm.Web.Api.Data;
-using Microsoft.EntityFrameworkCore;
 using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
@@ -26,7 +24,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetProfiles_ShouldReturnDefaultProfiles_WhenNoCustomProfilesExist()
+    public async Task GetProfiles_ShouldReturnDefaultProfiles_WhenNoCustomProfilesExistAsync()
     {
         // Act
         var response = await _client.GetAsync("/api/slicer/profiles");
@@ -34,7 +32,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var profiles = await response.Content.ReadFromJsonAsync<SlicerProfileDto[]>();
-        
+
         profiles.Should().NotBeNull().And.HaveCount(3); // Default profiles
         profiles![0].Quality.Should().Be("draft");
         profiles[1].Quality.Should().Be("standard");
@@ -42,7 +40,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CreateProfile_ShouldCreateProfile_WhenValidDataProvided()
+    public async Task CreateProfile_ShouldCreateProfile_WhenValidDataProvidedAsync()
     {
         // Arrange
         var createRequest = new CreateSlicerProfileDto
@@ -68,7 +66,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var profile = await response.Content.ReadFromJsonAsync<SlicerProfileResponseDto>();
-        
+
         profile.Should().NotBeNull();
         profile!.Id.Should().NotBeEmpty();
         profile.Name.Should().Be("Test Profile");
@@ -87,7 +85,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CreateProfile_ShouldReturnBadRequest_WhenInvalidSlicerType()
+    public async Task CreateProfile_ShouldReturnBadRequest_WhenInvalidSlicerTypeAsync()
     {
         // Arrange
         var createRequest = new CreateSlicerProfileDto
@@ -107,7 +105,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CreateProfile_ShouldReturnBadRequest_WhenInvalidQuality()
+    public async Task CreateProfile_ShouldReturnBadRequest_WhenInvalidQualityAsync()
     {
         // Arrange
         var createRequest = new CreateSlicerProfileDto
@@ -127,7 +125,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetProfile_ShouldReturnProfile_WhenProfileExists()
+    public async Task GetProfile_ShouldReturnProfile_WhenProfileExistsAsync()
     {
         // Arrange - Create a profile first
         var createdProfile = await CreateTestProfileAsync("Get Test Profile");
@@ -138,14 +136,14 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var profile = await response.Content.ReadFromJsonAsync<SlicerProfileResponseDto>();
-        
+
         profile.Should().NotBeNull();
         profile!.Id.Should().Be(createdProfile.Id);
         profile.Name.Should().Be("Get Test Profile");
     }
 
     [Fact]
-    public async Task GetProfile_ShouldReturnNotFound_WhenProfileDoesNotExist()
+    public async Task GetProfile_ShouldReturnNotFound_WhenProfileDoesNotExistAsync()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid();
@@ -158,7 +156,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task DeleteProfile_ShouldRemoveProfile_WhenProfileExists()
+    public async Task DeleteProfile_ShouldRemoveProfile_WhenProfileExistsAsync()
     {
         // Arrange - Create a profile first
         var createdProfile = await CreateTestProfileAsync("Delete Test Profile");
@@ -175,7 +173,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task DeleteProfile_ShouldReturnNotFound_WhenProfileDoesNotExist()
+    public async Task DeleteProfile_ShouldReturnNotFound_WhenProfileDoesNotExistAsync()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid();
@@ -188,7 +186,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SliceModel_ShouldStartSlicing_WhenValidModelProvided()
+    public async Task SliceModel_ShouldStartSlicing_WhenValidModelProvidedAsync()
     {
         // Arrange
         var stlContent = CreateValidStlContent();
@@ -196,11 +194,11 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         using var fileContent = new ByteArrayContent(stlContent);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         form.Add(fileContent, "modelFile", "slice-test.stl");
-        
+
         var printerId = Guid.NewGuid();
         form.Add(new StringContent(printerId.ToString()), "printerId");
         form.Add(new StringContent("prusaslicer"), "slicerEngine");
-        
+
         var profile = new SlicerProfileDto
         {
             LayerHeight = 0.2,
@@ -219,7 +217,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var result = await response.Content.ReadFromJsonAsync<SliceResultDto>();
-        
+
         result.Should().NotBeNull();
         result!.JobId.Should().NotBeNullOrEmpty();
         result.GcodeUrl.Should().Contain($"/api/slicer/job/{result.JobId}/gcode");
@@ -228,7 +226,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SliceModel_ShouldReturnBadRequest_WhenNoModelFileProvided()
+    public async Task SliceModel_ShouldReturnBadRequest_WhenNoModelFileProvidedAsync()
     {
         // Arrange
         using var form = new MultipartFormDataContent();
@@ -247,14 +245,14 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SliceModel_ShouldReturnBadRequest_WhenInvalidSlicerEngine()
+    public async Task SliceModel_ShouldReturnBadRequest_WhenInvalidSlicerEngineAsync()
     {
         // Arrange
         var stlContent = CreateValidStlContent();
         using var form = new MultipartFormDataContent();
         using var fileContent = new ByteArrayContent(stlContent);
         form.Add(fileContent, "modelFile", "test.stl");
-        
+
         var printerId = Guid.NewGuid();
         form.Add(new StringContent(printerId.ToString()), "printerId");
         form.Add(new StringContent("invalidslicer"), "slicerEngine");
@@ -270,14 +268,14 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SliceModel_ShouldReturnBadRequest_WhenInvalidPrinterId()
+    public async Task SliceModel_ShouldReturnBadRequest_WhenInvalidPrinterIdAsync()
     {
         // Arrange
         var stlContent = CreateValidStlContent();
         using var form = new MultipartFormDataContent();
         using var fileContent = new ByteArrayContent(stlContent);
         form.Add(fileContent, "modelFile", "test.stl");
-        
+
         form.Add(new StringContent("not-a-guid"), "printerId");
         form.Add(new StringContent("prusaslicer"), "slicerEngine");
         form.Add(new StringContent("{}"), "profile");
@@ -292,14 +290,14 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SliceModel_ShouldReturnBadRequest_WhenInvalidProfile()
+    public async Task SliceModel_ShouldReturnBadRequest_WhenInvalidProfileAsync()
     {
         // Arrange
         var stlContent = CreateValidStlContent();
         using var form = new MultipartFormDataContent();
         using var fileContent = new ByteArrayContent(stlContent);
         form.Add(fileContent, "modelFile", "test.stl");
-        
+
         var printerId = Guid.NewGuid();
         form.Add(new StringContent(printerId.ToString()), "printerId");
         form.Add(new StringContent("prusaslicer"), "slicerEngine");
@@ -317,18 +315,18 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Theory]
     [InlineData("prusaslicer", "PrusaSlicer 2.7.0")]
     [InlineData("orcaslicer", "OrcaSlicer 1.8.0")]
-    public async Task SliceModel_ShouldHandleDifferentSlicers(string slicerEngine, string expectedVersion)
+    public async Task SliceModel_ShouldHandleDifferentSlicersAsync(string slicerEngine, string expectedVersion)
     {
         // Arrange
         var stlContent = CreateValidStlContent();
         using var form = new MultipartFormDataContent();
         using var fileContent = new ByteArrayContent(stlContent);
         form.Add(fileContent, "modelFile", "test.stl");
-        
+
         var printerId = Guid.NewGuid();
         form.Add(new StringContent(printerId.ToString()), "printerId");
         form.Add(new StringContent(slicerEngine), "slicerEngine");
-        
+
         var profile = new SlicerProfileDto { LayerHeight = 0.2, Material = "PLA", Quality = "standard" };
         form.Add(new StringContent(JsonSerializer.Serialize(profile)), "profile");
 
@@ -338,13 +336,13 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var result = await response.Content.ReadFromJsonAsync<SliceResultDto>();
-        
+
         result.Should().NotBeNull();
         result!.Metadata.SlicerVersion.Should().Be(expectedVersion);
     }
 
     [Fact]
-    public async Task GetSlicingJob_ShouldReturnJobInfo_WhenJobExists()
+    public async Task GetSlicingJob_ShouldReturnJobInfo_WhenJobExistsAsync()
     {
         // Arrange - Start a slicing job first
         var sliceResult = await StartTestSlicingJobAsync();
@@ -355,13 +353,13 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var jobResult = await response.Content.ReadFromJsonAsync<SliceResultDto>();
-        
+
         jobResult.Should().NotBeNull();
         jobResult!.JobId.Should().Be(sliceResult.JobId);
     }
 
     [Fact]
-    public async Task GetSlicingJob_ShouldReturnNotFound_WhenJobDoesNotExist()
+    public async Task GetSlicingJob_ShouldReturnNotFound_WhenJobDoesNotExistAsync()
     {
         // Arrange
         var nonExistentJobId = "non-existent-job";
@@ -374,7 +372,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CancelSlicingJob_ShouldCancelJob_WhenJobExists()
+    public async Task CancelSlicingJob_ShouldCancelJob_WhenJobExistsAsync()
     {
         // Arrange - Start a slicing job first
         var sliceResult = await StartTestSlicingJobAsync();
@@ -387,7 +385,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CancelSlicingJob_ShouldReturnNotFound_WhenJobDoesNotExist()
+    public async Task CancelSlicingJob_ShouldReturnNotFound_WhenJobDoesNotExistAsync()
     {
         // Arrange
         var nonExistentJobId = "non-existent-job";
@@ -400,7 +398,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetProfiles_ShouldFilterBySlicerType_WhenSlicerTypeProvided()
+    public async Task GetProfiles_ShouldFilterBySlicerType_WhenSlicerTypeProvidedAsync()
     {
         // Arrange - Create profiles with different slicer types
         await CreateTestProfileAsync("PrusaSlicer Profile", SlicerType.PrusaSlicer);
@@ -412,14 +410,14 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var profiles = await response.Content.ReadFromJsonAsync<SlicerProfileDto[]>();
-        
+
         profiles.Should().NotBeNull();
         // Note: Default profiles are also returned, so we just check that we got some profiles
         profiles!.Should().HaveCountGreaterOrEqualTo(1);
     }
 
     [Fact]
-    public async Task CreateProfile_ShouldStoreInDatabase_WithCorrectMetadata()
+    public async Task CreateProfile_ShouldStoreInDatabase_WithCorrectMetadataAsync()
     {
         // Arrange
         var createdProfile = await CreateTestProfileAsync("Database Test Profile");
@@ -427,7 +425,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Act - Verify in database
         using var scope = _factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        
+
         var profile = await dbContext.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == createdProfile.Id);
 
         // Assert
@@ -468,10 +466,10 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         var response = await _client.PostAsJsonAsync("/api/slicer/profiles", createRequest);
         response.EnsureSuccessStatusCode();
-        
+
         var profile = await response.Content.ReadFromJsonAsync<SlicerProfileResponseDto>();
         profile.Should().NotBeNull();
-        
+
         return profile!;
     }
 
@@ -481,11 +479,11 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         using var form = new MultipartFormDataContent();
         using var fileContent = new ByteArrayContent(stlContent);
         form.Add(fileContent, "modelFile", "job-test.stl");
-        
+
         var printerId = Guid.NewGuid();
         form.Add(new StringContent(printerId.ToString()), "printerId");
         form.Add(new StringContent("prusaslicer"), "slicerEngine");
-        
+
         var profile = new SlicerProfileDto
         {
             LayerHeight = 0.2,
@@ -500,10 +498,10 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         var response = await _client.PostAsync("/api/slicer/slice", form);
         response.EnsureSuccessStatusCode();
-        
+
         var result = await response.Content.ReadFromJsonAsync<SliceResultDto>();
         result.Should().NotBeNull();
-        
+
         return result!;
     }
 

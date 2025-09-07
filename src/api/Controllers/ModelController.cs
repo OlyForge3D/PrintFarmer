@@ -1,10 +1,9 @@
-﻿using Farm.Web.Shared;
+﻿using System.Security.Cryptography;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -77,12 +76,12 @@ public class ModelController : ControllerBase
                 using var memoryStream = new MemoryStream();
                 await modelFile.CopyToAsync(memoryStream);
                 memoryStream.Position = 0;
-                
+
                 // Calculate hash
                 using var sha256 = SHA256.Create();
                 var hashBytes = await sha256.ComputeHashAsync(memoryStream);
                 fileHash = Convert.ToHexString(hashBytes);
-                
+
                 // Write to file
                 memoryStream.Position = 0;
                 await memoryStream.CopyToAsync(stream);
@@ -91,7 +90,7 @@ public class ModelController : ControllerBase
             // Check for duplicate by hash
             var existingModel = await _context.Models3D
                 .FirstOrDefaultAsync(m => m.FileHash == fileHash);
-            
+
             if (existingModel != null)
             {
                 // Clean up the duplicate file
@@ -99,7 +98,7 @@ public class ModelController : ControllerBase
                 {
                     System.IO.File.Delete(filePath);
                 }
-                
+
                 // Return existing model info
                 var existingResult = new Model3DUploadResultDto
                 {
@@ -111,7 +110,7 @@ public class ModelController : ControllerBase
                     UploadedAt = existingModel.UploadedAt,
                     Url = $"/api/models/{existingModel.Id}/file"
                 };
-                
+
                 return Ok(existingResult); // Return 200 for duplicate instead of 201
             }
 
@@ -212,7 +211,7 @@ public class ModelController : ControllerBase
     {
         var model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id && m.IsValid);
-            
+
         if (model == null)
         {
             return NotFound();
@@ -245,7 +244,7 @@ public class ModelController : ControllerBase
     {
         var model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id && m.IsValid);
-            
+
         if (model == null)
         {
             return NotFound();
@@ -281,7 +280,7 @@ public class ModelController : ControllerBase
     {
         var model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id);
-            
+
         if (model == null)
         {
             return NotFound();
