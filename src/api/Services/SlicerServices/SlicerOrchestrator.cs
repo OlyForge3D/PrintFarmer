@@ -45,7 +45,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ModelFileUrl = request.ModelFileUrl,
                 ModelFileName = request.ModelFileName,
                 SlicerEngine = request.SlicerEngine,
-                SlicerProfile = request.SlicerProfile,
+                Profile = request.SlicerProfile, // Use the Profile property from base class
                 Priority = request.Priority,
                 Status = SlicingJobStatus.Queued,
                 CreatedAt = DateTime.UtcNow,
@@ -115,7 +115,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ResultFileUrl = job.ResultFileUrl,
                 EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
-                LayerCount = job.LayerCount,
+                LayerCount = job.LayerCount ?? 0,
                 Metadata = job.Metadata
             };
         }
@@ -137,7 +137,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 return false;
             }
 
-            if (job.Status == SlicingJobStatus.Completed || job.Status == SlicingJobStatus.Failed || job.Status == SlicingJobStatus.Cancelled)
+            if (job.Status == SlicingJobStatus.Completed || job.Status == SlicingJobStatus.Error || job.Status == SlicingJobStatus.Cancelled)
             {
                 _logger.LogWarning("Cannot cancel job {JobId} - job is already in final state: {Status}", jobId, job.Status);
                 return false;
@@ -231,7 +231,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ResultFileUrl = job.ResultFileUrl,
                 EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
-                LayerCount = job.LayerCount,
+                LayerCount = job.LayerCount ?? 0,
                 Metadata = job.Metadata
             }).ToList();
         }

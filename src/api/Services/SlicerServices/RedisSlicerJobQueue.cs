@@ -41,7 +41,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             
             // Store job details
             var jobKey = GetJobKey(job.Id);
-            transaction.HashSetAsync(jobKey, new HashEntry[]
+            _ = transaction.HashSetAsync(jobKey, new HashEntry[]
             {
                 new("id", job.Id.ToString()),
                 new("status", job.Status.ToString()),
@@ -51,10 +51,10 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             });
 
             // Add to priority queue
-            transaction.SortedSetAddAsync(_queueKey, jobJson, score);
+            _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score);
             
             // Set job expiration (30 days)
-            transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
+            _ = transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
 
             await transaction.ExecuteAsync();
 
@@ -79,7 +79,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 return null;
             }
 
-            var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobData.Element);
+            var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobData.Value.Element!);
             
             if (job != null && preferredEngine != null && job.SlicerEngine != preferredEngine)
             {
@@ -90,12 +90,12 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             if (job != null)
             {
-                job.Status = SlicingJobStatus.Processing;
+                job.Status = SlicingJobStatus.Slicing;
                 job.StartedAt = DateTime.UtcNow;
                 job.WorkerId = workerId;
                 
                 // Move to processing queue
-                await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Score);
+                await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Value.Score);
                 
                 await UpdateJobAsync(job);
                 

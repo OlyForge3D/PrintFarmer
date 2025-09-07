@@ -47,7 +47,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
     }
 
-    public async Task NotifyCompletionAsync(SlicingJob job, SlicingResult result, CancellationToken cancellationToken = default)
+    public async Task NotifyCompletionAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -94,7 +94,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
     }
 
-    public async Task NotifyFailureAsync(SlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
+    public async Task NotifyFailureAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -207,37 +207,37 @@ public class SlicerProgressHub : Hub
         _progressNotifier = progressNotifier;
     }
 
-    public async Task SubscribeToJob(Guid jobId)
+    public async Task SubscribeToJobAsync(Guid jobId)
     {
         await _progressNotifier.SubscribeToJobAsync(jobId, Context.ConnectionId);
         _logger.LogDebug("Connection {ConnectionId} subscribed to job {JobId}", Context.ConnectionId, jobId);
     }
 
-    public async Task UnsubscribeFromJob(Guid jobId)
+    public async Task UnsubscribeFromJobAsync(Guid jobId)
     {
         await _progressNotifier.UnsubscribeFromJobAsync(jobId, Context.ConnectionId);
         _logger.LogDebug("Connection {ConnectionId} unsubscribed from job {JobId}", Context.ConnectionId, jobId);
     }
 
-    public async Task JoinUserGroup(Guid userId)
+    public async Task JoinUserGroupAsync(Guid userId)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, $"User-{userId}");
         _logger.LogDebug("Connection {ConnectionId} joined user group {UserId}", Context.ConnectionId, userId);
     }
 
-    public async Task LeaveUserGroup(Guid userId)
+    public async Task LeaveUserGroupAsync(Guid userId)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"User-{userId}");
         _logger.LogDebug("Connection {ConnectionId} left user group {UserId}", Context.ConnectionId, userId);
     }
 
-    public async Task JoinMonitoringGroup()
+    public async Task JoinMonitoringGroupAsync()
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, "SlicingMonitors");
         _logger.LogDebug("Connection {ConnectionId} joined monitoring group", Context.ConnectionId);
     }
 
-    public async Task LeaveMonitoringGroup()
+    public async Task LeaveMonitoringGroupAsync()
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, "SlicingMonitors");
         _logger.LogDebug("Connection {ConnectionId} left monitoring group", Context.ConnectionId);

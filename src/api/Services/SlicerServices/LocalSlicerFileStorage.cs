@@ -165,7 +165,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 return null;
             }
 
-            var fileInfo = new FileInfo(filePath);
+            var fileInfo = new System.IO.FileInfo(filePath);
             var key = GetKeyFromFilePath(filePath);
             
             return new SlicerFileMetadata
@@ -216,7 +216,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             {
                 try
                 {
-                    var fileInfo = new FileInfo(file);
+                    var fileInfo = new System.IO.FileInfo(file);
                     if (fileInfo.LastWriteTimeUtc < cutoffTime)
                     {
                         File.Delete(file);
@@ -332,7 +332,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         };
     }
 
-    private static string GenerateETag(FileInfo fileInfo)
+    private static string GenerateETag(System.IO.FileInfo fileInfo)
     {
         // Simple ETag based on last write time and size
         var hash = $"{fileInfo.LastWriteTimeUtc.Ticks}-{fileInfo.Length}".GetHashCode();
