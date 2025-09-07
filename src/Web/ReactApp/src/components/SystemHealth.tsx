@@ -1,8 +1,9 @@
-import { useHealthStatus, useBasicHealth } from '@/hooks/useApi';
-import { CheckCircle, AlertCircle, XCircle, Loader } from 'lucide-react';
+import { useBasicHealth, useHealthStatus } from '@/hooks/useApi';
+import { isDetailedHealthStatus } from '@/types/api';
+import { AlertCircle, CheckCircle, Loader, XCircle } from 'lucide-react';
 
 export function SystemHealth() {
-  const { data: health, isLoading, error } = useBasicHealth();
+  const { data: basic, isLoading, error } = useBasicHealth();
 
   if (isLoading) {
     return (
@@ -13,7 +14,7 @@ export function SystemHealth() {
     );
   }
 
-  if (error || !health) {
+  if (error || !basic) {
     return (
       <div className="flex items-center space-x-2">
         <XCircle className="h-4 w-4 text-red-500" />
@@ -22,7 +23,7 @@ export function SystemHealth() {
     );
   }
 
-  const isHealthy = health.status === 'ok';
+  const isHealthy = basic.status === 'ok';
 
   return (
     <div className="flex items-center space-x-2">
@@ -43,7 +44,8 @@ interface DetailedSystemHealthProps {
 }
 
 export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthProps) {
-  const { data: detailedHealth, isLoading, error } = useHealthStatus();
+  const { data: health, isLoading, error } = useHealthStatus();
+  const detailedHealth = isDetailedHealthStatus(health) ? health : undefined;
 
   if (isLoading) {
     return (
@@ -74,7 +76,7 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
   const renderHealthStatus = (status: string, title: string) => {
     const isHealthy = status === 'Healthy';
     const isWarning = status === 'Degraded' || status === 'Warning';
-    
+
     let icon, colorClass;
     if (isHealthy) {
       icon = <CheckCircle className="h-5 w-5 text-green-500" />;
@@ -101,30 +103,25 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
   return (
     <div className={`bg-white rounded-lg shadow p-6 ${className}`}>
       <h3 className="text-lg font-medium mb-4">System Health</h3>
-      
+
       <div className="space-y-3">
         {/* Overall Status */}
-        {renderHealthStatus(detailedHealth.status || 'Unknown', 'Overall System')}
-        
+        {renderHealthStatus(detailedHealth.status ?? 'Unknown', 'Overall System')}
+
         {/* Database Status */}
-        {detailedHealth.checks?.database && 
-          renderHealthStatus(detailedHealth.checks.database.status, 'Database')
-        }
-        
+        {detailedHealth.results?.Database && renderHealthStatus(detailedHealth.results.Database.status ?? 'Unknown', 'Database')}
+
         {/* SignalR Status */}
-        {detailedHealth.checks?.signalr && 
-          renderHealthStatus(detailedHealth.checks.signalr.status, 'Real-time Updates')
-        }
-        
+        {detailedHealth.results?.SignalRHub && renderHealthStatus(detailedHealth.results.SignalRHub.status ?? 'Unknown', 'SignalR Hub')}
+
         {/* Additional health checks */}
-        {detailedHealth.checks && Object.entries(detailedHealth.checks)
-          .filter(([key]) => !['database', 'signalr'].includes(key))
-          .map(([key, value]: [string, any]) => (
+        {detailedHealth.results && Object.entries(detailedHealth.results)
+          .filter(([key]) => !['Database', 'SignalRHub'].includes(key))
+          .map(([key, value]) => (
             <div key={key}>
-              {renderHealthStatus(value.status, key.charAt(0).toUpperCase() + key.slice(1))}
+              {renderHealthStatus(value.status ?? 'Unknown', key)}
             </div>
-          ))
-        }
+          ))}
       </div>
 
       {/* Last Updated */}

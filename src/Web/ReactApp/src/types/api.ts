@@ -199,13 +199,41 @@ export interface FilamentType {
   defaultTemperatures: TempTargets;
 }
 
-// Health status response shape (partial, extensible)
-export interface HealthStatus {
-  status: string;
-  checks?: Record<string, unknown>;
-  duration?: string;
-  entries?: Record<string, unknown>;
-  [key: string]: unknown;
+// Health status response shapes (discriminated)
+// Basic health (/healthz, /api/healthz)
+export interface BasicHealthStatus {
+  kind: 'basic';
+  status: string; // "ok"
+}
+
+// Detailed health (/health, /api/health) produced by ASP.NET Core health checks writer
+// Property names are camelCased by System.Text.Json (see Program.HealthJsonOptions)
+export interface DetailedHealthStatusEntry {
+  status: string;            // Healthy | Degraded | Unhealthy | etc.
+  duration?: string;         // e.g. 00:00:00.0423123
+  description?: string;      // optional description
+  data?: Record<string, unknown>; // additional payload from health check
+}
+
+export interface DetailedHealthStatus {
+  kind: 'detailed';
+  status: string;                 // Overall status
+  totalChecksDuration: string;    // Overall duration
+  results: Record<string, DetailedHealthStatusEntry>;
+}
+
+// Union used by hooks/components; runtime narrowing via 'kind'
+export type HealthStatus = BasicHealthStatus | DetailedHealthStatus;
+
+// Runtime type guard helpers
+export function isDetailedHealthStatus(h: HealthStatus | undefined | null): h is DetailedHealthStatus {
+  if (!h || h.kind !== 'detailed') return false;
+  const candidate: unknown = (h as unknown as { results?: unknown }).results;
+  return typeof candidate === 'object' && candidate !== null;
+}
+
+export function isBasicHealthStatus(h: HealthStatus | undefined | null): h is BasicHealthStatus {
+  return !!h && h.kind === 'basic';
 }
 
 export interface FilamentTypeDto {
