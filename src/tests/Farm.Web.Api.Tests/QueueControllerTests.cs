@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Tests;
 /// <summary>
 /// Integration tests for QueueController (job queue management)
 /// </summary>
-public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
+public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
@@ -23,11 +23,17 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
         _client = _factory.CreateClient();
     }
 
+    public async Task InitializeAsync()
+    {
+        await CleanDatabaseAsync();
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
     [Fact]
     public async Task GetQueueOverview_ShouldReturnEmptyOverview_WhenNoPrintersExist()
     {
-        // Arrange - Clean database
-        await CleanDatabaseAsync();
+    // Arrange
         
         // Act
         var response = await _client.GetAsync("/api/queue/overview");
@@ -41,8 +47,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetQueueOverview_ShouldReturnPrinterQueues_WhenPrintersExist()
     {
-        // Arrange - Clean database and create a printer with capabilities
-        await CleanDatabaseAsync();
+    // Arrange - Create a printer with capabilities
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Test Printer");
 
         // Act
@@ -330,8 +335,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData(PrintJobPriority.High, 2)]
     public async Task QueuePriority_ShouldOrderJobsCorrectly(PrintJobPriority priority, int expectedPriorityValue)
     {
-        // Arrange - Clean database and create printer and gcode file
-        await CleanDatabaseAsync();
+    // Arrange - Create printer and gcode file
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Priority Order Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("priority-order.gcode");
         
@@ -356,7 +360,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetQueueOverview_ShouldShowCorrectCounts_WhenJobsExist()
     {
-        // Arrange - Create printer and multiple jobs
+    // Arrange - Create printer and multiple jobs
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Count Test Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("count-test.gcode");
         
@@ -410,8 +414,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task PrinterCompatibility_ShouldMatchByMaterialType()
     {
-        // Arrange - Clean database and create printer with specific material support
-        await CleanDatabaseAsync();
+    // Arrange - Create printer with specific material support
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Material Match Printer", supportedMaterials: ["PLA", "PETG", "ABS"]);
         var gcodeFile = await CreateTestGcodeFileAsync("material-test.gcode");
         
