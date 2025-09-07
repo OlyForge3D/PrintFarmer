@@ -1,8 +1,8 @@
-﻿using System.Text.Json;
 using System.Collections.Concurrent;
-using Farm.Web.Shared;
+using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -60,9 +60,9 @@ public class SlicerController : ControllerBase
         var form = await Request.ReadFormAsync();
 
         // File extraction
-    // Intentionally using manual extraction to provide custom validation message matching tests.
-    // ReSharper disable once UseIndexFromEndExpression
-    var modelFile = form.Files.Count > 0 ? form.Files[0] : null; // analyzer suppressed: custom parsing required
+        // Intentionally using manual extraction to provide custom validation message matching tests.
+        // ReSharper disable once UseIndexFromEndExpression
+        var modelFile = form.Files.Count > 0 ? form.Files[0] : null; // analyzer suppressed: custom parsing required
         if (modelFile == null || modelFile.Length == 0)
         {
             return BadRequest("Model file is required");
@@ -189,8 +189,8 @@ public class SlicerController : ControllerBase
 
                 if (printer != null)
                 {
-                    query = query.Where(p => 
-                        p.SpecificPrinterId == printerGuid || 
+                    query = query.Where(p =>
+                        p.SpecificPrinterId == printerGuid ||
                         (p.PrinterModelId == printer.ModelId && p.SpecificPrinterId == null) ||
                         (p.PrinterModelId == null && p.SpecificPrinterId == null)); // Universal profiles
                 }
@@ -411,9 +411,9 @@ public class SlicerController : ControllerBase
             return NotFound();
         }
 
-    Response.Headers["Content-Type"] = "text/event-stream";
-    Response.Headers["Cache-Control"] = "no-cache";
-    Response.Headers["Connection"] = "keep-alive";
+        Response.Headers["Content-Type"] = "text/event-stream";
+        Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["Connection"] = "keep-alive";
 
         try
         {
@@ -421,8 +421,8 @@ public class SlicerController : ControllerBase
             await SendProgressEventAsync(jobId, job.Progress, job.Status, job.Message);
 
             // Keep connection alive and send updates
-            while (s_activeJobs.TryGetValue(jobId, out var currentJob) &&
-                   (currentJob.Status == SlicingJobStatus.Queued || currentJob.Status == SlicingJobStatus.Slicing))
+            while (_activeJobs.TryGetValue(jobId, out var currentJob) &&
+                (currentJob.Status == SlicingJobStatus.Queued || currentJob.Status == SlicingJobStatus.Slicing))
             {
                 await Task.Delay(1000); // Update every second
 
@@ -505,12 +505,12 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetGcodeFile(string jobId)
     {
-    if (!s_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
+        if (!_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
         }
 
-    if (!IsSafePath(job.GcodeFilePath, _tempPath) || !System.IO.File.Exists(job.GcodeFilePath))
+        if (!IsSafePath(job.GcodeFilePath, _tempPath) || !System.IO.File.Exists(job.GcodeFilePath))
         {
             return NotFound();
         }
@@ -532,7 +532,8 @@ public class SlicerController : ControllerBase
         {
             return NotFound();
         }
-    job.Status = SlicingJobStatus.Cancelled;
+
+        job.Status = SlicingJobStatus.Cancelled;
         job.Message = "Cancelled by user";
 
         _logger.LogInformation("Slicing job cancelled: {JobId}", jobId);
@@ -549,12 +550,12 @@ public class SlicerController : ControllerBase
             // Simulate slicing process with progress updates
             for (int i = 0; i <= 100; i += 10)
             {
-                #pragma warning disable CA1508 // condition can change via external cancellation endpoint
+#pragma warning disable CA1508 // condition can change via external cancellation endpoint
                 if (job.Status == SlicingJobStatus.Cancelled)
                 {
                     return;
                 }
-                #pragma warning restore CA1508
+#pragma warning restore CA1508
 
                 job.Progress = i;
                 job.Message = i switch
@@ -571,7 +572,7 @@ public class SlicerController : ControllerBase
                 await Task.Delay(1000); // Simulate work
             }
 
-            #pragma warning disable CA1508 // condition can change via external cancellation endpoint
+#pragma warning disable CA1508 // condition can change via external cancellation endpoint
             if (job.Status != SlicingJobStatus.Cancelled)
             {
                 // Generate mock G-code file
@@ -593,7 +594,7 @@ public class SlicerController : ControllerBase
 
                 _logger.LogInformation("Slicing job completed: {JobId}", job.JobId);
             }
-            #pragma warning restore CA1508
+#pragma warning restore CA1508
         }
         catch (Exception ex)
         {

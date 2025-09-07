@@ -204,10 +204,14 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var rawKey = _configuration["Jwt:Key"];
-        if (string.IsNullOrWhiteSpace(rawKey)) return Task.FromResult(false);
-        var key = Encoding.UTF8.GetBytes(rawKey);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var rawKey = _configuration["Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(rawKey))
+            {
+                return Task.FromResult(false);
+            }
+
+            var key = Encoding.UTF8.GetBytes(rawKey);
 
             var validationParameters = new TokenValidationParameters
             {
@@ -234,10 +238,14 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var rawKey = _configuration["Jwt:Key"];
-        if (string.IsNullOrWhiteSpace(rawKey)) return Task.FromResult<ClaimsPrincipal?>(null);
-        var key = Encoding.UTF8.GetBytes(rawKey);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var rawKey = _configuration["Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(rawKey))
+            {
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
+            var key = Encoding.UTF8.GetBytes(rawKey);
 
             var validationParameters = new TokenValidationParameters
             {

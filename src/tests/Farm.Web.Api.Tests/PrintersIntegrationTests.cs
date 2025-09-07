@@ -1,5 +1,5 @@
-﻿using Moq;
-using System.Text.Json;
+﻿using System.Text.Json;
+using Moq;
 
 namespace Farm.Web.Api.Tests;
 
@@ -19,7 +19,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         var resp = await client.GetAsync("/healthz");
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadFromJsonAsync<HealthzDto>();
-    body!.Status.Should().Be("ok");
+        body!.Status.Should().Be("ok");
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         var resp = await client.GetAsync("/api/healthz");
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadFromJsonAsync<HealthzDto>();
-    body!.Status.Should().Be("ok");
+        body!.Status.Should().Be("ok");
     }
 
     [Fact]

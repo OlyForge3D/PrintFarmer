@@ -1,9 +1,9 @@
 ﻿using System.Net;
 using System.Net.NetworkInformation;
-using Microsoft.AspNetCore.SignalR;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services;
 
@@ -94,8 +94,8 @@ public partial class NetworkDiscoveryService(
     {
         LogDiscoveryStarting(logger);
 
-    // Gather existing printers to exclude from results (fresh scope for safety)
-    var existingServerUrls = LoadExistingPrinterUrlsSafe();
+        // Gather existing printers to exclude from results (fresh scope for safety)
+        var existingServerUrls = LoadExistingPrinterUrlsSafe();
 
         var settings = settingsService.GetSettings();
         // Auto-detect network ranges if none configured
@@ -133,8 +133,8 @@ public partial class NetworkDiscoveryService(
     {
         LogDiscoveryStarting(logger);
 
-    // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
-    var existingServerUrls = LoadExistingPrinterUrlsSafe();
+        // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
+        var existingServerUrls = LoadExistingPrinterUrlsSafe();
 
         var settings = settingsService.GetSettings();
         var autoDetectedNetworks = false;
@@ -199,18 +199,18 @@ public partial class NetworkDiscoveryService(
 
         var excludedPrinters = 0; // count of printers skipped because already present
 
-    foreach (var network in settings.NetworkRanges)
+        foreach (var network in settings.NetworkRanges)
         {
             LogScanningNetwork(logger, network);
-            
+
             // Calculate hosts count for this network to properly track scanned IPs
             var (networkAddr, cidr) = ParseCidr(network);
             var hosts = GetHostsInRange(networkAddr, cidr);
-            
-            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, existingServerUrls, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, ( ) => Interlocked.Increment(ref excludedPrinters), cancellationToken);
+
+            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, existingServerUrls, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, () => Interlocked.Increment(ref excludedPrinters), cancellationToken);
             scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
             foundPrinters += networkPrinters.Count;
-            
+
             LogNetworkScanCompleted(logger, network, networkPrinters.Count);
         }
 
@@ -253,9 +253,9 @@ public partial class NetworkDiscoveryService(
                 ),
                 cancellationToken);
 
-    // NOTE: Do not clear the cached progress immediately. Leaving the final Completed snapshot
-    // allows late group joiners (e.g. tests or UI racing right after start) to still receive a
-    // DiscoveryProgress event. A new discovery run will overwrite this entry anyway.
+        // NOTE: Do not clear the cached progress immediately. Leaving the final Completed snapshot
+        // allows late group joiners (e.g. tests or UI racing right after start) to still receive a
+        // DiscoveryProgress event. A new discovery run will overwrite this entry anyway.
 
         LogDiscoveryCompleted(logger, foundPrinters);
     }
@@ -423,7 +423,7 @@ public partial class NetworkDiscoveryService(
                 try
                 {
                     LogScanningHost(logger, host);
-                    
+
                     // Send progress update for current IP
                     var currentScanned = Interlocked.Increment(ref scannedCount);
                     var progressDto = new DiscoveryProgressDto(
@@ -447,10 +447,10 @@ public partial class NetworkDiscoveryService(
                     if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
                         LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
-                        
+
                         // Increment found printers count
                         Interlocked.Increment(ref foundCount);
-                        
+
                         // Send printer found event
                         // Mark as seen to avoid duplicate notifications
                         existingServerUrls.Add(NormalizeUrl(result.ServerUrl));

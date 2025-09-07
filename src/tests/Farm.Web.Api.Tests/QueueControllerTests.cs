@@ -1,11 +1,8 @@
-using System.Net;
-using System.Net.Http.Json;
-using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
+﻿using System.Net;
 using Farm.Web.Api.Data;
-using Microsoft.EntityFrameworkCore;
 using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
@@ -31,10 +28,10 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
-    public async Task GetQueueOverview_ShouldReturnEmptyOverview_WhenNoPrintersExist()
+    public async Task GetQueueOverview_ShouldReturnEmptyOverview_WhenNoPrintersExistAsync()
     {
-    // Arrange
-        
+        // Arrange
+
         // Act
         var response = await _client.GetAsync("/api/queue/overview");
 
@@ -45,7 +42,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task GetQueueOverview_ShouldReturnPrinterQueues_WhenPrintersExist()
+    public async Task GetQueueOverview_ShouldReturnPrinterQueues_WhenPrintersExistAsync()
     {
     // Arrange - Create a printer with capabilities
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Test Printer");
@@ -56,7 +53,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var overview = await response.Content.ReadFromJsonAsync<QueueOverviewDto[]>();
-        
+
         overview.Should().NotBeNull().And.HaveCount(1);
         overview![0].PrinterId.Should().Be(printer.Id);
         overview[0].PrinterName.Should().Be("Test Printer");
@@ -66,7 +63,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task GetPrinterQueue_ShouldReturnEmptyQueue_WhenNoPrintersExist()
+    public async Task GetPrinterQueue_ShouldReturnEmptyQueue_WhenNoPrintersExistAsync()
     {
         // Arrange
         var printerId = Guid.NewGuid();
@@ -81,7 +78,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task GetPrinterQueue_ShouldReturnJobs_WhenJobsExistForPrinter()
+    public async Task GetPrinterQueue_ShouldReturnJobs_WhenJobsExistForPrinterAsync()
     {
         // Arrange - Create printer, gcode file, and job
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Queue Test Printer");
@@ -94,7 +91,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var jobs = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto[]>();
-        
+
         jobs.Should().NotBeNull().And.HaveCount(1);
         jobs![0].Id.Should().Be(job.Id);
         jobs[0].AssignedPrinterId.Should().Be(printer.Id);
@@ -103,12 +100,12 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task AddJobToQueue_ShouldCreateJob_WhenValidDataProvided()
+    public async Task AddJobToQueue_ShouldCreateJob_WhenValidDataProvidedAsync()
     {
         // Arrange - Create prerequisites
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Job Test Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("job-test.gcode");
-        
+
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -124,7 +121,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var job = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         job.Should().NotBeNull();
         job!.Id.Should().NotBeEmpty();
         job.GcodeFileId.Should().Be(gcodeFile.Id);
@@ -136,12 +133,12 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task AddJobToQueue_ShouldAutoAssignPrinter_WhenNoAssignedPrinter()
+    public async Task AddJobToQueue_ShouldAutoAssignPrinter_WhenNoAssignedPrinterAsync()
     {
         // Arrange - Create prerequisites
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Auto Assign Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("auto-assign.gcode");
-        
+
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -155,14 +152,14 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var job = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         job.Should().NotBeNull();
         job!.AssignedPrinterId.Should().Be(printer.Id); // Should auto-assign to available printer
         job.AssignedPrinterName.Should().Be("Auto Assign Printer");
     }
 
     [Fact]
-    public async Task AddJobToQueue_ShouldReturnBadRequest_WhenGcodeFileNotFound()
+    public async Task AddJobToQueue_ShouldReturnBadRequest_WhenGcodeFileNotFoundAsync()
     {
         // Arrange
         var nonExistentGcodeId = Guid.NewGuid();
@@ -182,11 +179,11 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task AddJobToQueue_ShouldReturnBadRequest_WhenNoCompatiblePrinter()
+    public async Task AddJobToQueue_ShouldReturnBadRequest_WhenNoCompatiblePrinterAsync()
     {
         // Arrange - Create gcode file but no compatible printer
         var gcodeFile = await CreateTestGcodeFileAsync("incompatible.gcode");
-        
+
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -205,7 +202,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task GetJob_ShouldReturnJob_WhenJobExists()
+    public async Task GetJob_ShouldReturnJob_WhenJobExistsAsync()
     {
         // Arrange - Create job
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Get Job Printer");
@@ -218,7 +215,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var retrievedJob = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         retrievedJob.Should().NotBeNull();
         retrievedJob!.Id.Should().Be(job.Id);
         retrievedJob.GcodeFileId.Should().Be(gcodeFile.Id);
@@ -226,7 +223,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task GetJob_ShouldReturnNotFound_WhenJobDoesNotExist()
+    public async Task GetJob_ShouldReturnNotFound_WhenJobDoesNotExistAsync()
     {
         // Arrange
         var nonExistentJobId = Guid.NewGuid();
@@ -239,7 +236,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task RemoveJobFromQueue_ShouldDeleteJob_WhenJobExists()
+    public async Task RemoveJobFromQueue_ShouldDeleteJob_WhenJobExistsAsync()
     {
         // Arrange - Create job
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Remove Job Printer");
@@ -258,7 +255,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task RemoveJobFromQueue_ShouldReturnNotFound_WhenJobDoesNotExist()
+    public async Task RemoveJobFromQueue_ShouldReturnNotFound_WhenJobDoesNotExistAsync()
     {
         // Arrange
         var nonExistentJobId = Guid.NewGuid();
@@ -271,7 +268,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task RemoveJobFromQueue_ShouldReturnBadRequest_WhenJobAlreadyStarted()
+    public async Task RemoveJobFromQueue_ShouldReturnBadRequest_WhenJobAlreadyStartedAsync()
     {
         // Arrange - Create a job that's already printing
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Started Job Printer");
@@ -288,7 +285,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task UpdateJobPriority_ShouldUpdatePriority_WhenJobExists()
+    public async Task UpdateJobPriority_ShouldUpdatePriority_WhenJobExistsAsync()
     {
         // Arrange - Create job
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Priority Job Printer");
@@ -306,14 +303,14 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var updatedJob = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         updatedJob.Should().NotBeNull();
         updatedJob!.Id.Should().Be(job.Id);
         updatedJob.Priority.Should().Be((int)PrintJobPriority.High);
     }
 
     [Fact]
-    public async Task UpdateJobPriority_ShouldReturnNotFound_WhenJobDoesNotExist()
+    public async Task UpdateJobPriority_ShouldReturnNotFound_WhenJobDoesNotExistAsync()
     {
         // Arrange
         var nonExistentJobId = Guid.NewGuid();
@@ -333,12 +330,12 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [InlineData(PrintJobPriority.Low, 0)]
     [InlineData(PrintJobPriority.Normal, 1)]
     [InlineData(PrintJobPriority.High, 2)]
-    public async Task QueuePriority_ShouldOrderJobsCorrectly(PrintJobPriority priority, int expectedPriorityValue)
+    public async Task QueuePriority_ShouldOrderJobsCorrectlyAsync(PrintJobPriority priority, int expectedPriorityValue)
     {
     // Arrange - Create printer and gcode file
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Priority Order Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("priority-order.gcode");
-        
+
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -352,23 +349,23 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var job = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         job.Should().NotBeNull();
         job!.Priority.Should().Be(expectedPriorityValue);
     }
 
     [Fact]
-    public async Task GetQueueOverview_ShouldShowCorrectCounts_WhenJobsExist()
+    public async Task GetQueueOverview_ShouldShowCorrectCounts_WhenJobsExistAsync()
     {
     // Arrange - Create printer and multiple jobs
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Count Test Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("count-test.gcode");
-        
+
         // Create 3 queued jobs
         await CreateTestPrintJobAsync(gcodeFile.Id, printer.Id, PrintJobStatus.Queued);
         await CreateTestPrintJobAsync(gcodeFile.Id, printer.Id, PrintJobStatus.Queued);
         await CreateTestPrintJobAsync(gcodeFile.Id, printer.Id, PrintJobStatus.Queued);
-        
+
         // Create 1 printing job
         var currentJob = await CreateTestPrintJobAsync(gcodeFile.Id, printer.Id, PrintJobStatus.Printing);
 
@@ -378,7 +375,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var overview = await response.Content.ReadFromJsonAsync<QueueOverviewDto[]>();
-        
+
         overview.Should().NotBeNull().And.HaveCount(1);
         overview![0].QueuedJobsCount.Should().Be(3);
         overview[0].CurrentJobId.Should().Be(currentJob.Id);
@@ -386,12 +383,12 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     [Fact]
-    public async Task PrinterCompatibility_ShouldMatchByNozzleDiameter()
+    public async Task PrinterCompatibility_ShouldMatchByNozzleDiameterAsync()
     {
         // Arrange - Create printer with specific nozzle diameter
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Nozzle Match Printer", nozzleDiameter: 0.6);
         var gcodeFile = await CreateTestGcodeFileAsync("nozzle-test.gcode");
-        
+
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -406,18 +403,18 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var job = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         job.Should().NotBeNull();
         job!.AssignedPrinterId.Should().Be(printer.Id); // Should auto-assign to matching printer
     }
 
     [Fact]
-    public async Task PrinterCompatibility_ShouldMatchByMaterialType()
+    public async Task PrinterCompatibility_ShouldMatchByMaterialTypeAsync()
     {
     // Arrange - Create printer with specific material support
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Material Match Printer", supportedMaterials: ["PLA", "PETG", "ABS"]);
         var gcodeFile = await CreateTestGcodeFileAsync("material-test.gcode");
-        
+
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -432,7 +429,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var job = await response.Content.ReadFromJsonAsync<JobQueuePrintJobDto>();
-        
+
         job.Should().NotBeNull();
         job!.AssignedPrinterId.Should().Be(printer.Id); // Should auto-assign to matching printer
     }
@@ -440,7 +437,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     // Helper methods
 
     private async Task<Printer> CreateTestPrinterWithCapabilitiesAsync(
-        string name, 
+        string name,
         double? nozzleDiameter = null,
         string[]? supportedMaterials = null)
     {
@@ -501,8 +498,8 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     }
 
     private async Task<PrintJob> CreateTestPrintJobAsync(
-        Guid gcodeFileId, 
-        Guid printerId, 
+        Guid gcodeFileId,
+        Guid printerId,
         PrintJobStatus status = PrintJobStatus.Queued)
     {
         using var scope = _factory.Services.CreateScope();
@@ -532,7 +529,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
 
         return printJob;
     }
-    
+
     /// <summary>
     /// Clean the database by removing all test data
     /// </summary>
@@ -548,7 +545,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         dbContext.GcodeFiles.RemoveRange(dbContext.GcodeFiles);
         dbContext.Models3D.RemoveRange(dbContext.Models3D);
         dbContext.SlicerProfiles.RemoveRange(dbContext.SlicerProfiles);
-        
+
         await dbContext.SaveChangesAsync();
     }
 }

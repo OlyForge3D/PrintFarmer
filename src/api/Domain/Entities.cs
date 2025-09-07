@@ -290,7 +290,7 @@ public class SlicerProfile
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public SlicerType SlicerType { get; set; }
-    
+
     // Printer Compatibility
     public Guid? PrinterModelId { get; set; }
     public PrinterModel? PrinterModel { get; set; }

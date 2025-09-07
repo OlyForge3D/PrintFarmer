@@ -1,8 +1,7 @@
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
@@ -19,7 +18,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Model3D_ShouldCreateAndRetrieve_WithAllProperties()
+    public async Task Model3D_ShouldCreateAndRetrieve_WithAllPropertiesAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -73,7 +72,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SlicerProfile_ShouldCreateAndRetrieve_WithAllProperties()
+    public async Task SlicerProfile_ShouldCreateAndRetrieve_WithAllPropertiesAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -124,7 +123,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task PrintJob_ShouldCreateAndRetrieve_WithAllProperties()
+    public async Task PrintJob_ShouldCreateAndRetrieve_WithAllPropertiesAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -195,7 +194,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
         retrieved.QueuePosition.Should().Be(1);
         retrieved.RequiredNozzleDiameter.Should().Be(0.4m);
         retrieved.RequiredMaterialType.Should().Be("PLA");
-        retrieved.RequiredCapabilities.Should().BeEquivalentTo(new[] { "heated_bed", "auto_leveling" });
+        retrieved.RequiredCapabilities.Should().BeEquivalentTo(["heated_bed", "auto_leveling"]);
         retrieved.EstimatedPrintTime.Should().Be(TimeSpan.FromHours(2.5));
         retrieved.EstimatedFilamentUsage.Should().Be(25.5);
         retrieved.PreferredPrinterIds.Should().BeEquivalentTo(new[] { printer.Id });
@@ -209,7 +208,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task PrinterCapabilities_ShouldCreateAndRetrieve_WithAllProperties()
+    public async Task PrinterCapabilities_ShouldCreateAndRetrieve_WithAllPropertiesAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -264,7 +263,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
         retrieved.Should().NotBeNull();
         retrieved!.PrinterId.Should().Be(printer.Id);
         retrieved.NozzleDiameter.Should().Be(0.6);
-        retrieved.SupportedMaterials.Should().BeEquivalentTo(new[] { "PLA", "PETG", "ABS", "TPU" });
+        retrieved.SupportedMaterials.Should().BeEquivalentTo(["PLA", "PETG", "ABS", "TPU"]);
         retrieved.MaxBuildVolumeX.Should().Be(220.0);
         retrieved.MaxBuildVolumeY.Should().Be(220.0);
         retrieved.MaxBuildVolumeZ.Should().Be(250.0);
@@ -292,7 +291,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData(SlicerType.OrcaSlicer)]
     [InlineData(SlicerType.Cura)]
     [InlineData(SlicerType.SuperSlicer)]
-    public async Task SlicerProfile_ShouldSupportAllSlicerTypes(SlicerType slicerType)
+    public async Task SlicerProfile_ShouldSupportAllSlicerTypesAsync(SlicerType slicerType)
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -323,7 +322,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData(ProfileQuality.Draft)]
     [InlineData(ProfileQuality.Standard)]
     [InlineData(ProfileQuality.Fine)]
-    public async Task SlicerProfile_ShouldSupportAllQualityLevels(ProfileQuality quality)
+    public async Task SlicerProfile_ShouldSupportAllQualityLevelsAsync(ProfileQuality quality)
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -355,7 +354,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData(ModelFileFormat.OBJ)]
     [InlineData(ModelFileFormat.PLY)]
     [InlineData(ModelFileFormat.STEP)]
-    public async Task Model3D_ShouldSupportAllFileFormats(ModelFileFormat format)
+    public async Task Model3D_ShouldSupportAllFileFormatsAsync(ModelFileFormat format)
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -395,7 +394,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData(PrintJobStatus.Completed)]
     [InlineData(PrintJobStatus.Failed)]
     [InlineData(PrintJobStatus.Cancelled)]
-    public async Task PrintJob_ShouldSupportAllStatuses(PrintJobStatus status)
+    public async Task PrintJob_ShouldSupportAllStatusesAsync(PrintJobStatus status)
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -451,7 +450,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SlicerProfile_ShouldSupportPrinterModelAssociation()
+    public async Task SlicerProfile_ShouldSupportPrinterModelAssociationAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -503,7 +502,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task SlicerProfile_ShouldSupportSpecificPrinterAssociation()
+    public async Task SlicerProfile_ShouldSupportSpecificPrinterAssociationAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -545,7 +544,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task DatabaseContext_ShouldHandleComplexRelationships()
+    public async Task DatabaseContext_ShouldHandleComplexRelationshipsAsync()
     {
         // Arrange
         using var scope = _factory.Services.CreateScope();
@@ -556,10 +555,10 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
         var printerModel = new PrinterModel { Id = Guid.NewGuid(), Name = "Complex Model", ManufacturerId = manufacturer.Id };
         var printer = new Printer { Id = Guid.NewGuid(), Name = "Complex Printer", ModelId = printerModel.Id, ServerUrl = "http://complex:7125", Backend = 0 };
         var capabilities = new PrinterCapabilities { Id = Guid.NewGuid(), PrinterId = printer.Id, IsAvailable = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
-        var gcodeFile = new GcodeFile 
-        { 
-            Id = Guid.NewGuid(), 
-            OriginalFileName = "complex.gcode", 
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            OriginalFileName = "complex.gcode",
             DisplayName = "Complex GCode",
             FilePath = "/tmp/complex.gcode",
             FileSizeBytes = 4096,
@@ -571,9 +570,9 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
-        var printJob = new PrintJob 
-        { 
-            Id = Guid.NewGuid(), 
+        var printJob = new PrintJob
+        {
+            Id = Guid.NewGuid(),
             Name = "Complex Job",
             GcodeFileId = gcodeFile.Id,
             AssignedPrinterId = printer.Id,

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
@@ -24,7 +24,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
             FirstName = "Test",
             LastName = "Admin"
         };
-        
+
         var response = await _client.PostAsJsonAsync("/api/setup/initial-admin", adminRequest);
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         return result!.Token!;
@@ -38,21 +38,21 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
             "TestPassword123!",
             "Test",
             "User");
-        
+
         var response = await _client.PostAsJsonAsync("/api/auth/register", userRequest);
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         return result!.Token!;
     }
 
     [Fact]
-    public async Task GetUsers_AsAdmin_ShouldReturnAllUsers()
+    public async Task GetUsers_AsAdmin_ShouldReturnAllUsersAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         await CreateUserAndGetTokenAsync("user1", "user1@example.com");
         await CreateUserAndGetTokenAsync("user2", "user2@example.com");
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         // Act
@@ -60,23 +60,23 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var users = await response.Content.ReadFromJsonAsync<UserDto[]>();
         users.Should().NotBeNull();
         users!.Length.Should().BeGreaterOrEqualTo(3); // admin + 2 users
-        
+
         users.Should().Contain(u => u.Username == "testadmin" && u.Roles.Contains("farm_admin"));
         users.Should().Contain(u => u.Username == "user1" && u.Roles.Contains("farm_user"));
         users.Should().Contain(u => u.Username == "user2" && u.Roles.Contains("farm_user"));
     }
 
     [Fact]
-    public async Task GetUsers_AsRegularUser_ShouldReturnForbidden()
+    public async Task GetUsers_AsRegularUser_ShouldReturnForbiddenAsync()
     {
         // Arrange
         var userToken = await CreateUserAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
 
         // Act
@@ -87,7 +87,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task GetUsers_WithoutAuthentication_ShouldReturnUnauthorized()
+    public async Task GetUsers_WithoutAuthentication_ShouldReturnUnauthorizedAsync()
     {
         // Act
         var response = await _client.GetAsync("/api/users");
@@ -97,16 +97,16 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task GetUser_AsAdmin_ShouldReturnSpecificUser()
+    public async Task GetUser_AsAdmin_ShouldReturnSpecificUserAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         await CreateUserAndGetTokenAsync("getuser", "getuser@example.com");
-        
+
         // Get the user ID first
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var usersResponse = await _client.GetAsync("/api/users");
         var users = await usersResponse.Content.ReadFromJsonAsync<UserDto[]>();
         var targetUser = users!.First(u => u.Username == "getuser");
@@ -116,7 +116,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var user = await response.Content.ReadFromJsonAsync<UserDto>();
         user.Should().NotBeNull();
         user!.Id.Should().Be(targetUser.Id);
@@ -126,12 +126,12 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task CreateUser_AsAdmin_ShouldReturnCreatedUser()
+    public async Task CreateUser_AsAdmin_ShouldReturnCreatedUserAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         var createRequest = new CreateUserRequest
@@ -149,7 +149,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        
+
         var user = await response.Content.ReadFromJsonAsync<UserDto>();
         user.Should().NotBeNull();
         user!.Username.Should().Be("createduser");
@@ -161,12 +161,12 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task CreateUser_AsRegularUser_ShouldReturnForbidden()
+    public async Task CreateUser_AsRegularUser_ShouldReturnForbiddenAsync()
     {
         // Arrange
-    var userToken = await CreateUserAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+        var userToken = await CreateUserAndGetTokenAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
 
         var createRequest = new CreateUserRequest
@@ -186,13 +186,13 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task CreateUser_WithDuplicateUsername_ShouldReturnBadRequest()
+    public async Task CreateUser_WithDuplicateUsername_ShouldReturnBadRequestAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         await CreateUserAndGetTokenAsync("duplicateuser", "first@example.com");
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         var createRequest = new CreateUserRequest
@@ -209,22 +209,22 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("already taken");
     }
 
     [Fact]
-    public async Task UpdateUser_AsAdmin_ShouldReturnUpdatedUser()
+    public async Task UpdateUser_AsAdmin_ShouldReturnUpdatedUserAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         await CreateUserAndGetTokenAsync("updateuser", "update@example.com");
-        
+
         // Get the user ID first
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var usersResponse = await _client.GetAsync("/api/users");
         var users = await usersResponse.Content.ReadFromJsonAsync<UserDto[]>();
         var targetUser = users!.First(u => u.Username == "updateuser");
@@ -242,7 +242,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var updatedUser = await response.Content.ReadFromJsonAsync<UserDto>();
         updatedUser.Should().NotBeNull();
         updatedUser!.Id.Should().Be(targetUser.Id);
@@ -253,22 +253,22 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task UpdateUser_AsRegularUser_ShouldReturnForbidden()
+    public async Task UpdateUser_AsRegularUser_ShouldReturnForbiddenAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         var userToken = await CreateUserAndGetTokenAsync("updateuser2", "update2@example.com");
-        
+
         // Get the user ID
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var usersResponse = await _client.GetAsync("/api/users");
         var users = await usersResponse.Content.ReadFromJsonAsync<UserDto[]>();
         var targetUser = users!.First(u => u.Username == "updateuser2");
 
         // Switch to regular user token
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
 
         var updateRequest = new UpdateUserRequest
@@ -285,16 +285,16 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task DeleteUser_AsAdmin_ShouldReturnNoContent()
+    public async Task DeleteUser_AsAdmin_ShouldReturnNoContentAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         await CreateUserAndGetTokenAsync("deleteuser", "delete@example.com");
-        
+
         // Get the user ID first
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var usersResponse = await _client.GetAsync("/api/users");
         var users = await usersResponse.Content.ReadFromJsonAsync<UserDto[]>();
         var targetUser = users!.First(u => u.Username == "deleteuser");
@@ -304,21 +304,21 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        
+
         // Verify user is deleted
         var getResponse = await _client.GetAsync($"/api/users/{targetUser.Id}");
         getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
-    public async Task DeleteUser_AdminTryingToDeleteSelf_ShouldReturnBadRequest()
+    public async Task DeleteUser_AdminTryingToDeleteSelf_ShouldReturnBadRequestAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         // Get the admin user ID
         var usersResponse = await _client.GetAsync("/api/users");
         var users = await usersResponse.Content.ReadFromJsonAsync<UserDto[]>();
@@ -329,28 +329,28 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("Cannot delete your own account");
     }
 
     [Fact]
-    public async Task DeleteUser_AsRegularUser_ShouldReturnForbidden()
+    public async Task DeleteUser_AsRegularUser_ShouldReturnForbiddenAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-    var userToken = await CreateUserAndGetTokenAsync("deleteuser2", "delete2@example.com");
-        
+        var userToken = await CreateUserAndGetTokenAsync("deleteuser2", "delete2@example.com");
+
         // Get the user ID
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var usersResponse = await _client.GetAsync("/api/users");
         var users = await usersResponse.Content.ReadFromJsonAsync<UserDto[]>();
         var targetUser = users!.First(u => u.Username == "deleteuser2");
 
         // Switch to regular user token
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
 
         // Act
@@ -361,12 +361,12 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task GetRoles_AsAdmin_ShouldReturnAllRoles()
+    public async Task GetRoles_AsAdmin_ShouldReturnAllRolesAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         // Act
@@ -374,14 +374,14 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var roles = await response.Content.ReadFromJsonAsync<RoleDto[]>();
         roles.Should().NotBeNull();
         roles!.Should().HaveCountGreaterOrEqualTo(2); // At least farm_admin and farm_user
-        
+
         roles.Should().Contain(r => r.Name == "farm_admin");
         roles.Should().Contain(r => r.Name == "farm_user");
-        
+
         // Verify role details
         var adminRole = roles!.First(r => r.Name == "farm_admin");
         adminRole.DisplayName.Should().NotBeNullOrEmpty();
@@ -390,12 +390,12 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task GetRoles_AsRegularUser_ShouldReturnForbidden()
+    public async Task GetRoles_AsRegularUser_ShouldReturnForbiddenAsync()
     {
         // Arrange
         var userToken = await CreateUserAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
 
         // Act

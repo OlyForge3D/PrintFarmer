@@ -1,6 +1,6 @@
-using Farm.Web.Shared;
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -44,14 +44,14 @@ public class QueueController : ControllerBase
             foreach (var printer in printers)
             {
                 var queuedJobs = await _context.PrintJobs
-                    .Where(j => j.AssignedPrinterId == printer.Id && 
+                    .Where(j => j.AssignedPrinterId == printer.Id &&
                                (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned))
                     .OrderBy(j => j.Priority)
                     .ThenBy(j => j.QueuedAt)
                     .ToListAsync();
 
                 var currentJob = await _context.PrintJobs
-                    .FirstOrDefaultAsync(j => j.AssignedPrinterId == printer.Id && 
+                    .FirstOrDefaultAsync(j => j.AssignedPrinterId == printer.Id &&
                                             (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing));
 
                 queueOverview.Add(new QueueOverviewDto
@@ -181,8 +181,8 @@ public class QueueController : ControllerBase
                 QueuePosition = await GetNextQueuePositionAsync(assignedPrinterId.Value),
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
-                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue 
-                    ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value) 
+                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
+                    ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
                     : null,
                 EstimatedFilamentUsage = gcodeFile.EstimatedFilamentWeightG,
                 CreatedAt = DateTime.UtcNow,
@@ -372,7 +372,7 @@ public class QueueController : ControllerBase
         foreach (var printer in printers)
         {
             // Check nozzle diameter compatibility
-            if (request.RequiredNozzleDiameter.HasValue && 
+            if (request.RequiredNozzleDiameter.HasValue &&
                 printer.Capabilities?.NozzleDiameter.HasValue == true &&
                 Math.Abs(printer.Capabilities.NozzleDiameter.Value - (double)request.RequiredNozzleDiameter.Value) > 0.01)
             {
@@ -389,7 +389,7 @@ public class QueueController : ControllerBase
 
             // Check current queue load
             var queueCount = await _context.PrintJobs
-                .CountAsync(j => j.AssignedPrinterId == printer.Id && 
+                .CountAsync(j => j.AssignedPrinterId == printer.Id &&
                                (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned));
 
             // Simple load balancing - prefer printers with fewer queued jobs
@@ -405,7 +405,7 @@ public class QueueController : ControllerBase
     private async Task<int> GetNextQueuePositionAsync(Guid printerId)
     {
         var maxPosition = await _context.PrintJobs
-            .Where(j => j.AssignedPrinterId == printerId && 
+            .Where(j => j.AssignedPrinterId == printerId &&
                        (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned))
             .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
 
@@ -418,7 +418,7 @@ public class QueueController : ControllerBase
 
         if (currentJob?.EstimatedPrintTime.HasValue == true)
         {
-            var elapsed = currentJob.ActualStartTime.HasValue 
+            var elapsed = currentJob.ActualStartTime.HasValue
                 ? DateTime.UtcNow - currentJob.ActualStartTime.Value
                 : TimeSpan.Zero;
             var remaining = currentJob.EstimatedPrintTime.Value - elapsed;
