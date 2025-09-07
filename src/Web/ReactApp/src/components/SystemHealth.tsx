@@ -1,6 +1,10 @@
 import { useHealthStatus, useBasicHealth } from '@/hooks/useApi';
 import { CheckCircle, AlertCircle, XCircle, Loader } from 'lucide-react';
 
+// Narrow typing helpers for dynamic health check structure
+type HealthCheckEntry = { status?: string; [key: string]: unknown };
+type HealthChecks = Record<string, HealthCheckEntry>;
+
 export function SystemHealth() {
   const { data: health, isLoading, error } = useBasicHealth();
 
@@ -104,27 +108,34 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
       
       <div className="space-y-3">
         {/* Overall Status */}
-        {renderHealthStatus(detailedHealth.status || 'Unknown', 'Overall System')}
+  {renderHealthStatus(String(detailedHealth.status || 'Unknown'), 'Overall System')}
         
         {/* Database Status */}
-        {detailedHealth.checks?.database && 
-          renderHealthStatus(detailedHealth.checks.database.status, 'Database')
-        }
+        {(() => {
+          const checks = detailedHealth.checks as HealthChecks | undefined;
+          const dbStatus = checks?.database?.status;
+          return dbStatus ? renderHealthStatus(String(dbStatus), 'Database') : null;
+        })()}
         
         {/* SignalR Status */}
-        {detailedHealth.checks?.signalr && 
-          renderHealthStatus(detailedHealth.checks.signalr.status, 'Real-time Updates')
-        }
+        {(() => {
+          const checks = detailedHealth.checks as HealthChecks | undefined;
+            const sigStatus = checks?.signalr?.status;
+            return sigStatus ? renderHealthStatus(String(sigStatus), 'Real-time Updates') : null;
+        })()}
         
         {/* Additional health checks */}
-        {detailedHealth.checks && Object.entries(detailedHealth.checks)
-          .filter(([key]) => !['database', 'signalr'].includes(key))
-          .map(([key, value]: [string, any]) => (
-            <div key={key}>
-              {renderHealthStatus(value.status, key.charAt(0).toUpperCase() + key.slice(1))}
-            </div>
-          ))
-        }
+        {(() => {
+          const checks = detailedHealth.checks as HealthChecks | undefined;
+          if (!checks) return null;
+          return Object.entries(checks)
+            .filter(([key]) => !['database', 'signalr'].includes(key))
+            .map(([key, value]) => (
+              <div key={key}>
+                {renderHealthStatus(String(value.status || 'Unknown'), key.charAt(0).toUpperCase() + key.slice(1))}
+              </div>
+            ));
+        })()}
       </div>
 
       {/* Last Updated */}

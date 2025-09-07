@@ -2,12 +2,49 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- existing head updated for PWA -->
+    <link rel="icon" type="image/svg+xml" href="/printfarmer-logo.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- Adaptive theme colors -->
+  <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b1524" media="(prefers-color-scheme: dark)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+    <title>PrintFarmer</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Dynamically update theme-color on manual theme toggles (if app sets data-theme attr)
+      const updateThemeColor = () => {
+        const isDark = document.documentElement.classList.contains('dark') || window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const meta = document.querySelector('meta[name=\"theme-color\"][media]') || document.querySelector('meta[name=\"theme-color\"]');
+        if (!meta) return;
+        if (isDark) {
+          // ensure a non-media meta exists for some browsers
+          let base = document.querySelector('meta[name=\"theme-color\"][data-dynamic]');
+          if (!base) {
+            base = document.createElement('meta');
+            base.setAttribute('name','theme-color');
+            base.setAttribute('data-dynamic','true');
+            document.head.appendChild(base);
+          }
+          base.setAttribute('content','#0b1524');
+        } else {
+          let base = document.querySelector('meta[name=\"theme-color\"][data-dynamic]');
+          if (!base) {
+            base = document.createElement('meta');
+            base.setAttribute('name','theme-color');
+            base.setAttribute('data-dynamic','true');
+            document.head.appendChild(base);
+          }
+          base.setAttribute('content','#1d4ed8');
+        }
+      };
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateThemeColor);
+      document.addEventListener('DOMContentLoaded', updateThemeColor);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
