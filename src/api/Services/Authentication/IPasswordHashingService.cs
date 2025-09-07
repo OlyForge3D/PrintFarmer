@@ -14,7 +14,7 @@ public class PasswordHashingService : IPasswordHashingService
         {
             throw new ArgumentException("Password cannot be null or empty", nameof(password));
         }
-        
+
         return BCrypt.Net.BCrypt.HashPassword(password);
     }
 
@@ -24,7 +24,7 @@ public class PasswordHashingService : IPasswordHashingService
         {
             return false;
         }
-        
+
         try
         {
             return BCrypt.Net.BCrypt.Verify(password, hashedPassword);

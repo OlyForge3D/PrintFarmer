@@ -994,7 +994,7 @@ public class SlicerProfileDto
     public int PrintSpeed { get; set; } = 50; // mm/s
     public int NozzleTemperature { get; set; } = 210; // °C
     public int BedTemperature { get; set; } = 60; // °C
-    public bool Supports { get; set; } = false;
+    public bool Supports { get; set; }
     public string Material { get; set; } = "PLA";
     public string Quality { get; set; } = "standard"; // draft, standard, fine
 }
@@ -1019,13 +1019,86 @@ public class SliceMetadataDto
     public double EstimatedCost { get; set; }
 }
 
+// Slicer Profile Management DTOs
+public class CreateSlicerProfileDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string SlicerType { get; set; } = "PrusaSlicer"; // PrusaSlicer, OrcaSlicer, etc.
+    public Guid? PrinterModelId { get; set; }
+    public Guid? SpecificPrinterId { get; set; }
+    public double LayerHeight { get; set; } = 0.2;
+    public int InfillPercentage { get; set; } = 20;
+    public double PrintSpeed { get; set; } = 50;
+    public int NozzleTemperature { get; set; } = 210;
+    public int BedTemperature { get; set; } = 60;
+    public bool EnableSupports { get; set; } = false;
+    public string Material { get; set; } = "PLA";
+    public string Quality { get; set; } = "Standard"; // Draft, Standard, Fine
+    public string? AdvancedSettings { get; set; }
+    public bool IsDefault { get; set; } = false;
+    public bool IsPublic { get; set; } = true;
+}
+
+public class SlicerProfileResponseDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string SlicerType { get; set; } = string.Empty;
+    public Guid? PrinterModelId { get; set; }
+    public string? PrinterModelName { get; set; }
+    public Guid? SpecificPrinterId { get; set; }
+    public string? SpecificPrinterName { get; set; }
+    public double LayerHeight { get; set; }
+    public int InfillPercentage { get; set; }
+    public int PrintSpeed { get; set; }
+    public int NozzleTemperature { get; set; }
+    public int BedTemperature { get; set; }
+    public bool EnableSupports { get; set; }
+    public string Material { get; set; } = string.Empty;
+    public string Quality { get; set; } = string.Empty;
+    public string? AdvancedSettings { get; set; }
+    public bool IsDefault { get; set; }
+    public bool IsPublic { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+// Queue Management DTOs
+public class QueueOverviewDto
+{
+    public Guid PrinterId { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+    public string PrinterModel { get; set; } = string.Empty;
+    public bool IsAvailable { get; set; }
+    public int QueuedJobsCount { get; set; }
+    public Guid? CurrentJobId { get; set; }
+    public string? CurrentJobName { get; set; }
+    public DateTime? EstimatedCompletionTime { get; set; }
+}
+
+public class UpdateJobPriorityDto
+{
+    public int Priority { get; set; }
+}
+
 /// <summary>
 /// Internal tracking DTO for active / completed slicing jobs.
 /// </summary>
+public enum SlicingJobStatus
+{
+    Queued,
+    Slicing,
+    Completed,
+    Error,
+    Cancelled
+}
+
 public class SlicingJobDto
 {
     public string JobId { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty; // queued, slicing, completed, error, cancelled
+    public SlicingJobStatus Status { get; set; } = SlicingJobStatus.Queued;
     public int Progress { get; set; } // 0-100
     public string? Message { get; set; }
     public string SlicerEngine { get; set; } = string.Empty; // prusaslicer, orcaslicer

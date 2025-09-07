@@ -63,10 +63,10 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     private readonly ConcurrentDictionary<Guid, int> _parseErrorCounts = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastHttpPollTimes = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusUpdateTimes = new();
-    
+
     // Track polling strategy per printer based on Klippy state
     private readonly ConcurrentDictionary<Guid, PollingMode> _pollingModes = new();
-    
+
     private enum PollingMode
     {
         WebSocketRealTime,  // Use WebSocket for real-time updates (normal operation)
@@ -155,7 +155,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             {
                 logger.LogError(ex, "Error enumerating printers for subscription");
             }
-            
+
             try
             {
                 await CheckForStaleConnectionsAsync(ct);
@@ -164,7 +164,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             {
                 logger.LogError(ex, "Error checking for stale connections");
             }
-            
+
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(10), ct);
@@ -198,20 +198,20 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         var now = DateTime.UtcNow;
         var staleThreshold = now - StaleConnectionThreshold;
-        
+
         foreach (var (printerId, lastUpdate) in _lastStatusUpdateTimes.ToList())
         {
             if (lastUpdate < staleThreshold)
             {
-                logger.LogWarning("Detected stale connection for printer {PrinterId}, last update was {LastUpdate:O}. Triggering HTTP polling fallback.", 
+                logger.LogWarning("Detected stale connection for printer {PrinterId}, last update was {LastUpdate:O}. Triggering HTTP polling fallback.",
                     printerId, lastUpdate);
-                
+
                 // Find the printer to trigger fallback
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var printer = await db.Printers.AsNoTracking()
                     .FirstOrDefaultAsync(p => p.Id == printerId, ct);
-                
+
                 if (printer != null)
                 {
                     await TriggerHttpPollingFallbackAsync(printer, ct);
@@ -304,10 +304,10 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
                 // Connection successful - reset metrics
                 metrics.Reset();
-                
+
                 // Initialize status update tracking
                 _lastStatusUpdateTimes[id] = DateTime.UtcNow;
-                
+
                 logger.LogInformation("Successfully established monitored connection to printer {PrinterName}", printer.Name);
 
                 // Step 4: Message processing loop
@@ -572,13 +572,13 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     {
                         logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
                             printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
-                            
+
                         // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
                         if (jsonRpcResponse.Error.Code == -32700)
                         {
                             _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
                             var errorCount = _parseErrorCounts[printer.Id];
-                            
+
                             if (errorCount >= MaxParseErrorsBeforeFallback)
                             {
                                 logger.LogWarning("JSON-RPC parse error threshold ({Threshold}) exceeded for printer {PrinterName}. Triggering HTTP polling fallback.",
@@ -601,11 +601,11 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 catch (JsonException ex)
                 {
                     logger.LogWarning("Failed to parse JSON-RPC response from printer {PrinterName}: {Error}", printer.Name, ex.Message);
-                    
+
                     // Track parse errors and trigger fallback if threshold exceeded
                     _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
                     var errorCount = _parseErrorCounts[printer.Id];
-                    
+
                     if (errorCount >= MaxParseErrorsBeforeFallback)
                     {
                         logger.LogWarning("Parse error threshold ({Threshold}) exceeded for printer {PrinterName}. Triggering HTTP polling fallback.",
@@ -999,33 +999,25 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         try
         {
             _pollingModes.AddOrUpdate(printerId, mode, (key, oldValue) => mode);
-            
-            logger.LogInformation("Set polling mode for printer {PrinterId} to {PollingMode}: {Reason}", 
+
+            logger.LogInformation("Set polling mode for printer {PrinterId} to {PollingMode}: {Reason}",
                 printerId, mode, reason);
 
             // Log state transition if mode changed
             if (_pollingModes.TryGetValue(printerId, out var previousMode) && previousMode != mode)
             {
-                logger.LogDebug("Polling mode transition for printer {PrinterId}: {PreviousMode} -> {NewMode}", 
+                logger.LogDebug("Polling mode transition for printer {PrinterId}: {PreviousMode} -> {NewMode}",
                     printerId, previousMode, mode);
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to set polling mode for printer {PrinterId} to {PollingMode}", 
+            logger.LogError(ex, "Failed to set polling mode for printer {PrinterId} to {PollingMode}",
                 printerId, mode);
         }
     }
 
-    /// <summary>
-    /// Gets the current polling mode for a printer, defaulting to WebSocketWithFallback
-    /// </summary>
-    /// <param name="printerId">The printer ID</param>
-    /// <returns>The current polling mode</returns>
-    private PollingMode GetPollingMode(Guid printerId)
-    {
-        return _pollingModes.GetValueOrDefault(printerId, PollingMode.WebSocketWithFallback);
-    }
+    // Removed unused GetPollingMode (CA S1144)
 
     // Helper method to get spool information for Moonraker printers
     private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
@@ -1098,7 +1090,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             using var scope = scopeFactory.CreateScope();
             var serviceProvider = scope.ServiceProvider;
             var moonrakerClient = serviceProvider.GetRequiredService<IMoonrakerClient>();
-            
+
             // Get comprehensive status using existing HTTP endpoint
             var compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.ServerUrl, ct);
 
@@ -1110,7 +1102,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
                 // Create a status update using the composite status data
                 var spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
-                
+
                 var statusUpdate = new PrinterStatusUpdate(
                     printer.Id,
                     compositeStatus.IsOnline,
@@ -1131,11 +1123,11 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 );
 
                 await hub.Clients.All.SendAsync("PrinterUpdated", statusUpdate, ct);
-                
+
                 // Update last poll time and reset parse error count since HTTP polling succeeded
                 _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;
                 _parseErrorCounts.TryRemove(printer.Id, out _);
-                
+
                 logger.LogDebug("HTTP polling fallback successful for printer {PrinterName}", printer.Name);
             }
             else

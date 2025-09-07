@@ -1,19 +1,16 @@
-using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net;
 using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
-public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class AuthorizationIntegrationTests : IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    public AuthorizationIntegrationTests(CustomWebApplicationFactory factory)
+    public AuthorizationIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
         _client = _factory.CreateClient();
     }
 
@@ -27,7 +24,7 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
             FirstName = "Authorization",
             LastName = "Admin"
         };
-        
+
         var response = await _client.PostAsJsonAsync("/api/setup/initial-admin", adminRequest);
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         return result!.Token!;
@@ -41,7 +38,7 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
             "TestPassword123!",
             "Authorization",
             "User");
-        
+
         var response = await _client.PostAsJsonAsync("/api/auth/register", userRequest);
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         return result!.Token!;
@@ -50,12 +47,12 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     [Theory]
     [InlineData("/api/users")]
     [InlineData("/api/users/roles")]
-    public async Task AdminOnlyEndpoints_WithAdminToken_ShouldReturnSuccess(string endpoint)
+    public async Task AdminOnlyEndpoints_WithAdminToken_ShouldReturnSuccessAsync(string endpoint)
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         // Act
@@ -68,12 +65,12 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     [Theory]
     [InlineData("/api/users")]
     [InlineData("/api/users/roles")]
-    public async Task AdminOnlyEndpoints_WithUserToken_ShouldReturnForbidden(string endpoint)
+    public async Task AdminOnlyEndpoints_WithUserToken_ShouldReturnForbiddenAsync(string endpoint)
     {
         // Arrange
         var userToken = await CreateUserAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
 
         // Act
@@ -88,7 +85,7 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     [InlineData("/api/users/roles")]
     [InlineData("/api/auth/me")]
     [InlineData("/api/auth/logout")]
-    public async Task ProtectedEndpoints_WithoutToken_ShouldReturnUnauthorized(string endpoint)
+    public async Task ProtectedEndpoints_WithoutToken_ShouldReturnUnauthorizedAsync(string endpoint)
     {
         // Act
         var response = await _client.GetAsync(endpoint);
@@ -98,7 +95,7 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     }
 
     [Fact]
-    public async Task UserCRUD_PostOperations_AdminVsUser()
+    public async Task UserCRUD_PostOperations_AdminVsUserAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
@@ -114,32 +111,32 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
         };
 
         // Act & Assert - Admin can create users
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var adminResponse = await _client.PostAsJsonAsync("/api/users", createUserRequest);
         adminResponse.StatusCode.Should().Be(HttpStatusCode.Created);
 
         // Act & Assert - Regular user cannot create users
         createUserRequest.Username = "testcreation2";
         createUserRequest.Email = "testcreation2@example.com";
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
-        
+
         var userResponse = await _client.PostAsJsonAsync("/api/users", createUserRequest);
         userResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
-    public async Task UserCRUD_PutOperations_AdminVsUser()
+    public async Task UserCRUD_PutOperations_AdminVsUserAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         var userToken = await CreateUserAndGetTokenAsync();
 
         // Create a user to update
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         var createUserRequest = new CreateUserRequest
@@ -165,22 +162,22 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
         adminResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Act & Assert - Regular user cannot update users
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
-        
+
         var userResponse = await _client.PutAsJsonAsync($"/api/users/{createdUser.Id}", updateRequest);
         userResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
-    public async Task UserCRUD_DeleteOperations_AdminVsUser()
+    public async Task UserCRUD_DeleteOperations_AdminVsUserAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         var userToken = await CreateUserAndGetTokenAsync();
 
         // Create a user to delete
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         var createUserRequest = new CreateUserRequest
@@ -196,52 +193,52 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
         var createdUser = await createResponse.Content.ReadFromJsonAsync<UserDto>();
 
         // Act & Assert - Regular user cannot delete users
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
-        
+
         var userResponse = await _client.DeleteAsync($"/api/users/{createdUser!.Id}");
         userResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
 
         // Act & Assert - Admin can delete users
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var adminResponse = await _client.DeleteAsync($"/api/users/{createdUser.Id}");
         adminResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
     [Fact]
-    public async Task ProtectedEndpoints_BothRoles_CanAccessUserProfile()
+    public async Task ProtectedEndpoints_BothRoles_CanAccessUserProfileAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
         var userToken = await CreateUserAndGetTokenAsync();
 
         // Act & Assert - Admin can access their profile
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var adminResponse = await _client.GetAsync("/api/auth/me");
         adminResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var adminUser = await adminResponse.Content.ReadFromJsonAsync<UserDto>();
         adminUser.Should().NotBeNull();
         adminUser!.Roles.Should().Contain("farm_admin");
 
         // Act & Assert - Regular user can access their profile
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
-        
+
         var userResponse = await _client.GetAsync("/api/auth/me");
         userResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var regularUser = await userResponse.Content.ReadFromJsonAsync<UserDto>();
         regularUser.Should().NotBeNull();
         regularUser!.Roles.Should().Contain("farm_user");
     }
 
     [Fact]
-    public async Task ProtectedEndpoints_BothRoles_CanChangePassword()
+    public async Task ProtectedEndpoints_BothRoles_CanChangePasswordAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
@@ -260,25 +257,25 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
         };
 
         // Act & Assert - Admin can change password
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
-        
+
         var adminResponse = await _client.PostAsJsonAsync("/api/auth/change-password", adminChangeRequest);
         adminResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Act & Assert - Regular user can change password
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
-        
+
         var userResponse = await _client.PostAsJsonAsync("/api/auth/change-password", userChangeRequest);
         userResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
-    public async Task JWT_TokenValidation_InvalidToken_ShouldReturnUnauthorized()
+    public async Task JWT_TokenValidation_InvalidToken_ShouldReturnUnauthorizedAsync()
     {
         // Arrange - Use invalid JWT token
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "invalid.jwt.token");
 
         // Act
@@ -289,10 +286,10 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     }
 
     [Fact]
-    public async Task JWT_TokenValidation_MalformedToken_ShouldReturnUnauthorized()
+    public async Task JWT_TokenValidation_MalformedToken_ShouldReturnUnauthorizedAsync()
     {
         // Arrange - Use malformed token
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "not-a-jwt-token");
 
         // Act
@@ -303,10 +300,10 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     }
 
     [Fact]
-    public async Task Authorization_Header_MissingBearer_ShouldReturnUnauthorized()
+    public async Task Authorization_Header_MissingBearer_ShouldReturnUnauthorizedAsync()
     {
         // Arrange - Use wrong authentication scheme
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", "dGVzdDp0ZXN0");
 
         // Act
@@ -317,12 +314,12 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
     }
 
     [Fact]
-    public async Task RoleBasedAuthorization_MultipleRoles_ShouldWorkCorrectly()
+    public async Task RoleBasedAuthorization_MultipleRoles_ShouldWorkCorrectlyAsync()
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        
-        _client.DefaultRequestHeaders.Authorization = 
+
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
 
         // Act - Admin should be able to access both admin and user endpoints
@@ -332,10 +329,16 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
         // Assert
         adminOnlyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         userResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         // Admin should have both roles
         var user = await userResponse.Content.ReadFromJsonAsync<UserDto>();
         user.Should().NotBeNull();
         user!.Roles.Should().Contain("farm_admin");
+    }
+
+    public void Dispose()
+    {
+        _client.Dispose();
+        _factory.Dispose();
     }
 }

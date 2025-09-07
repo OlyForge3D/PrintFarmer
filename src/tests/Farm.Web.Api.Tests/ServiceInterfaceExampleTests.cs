@@ -124,10 +124,10 @@ public class ServiceInterfaceExampleTests
         var result = mockPresets.Object.GetPresets();
 
         // Assert
-    Assert.Equal(205, result.Presets["PLA"].Hotend);
-    Assert.Equal(60, result.Presets["PLA"].Bed);
-    Assert.Equal(240, result.Presets["PETG"].Hotend);
-    Assert.Equal(85, result.Presets["PETG"].Bed);
+        Assert.Equal(205, result.Presets["PLA"].Hotend);
+        Assert.Equal(60, result.Presets["PLA"].Bed);
+        Assert.Equal(240, result.Presets["PETG"].Hotend);
+        Assert.Equal(85, result.Presets["PETG"].Bed);
     }
 
     /// <summary>

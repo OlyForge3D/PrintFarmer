@@ -406,9 +406,9 @@ public class HarvestWorkerService : BackgroundService
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
 
         var linesRead = 0;
-    var maxLinesToRead = 100; // Limit header scanning
+        var maxLinesToRead = 100; // Limit header scanning
 
-    while (linesRead < maxLinesToRead && await reader.ReadLineAsync() is { } line)
+        while (linesRead < maxLinesToRead && await reader.ReadLineAsync() is { } line)
         {
             linesRead++;
 

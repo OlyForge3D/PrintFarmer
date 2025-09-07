@@ -79,6 +79,19 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
+            // If a user with the same username AND email already exists and the password matches,
+            // treat registration as idempotent and return a valid authentication result.
+            var existingExact = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Email == request.Email);
+            if (existingExact != null)
+            {
+                if (_passwordHashing.VerifyPassword(request.Password, existingExact.PasswordHash))
+                {
+                    var tokenExisting = await GenerateJwtTokenAsync(existingExact);
+                    var userDtoExisting = await GetUserWithRolesAndPermissionsAsync(existingExact.Id);
+                    return new AuthenticationResult(true, tokenExisting, DateTime.UtcNow.AddDays(7), userDtoExisting);
+                }
+            }
+
             // Check if username already exists
             if (await _context.Users.AnyAsync(u => u.Username == request.Username))
             {
@@ -148,8 +161,14 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<string> GenerateJwtTokenAsync(User user)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
-            _configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured")));
+        ArgumentNullException.ThrowIfNull(user);
+        var rawKey = _configuration["Jwt:Key"];
+        if (string.IsNullOrWhiteSpace(rawKey) || rawKey.Length < 32)
+        {
+            _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
+            throw new InvalidOperationException("Secure JWT key not configured");
+        }
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(rawKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var roles = await GetUserRolesAsync(user.Id);
@@ -186,8 +205,13 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(
-                _configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured"));
+            var rawKey = _configuration["Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(rawKey))
+            {
+                return Task.FromResult(false);
+            }
+
+            var key = Encoding.UTF8.GetBytes(rawKey);
 
             var validationParameters = new TokenValidationParameters
             {
@@ -215,8 +239,13 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(
-                _configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured"));
+            var rawKey = _configuration["Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(rawKey))
+            {
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
+            var key = Encoding.UTF8.GetBytes(rawKey);
 
             var validationParameters = new TokenValidationParameters
             {

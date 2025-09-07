@@ -23,13 +23,16 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         _dbPath = Path.Combine(Path.GetTempPath(), dbFile);
         TryDelete();
 
-    // Set environment variables EARLY so Program.cs picks up the test-specific database path
-    // Minimal hosting reads configuration very early; relying only on ConfigureAppConfiguration
-    // meant the connection string was resolved before our in-memory override, causing usage of the default farm.db.
-    // Using environment variables guarantees the correct ephemeral file is used for each test factory instance.
-    Environment.SetEnvironmentVariable("ConnectionStrings__Default", $"Data Source={_dbPath}");
-    Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", $"Data Source={_dbPath}");
-    Environment.SetEnvironmentVariable("DISABLE_EF_MIGRATIONS", "true");
+        // Ensure Program.cs picks up the test-specific database path early
+        // Minimal hosting reads configuration very early; environment variables are safest for overrides
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default", $"Data Source={_dbPath}");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", $"Data Source={_dbPath}");
+        Environment.SetEnvironmentVariable("DISABLE_EF_MIGRATIONS", "true");
+
+        // Ensure JWT config is present and consistent in tests
+        Environment.SetEnvironmentVariable("Jwt__Key", "PrintFarmerTestSigningKey_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        Environment.SetEnvironmentVariable("Jwt__Issuer", "PrintFarmer");
+        Environment.SetEnvironmentVariable("Jwt__Audience", "PrintFarmer");
 
         // Initialize mocks
         MockNetworkDiscoveryService = new Mock<INetworkDiscoveryService>();

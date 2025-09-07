@@ -1,15 +1,13 @@
-using System.Text.Json;
+﻿using System.Text.Json;
+using Farm.Web.Api.Data;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Xunit;
 namespace Farm.Web.Api.Tests;
 
 public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
@@ -51,7 +49,7 @@ public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFact
     }
 
     [Fact(Timeout = 15000)]
-    public async Task DiscoveryProgress_event_should_include_new_fields()
+    public async Task DiscoveryProgress_event_should_include_new_fieldsAsync()
     {
         using var client = _factory.CreateClient();
 
@@ -75,19 +73,19 @@ public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFact
             }
         });
 
-    await hubConnection.StartAsync();
+        await hubConnection.StartAsync();
 
-    // 2. Start discovery to get session id
-    var startResponse = await client.PostAsync("/api/printers/discover/stream", new StringContent(""));
-    startResponse.EnsureSuccessStatusCode();
-    using var doc = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
-    sessionId = doc.RootElement.GetProperty("sessionId").GetString();
-    sessionId.Should().NotBeNull();
+        // 2. Start discovery to get session id
+        var startResponse = await client.PostAsync("/api/printers/discover/stream", new StringContent(""));
+        startResponse.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        sessionId = doc.RootElement.GetProperty("sessionId").GetString();
+        sessionId.Should().NotBeNull();
 
-    // Join group after session id issuance (initial Starting event may still be in-flight, so we allow for a second progress event if missed)
-    await hubConnection.InvokeAsync("JoinDiscoveryGroupAsync", sessionId!);
+        // Join group after session id issuance (initial Starting event may still be in-flight, so we allow for a second progress event if missed)
+        await hubConnection.InvokeAsync("JoinDiscoveryGroupAsync", sessionId!);
 
-    // 3. Wait (with generous timeout) for first progress message corresponding to the session
+        // 3. Wait (with generous timeout) for first progress message corresponding to the session
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var completed = await Task.WhenAny(tcs.Task, Task.Delay(-1, cts.Token));
         completed.Should().Be(tcs.Task, "a DiscoveryProgress event for the session should arrive");
@@ -95,14 +93,14 @@ public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFact
         var progressDto = await tcs.Task;
         progressDto.NetworkRanges.Should().NotBeNull();
         progressDto.NetworkRanges!.Count.Should().BeGreaterThan(0);
-    progressDto.AutoDetectedNetworks.Should().BeFalse();
+        progressDto.AutoDetectedNetworks.Should().BeFalse();
         progressDto.TotalIps.Should().BeGreaterThanOrEqualTo(0);
 
         await hubConnection.DisposeAsync();
     }
 
     [Fact(Timeout = 20000)]
-    public async Task DiscoveryProgress_event_should_set_autoDetected_true_when_networks_auto_detected()
+    public async Task DiscoveryProgress_event_should_set_autoDetected_true_when_networks_auto_detectedAsync()
     {
         // Create a new factory instance that returns no configured networks so auto-detection path executes
         var autoFactory = _factory.WithWebHostBuilder(builder =>

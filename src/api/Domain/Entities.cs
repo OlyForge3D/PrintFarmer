@@ -239,6 +239,103 @@ public class DiscoveredGcodeFile
     public string? ExtractedInfill { get; set; }
 }
 
+// 3D Model Management System
+public class Model3D
+{
+    public Guid Id { get; set; }
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty; // Physical path on disk
+    public long FileSizeBytes { get; set; }
+    public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
+    public ModelFileFormat FileFormat { get; set; }
+    public DateTime UploadedAt { get; set; }
+    public string? Description { get; set; }
+    public string? Tags { get; set; } // JSON array of tags
+
+    // Model Properties
+    public double? DimensionX { get; set; } // in mm
+    public double? DimensionY { get; set; } // in mm  
+    public double? DimensionZ { get; set; } // in mm
+    public double? VolumeM3 { get; set; } // in cubic mm
+    public int? TriangleCount { get; set; }
+    public bool IsValid { get; set; } = true;
+    public string? ValidationErrors { get; set; } // JSON array of validation issues
+
+    // Thumbnail
+    public string? ThumbnailPath { get; set; } // Path to thumbnail image
+
+    // User/Owner tracking
+    public Guid? UploadedByUserId { get; set; }
+    public User? UploadedByUser { get; set; }
+
+    // Timestamps
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public enum ModelFileFormat
+{
+    STL = 0,
+    TMF = 1,  // 3MF
+    OBJ = 2,
+    PLY = 3,
+    STEP = 4
+}
+
+// Slicer Profile Management System
+public class SlicerProfile
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public SlicerType SlicerType { get; set; }
+
+    // Printer Compatibility
+    public Guid? PrinterModelId { get; set; }
+    public PrinterModel? PrinterModel { get; set; }
+    public Guid? SpecificPrinterId { get; set; } // Optional: specific printer instance
+    public Printer? SpecificPrinter { get; set; }
+
+    // Basic Settings
+    public double LayerHeight { get; set; } = 0.2; // in mm
+    public int InfillPercentage { get; set; } = 20; // 0-100%
+    public double PrintSpeed { get; set; } = 50; // mm/s
+    public int NozzleTemperature { get; set; } = 210; // °C
+    public int BedTemperature { get; set; } = 60; // °C
+    public bool EnableSupports { get; set; } = false;
+    public string Material { get; set; } = "PLA";
+    public ProfileQuality Quality { get; set; } = ProfileQuality.Standard;
+
+    // Advanced Settings (JSON storage for extensibility)
+    public string? AdvancedSettings { get; set; } // JSON object with additional slicer-specific settings
+
+    // Profile Management
+    public bool IsDefault { get; set; } = false;
+    public bool IsPublic { get; set; } = true; // Can be used by other users
+    public Guid? CreatedByUserId { get; set; }
+    public User? CreatedByUser { get; set; }
+
+    // Timestamps
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public enum SlicerType
+{
+    PrusaSlicer = 0,
+    OrcaSlicer = 1,
+    Cura = 2,
+    SuperSlicer = 3
+}
+
+public enum ProfileQuality
+{
+    Draft = 0,
+    Standard = 1,
+    Fine = 2
+}
+
 // Job Queue System  
 public class PrintJob
 {
@@ -343,7 +440,7 @@ public class User
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
     public bool IsActive { get; set; } = true;
-    public bool EmailConfirmed { get; set; } = false;
+    public bool EmailConfirmed { get; set; }
     public string? EmailConfirmationToken { get; set; }
     public string? PasswordResetToken { get; set; }
     public DateTime? PasswordResetExpires { get; set; }
@@ -361,7 +458,7 @@ public class Role
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public bool IsSystemRole { get; set; } = false;
+    public bool IsSystemRole { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

@@ -1,6 +1,6 @@
+﻿using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Farm.Web.Api.Hubs;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -19,6 +19,10 @@ public class SignalRTestController(
     [HttpPost("send-test-message")]
     public async Task<IActionResult> SendTestMessageAsync([FromBody] SignalRTestRequest request)
     {
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
         try
         {
             var testMessage = new
@@ -60,6 +64,10 @@ public class SignalRTestController(
     [HttpPost("test-discovery-group")]
     public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] DiscoveryTestRequest request)
     {
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
         try
         {
             var sessionId = request.SessionId ?? Guid.NewGuid().ToString();
@@ -77,7 +85,7 @@ public class SignalRTestController(
             foreach (var message in testMessages)
             {
                 await hubContext.Clients.Group(groupName).SendAsync("DiscoveryProgress", message);
-                
+
                 // Small delay between messages for realistic simulation
                 if (request.DelayBetweenMessages)
                 {
@@ -129,13 +137,15 @@ public class SignalRTestController(
     /// Get current SignalR connection statistics
     /// </summary>
     [HttpGet("connection-stats")]
-    public async Task<IActionResult> GetConnectionStatsAsync()
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public IActionResult GetConnectionStats()
     {
         try
         {
             // Note: Getting exact connection count requires additional setup
             // This is a basic implementation that provides available information
-            
+
             var stats = new
             {
                 Timestamp = DateTime.UtcNow,
@@ -144,7 +154,7 @@ public class SignalRTestController(
                 {
                     "PrinterStatusUpdated",
                     "HarvestProgress",
-                    "JobQueueUpdated", 
+                    "JobQueueUpdated",
                     "DiscoveryProgress",
                     "DiscoveryPrinterFound",
                     "DiscoveryCompleted",
