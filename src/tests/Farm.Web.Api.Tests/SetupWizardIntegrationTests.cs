@@ -1,7 +1,5 @@
-using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net;
 using Farm.Web.Shared;
-using FluentAssertions;
 
 namespace Farm.Web.Api.Tests;
 
@@ -18,20 +16,20 @@ public sealed class SetupWizardIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSetupStatus_WhenNoAdminUsers_ShouldReturnNeedsSetup()
+    public async Task GetSetupStatus_WhenNoAdminUsers_ShouldReturnNeedsSetupAsync()
     {
         // Act
         var response = await _client.GetAsync("/api/setup/status");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("\"needsSetup\":true");
     }
 
     [Fact]
-    public async Task CreateInitialAdmin_WithValidData_ShouldReturnSuccess()
+    public async Task CreateInitialAdmin_WithValidData_ShouldReturnSuccessAsync()
     {
         // Arrange
         var request = new
@@ -48,7 +46,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
@@ -61,7 +59,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateInitialAdmin_WithShortPassword_ShouldReturnBadRequest()
+    public async Task CreateInitialAdmin_WithShortPassword_ShouldReturnBadRequestAsync()
     {
         // Arrange
         var request = new
@@ -78,13 +76,13 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("at least 8 characters");
     }
 
     [Fact]
-    public async Task CreateInitialAdmin_WithMissingFields_ShouldReturnBadRequest()
+    public async Task CreateInitialAdmin_WithMissingFields_ShouldReturnBadRequestAsync()
     {
         // Arrange
         var request = new
@@ -101,13 +99,13 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("Username, email, and password are required");
     }
 
     [Fact]
-    public async Task CreateInitialAdmin_WhenAdminAlreadyExists_ShouldReturnBadRequest()
+    public async Task CreateInitialAdmin_WhenAdminAlreadyExists_ShouldReturnBadRequestAsync()
     {
         // Arrange - First create an admin
         var firstRequest = new
@@ -118,7 +116,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
             FirstName = "First",
             LastName = "Admin"
         };
-        
+
         await _client.PostAsJsonAsync("/api/setup/initial-admin", firstRequest);
 
         // Arrange - Try to create another admin
@@ -136,13 +134,13 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("Setup has already been completed");
     }
 
     [Fact]
-    public async Task GetSetupStatus_WhenAdminExists_ShouldReturnNoSetupNeeded()
+    public async Task GetSetupStatus_WhenAdminExists_ShouldReturnNoSetupNeededAsync()
     {
         // Arrange - Create an admin first
         var adminRequest = new
@@ -153,7 +151,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
             FirstName = "Status",
             LastName = "Admin"
         };
-        
+
         await _client.PostAsJsonAsync("/api/setup/initial-admin", adminRequest);
 
         // Act
@@ -161,20 +159,20 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("\"needsSetup\":false");
     }
 
     [Fact]
-    public async Task GetConfigurationOptions_ShouldReturnAvailableOptions()
+    public async Task GetConfigurationOptions_ShouldReturnAvailableOptionsAsync()
     {
         // Act
         var response = await _client.GetAsync("/api/setup/config-options");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("DatabaseProviders");
         responseContent.Should().Contain("SQLite");
@@ -188,7 +186,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateInitialAdmin_WithDuplicateEmail_ShouldReturnBadRequest()
+    public async Task CreateInitialAdmin_WithDuplicateEmail_ShouldReturnBadRequestAsync()
     {
         // Arrange - Create a regular user first with the same email
         var userRequest = new RegisterRequest(
@@ -197,7 +195,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
             "TestPassword123!",
             "Regular",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", userRequest);
 
         // Arrange - Try to create admin with same email
@@ -215,13 +213,13 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("already taken");
     }
 
     [Fact]
-    public async Task InitialAdminLogin_AfterSetup_ShouldHaveAdminRole()
+    public async Task InitialAdminLogin_AfterSetup_ShouldHaveAdminRoleAsync()
     {
         // Arrange - Create initial admin
         var adminRequest = new
@@ -232,7 +230,7 @@ public sealed class SetupWizardIntegrationTests : IDisposable
             FirstName = "Admin",
             LastName = "Login"
         };
-        
+
         var setupResponse = await _client.PostAsJsonAsync("/api/setup/initial-admin", adminRequest);
         var setupResult = await setupResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
 
@@ -243,14 +241,14 @@ public sealed class SetupWizardIntegrationTests : IDisposable
 
         // Assert
         loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
         loginResult.Should().NotBeNull();
         loginResult!.Success.Should().BeTrue();
         loginResult.User.Should().NotBeNull();
         loginResult.User!.Roles.Should().Contain("farm_admin");
         loginResult.User.Username.Should().Be("adminlogin");
-        
+
         // The tokens should be equivalent (both should work)
         setupResult!.Token.Should().NotBeNullOrEmpty();
         loginResult.Token.Should().NotBeNullOrEmpty();

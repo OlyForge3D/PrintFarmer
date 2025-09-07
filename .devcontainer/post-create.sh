@@ -3,21 +3,29 @@ set -e
 
 echo "🚀 Setting up PrintFarmer React Development Environment..."
 
-# Update system packages
-echo "📦 Updating system packages..."
-sudo apt-get update
+if [ "${SKIP_APT:-0}" != "1" ]; then
+    # Update system packages
+    echo "📦 Updating system packages..."
+    sudo apt-get update
 
-# Install additional tools
-echo "🛠️  Installing additional development tools..."
-sudo apt-get install -y curl wget git jq
+    # Install additional tools
+    echo "🛠️  Installing additional development tools..."
+    sudo apt-get install -y curl wget git jq
+else
+    echo "⏭️  Skipping apt-get operations (SKIP_APT=${SKIP_APT})"
+fi
 
-# Ensure latest npm and install global packages
-echo "📦 Setting up Node.js global packages..."
-sudo npm install -g npm@latest
-sudo npm install -g @vitejs/create-vite
-sudo npm install -g typescript
-sudo npm install -g eslint
-sudo npm install -g prettier
+if [ "${SKIP_GLOBAL_NPM:-0}" != "1" ]; then
+    # Ensure latest npm and install global packages
+    echo "📦 Setting up Node.js global packages..."
+    sudo npm install -g npm@latest
+    sudo npm install -g @vitejs/create-vite
+    sudo npm install -g typescript
+    sudo npm install -g eslint
+    sudo npm install -g prettier
+else
+    echo "⏭️  Skipping global npm installs (SKIP_GLOBAL_NPM=${SKIP_GLOBAL_NPM})"
+fi
 
 # Install .NET global tools
 echo "🔧 Installing .NET global tools..."
@@ -55,12 +63,13 @@ fi
 echo "🔗 Setting up development aliases..."
 cat >> ~/.bashrc << 'EOF'
 
-# PrintFarmer development aliases
-alias pf-api='cd /workspaces/PrintFarmer/src/api && dotnet watch run'
-alias pf-react='cd /workspaces/PrintFarmer/src/Web/ReactApp && npm run dev'
-alias pf-build='cd /workspaces/PrintFarmer && ./scripts/build.sh'
-alias pf-deploy='cd /workspaces/PrintFarmer && ./scripts/deploy.sh'
-alias pf-dev='cd /workspaces/PrintFarmer && ./scripts/dev.sh'
+# PrintFarmer development aliases (use DEVCONTAINER_WORKSPACE_FOLDER if available)
+WORKSPACE_DIR=${DEVCONTAINER_WORKSPACE_FOLDER:-/workspaces/$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo PrintFarmer)")}
+alias pf-api='cd "$WORKSPACE_DIR"/src && dotnet watch --project api/Farm.Web.Api.csproj run'
+alias pf-react='cd "$WORKSPACE_DIR"/src/Web/ReactApp && npm run dev'
+alias pf-build='cd "$WORKSPACE_DIR" && cd ./src && dotnet build ./farm-web.sln -c Debug && cd ./Web/ReactApp && npm ci && npm run build'
+alias pf-deploy='cd "$WORKSPACE_DIR" && ./scripts/deploy-docker.sh'
+alias pf-dev='cd "$WORKSPACE_DIR" && ./scripts/dev-monolithic.sh'
 alias pf-logs='docker-compose logs -f'
 alias pf-ps='docker-compose ps'
 EOF
@@ -132,9 +141,9 @@ echo "   • pf-react  - Start React dev server (after Phase 1)"
 echo "   • pf-build  - Build Docker images"
 echo ""
 echo "🔗 Useful URLs (after starting services):"
-echo "   • React App: http://localhost:5173"
-echo "   • API: http://localhost:5000"
-echo "   • Health Check: http://localhost:5000/health"
+echo "   • React App: http://localhost:3000"
+echo "   • API: http://localhost:5245"
+echo "   • Health Check: http://localhost:5245/health"
 echo ""
 echo "📚 Documentation:"
 echo "   • React Migration: ./REACT_MIGRATION_README.md"

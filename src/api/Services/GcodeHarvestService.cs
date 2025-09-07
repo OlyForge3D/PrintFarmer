@@ -187,7 +187,7 @@ public class GcodeHarvestService : IGcodeHarvestService
             // Determine allowed extensions (default to gcode if none specified)
             var allowedExts = (operation.FileExtensions != null && operation.FileExtensions.Length > 0
                 ? operation.FileExtensions
-                : new[] { "gcode" })
+                : ["gcode"])
                 .Select(e => e.StartsWith('.') ? e.ToLowerInvariant() : "." + e.ToLowerInvariant())
                 .ToArray();
 

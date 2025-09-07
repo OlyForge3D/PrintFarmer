@@ -21,18 +21,18 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     {
         var dbFile = $"farm_test_{Guid.NewGuid():N}.db";
         _dbPath = Path.Combine(Path.GetTempPath(), dbFile);
-    TryDelete();
+        TryDelete();
 
-    // Ensure Program.cs picks up the test-specific database path early
-    // Minimal hosting reads configuration very early; environment variables are safest for overrides
-    Environment.SetEnvironmentVariable("ConnectionStrings__Default", $"Data Source={_dbPath}");
-    Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", $"Data Source={_dbPath}");
-    Environment.SetEnvironmentVariable("DISABLE_EF_MIGRATIONS", "true");
+        // Ensure Program.cs picks up the test-specific database path early
+        // Minimal hosting reads configuration very early; environment variables are safest for overrides
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default", $"Data Source={_dbPath}");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", $"Data Source={_dbPath}");
+        Environment.SetEnvironmentVariable("DISABLE_EF_MIGRATIONS", "true");
 
-    // Ensure JWT config is present and consistent in tests
-    Environment.SetEnvironmentVariable("Jwt__Key", "PrintFarmerTestSigningKey_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-    Environment.SetEnvironmentVariable("Jwt__Issuer", "PrintFarmer");
-    Environment.SetEnvironmentVariable("Jwt__Audience", "PrintFarmer");
+        // Ensure JWT config is present and consistent in tests
+        Environment.SetEnvironmentVariable("Jwt__Key", "PrintFarmerTestSigningKey_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        Environment.SetEnvironmentVariable("Jwt__Issuer", "PrintFarmer");
+        Environment.SetEnvironmentVariable("Jwt__Audience", "PrintFarmer");
 
         // Initialize mocks
         MockNetworkDiscoveryService = new Mock<INetworkDiscoveryService>();

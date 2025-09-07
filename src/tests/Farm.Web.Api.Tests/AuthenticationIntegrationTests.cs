@@ -1,10 +1,5 @@
-using System.Net;
-using System.Net.Http.Json;
-using System.Text;
+﻿using System.Net;
 using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
-using Newtonsoft.Json;
 
 namespace Farm.Web.Api.Tests;
 
@@ -20,7 +15,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task Register_WithValidData_ShouldReturnSuccess()
+    public async Task Register_WithValidData_ShouldReturnSuccessAsync()
     {
         // Arrange
         var request = new RegisterRequest(
@@ -35,7 +30,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
@@ -47,7 +42,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task Register_WithShortPassword_ShouldReturnBadRequest()
+    public async Task Register_WithShortPassword_ShouldReturnBadRequestAsync()
     {
         // Arrange
         var request = new RegisterRequest(
@@ -62,7 +57,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
@@ -70,7 +65,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task Register_WithDuplicateUsername_ShouldReturnBadRequest()
+    public async Task Register_WithDuplicateUsername_ShouldReturnBadRequestAsync()
     {
         // Arrange - Create first user
         var firstRequest = new RegisterRequest(
@@ -79,7 +74,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
             "TestPassword123!",
             "First",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", firstRequest);
 
         // Arrange - Try to create second user with same username
@@ -95,7 +90,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
@@ -103,7 +98,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task Login_WithValidCredentials_ShouldReturnSuccess()
+    public async Task Login_WithValidCredentials_ShouldReturnSuccessAsync()
     {
         // Arrange - Create a user first
         var registerRequest = new RegisterRequest(
@@ -112,7 +107,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
             "TestPassword123!",
             "Login",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         var loginRequest = new LoginRequest("loginuser", "TestPassword123!");
@@ -122,7 +117,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
@@ -132,7 +127,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task Login_WithInvalidCredentials_ShouldReturnUnauthorized()
+    public async Task Login_WithInvalidCredentials_ShouldReturnUnauthorizedAsync()
     {
         // Arrange
         var loginRequest = new LoginRequest("nonexistentuser", "WrongPassword123!");
@@ -142,7 +137,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
@@ -150,7 +145,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task Login_WithMissingFields_ShouldReturnBadRequest()
+    public async Task Login_WithMissingFields_ShouldReturnBadRequestAsync()
     {
         // Arrange
         var loginRequest = new LoginRequest("", "TestPassword123!"); // Empty username
@@ -160,7 +155,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var result = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
@@ -168,7 +163,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task GetCurrentUser_WithValidToken_ShouldReturnUserInfo()
+    public async Task GetCurrentUser_WithValidToken_ShouldReturnUserInfoAsync()
     {
         // Arrange - Create and login user
         var registerRequest = new RegisterRequest(
@@ -177,16 +172,16 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
             "TestPassword123!",
             "Current",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         var loginRequest = new LoginRequest("currentuser", "TestPassword123!");
 
         var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", loginRequest);
         var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
-        
+
         // Add JWT token to client
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginResult!.Token);
 
         // Act
@@ -194,7 +189,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var user = await response.Content.ReadFromJsonAsync<UserDto>();
         user.Should().NotBeNull();
         user!.Username.Should().Be("currentuser");
@@ -205,7 +200,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task GetCurrentUser_WithoutToken_ShouldReturnUnauthorized()
+    public async Task GetCurrentUser_WithoutToken_ShouldReturnUnauthorizedAsync()
     {
         // Act
         var response = await _client.GetAsync("/api/auth/me");
@@ -215,7 +210,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task ChangePassword_WithValidData_ShouldReturnSuccess()
+    public async Task ChangePassword_WithValidData_ShouldReturnSuccessAsync()
     {
         // Arrange - Create and login user
         var registerRequest = new RegisterRequest(
@@ -224,16 +219,16 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
             "OldPassword123!",
             "Password",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         var loginRequest = new LoginRequest("passworduser", "OldPassword123!");
 
         var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", loginRequest);
         var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
-        
+
         // Add JWT token to client
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginResult!.Token);
 
         var changePasswordRequest = new ChangePasswordRequest
@@ -247,7 +242,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("Password changed successfully");
 
@@ -259,7 +254,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
     }
 
     [Fact]
-    public async Task ChangePassword_WithWrongCurrentPassword_ShouldReturnBadRequest()
+    public async Task ChangePassword_WithWrongCurrentPassword_ShouldReturnBadRequestAsync()
     {
         // Arrange - Create and login user
         var registerRequest = new RegisterRequest(
@@ -268,16 +263,16 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
             "OldPassword123!",
             "Wrong",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         var loginRequest = new LoginRequest("wrongpassuser", "OldPassword123!");
 
         var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", loginRequest);
         var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
-        
+
         // Add JWT token to client
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginResult!.Token);
 
         var changePasswordRequest = new ChangePasswordRequest
@@ -291,13 +286,13 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("Current password is incorrect");
     }
 
     [Fact]
-    public async Task Logout_WithValidToken_ShouldReturnSuccess()
+    public async Task Logout_WithValidToken_ShouldReturnSuccessAsync()
     {
         // Arrange - Create and login user
         var registerRequest = new RegisterRequest(
@@ -306,16 +301,16 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
             "TestPassword123!",
             "Logout",
             "User");
-        
+
         await _client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         var loginRequest = new LoginRequest("logoutuser", "TestPassword123!");
 
         var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", loginRequest);
         var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
-        
+
         // Add JWT token to client
-        _client.DefaultRequestHeaders.Authorization = 
+        _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginResult!.Token);
 
         // Act
@@ -323,13 +318,13 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync();
         responseContent.Should().Contain("Logged out successfully");
     }
 
     [Fact]
-    public async Task Logout_WithoutToken_ShouldReturnUnauthorized()
+    public async Task Logout_WithoutToken_ShouldReturnUnauthorizedAsync()
     {
         // Act
         var response = await _client.PostAsync("/api/auth/logout", null);

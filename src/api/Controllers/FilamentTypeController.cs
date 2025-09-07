@@ -1,4 +1,4 @@
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -72,19 +72,19 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
             return Conflict(new FilamentTypeDto(existing.Id, existing.Name, new TempTargets(existing.DefaultHotendTemp, existing.DefaultBedTemp)));
         }
 
-        var filamentType = new FilamentType 
-        { 
-            Id = Guid.NewGuid(), 
+        var filamentType = new FilamentType
+        {
+            Id = Guid.NewGuid(),
             Name = trimmed,
             DefaultHotendTemp = request.DefaultTemperatures.Hotend,
             DefaultBedTemp = request.DefaultTemperatures.Bed,
             CreatedAt = DateTime.UtcNow
         };
-        
+
         db.FilamentTypes.Add(filamentType);
         await db.SaveChangesAsync(ct);
-        
-        return CreatedAtAction(nameof(GetFilamentTypesAsync), new { id = filamentType.Id }, 
+
+        return CreatedAtAction(nameof(GetFilamentTypesAsync), new { id = filamentType.Id },
             new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp)));
     }
 
@@ -122,7 +122,7 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
 
         filamentType.DefaultHotendTemp = request.DefaultTemperatures.Hotend;
         filamentType.DefaultBedTemp = request.DefaultTemperatures.Bed;
-        
+
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -173,7 +173,7 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
         {
             var name = preset.Key.Trim();
             var existing = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
-            
+
             if (existing != null)
             {
                 existing.DefaultHotendTemp = preset.Value.Hotend;
@@ -181,9 +181,9 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
             }
             else
             {
-                var newType = new FilamentType 
-                { 
-                    Id = Guid.NewGuid(), 
+                var newType = new FilamentType
+                {
+                    Id = Guid.NewGuid(),
                     Name = name,
                     DefaultHotendTemp = preset.Value.Hotend,
                     DefaultBedTemp = preset.Value.Bed,

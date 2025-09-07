@@ -1,20 +1,20 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { UseQueryOptions } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import { 
-  Printer, 
-  CreatePrinterDto, 
-  UpdatePrinterDto, 
-  PrinterDetails,
-  ManufacturerDto,
-  ModelDto,
+import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/types/api';
+import {
+  ApiError,
+  CreatePrinterDto,
   FilamentPresets,
   GcodeFile,
   GcodeHarvestOperation,
   JobQueuePrintJob,
-  ApiError, 
-  HealthStatus
+  ManufacturerDto,
+  ModelDto,
+  Printer,
+  PrinterDetails,
+  UpdatePrinterDto
 } from '@/types/api';
+import type { UseQueryOptions } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 // ============ Query Keys ============
@@ -66,10 +66,10 @@ export function usePrinterDetails(id: string, options?: UseQueryOptions<PrinterD
 
 export function useCreatePrinter() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (printer: CreatePrinterDto) => apiClient.createPrinter(printer),
-  onMutate: async (printer) => {
+    onMutate: async (printer) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.printers });
       const previous = queryClient.getQueryData<Printer[]>(queryKeys.printers);
       const temp: Printer = {
@@ -120,9 +120,9 @@ export function useCreatePrinter() {
 
 export function useUpdatePrinter() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ id, printer }: { id: string; printer: UpdatePrinterDto }) => 
+    mutationFn: ({ id, printer }: { id: string; printer: UpdatePrinterDto }) =>
       apiClient.updatePrinter(id, printer),
     onMutate: async ({ id, printer }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.printers });
@@ -167,7 +167,7 @@ export function useUpdatePrinter() {
 
 export function useDeletePrinter() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (id: string) => apiClient.deletePrinter(id),
     onMutate: async (id) => {
@@ -182,7 +182,7 @@ export function useDeletePrinter() {
       if (ctx?.previous) queryClient.setQueryData(queryKeys.printers, ctx.previous);
       toast.error('Failed to delete printer');
     },
-  onSuccess: () => {
+    onSuccess: () => {
       toast.success('Printer deleted');
     },
     onSettled: (_d, _e, id) => {
@@ -218,7 +218,7 @@ export function useManufacturers(options?: UseQueryOptions<ManufacturerDto[], Ap
 
 export function useCreateManufacturer() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (name: string) => apiClient.createManufacturer(name),
     onMutate: async (name) => {
@@ -260,7 +260,7 @@ export function useModels(manufacturerId?: string, options?: UseQueryOptions<Mod
 
 export function useCreateModel() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (model: Omit<ModelDto, 'id'>) => apiClient.createModel(model),
     onMutate: async (model) => {
@@ -308,7 +308,7 @@ export function useFilamentPresets(options?: UseQueryOptions<FilamentPresets, Ap
 
 export function useSaveFilamentPresets() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (presets: FilamentPresets) => apiClient.saveFilamentPresets(presets),
     onSuccess: () => {
@@ -340,7 +340,7 @@ export function useGcodeFile(id: string, options?: UseQueryOptions<GcodeFile, Ap
 
 export function useUploadGcodeFile() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: ({ file, description, tags }: { file: File; description?: string; tags?: string[] }) =>
       apiClient.uploadGcodeFile(file, description, tags),
@@ -352,7 +352,7 @@ export function useUploadGcodeFile() {
 
 export function useDeleteGcodeFile() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (id: string) => apiClient.deleteGcodeFile(id),
     onSuccess: (_, id) => {
@@ -389,7 +389,7 @@ export function useHarvestOperation(id: string, options?: UseQueryOptions<GcodeH
 
 export function useStartHarvestOperation() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (printerId: string) => apiClient.startHarvestOperation(printerId),
     onSuccess: (_, printerId) => {
@@ -413,11 +413,11 @@ export function useJobQueue(printerId?: string, options?: UseQueryOptions<JobQue
 
 export function useQueuePrintJob() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: ({ printerId, gcodeFileId, priority = 0 }: { printerId: string; gcodeFileId: string; priority?: number }) =>
       apiClient.queuePrintJob(printerId, gcodeFileId, priority),
-  onMutate: async (vars) => {
+    onMutate: async (vars) => {
       const { printerId, gcodeFileId, priority = 0 } = vars;
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue(printerId) });
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue() });
@@ -474,7 +474,7 @@ export function useQueuePrintJob() {
 
 export function useCancelJob() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (jobId: string) => apiClient.cancelJob(jobId),
     onMutate: async (jobId) => {
@@ -488,7 +488,7 @@ export function useCancelJob() {
       return { snapshots };
     },
     onError: (_e, _id, ctx) => {
-  ctx?.snapshots?.forEach(s => queryClient.setQueryData<JobQueuePrintJob[]>(s.key as readonly unknown[], s.value));
+      ctx?.snapshots?.forEach(s => queryClient.setQueryData<JobQueuePrintJob[]>(s.key as readonly unknown[], s.value));
       toast.error('Failed to cancel job');
     },
     onSuccess: () => {
@@ -502,7 +502,7 @@ export function useCancelJob() {
 
 export function useDeleteJob() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (jobId: string) => apiClient.deleteJob(jobId),
     onMutate: async (jobId) => {
@@ -516,7 +516,7 @@ export function useDeleteJob() {
       return { snapshots };
     },
     onError: (_e, _id, ctx) => {
-  ctx?.snapshots?.forEach(s => queryClient.setQueryData<JobQueuePrintJob[] >(s.key as readonly unknown[], s.value));
+      ctx?.snapshots?.forEach(s => queryClient.setQueryData<JobQueuePrintJob[]>(s.key as readonly unknown[], s.value));
       toast.error('Failed to delete job');
     },
     onSuccess: () => {
@@ -549,17 +549,39 @@ export function useStartPrintFromFile() {
 export function useHealthStatus(options?: UseQueryOptions<HealthStatus, ApiError>) {
   return useQuery({
     queryKey: queryKeys.health,
-    queryFn: () => apiClient.getHealthStatus(),
-    staleTime: 30000, // 30 seconds
+    queryFn: async () => {
+      const raw = (await apiClient.getHealthStatus()) as unknown; // backend detailed or basic
+      if (typeof raw === 'object' && raw !== null) {
+        const r = raw as Record<string, unknown>;
+        if (typeof r.results === 'object' && r.results !== null) {
+          return {
+            kind: 'detailed',
+            status: String(r.status ?? 'unknown'),
+            totalChecksDuration: String(r.totalChecksDuration ?? ''),
+            results: r.results as DetailedHealthStatus['results']
+          } satisfies DetailedHealthStatus;
+        }
+        return { kind: 'basic', status: String(r.status ?? 'unknown') } satisfies BasicHealthStatus;
+      }
+      return { kind: 'basic', status: 'unknown' } satisfies BasicHealthStatus;
+    },
+    staleTime: 30000,
     ...options,
   });
 }
 
-export function useBasicHealth(options?: UseQueryOptions<{ status: string }, ApiError>) {
+export function useBasicHealth(options?: UseQueryOptions<BasicHealthStatus, ApiError>) {
   return useQuery({
     queryKey: ['health', 'basic'],
-    queryFn: () => apiClient.getBasicHealth(),
-    staleTime: 10000, // 10 seconds
+    queryFn: async () => {
+      const raw = (await apiClient.getBasicHealth()) as unknown;
+      if (typeof raw === 'object' && raw !== null) {
+        const r = raw as Record<string, unknown>;
+        return { kind: 'basic', status: String(r.status ?? 'unknown') } satisfies BasicHealthStatus;
+      }
+      return { kind: 'basic', status: 'unknown' } satisfies BasicHealthStatus;
+    },
+    staleTime: 10000,
     ...options,
   });
 }

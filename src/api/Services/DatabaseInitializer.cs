@@ -1,5 +1,4 @@
 ﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Data.Seed;
 
 namespace Farm.Web.Api.Services;
 

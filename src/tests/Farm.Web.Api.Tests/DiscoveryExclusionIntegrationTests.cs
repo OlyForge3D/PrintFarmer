@@ -1,16 +1,14 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace Farm.Web.Api.Tests;
 
@@ -57,7 +55,7 @@ public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFa
     }
 
     [Fact(Timeout = 20000)]
-    public async Task Streaming_discovery_should_exclude_already_added_printer()
+    public async Task Streaming_discovery_should_exclude_already_added_printerAsync()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -120,8 +118,8 @@ public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFa
 
         // Ensure no found printer event happened
         foundTcs.Task.IsCompleted.Should().BeFalse("already added printer must be excluded");
-    var completion = await completedTcs.Task;
-    completion.TotalPrintersFound.Should().Be(0, "excluded printer should not be counted");
+        var completion = await completedTcs.Task;
+        completion.TotalPrintersFound.Should().Be(0, "excluded printer should not be counted");
 
         await hubConnection.DisposeAsync();
     }
