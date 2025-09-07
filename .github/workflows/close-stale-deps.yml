@@ -1,0 +1,90 @@
+name: Close Stale Dependency PRs
+
+on:
+  schedule:
+    - cron: '20 4 * * *' # Daily at 04:20 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  close-stale:
+    runs-on: ubuntu-latest
+    env:
+      DAYS_THRESHOLD: 5
+      EXEMPT_LABELS: 'no-autoclose,security,keep-open'
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List dependency PRs
+        id: list
+        run: |
+          echo "Fetching open dependency PRs..."
+          gh pr list --search "is:open is:pr author:dependabot" --json number,title,headRefName,updatedAt,createdAt,labels > prs.json
+          cat prs.json
+
+      - name: Close stale dependency PRs (> ${DAYS_THRESHOLD} days no update)
+        run: |
+          set -euo pipefail
+          threshold_days=${DAYS_THRESHOLD}
+          threshold_seconds=$((threshold_days*24*3600))
+          now_epoch=$(date -u +%s)
+
+          closed=0
+          kept=0
+
+          jq -c '.[]' prs.json | while read -r pr; do
+            num=$(echo "$pr" | jq -r '.number')
+            branch=$(echo "$pr" | jq -r '.headRefName')
+            updatedAt=$(echo "$pr" | jq -r '.updatedAt')
+            createdAt=$(echo "$pr" | jq -r '.createdAt')
+            title=$(echo "$pr" | jq -r '.title')
+            labels=$(echo "$pr" | jq -r '[.labels[].name]|join(",")')
+
+            # Skip if branch not dependabot/* just in case
+            if [[ ! $branch == dependabot/* ]]; then
+              echo "PR #$num not a dependabot branch (branch=$branch), skipping"
+              kept=$((kept+1))
+              continue
+            fi
+
+            # Exempt if any exempt label present
+            IFS=',' read -ra exempt_arr <<< "$EXEMPT_LABELS"
+            skip=false
+            for lbl in "${exempt_arr[@]}"; do
+              if echo "$labels" | grep -qi "\b${lbl}\b"; then
+                echo "PR #$num has exempt label '$lbl' -> skip"
+                skip=true; break
+              fi
+            done
+            $skip && { kept=$((kept+1)); continue; }
+
+            # Determine last activity (favor updatedAt else createdAt)
+            last_ts_iso=${updatedAt:-$createdAt}
+            last_epoch=$(date -u -d "$last_ts_iso" +%s || echo 0)
+            age_seconds=$((now_epoch - last_epoch))
+
+            if (( age_seconds > threshold_seconds )); then
+              echo "Closing stale dependency PR #$num (age: $((age_seconds/86400)) days) - $title"
+              gh pr comment "$num" --body "Closing as stale (no activity > ${threshold_days} days). Reopen or rebase if still needed."
+              gh pr close "$num"
+              closed=$((closed+1))
+            else
+              echo "Keeping PR #$num (recent activity within threshold)."
+              kept=$((kept+1))
+            fi
+          done
+
+          echo "closed=$closed" >> $GITHUB_OUTPUT
+          echo "kept=$kept" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        run: |
+          echo "### Stale Dependency PR Sweep" >> $GITHUB_STEP_SUMMARY
+          echo "- Threshold: ${DAYS_THRESHOLD} days" >> $GITHUB_STEP_SUMMARY
+          echo "- Closed: ${{ steps.close-stale.outputs.closed || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Kept: ${{ steps.close-stale.outputs.kept || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
