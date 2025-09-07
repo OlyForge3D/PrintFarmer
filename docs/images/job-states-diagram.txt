@@ -1,0 +1,40 @@
+Job State Machine Lifecycle
+
+           +-------+
+           | START |
+           +-------+
+                |
+                v
+          +---------+
+          |  QUEUED |
+          +---------+
+             |    |
+         dispatch |  |cancel
+                  v  v
+        +-----------+ | 
+        | DISPATCHED| |
+        +-----------+ |
+          |   |   |   |
+     process  |   |   |
+        |     |   |   |
+        |   deadletter|
+        v     |   v   v
+    +------------+ +-----------+
+    | PROCESSING | | CANCELLED |
+    +------------+ +-----------+
+       |  |  |  |     (TERMINAL)
+       |  |  | deadletter
+    succeed | | |
+       |   fail |
+       v    v  v  v
++----------+  +--------+  +------------+
+| SUCCEEDED|  | FAILED |  | DEAD-LETTER|
++----------+  +--------+  +------------+
+(TERMINAL)    (TERMINAL)    (TERMINAL)
+
+Valid Transitions:
+- QUEUED → DISPATCHED, CANCELLED
+- DISPATCHED → PROCESSING, CANCELLED, DEAD-LETTER
+- PROCESSING → SUCCEEDED, FAILED, CANCELLED, DEAD-LETTER
+- Terminal states have no outgoing transitions
+
