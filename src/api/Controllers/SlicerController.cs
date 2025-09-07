@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Collections.Concurrent;
+using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
@@ -18,7 +19,8 @@ public class SlicerController : ControllerBase
     private readonly ILogger<SlicerController> _logger;
     private readonly AppDbContext _context;
     private readonly string _tempPath;
-    private readonly Dictionary<string, SlicingJobDto> _activeJobs = new();
+    // Static shared in-memory job store so subsequent requests can see previously created jobs (controller is transient).
+    private static readonly ConcurrentDictionary<string, SlicingJobDto> s_activeJobs = new();
     private static readonly HashSet<string> s_allowedEngines = new(StringComparer.OrdinalIgnoreCase)
     {
         "prusaslicer",
@@ -42,48 +44,58 @@ public class SlicerController : ControllerBase
     /// <summary>
     /// Start slicing a 3D model
     /// </summary>
-    /// <param name="modelFile">3D model file</param>
-    /// <param name="slicerEngine">Slicer engine to use</param>
-    /// <param name="printerId">Target printer ID</param>
-    /// <param name="profile">Slicer profile settings</param>
+    // Parameters supplied via multipart form body; XML param tags removed after switching to manual form parsing.
     /// <returns>Slicing job information</returns>
     [HttpPost("slice")]
     [ProducesResponseType(typeof(SliceResultDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)] // 100MB limit
-    public async Task<IActionResult> SliceModelAsync(
-        IFormFile modelFile,
-        [FromForm] string slicerEngine,
-        [FromForm] string printerId,
-        [FromForm] string profile)
+    public async Task<IActionResult> SliceModelAsync()
     {
+        if (!Request.HasFormContentType)
+        {
+            return BadRequest("Multipart form data is required");
+        }
+
+        var form = await Request.ReadFormAsync();
+
+        // File extraction
+        // Intentionally using manual extraction to provide custom validation message matching tests.
+        // ReSharper disable once UseIndexFromEndExpression
+        var modelFile = form.Files.Count > 0 ? form.Files[0] : null; // analyzer suppressed: custom parsing required
         if (modelFile == null || modelFile.Length == 0)
         {
             return BadRequest("Model file is required");
         }
 
+        var slicerEngine = form["slicerEngine"].FirstOrDefault();
         if (string.IsNullOrEmpty(slicerEngine) || !s_allowedEngines.Contains(slicerEngine))
         {
             return BadRequest("Valid slicer engine is required (prusaslicer or orcaslicer)");
         }
 
+        var printerId = form["printerId"].FirstOrDefault();
         if (string.IsNullOrEmpty(printerId) || !Guid.TryParse(printerId, out var printerGuid))
         {
             return BadRequest("Valid printer ID is required");
         }
 
-        SlicerProfileDto? slicerProfile;
-        try
+        var profileRaw = form["profile"].FirstOrDefault();
+        SlicerProfileDto? slicerProfile = null;
+        if (!string.IsNullOrEmpty(profileRaw))
         {
-            slicerProfile = JsonSerializer.Deserialize<SlicerProfileDto>(profile);
-            if (slicerProfile == null)
+            try
             {
-                return BadRequest("Valid slicer profile is required");
+                slicerProfile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw);
+            }
+            catch (JsonException)
+            {
+                return BadRequest("Invalid slicer profile format");
             }
         }
-        catch (JsonException)
+        else
         {
-            return BadRequest("Invalid slicer profile format");
+            return BadRequest("Valid slicer profile is required");
         }
 
         var jobId = Guid.NewGuid().ToString();
@@ -120,7 +132,7 @@ public class SlicerController : ControllerBase
                 CreatedAt = DateTime.UtcNow
             };
 
-            _activeJobs[jobId] = job;
+            s_activeJobs[jobId] = job; // Upsert into shared dictionary
 
             // Start slicing process (in background)
             _ = Task.Run(() => ProcessSlicingJobAsync(job));
@@ -135,7 +147,7 @@ public class SlicerController : ControllerBase
                 Metadata = new SliceMetadataDto
                 {
                     SlicerVersion = slicerEngine == "prusaslicer" ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                    ProfileUsed = $"{slicerProfile.Quality} - {slicerProfile.Material}",
+                    ProfileUsed = $"{slicerProfile!.Quality} - {slicerProfile.Material}",
                     EstimatedCost = 0
                 }
             };
@@ -296,7 +308,7 @@ public class SlicerController : ControllerBase
             };
 
             _logger.LogInformation("Slicer profile created: {ProfileId} ({Name})", profile.Id, profile.Name);
-            return CreatedAtAction(nameof(GetProfileAsync), new { id = profile.Id }, response);
+            return CreatedAtRoute("GetSlicerProfile", new { id = profile.Id }, response);
         }
         catch (Exception ex)
         {
@@ -310,7 +322,7 @@ public class SlicerController : ControllerBase
     /// </summary>
     /// <param name="id">Profile ID</param>
     /// <returns>Slicer profile</returns>
-    [HttpGet("profiles/{id:guid}")]
+    [HttpGet("profiles/{id:guid}", Name = "GetSlicerProfile")]
     [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProfileAsync(Guid id)
@@ -394,7 +406,7 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetSlicingProgressAsync(string jobId)
     {
-        if (!_activeJobs.TryGetValue(jobId, out var job))
+    if (!s_activeJobs.TryGetValue(jobId, out var job))
         {
             return NotFound();
         }
@@ -414,14 +426,14 @@ public class SlicerController : ControllerBase
             {
                 await Task.Delay(1000); // Update every second
 
-                if (_activeJobs.TryGetValue(jobId, out var updatedJob))
+                if (s_activeJobs.TryGetValue(jobId, out var updatedJob))
                 {
                     await SendProgressEventAsync(jobId, updatedJob.Progress, updatedJob.Status, updatedJob.Message);
                 }
             }
 
             // Send final status
-            if (_activeJobs.TryGetValue(jobId, out var finalJob))
+            if (s_activeJobs.TryGetValue(jobId, out var finalJob))
             {
                 await SendProgressEventAsync(jobId, finalJob.Progress, finalJob.Status, finalJob.Message);
             }
@@ -460,7 +472,7 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetSlicingJob(string jobId)
     {
-        if (!_activeJobs.TryGetValue(jobId, out var job))
+    if (!s_activeJobs.TryGetValue(jobId, out var job))
         {
             return NotFound();
         }
@@ -516,7 +528,7 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult CancelSlicingJob(string jobId)
     {
-        if (!_activeJobs.TryGetValue(jobId, out var job))
+    if (!s_activeJobs.TryGetValue(jobId, out var job))
         {
             return NotFound();
         }
