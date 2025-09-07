@@ -171,18 +171,8 @@ public class SlicerController : ControllerBase
             var cancelled = await _slicerOrchestrator.CancelJobAsync(jobId);
             if (!cancelled)
             {
-                JobId = jobId,
-                GcodeUrl = $"/api/slicer/job/{jobId}/gcode",
-                PrintTime = 0, // Will be updated when slicing completes
-                FilamentUsed = 0,
-                LayerCount = 0,
-                Metadata = new SliceMetadataDto
-                {
-                    SlicerVersion = slicerEngine == "prusaslicer" ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                    ProfileUsed = $"{slicerProfile!.Quality} - {slicerProfile.Material}",
-                    EstimatedCost = 0
-                }
-            };
+                return NotFound();
+            }
 
             _logger.LogInformation("Cancelled slicing job {JobId}", jobId);
             return Ok(new { success = true, message = "Job cancelled successfully" });
