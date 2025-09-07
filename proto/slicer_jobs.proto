@@ -1,0 +1,248 @@
+syntax = "proto3";
+
+option csharp_namespace = "Farm.Web.Api.Grpc";
+
+package slicerjobs;
+
+// Slicer Jobs gRPC Service
+// Internal service for managing slicing jobs across distributed workers
+service SlicerJobsService {
+  // Submit a new slicing job for processing
+  rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
+  
+  // Get current status of a slicing job
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  
+  // Cancel a queued or in-progress slicing job
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  
+  // Stream real-time progress updates for a job
+  rpc StreamProgress(StreamProgressRequest) returns (stream ProgressUpdate);
+  
+  // Get available slicer workers and their capabilities
+  rpc GetWorkerStatus(GetWorkerStatusRequest) returns (GetWorkerStatusResponse);
+  
+  // Register a new slicer worker
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  
+  // Worker heartbeat to maintain connection
+  rpc WorkerHeartbeat(WorkerHeartbeatRequest) returns (WorkerHeartbeatResponse);
+}
+
+// Submit Job Request
+message SubmitJobRequest {
+  string job_id = 1;  // UUID as string
+  string user_id = 2; // UUID as string
+  string printer_id = 3; // UUID as string
+  string model_file_url = 4;
+  string model_file_name = 5;
+  SlicerEngineType slicer_engine = 6;
+  SlicerProfile slicer_profile = 7;
+  JobPriority priority = 8;
+  map<string, string> metadata = 9;
+  int64 file_size_bytes = 10;
+  string file_checksum = 11; // MD5 or SHA256 hash
+}
+
+// Submit Job Response
+message SubmitJobResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  int64 estimated_completion_time = 3; // Unix timestamp
+  int32 queue_position = 4;
+  string worker_id = 5;
+  string worker_url = 6;
+}
+
+// Get Job Status Request
+message GetJobStatusRequest {
+  string job_id = 1;
+}
+
+// Get Job Status Response  
+message GetJobStatusResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  int32 progress_percentage = 3; // 0-100
+  int64 created_at = 4; // Unix timestamp
+  int64 started_at = 5; // Unix timestamp (0 if not started)
+  int64 completed_at = 6; // Unix timestamp (0 if not completed)
+  string worker_id = 7;
+  string error_message = 8;
+  string result_file_url = 9;
+  double estimated_print_time_seconds = 10;
+  double estimated_filament_usage_grams = 11;
+  int32 layer_count = 12;
+  map<string, string> metadata = 13;
+  int32 retry_count = 14;
+  int64 last_retry_at = 15; // Unix timestamp
+}
+
+// Cancel Job Request
+message CancelJobRequest {
+  string job_id = 1;
+  string reason = 2; // Optional cancellation reason
+}
+
+// Cancel Job Response
+message CancelJobResponse {
+  bool success = 1;
+  string message = 2;
+  JobStatus previous_status = 3;
+}
+
+// Stream Progress Request
+message StreamProgressRequest {
+  string job_id = 1;
+}
+
+// Progress Update (streamed response)
+message ProgressUpdate {
+  string job_id = 1;
+  JobStatus status = 2;
+  int32 progress_percentage = 3;
+  string current_step = 4; // "Loading model", "Generating toolpaths", etc.
+  int64 timestamp = 5; // Unix timestamp
+  map<string, string> additional_data = 6;
+  double estimated_remaining_seconds = 7;
+}
+
+// Get Worker Status Request
+message GetWorkerStatusRequest {
+  bool include_offline = 1; // Include offline workers in response
+}
+
+// Get Worker Status Response
+message GetWorkerStatusResponse {
+  repeated WorkerInfo workers = 1;
+  int32 total_workers = 2;
+  int32 active_workers = 3;
+  int32 busy_workers = 4;
+}
+
+// Register Worker Request
+message RegisterWorkerRequest {
+  string worker_id = 1;
+  string worker_name = 2;
+  string worker_url = 3;
+  repeated SlicerEngineType supported_engines = 4;
+  WorkerCapabilities capabilities = 5;
+  string version = 6;
+}
+
+// Register Worker Response
+message RegisterWorkerResponse {
+  bool success = 1;
+  string message = 2;
+  string assigned_worker_id = 3; // May be different from requested ID
+}
+
+// Worker Heartbeat Request
+message WorkerHeartbeatRequest {
+  string worker_id = 1;
+  WorkerStatus worker_status = 2;
+  repeated string active_job_ids = 3;
+  WorkerMetrics metrics = 4;
+}
+
+// Worker Heartbeat Response
+message WorkerHeartbeatResponse {
+  bool acknowledged = 1;
+  repeated string jobs_to_cancel = 2; // Jobs the worker should cancel
+  WorkerConfig updated_config = 3; // Updated configuration if needed
+}
+
+// Slicer Profile Definition
+message SlicerProfile {
+  string name = 1;
+  string description = 2;
+  double layer_height = 3;
+  int32 infill_percentage = 4;
+  int32 print_speed = 5; // mm/s
+  int32 nozzle_temperature = 6; // Celsius  
+  int32 bed_temperature = 7; // Celsius
+  bool enable_supports = 8;
+  string material = 9; // "PLA", "ABS", "PETG", etc.
+  string quality = 10; // "Draft", "Standard", "Fine", "Ultra Fine"
+  string advanced_settings_json = 11; // JSON-encoded advanced settings
+}
+
+// Worker Information
+message WorkerInfo {
+  string worker_id = 1;
+  string worker_name = 2;
+  string worker_url = 3;
+  WorkerStatus status = 4;
+  repeated SlicerEngineType supported_engines = 5;
+  WorkerCapabilities capabilities = 6;
+  int64 last_heartbeat = 7; // Unix timestamp
+  repeated string active_job_ids = 8;
+  WorkerMetrics metrics = 9;
+}
+
+// Worker Capabilities
+message WorkerCapabilities {
+  int32 max_concurrent_jobs = 1;
+  int64 max_file_size_bytes = 2;
+  repeated string supported_file_formats = 3; // ["stl", "3mf", "obj"]
+  bool supports_large_models = 4;
+  bool supports_multi_material = 5;
+  string cpu_architecture = 6; // "x64", "arm64", etc.
+  int32 memory_mb = 7;
+  int32 cpu_cores = 8;
+}
+
+// Worker Metrics
+message WorkerMetrics {
+  int32 jobs_completed_today = 1;
+  int32 jobs_failed_today = 2;
+  double average_job_time_seconds = 3;
+  double cpu_usage_percentage = 4;
+  double memory_usage_percentage = 5;
+  double disk_usage_percentage = 6;
+  int64 uptime_seconds = 7;
+}
+
+// Worker Configuration
+message WorkerConfig {
+  int32 max_concurrent_jobs = 1;
+  int32 heartbeat_interval_seconds = 2;
+  int32 job_timeout_seconds = 3;
+  bool enable_detailed_logging = 4;
+  map<string, string> environment_variables = 5;
+}
+
+// Enumerations
+enum JobStatus {
+  JOB_STATUS_UNKNOWN = 0;
+  JOB_STATUS_QUEUED = 1;
+  JOB_STATUS_SLICING = 2;
+  JOB_STATUS_COMPLETED = 3;
+  JOB_STATUS_ERROR = 4;
+  JOB_STATUS_CANCELLED = 5;
+}
+
+enum JobPriority {
+  JOB_PRIORITY_UNKNOWN = 0;
+  JOB_PRIORITY_LOW = 1;
+  JOB_PRIORITY_NORMAL = 2;
+  JOB_PRIORITY_HIGH = 3;
+  JOB_PRIORITY_CRITICAL = 4;
+}
+
+enum SlicerEngineType {
+  SLICER_ENGINE_UNKNOWN = 0;
+  SLICER_ENGINE_ORCA = 1;
+  SLICER_ENGINE_PRUSA = 2;
+  SLICER_ENGINE_SUPER = 3;
+  SLICER_ENGINE_CURA = 4;
+}
+
+enum WorkerStatus {
+  WORKER_STATUS_UNKNOWN = 0;
+  WORKER_STATUS_IDLE = 1;
+  WORKER_STATUS_BUSY = 2;
+  WORKER_STATUS_OFFLINE = 3;
+  WORKER_STATUS_MAINTENANCE = 4;
+  WORKER_STATUS_ERROR = 5;
+}
