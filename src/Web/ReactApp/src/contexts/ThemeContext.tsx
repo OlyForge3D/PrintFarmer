@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 
 export type ThemeName = 'dark' | 'light' | 'system';
 
-interface ThemeContextType {
+export interface ThemeContextType {
   /** Current theme setting ('dark', 'light', or 'system') */
   theme: ThemeName;
   /** Computed theme after system preference resolution */
@@ -89,12 +89,13 @@ export function ThemeProvider({
     };
   }, []);
 
-  // Apply theme to document
+  // Apply theme to document (also manage .dark class for Tailwind dark mode)
   useEffect(() => {
     const root = window.document.documentElement;
     
     // Remove previous theme classes
     root.removeAttribute('data-theme');
+    root.classList.remove('dark');
     
     // Compute the actual theme to apply
     const computedTheme = theme === 'system' ? systemTheme : theme;
@@ -102,8 +103,9 @@ export function ThemeProvider({
     // Apply theme
     if (computedTheme === 'light') {
       root.setAttribute('data-theme', 'light');
+    } else {
+      root.classList.add('dark');
     }
-    // Dark theme is the default (no attribute needed)
     
     // Apply accessibility preferences
     if (prefersReducedMotion) {
@@ -111,17 +113,15 @@ export function ThemeProvider({
     } else {
       root.style.removeProperty('--pf-transition-duration');
     }
-    
+    // Broadcast change
+    window.dispatchEvent(new CustomEvent('themeChange', { 
+      detail: { theme, computedTheme }
+    }));
   }, [theme, systemTheme, prefersReducedMotion, prefersHighContrast]);
 
   const setTheme = (newTheme: ThemeName) => {
     setThemeState(newTheme);
     localStorage.setItem(storageKey, newTheme);
-    
-    // Dispatch custom event for theme change
-    window.dispatchEvent(new CustomEvent('themeChange', { 
-      detail: { theme: newTheme, computedTheme: newTheme === 'system' ? systemTheme : newTheme }
-    }));
   };
 
   const toggleTheme = () => {

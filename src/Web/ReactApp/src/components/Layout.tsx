@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LoginModal } from '@/components/auth/LoginModal';
 import { RegisterModal } from '@/components/auth/RegisterModal';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { BuildInfo } from '@/components/BuildInfo';
 import { 
   Home,
   Printer, 
@@ -111,10 +112,7 @@ export function Layout({ children }: LayoutProps) {
     setUserMenuOpen(false);
   };
 
-  const handleLoginSuccess = () => {
-    setShowLoginModal(false);
-    setShowRegisterModal(false);
-  };
+  // Removed unused handleLoginSuccess
 
   const switchToRegister = () => {
     setShowLoginModal(false);
@@ -127,7 +125,7 @@ export function Layout({ children }: LayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-pf-bg-0">
+  <div className="min-h-screen bg-pf-bg-0 flex flex-col">
       {/* Top Header Bar */}
       <header className="bg-pf-bg-1 border-b border-pf-border sticky top-0 z-50">
         <div className="flex items-center justify-between h-16 px-4">
@@ -136,6 +134,8 @@ export function Layout({ children }: LayoutProps) {
             {/* Mobile menu button */}
             <button
               type="button"
+              aria-label="Open navigation menu"
+              title="Open navigation menu"
               className="lg:hidden p-2 rounded-md text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent"
               onClick={() => setSidebarOpen(true)}
             >
@@ -244,7 +244,7 @@ export function Layout({ children }: LayoutProps) {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-4rem)]">
+  <div className="flex flex-1 h-[calc(100vh-4rem)]">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
@@ -253,6 +253,8 @@ export function Layout({ children }: LayoutProps) {
               <div className="absolute top-0 right-0 -mr-12 pt-2">
                 <button
                   type="button"
+                  aria-label="Close navigation menu"
+                  title="Close navigation menu"
                   className="ml-1 flex h-10 w-10 items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-pf-accent"
                   onClick={() => setSidebarOpen(false)}
                 >
@@ -380,6 +382,13 @@ export function Layout({ children }: LayoutProps) {
         />
       )}
 
+      <footer className="bg-pf-bg-1 border-t border-pf-border px-4 py-2 text-xs text-pf-text-tertiary flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <span>&copy; {new Date().getFullYear()} PrintFarmer</span>
+        </div>
+        <BuildInfo />
+      </footer>
+
       {/* Authentication Modals */}
       <LoginModal
         isOpen={showLoginModal}
@@ -394,3 +403,5 @@ export function Layout({ children }: LayoutProps) {
     </div>
   );
 }
+
+// Footer with build info now moved out of header for persistent display
