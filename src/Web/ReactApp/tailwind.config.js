@@ -7,77 +7,87 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // PrintFarmer Dark Theme Colors - matching original Blazor
+        // PrintFarmer Colors - Now using CSS Custom Properties for dynamic theming
         'pf': {
-          // Primary backgrounds (from CSS variables)
-          'bg-0': '#0b1020',    // --bg-0: main background
-          'bg-1': '#0f172a',    // --bg-1: secondary background  
-          'bg-2': '#111827',    // --bg-2: tertiary background
-          'panel': '#0e1528',   // --panel: panel background
+          // Primary backgrounds
+          'bg-0': 'var(--pf-bg-0)',           // Main background
+          'bg-1': 'var(--pf-bg-1)',           // Secondary background  
+          'bg-2': 'var(--pf-bg-2)',           // Tertiary background
+          'panel': 'var(--pf-panel)',         // Panel background
           
           // Borders and dividers
-          'border': '#243145',  // --border: main border color
-          'border-light': '#475569',
-          'border-medium': '#334155',
-          'border-dark': '#1f2937',
+          'border': 'var(--pf-border)',       // Main border color
+          'border-light': 'var(--pf-border-light)',
+          'border-medium': 'var(--pf-border-medium)',
+          'border-dark': 'var(--pf-border-dark)',
+          'border-gray': 'var(--pf-border-gray)',
           
           // Text colors
-          'text-primary': '#e5e7eb',    // --color-text-primary
-          'text-secondary': '#9ca3af',  // --color-text-secondary  
-          'text-tertiary': '#6b7280',   // --color-text-tertiary
-          'text-light': '#cbd5e1',
-          'text-muted': '#94a3b8',
+          'text-primary': 'var(--pf-text-primary)',
+          'text-secondary': 'var(--pf-text-secondary)',
+          'text-tertiary': 'var(--pf-text-tertiary)',
+          'text-light': 'var(--pf-text-light)',
+          'text-muted': 'var(--pf-text-muted)',
           
           // Accent colors
-          'accent': '#10b981',          // --accent: primary green
-          'accent-2': '#2563eb',        // --accent-2: blue accent
-          'success': '#10b981',         // --color-success
-          'success-hover': '#059669',   // --color-primary-hover
-          'link': '#93c5fd',           // --color-link
+          'accent': 'var(--pf-accent)',
+          'accent-bg': 'var(--pf-accent-bg)',
+          'accent-2': 'var(--pf-accent-2)',
+          'success': 'var(--pf-success)',
+          'success-bg': 'var(--pf-success-bg)',
+          'success-hover': 'var(--pf-success-hover)',
+          'link': 'var(--pf-link)',
           
           // Status colors
-          'status-online-bg': '#064e3b',
-          'status-online-text': '#d1fae5', 
-          'status-online-border': '#065f46',
-          'status-offline-bg': '#450a0a',
-          'status-offline-text': '#fee2e2',
-          'status-offline-border': '#7f1d1d',
+          'status-online-bg': 'var(--pf-status-online-bg)',
+          'status-online-text': 'var(--pf-status-online-text)', 
+          'status-online-border': 'var(--pf-status-online-border)',
+          'status-offline-bg': 'var(--pf-status-offline-bg)',
+          'status-offline-text': 'var(--pf-status-offline-text)',
+          'status-offline-border': 'var(--pf-status-offline-border)',
           
           // Error and warning
-          'error': '#ef4444',
-          'error-bg': '#450a0a',
-          'error-text': '#fee2e2',
-          'error-border': '#7f1d1d',
-          'warning': '#f59e0b',
-          'warning-text': '#fecaca',
+          'error': 'var(--pf-error)',
+          'error-bg': 'var(--pf-error-bg)',
+          'error-text': 'var(--pf-error-text)',
+          'error-border': 'var(--pf-error-border)',
+          'warning': 'var(--pf-warning)',
+          'warning-text': 'var(--pf-warning-text)',
           
           // Loading and disabled
-          'loading': '#93c5fd',
-          'loading-border': '#2563eb',
-          'disabled': '#9ca3af',
+          'loading': 'var(--pf-loading)',
+          'loading-border': 'var(--pf-loading-border)',
+          'disabled': 'var(--pf-disabled)',
           
           // Gradient colors for buttons
           'gradient': {
-            'primary-start': '#172036',
-            'primary-end': '#0f172a',
-            'secondary-start': '#1a2542',
-            'secondary-end': '#111b30',
-            'success-start': '#34d399',
-            'success-end': '#10b981',
-            'green-start': '#22c55e',
-            'green-end': '#16a34a',
-            'green-active-start': '#16a34a',
-            'green-active-end': '#15803d',
-            'gray-start': '#64748b',
-            'gray-end': '#475569',
-            'gray-dark-start': '#4a5668',
-            'gray-dark-end': '#334155',
+            'primary-start': 'var(--pf-gradient-primary-start)',
+            'primary-end': 'var(--pf-gradient-primary-end)',
+            'secondary-start': 'var(--pf-gradient-secondary-start)',
+            'secondary-end': 'var(--pf-gradient-secondary-end)',
+            'success-start': 'var(--pf-gradient-success-start)',
+            'success-end': 'var(--pf-gradient-success-end)',
+            'green-start': 'var(--pf-gradient-green-start)',
+            'green-end': 'var(--pf-gradient-green-end)',
+            'green-active-start': 'var(--pf-gradient-green-active-start)',
+            'green-active-end': 'var(--pf-gradient-green-active-end)',
+            'gray-start': 'var(--pf-gradient-gray-start)',
+            'gray-end': 'var(--pf-gradient-gray-end)',
+            'gray-dark-start': 'var(--pf-gradient-gray-dark-start)',
+            'gray-dark-end': 'var(--pf-gradient-gray-dark-end)',
           }
         }
       },
       fontFamily: {
         'inter': ['Inter', 'ui-sans-serif', 'system-ui'],
         'bebas': ['Bebas Neue', 'sans-serif'],
+      },
+      // Add theme-aware ring colors for focus states
+      ringColor: {
+        'pf-focus': 'var(--pf-focus-ring)',
+      },
+      ringOffsetColor: {
+        'pf-focus': 'var(--pf-focus-ring-offset)',
       },
     },
   },
