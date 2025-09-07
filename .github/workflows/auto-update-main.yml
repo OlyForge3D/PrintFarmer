@@ -1,0 +1,48 @@
+name: Auto Update Main Branch
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # Daily 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Pull fast-forward
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull --ff-only || echo "No fast-forward possible (already up to date or divergence)"
+
+      - name: Refresh open dependency PRs
+        run: |
+          echo "Looking for stale Dependabot PRs to rebase" 
+          gh pr list --search "is:open is:pr author:dependabot" --json number,headRefName,updatedAt -L 50 | jq -c '.[]' | while read -r pr; do
+            num=$(echo "$pr" | jq -r '.number')
+            echo "Requesting rebase for PR #$num"
+            gh pr comment "$num" --body "Automated rebase request: triggering Dependabot rebase." || true
+            gh pr edit "$num" --add-label "rebase-requested" || true
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### Auto Update Main" >> $GITHUB_STEP_SUMMARY
+          echo "- Performed fast-forward pull on main" >> $GITHUB_STEP_SUMMARY
+          echo "- Marked dependency PRs for refresh (if any)" >> $GITHUB_STEP_SUMMARY
