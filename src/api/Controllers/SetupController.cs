@@ -1,4 +1,4 @@
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
@@ -169,7 +169,7 @@ public class SetupController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-    _logger.LogInformation("Initial admin user created: {Username} ({Email})", adminUser.Username, adminUser.Email);
+        _logger.LogInformation("Initial admin user created: {Username} ({Email})", adminUser.Username, adminUser.Email);
 
         // Generate JWT token for immediate login
         var token = await _authService.GenerateJwtTokenAsync(adminUser);

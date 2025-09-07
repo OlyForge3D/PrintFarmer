@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Authentication;
@@ -24,7 +24,7 @@ public class UsersController : ControllerBase
     private readonly ILogger<UsersController> _logger;
 
     public UsersController(
-        AppDbContext db, 
+        AppDbContext db,
         IAuthenticationService authService,
         IPasswordHashingService passwordHashingService,
         ILogger<UsersController> logger)
@@ -92,9 +92,13 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<UserDto>> CreateUserAsync([FromBody] CreateUserRequest request, CancellationToken ct)
     {
-        if (request == null) return BadRequest("Request body required");
-        if (string.IsNullOrWhiteSpace(request.Username) || 
-            string.IsNullOrWhiteSpace(request.Email) || 
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Username) ||
+            string.IsNullOrWhiteSpace(request.Email) ||
             string.IsNullOrWhiteSpace(request.Password))
         {
             return BadRequest("Username, email, and password are required");
@@ -126,7 +130,7 @@ public class UsersController : ControllerBase
         _db.Users.Add(user);
 
         // Assign roles if provided
-    if (request.RoleIds is { Length: > 0 })
+        if (request.RoleIds is { Length: > 0 })
         {
             foreach (var roleId in request.RoleIds)
             {
@@ -148,12 +152,12 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("User {UserId} created new user {NewUserId} ({Username})", 
+        _logger.LogInformation("User {UserId} created new user {NewUserId} ({Username})",
             currentUserId, user.Id, user.Username);
 
         // Return the created user with roles and permissions
-    var createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
-    return CreatedAtRoute("GetUserById", new { id = user.Id }, createdUser);
+        var createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
+        return CreatedAtRoute("GetUserById", new { id = user.Id }, createdUser);
     }
 
     /// <summary>
@@ -166,7 +170,11 @@ public class UsersController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<UserDto>> UpdateUserAsync(Guid id, [FromBody] UpdateUserRequest request, CancellationToken ct)
     {
-        if (request == null) return BadRequest("Request body required");
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
+
         var user = await _db.Users.FindAsync(id);
         if (user == null)
         {
@@ -178,7 +186,7 @@ public class UsersController : ControllerBase
         {
             user.FirstName = request.FirstName;
         }
-        
+
         if (!string.IsNullOrWhiteSpace(request.LastName))
         {
             user.LastName = request.LastName;
@@ -218,7 +226,7 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("User {UserId} updated user {UpdatedUserId} ({Username})", 
+        _logger.LogInformation("User {UserId} updated user {UpdatedUserId} ({Username})",
             currentUserId, user.Id, user.Username);
 
         // Return the updated user with roles and permissions
@@ -255,7 +263,7 @@ public class UsersController : ControllerBase
         _db.Users.Remove(user);
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("User {UserId} deleted user {DeletedUserId} ({Username})", 
+        _logger.LogInformation("User {UserId} deleted user {DeletedUserId} ({Username})",
             currentUserId, user.Id, user.Username);
 
         return NoContent();

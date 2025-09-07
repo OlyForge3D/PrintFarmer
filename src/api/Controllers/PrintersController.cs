@@ -8,7 +8,6 @@ using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using FluentValidation;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -2154,7 +2153,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             // Generate a unique session ID for this discovery session
             var sessionId = Guid.NewGuid().ToString();
-            
+
             logger.LogInformation("Starting streaming network printer discovery with session ID: {SessionId}", sessionId);
 
             // Start the discovery process in the background
@@ -2165,7 +2164,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 {
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     timeoutCts.CancelAfter(TimeSpan.FromMinutes(5)); // 5 minute total timeout
-                    
+
                     await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, timeoutCts.Token);
                 }
                 catch (OperationCanceledException)

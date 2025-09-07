@@ -1,5 +1,4 @@
-using Farm.Web.Api.Services.Authentication;
-using FluentAssertions;
+﻿using Farm.Web.Api.Services.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
@@ -204,14 +203,14 @@ public class PasswordSecurityTests : IClassFixture<CustomWebApplicationFactory>
 
         // Act
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        
+
         for (int i = 0; i < iterations; i++)
         {
             var hash = _passwordHashingService.HashPassword(password);
             var isValid = _passwordHashingService.VerifyPassword(password, hash);
             isValid.Should().BeTrue();
         }
-        
+
         stopwatch.Stop();
 
         // Assert - Should complete 10 hash+verify cycles in reasonable time
@@ -248,11 +247,11 @@ public class PasswordSecurityTests : IClassFixture<CustomWebApplicationFactory>
         hash1.Should().NotBeNullOrEmpty();
         hash2.Should().NotBeNullOrEmpty();
         hash1.Should().NotBe(hash2);
-        
+
         // Both should verify correctly
         _passwordHashingService.VerifyPassword(password, hash1).Should().BeTrue();
         _passwordHashingService.VerifyPassword(password, hash2).Should().BeTrue();
-        
+
         // Cross-verification should fail (hash1 with password shouldn't verify with hash2)
         _passwordHashingService.VerifyPassword(password + "wrong", hash1).Should().BeFalse();
         _passwordHashingService.VerifyPassword(password + "wrong", hash2).Should().BeFalse();
@@ -275,7 +274,7 @@ public class PasswordSecurityTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         hashes.Should().HaveCount(numberOfHashes);
         hashes.Should().OnlyHaveUniqueItems(); // All hashes should be unique
-        
+
         // All hashes should verify the original password
         foreach (var hash in hashes)
         {

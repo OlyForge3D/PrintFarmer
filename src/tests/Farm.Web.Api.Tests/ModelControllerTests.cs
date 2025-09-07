@@ -1,11 +1,9 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
-using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
-using System.Net.Http.Json;
 using Farm.Web.Api.Data;
+using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
@@ -24,11 +22,11 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetModels_ShouldReturnEmptyList_WhenNoModelsExist()
+    public async Task GetModels_ShouldReturnEmptyList_WhenNoModelsExistAsync()
     {
         // Arrange - Clean database
         await CleanDatabaseAsync();
-        
+
         // Act
         var response = await _client.GetAsync("/api/models");
 
@@ -39,7 +37,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task UploadModel_ShouldCreateModel_WhenValidStlFileProvided()
+    public async Task UploadModel_ShouldCreateModel_WhenValidStlFileProvidedAsync()
     {
         // Arrange
         var stlContent = CreateValidStlContent();
@@ -54,7 +52,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var result = await response.Content.ReadFromJsonAsync<Model3DUploadResultDto>();
-        
+
         result.Should().NotBeNull();
         result!.Id.Should().NotBeEmpty();
         result.Name.Should().Be("test-cube");
@@ -65,7 +63,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task UploadModel_ShouldReturnExisting_WhenDuplicateFileUploaded()
+    public async Task UploadModel_ShouldReturnExisting_WhenDuplicateFileUploadedAsync()
     {
         // Arrange - Upload first model
         var stlContent = CreateValidStlContent();
@@ -73,7 +71,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         using var fileContent1 = new ByteArrayContent(stlContent);
         fileContent1.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         form1.Add(fileContent1, "modelFile", "duplicate.stl");
-        
+
         var firstResponse = await _client.PostAsync("/api/models", form1);
         firstResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         var firstResult = await firstResponse.Content.ReadFromJsonAsync<Model3DUploadResultDto>();
@@ -90,14 +88,14 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert - Should return OK (200) for duplicate, not Created (201)
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<Model3DUploadResultDto>();
-        
+
         result.Should().NotBeNull();
         result!.Id.Should().Be(firstResult!.Id); // Same ID as first upload
         result.Name.Should().Be(firstResult.Name); // Original name preserved
     }
 
     [Fact]
-    public async Task UploadModel_ShouldReturnBadRequest_WhenInvalidFileTypeProvided()
+    public async Task UploadModel_ShouldReturnBadRequest_WhenInvalidFileTypeProvidedAsync()
     {
         // Arrange
         var invalidContent = Encoding.UTF8.GetBytes("This is not a valid 3D model file");
@@ -116,7 +114,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task UploadModel_ShouldReturnBadRequest_WhenNoFileProvided()
+    public async Task UploadModel_ShouldReturnBadRequest_WhenNoFileProvidedAsync()
     {
         // Arrange
         using var form = new MultipartFormDataContent();
@@ -131,7 +129,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetModel_ShouldReturnModel_WhenModelExists()
+    public async Task GetModel_ShouldReturnModel_WhenModelExistsAsync()
     {
         // Arrange - Upload a model first
         var uploadResult = await UploadTestModelAsync("get-test.stl");
@@ -142,7 +140,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var model = await response.Content.ReadFromJsonAsync<Model3DDto>();
-        
+
         model.Should().NotBeNull();
         model!.Id.Should().Be(uploadResult.Id);
         model.Name.Should().Be("get-test");
@@ -150,7 +148,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetModel_ShouldReturnNotFound_WhenModelDoesNotExist()
+    public async Task GetModel_ShouldReturnNotFound_WhenModelDoesNotExistAsync()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid();
@@ -163,7 +161,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetModelFile_ShouldReturnFile_WhenModelExists()
+    public async Task GetModelFile_ShouldReturnFile_WhenModelExistsAsync()
     {
         // Arrange - Upload a model first
         var uploadResult = await UploadTestModelAsync("download-test.stl");
@@ -174,13 +172,13 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/vnd.ms-pki.stl");
-        
+
         var fileContent = await response.Content.ReadAsByteArrayAsync();
         fileContent.Should().NotBeEmpty();
     }
 
     [Fact]
-    public async Task GetModelFile_ShouldReturnNotFound_WhenModelDoesNotExist()
+    public async Task GetModelFile_ShouldReturnNotFound_WhenModelDoesNotExistAsync()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid();
@@ -193,7 +191,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task DeleteModel_ShouldRemoveModel_WhenModelExists()
+    public async Task DeleteModel_ShouldRemoveModel_WhenModelExistsAsync()
     {
         // Arrange - Upload a model first
         var uploadResult = await UploadTestModelAsync("delete-test.stl");
@@ -210,7 +208,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task DeleteModel_ShouldReturnNotFound_WhenModelDoesNotExist()
+    public async Task DeleteModel_ShouldReturnNotFound_WhenModelDoesNotExistAsync()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid();
@@ -223,7 +221,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task ValidateModel_ShouldReturnValid_WhenValidStlFileProvided()
+    public async Task ValidateModel_ShouldReturnValid_WhenValidStlFileProvidedAsync()
     {
         // Arrange
         var stlContent = CreateValidStlContent();
@@ -238,14 +236,14 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<Model3DValidationResultDto>();
-        
+
         result.Should().NotBeNull();
         result!.Valid.Should().BeTrue();
         result.Issues.Should().BeNullOrEmpty();
     }
 
     [Fact]
-    public async Task ValidateModel_ShouldReturnInvalid_WhenInvalidFileTypeProvided()
+    public async Task ValidateModel_ShouldReturnInvalid_WhenInvalidFileTypeProvidedAsync()
     {
         // Arrange
         var invalidContent = Encoding.UTF8.GetBytes("Invalid content");
@@ -260,7 +258,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<Model3DValidationResultDto>();
-        
+
         result.Should().NotBeNull();
         result!.Valid.Should().BeFalse();
         result.Issues.Should().NotBeNullOrEmpty();
@@ -271,7 +269,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData("test.3mf", "model/3mf")]
     [InlineData("test.obj", "text/plain")]
     [InlineData("test.ply", "application/octet-stream")]
-    public async Task UploadModel_ShouldHandleMultipleFileTypes(string filename, string expectedContentType)
+    public async Task UploadModel_ShouldHandleMultipleFileTypesAsync(string filename, string expectedContentType)
     {
         // Arrange
         var modelContent = CreateValidModelContent();
@@ -288,14 +286,14 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Verify download has correct content type
         var downloadResponse = await _client.GetAsync($"/api/models/{uploadResult!.Id}/file");
         downloadResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         // Note: Content type is set based on file extension, not upload type
         var actualContentType = downloadResponse.Content.Headers.ContentType?.MediaType;
         actualContentType.Should().Be(expectedContentType);
     }
 
     [Fact]
-    public async Task GetModels_ShouldReturnMultipleModels_WhenModelsExist()
+    public async Task GetModels_ShouldReturnMultipleModels_WhenModelsExistAsync()
     {
         // Arrange - Upload several models
         var model1 = await UploadTestModelAsync("list-test-1.stl");
@@ -308,15 +306,15 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var models = await response.Content.ReadFromJsonAsync<Model3DDto[]>();
-        
+
         models.Should().NotBeNull().And.HaveCountGreaterOrEqualTo(3);
-        
+
         var uploadedIds = new[] { model1.Id, model2.Id, model3.Id };
         models!.Where(m => uploadedIds.Contains(m.Id)).Should().HaveCount(3);
     }
 
     [Fact]
-    public async Task UploadModel_ShouldStoreInDatabase_WithCorrectMetadata()
+    public async Task UploadModel_ShouldStoreInDatabase_WithCorrectMetadataAsync()
     {
         // Arrange
         var uploadResult = await UploadTestModelAsync("database-test.stl");
@@ -324,7 +322,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Act - Verify in database
         using var scope = _factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        
+
         var model = await dbContext.Models3D.FirstOrDefaultAsync(m => m.Id == uploadResult.Id);
 
         // Assert
@@ -350,10 +348,10 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         var response = await _client.PostAsync("/api/models", form);
         response.EnsureSuccessStatusCode();
-        
+
         var result = await response.Content.ReadFromJsonAsync<Model3DUploadResultDto>();
         result.Should().NotBeNull();
-        
+
         return result!;
     }
 
@@ -386,7 +384,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Create generic model content for different file types
         return Encoding.UTF8.GetBytes("Model content for testing");
     }
-    
+
     /// <summary>
     /// Clean the database by removing all test data
     /// </summary>
@@ -402,7 +400,7 @@ public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
         dbContext.GcodeFiles.RemoveRange(dbContext.GcodeFiles);
         dbContext.Models3D.RemoveRange(dbContext.Models3D);
         dbContext.SlicerProfiles.RemoveRange(dbContext.SlicerProfiles);
-        
+
         await dbContext.SaveChangesAsync();
     }
 }

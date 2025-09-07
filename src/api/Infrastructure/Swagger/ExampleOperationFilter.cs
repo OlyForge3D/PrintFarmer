@@ -1,4 +1,4 @@
-using Microsoft.OpenApi.Models;
+﻿using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace Farm.Web.Api.Infrastructure.Swagger;
@@ -24,7 +24,11 @@ public sealed class ExampleOperationFilter : IOperationFilter
 
         foreach (var response in operation.Responses.Values)
         {
-            if (response.Content == null) continue;
+            if (response.Content == null)
+            {
+                continue;
+            }
+
             foreach (var content in response.Content.Values)
             {
                 if (content.Example == null && content.Schema?.Example != null)

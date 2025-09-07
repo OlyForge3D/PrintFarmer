@@ -1,6 +1,6 @@
+﻿using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Farm.Web.Api.Hubs;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -85,7 +85,7 @@ public class SignalRTestController(
             foreach (var message in testMessages)
             {
                 await hubContext.Clients.Group(groupName).SendAsync("DiscoveryProgress", message);
-                
+
                 // Small delay between messages for realistic simulation
                 if (request.DelayBetweenMessages)
                 {
@@ -145,7 +145,7 @@ public class SignalRTestController(
         {
             // Note: Getting exact connection count requires additional setup
             // This is a basic implementation that provides available information
-            
+
             var stats = new
             {
                 Timestamp = DateTime.UtcNow,
@@ -154,7 +154,7 @@ public class SignalRTestController(
                 {
                     "PrinterStatusUpdated",
                     "HarvestProgress",
-                    "JobQueueUpdated", 
+                    "JobQueueUpdated",
                     "DiscoveryProgress",
                     "DiscoveryPrinterFound",
                     "DiscoveryCompleted",

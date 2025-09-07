@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 
 namespace Farm.Web.Api.Middleware;
 

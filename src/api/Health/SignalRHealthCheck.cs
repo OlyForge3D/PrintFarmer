@@ -1,6 +1,6 @@
+﻿using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Farm.Web.Api.Hubs;
 
 namespace Farm.Web.Api.Health;
 
@@ -61,7 +61,7 @@ public class SignalRHealthCheck(
             {
                 var testSessionId = Guid.NewGuid().ToString();
                 var discoveryGroupName = $"discovery-{testSessionId}";
-                
+
                 // Test sending discovery messages
                 await hubContext.Clients.Group(discoveryGroupName).SendAsync("DiscoveryProgress", new
                 {

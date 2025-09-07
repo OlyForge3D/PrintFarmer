@@ -1,7 +1,5 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Shared;
-using FluentAssertions;
-using Xunit;
 
 namespace Farm.Web.Api.Tests;
 
@@ -23,7 +21,7 @@ public class DiscoveryDtoContractTests
             ProgressPercentage: 3.93,
             Status: DiscoveryStatus.Scanning,
             Message: null,
-            NetworkRanges: new [] {"192.168.1.0/24"},
+            NetworkRanges: new[] { "192.168.1.0/24" },
             AutoDetectedNetworks: true
         );
 
@@ -41,7 +39,7 @@ public class DiscoveryDtoContractTests
             TotalPrintersExcluded: 2,
             Duration: TimeSpan.FromSeconds(12),
             WasCancelled: false,
-            NetworkRanges: new [] {"10.0.0.0/24","192.168.0.0/24"},
+            NetworkRanges: new[] { "10.0.0.0/24", "192.168.0.0/24" },
             AutoDetectedNetworks: false
         );
 
