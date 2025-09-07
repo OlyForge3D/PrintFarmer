@@ -19,6 +19,10 @@ public class SignalRTestController(
     [HttpPost("send-test-message")]
     public async Task<IActionResult> SendTestMessageAsync([FromBody] SignalRTestRequest request)
     {
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
         try
         {
             var testMessage = new
@@ -60,6 +64,10 @@ public class SignalRTestController(
     [HttpPost("test-discovery-group")]
     public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] DiscoveryTestRequest request)
     {
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
         try
         {
             var sessionId = request.SessionId ?? Guid.NewGuid().ToString();
@@ -129,7 +137,9 @@ public class SignalRTestController(
     /// Get current SignalR connection statistics
     /// </summary>
     [HttpGet("connection-stats")]
-    public async Task<IActionResult> GetConnectionStatsAsync()
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public IActionResult GetConnectionStats()
     {
         try
         {

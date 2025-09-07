@@ -343,7 +343,7 @@ public class User
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
     public bool IsActive { get; set; } = true;
-    public bool EmailConfirmed { get; set; } = false;
+    public bool EmailConfirmed { get; set; }
     public string? EmailConfirmationToken { get; set; }
     public string? PasswordResetToken { get; set; }
     public DateTime? PasswordResetExpires { get; set; }
@@ -361,7 +361,7 @@ public class Role
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public bool IsSystemRole { get; set; } = false;
+    public bool IsSystemRole { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

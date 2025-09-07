@@ -2148,7 +2148,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(408)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult> StartDiscoveryStreamAsync(CancellationToken ct)
+    public ActionResult StartDiscoveryStream(CancellationToken ct)
     {
         try
         {

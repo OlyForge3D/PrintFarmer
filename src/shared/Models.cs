@@ -994,7 +994,7 @@ public class SlicerProfileDto
     public int PrintSpeed { get; set; } = 50; // mm/s
     public int NozzleTemperature { get; set; } = 210; // °C
     public int BedTemperature { get; set; } = 60; // °C
-    public bool Supports { get; set; } = false;
+    public bool Supports { get; set; }
     public string Material { get; set; } = "PLA";
     public string Quality { get; set; } = "standard"; // draft, standard, fine
 }
@@ -1022,10 +1022,19 @@ public class SliceMetadataDto
 /// <summary>
 /// Internal tracking DTO for active / completed slicing jobs.
 /// </summary>
+public enum SlicingJobStatus
+{
+    Queued,
+    Slicing,
+    Completed,
+    Error,
+    Cancelled
+}
+
 public class SlicingJobDto
 {
     public string JobId { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty; // queued, slicing, completed, error, cancelled
+    public SlicingJobStatus Status { get; set; } = SlicingJobStatus.Queued;
     public int Progress { get; set; } // 0-100
     public string? Message { get; set; }
     public string SlicerEngine { get; set; } = string.Empty; // prusaslicer, orcaslicer

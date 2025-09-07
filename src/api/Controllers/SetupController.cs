@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Authentication;
@@ -53,16 +52,62 @@ public class SetupController : ControllerBase
     /// </summary>
     [HttpPost("initial-admin")]
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
-        [FromBody] CreateInitialAdminRequest request, 
+        [FromBody] CreateInitialAdminRequest request,
         CancellationToken ct)
     {
+        if (request == null)
+        {
+            return BadRequest(new AuthenticationResult(false, Error: "Request body required"));
+        }
         // Validate that setup is actually needed
         var hasAdminUsers = await _db.Users
             .AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), ct);
 
         if (hasAdminUsers)
         {
-            return BadRequest("Setup has already been completed. Admin users exist in the system.");
+            // If an admin already exists, check idempotency first for same credentials
+            if (!string.IsNullOrWhiteSpace(request.Username) &&
+                !string.IsNullOrWhiteSpace(request.Email) &&
+                !string.IsNullOrWhiteSpace(request.Password))
+            {
+                var existingAdmin = await _db.Users
+                    .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                    .FirstOrDefaultAsync(u =>
+                        u.Username == request.Username && u.Email == request.Email &&
+                        u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), ct);
+
+                if (existingAdmin != null && _passwordHashingService.VerifyPassword(request.Password, existingAdmin.PasswordHash))
+                {
+                    var tokenExisting = await _authService.GenerateJwtTokenAsync(existingAdmin);
+                    var userDtoExisting = await _authService.GetUserWithRolesAndPermissionsAsync(existingAdmin.Id);
+
+                    return Ok(new AuthenticationResult(
+                        Success: true,
+                        Token: tokenExisting,
+                        ExpiresAt: DateTime.UtcNow.AddDays(7),
+                        User: userDtoExisting
+                    ));
+                }
+            }
+
+            // Then validate request and provide precise duplicate feedback
+            if (string.IsNullOrWhiteSpace(request.Username) ||
+                string.IsNullOrWhiteSpace(request.Email) ||
+                string.IsNullOrWhiteSpace(request.Password))
+            {
+                return BadRequest(new AuthenticationResult(false, Error: "Username, email, and password are required"));
+            }
+
+            var duplicateUser = await _db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Username == request.Username || u.Email == request.Email, ct);
+
+            if (duplicateUser != null)
+            {
+                return BadRequest(new AuthenticationResult(false, Error: "Username or email is already taken"));
+            }
+
+            return BadRequest(new AuthenticationResult(false, Error: "Setup has already been completed. Admin users exist in the system."));
         }
 
         // Validate required fields
@@ -70,13 +115,13 @@ public class SetupController : ControllerBase
             string.IsNullOrWhiteSpace(request.Email) ||
             string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest("Username, email, and password are required");
+            return BadRequest(new AuthenticationResult(false, Error: "Username, email, and password are required"));
         }
 
         // Validate password strength
         if (request.Password.Length < 8)
         {
-            return BadRequest("Password must be at least 8 characters long for admin accounts");
+            return BadRequest(new AuthenticationResult(false, Error: "Password must be at least 8 characters long for admin accounts"));
         }
 
         // Check if username or email already exists
@@ -85,14 +130,14 @@ public class SetupController : ControllerBase
 
         if (existingUser)
         {
-            return BadRequest("Username or email already exists");
+            return BadRequest(new AuthenticationResult(false, Error: "Username or email is already taken"));
         }
 
         // Get admin role
         var adminRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin", ct);
         if (adminRole == null)
         {
-            return StatusCode(500, "Admin role not found in database. Database may not be properly initialized.");
+            return StatusCode(500, new AuthenticationResult(false, Error: "Admin role not found in database. Database may not be properly initialized."));
         }
 
         // Create the admin user
@@ -124,8 +169,7 @@ public class SetupController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Initial admin user created: {Username} ({Email})", 
-            adminUser.Username, adminUser.Email);
+    _logger.LogInformation("Initial admin user created: {Username} ({Email})", adminUser.Username, adminUser.Email);
 
         // Generate JWT token for immediate login
         var token = await _authService.GenerateJwtTokenAsync(adminUser);
@@ -145,12 +189,20 @@ public class SetupController : ControllerBase
     [HttpGet("config-options")]
     public ActionResult<object> GetConfigurationOptions()
     {
-        return Ok(new
+        // Use dictionaries to preserve exact key casing as expected by tests
+        var result = new Dictionary<string, object>
         {
-            DatabaseProviders = new[] { "SQLite", "SQL Server", "PostgreSQL", "MySQL" },
-            DefaultNetworkRanges = new[] { "192.168.1.0/24", "192.168.0.0/24", "10.0.0.0/24" },
-            RecommendedPorts = new { Moonraker = 7125, PrusaLink = 8080, SDCP = 3000 }
-        });
+            ["DatabaseProviders"] = new[] { "SQLite", "SQL Server", "PostgreSQL", "MySQL" },
+            ["DefaultNetworkRanges"] = new[] { "192.168.1.0/24", "192.168.0.0/24", "10.0.0.0/24" },
+            ["RecommendedPorts"] = new Dictionary<string, int>
+            {
+                ["Moonraker"] = 7125,
+                ["PrusaLink"] = 8080,
+                ["SDCP"] = 3000
+            }
+        };
+
+        return Ok(result);
     }
 }
 

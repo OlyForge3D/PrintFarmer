@@ -71,7 +71,7 @@ public class UsersController : ControllerBase
     /// <param name="id">User ID</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>User details with roles and permissions</returns>
-    [HttpGet("{id:guid}")]
+    [HttpGet("{id:guid}", Name = "GetUserById")]
     public async Task<ActionResult<UserDto>> GetUserAsync(Guid id, CancellationToken ct)
     {
         var user = await _authService.GetUserWithRolesAndPermissionsAsync(id);
@@ -92,6 +92,7 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<UserDto>> CreateUserAsync([FromBody] CreateUserRequest request, CancellationToken ct)
     {
+        if (request == null) return BadRequest("Request body required");
         if (string.IsNullOrWhiteSpace(request.Username) || 
             string.IsNullOrWhiteSpace(request.Email) || 
             string.IsNullOrWhiteSpace(request.Password))
@@ -102,10 +103,10 @@ public class UsersController : ControllerBase
         // Check if username or email already exists
         var existingUser = await _db.Users
             .AnyAsync(u => u.Username == request.Username || u.Email == request.Email, ct);
-        
+
         if (existingUser)
         {
-            return BadRequest("Username or email already exists");
+            return BadRequest("Username or email is already taken");
         }
 
         var user = new User
@@ -125,7 +126,7 @@ public class UsersController : ControllerBase
         _db.Users.Add(user);
 
         // Assign roles if provided
-        if (request.RoleIds?.Any() == true)
+    if (request.RoleIds is { Length: > 0 })
         {
             foreach (var roleId in request.RoleIds)
             {
@@ -151,8 +152,8 @@ public class UsersController : ControllerBase
             currentUserId, user.Id, user.Username);
 
         // Return the created user with roles and permissions
-        var createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
-        return CreatedAtAction(nameof(GetUserAsync), new { id = user.Id }, createdUser);
+    var createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
+    return CreatedAtRoute("GetUserById", new { id = user.Id }, createdUser);
     }
 
     /// <summary>
@@ -165,6 +166,7 @@ public class UsersController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<UserDto>> UpdateUserAsync(Guid id, [FromBody] UpdateUserRequest request, CancellationToken ct)
     {
+        if (request == null) return BadRequest("Request body required");
         var user = await _db.Users.FindAsync(id);
         if (user == null)
         {
@@ -173,13 +175,19 @@ public class UsersController : ControllerBase
 
         // Update basic fields
         if (!string.IsNullOrWhiteSpace(request.FirstName))
+        {
             user.FirstName = request.FirstName;
+        }
         
         if (!string.IsNullOrWhiteSpace(request.LastName))
+        {
             user.LastName = request.LastName;
+        }
 
         if (request.IsActive.HasValue)
+        {
             user.IsActive = request.IsActive.Value;
+        }
         user.UpdatedAt = DateTime.UtcNow;
 
         // Update roles if provided

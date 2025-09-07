@@ -1017,15 +1017,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         }
     }
 
-    /// <summary>
-    /// Gets the current polling mode for a printer, defaulting to WebSocketWithFallback
-    /// </summary>
-    /// <param name="printerId">The printer ID</param>
-    /// <returns>The current polling mode</returns>
-    private PollingMode GetPollingMode(Guid printerId)
-    {
-        return _pollingModes.GetValueOrDefault(printerId, PollingMode.WebSocketWithFallback);
-    }
+    // Removed unused GetPollingMode (CA S1144)
 
     // Helper method to get spool information for Moonraker printers
     private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)

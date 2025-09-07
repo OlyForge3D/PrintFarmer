@@ -6,14 +6,14 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
-public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class AuthorizationIntegrationTests : IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    public AuthorizationIntegrationTests(CustomWebApplicationFactory factory)
+    public AuthorizationIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
         _client = _factory.CreateClient();
     }
 
@@ -337,5 +337,11 @@ public class AuthorizationIntegrationTests : IClassFixture<CustomWebApplicationF
         var user = await userResponse.Content.ReadFromJsonAsync<UserDto>();
         user.Should().NotBeNull();
         user!.Roles.Should().Contain("farm_admin");
+    }
+
+    public void Dispose()
+    {
+        _client.Dispose();
+        _factory.Dispose();
     }
 }

@@ -2,18 +2,18 @@ using System.Net;
 using System.Net.Http.Json;
 using Farm.Web.Shared;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
-public class SetupWizardIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public sealed class SetupWizardIntegrationTests : IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
+    private bool _disposed;
 
-    public SetupWizardIntegrationTests(CustomWebApplicationFactory factory)
+    public SetupWizardIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
         _client = _factory.CreateClient();
     }
 
@@ -254,5 +254,16 @@ public class SetupWizardIntegrationTests : IClassFixture<CustomWebApplicationFac
         // The tokens should be equivalent (both should work)
         setupResult!.Token.Should().NotBeNullOrEmpty();
         loginResult.Token.Should().NotBeNullOrEmpty();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _client.Dispose();
+        _factory.Dispose();
+        _disposed = true;
     }
 }

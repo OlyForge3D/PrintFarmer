@@ -15,9 +15,15 @@ public class SlicerController : ControllerBase
     private readonly ILogger<SlicerController> _logger;
     private readonly string _tempPath;
     private readonly Dictionary<string, SlicingJobDto> _activeJobs = new();
+    private static readonly HashSet<string> s_allowedEngines = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "prusaslicer",
+        "orcaslicer"
+    };
 
     public SlicerController(ILogger<SlicerController> logger, IConfiguration configuration)
     {
+        ArgumentNullException.ThrowIfNull(configuration);
         _logger = logger;
         _tempPath = configuration["TempStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "temp");
 
@@ -51,7 +57,7 @@ public class SlicerController : ControllerBase
             return BadRequest("Model file is required");
         }
 
-        if (string.IsNullOrEmpty(slicerEngine) || !new[] { "prusaslicer", "orcaslicer" }.Contains(slicerEngine.ToLower()))
+    if (string.IsNullOrEmpty(slicerEngine) || !s_allowedEngines.Contains(slicerEngine))
         {
             return BadRequest("Valid slicer engine is required (prusaslicer or orcaslicer)");
         }
@@ -80,7 +86,17 @@ public class SlicerController : ControllerBase
         try
         {
             // Save model file temporarily
-            var tempModelPath = Path.Combine(_tempPath, $"{jobId}_model{Path.GetExtension(modelFile.FileName)}");
+            var safeExt = Path.GetExtension(modelFile.FileName);
+            if (string.IsNullOrEmpty(safeExt) || safeExt.Length > 10)
+            {
+                safeExt = ".stl"; // basic sanity fallback
+            }
+            var tempModelPath = Path.Combine(_tempPath, $"{jobId}_model{safeExt}");
+            // Ensure path stays within temp root
+            if (!IsSafePath(tempModelPath, _tempPath))
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to allocate temp file path");
+            }
             using (var stream = new FileStream(tempModelPath, FileMode.Create))
             {
                 await modelFile.CopyToAsync(stream);
@@ -90,7 +106,7 @@ public class SlicerController : ControllerBase
             var job = new SlicingJobDto
             {
                 JobId = jobId,
-                Status = "queued",
+                Status = SlicingJobStatus.Queued,
                 Progress = 0,
                 SlicerEngine = slicerEngine,
                 PrinterId = printerGuid,
@@ -195,9 +211,9 @@ public class SlicerController : ControllerBase
             return NotFound();
         }
 
-        Response.Headers.Add("Content-Type", "text/event-stream");
-        Response.Headers.Add("Cache-Control", "no-cache");
-        Response.Headers.Add("Connection", "keep-alive");
+    Response.Headers["Content-Type"] = "text/event-stream";
+    Response.Headers["Cache-Control"] = "no-cache";
+    Response.Headers["Connection"] = "keep-alive";
 
         try
         {
@@ -205,8 +221,8 @@ public class SlicerController : ControllerBase
             await SendProgressEventAsync(jobId, job.Progress, job.Status, job.Message);
 
             // Keep connection alive and send updates
-            while (_activeJobs.TryGetValue(jobId, out var currentJob) &&
-                   currentJob.Status is "queued" or "slicing")
+         while (_activeJobs.TryGetValue(jobId, out var currentJob) &&
+             (currentJob.Status == SlicingJobStatus.Queued || currentJob.Status == SlicingJobStatus.Slicing))
             {
                 await Task.Delay(1000); // Update every second
 
@@ -230,13 +246,14 @@ public class SlicerController : ControllerBase
         return new EmptyResult();
     }
 
-    private async Task SendProgressEventAsync(string jobId, int progress, string status, string? message = null)
+    private async Task SendProgressEventAsync(string jobId, int progress, SlicingJobStatus status, string? message = null)
     {
+        var statusString = status.ToString().ToLowerInvariant();
         var progressData = new
         {
             jobId,
             progress,
-            status,
+            status = statusString,
             message
         };
 
@@ -263,7 +280,7 @@ public class SlicerController : ControllerBase
         var result = new SliceResultDto
         {
             JobId = jobId,
-            GcodeUrl = job.Status == "completed" ? $"/api/slicer/job/{jobId}/gcode" : "",
+            GcodeUrl = job.Status == SlicingJobStatus.Completed ? $"/api/slicer/job/{jobId}/gcode" : "",
             PrintTime = job.EstimatedPrintTime ?? 0,
             FilamentUsed = job.EstimatedFilamentUsed ?? 0,
             LayerCount = job.LayerCount ?? 0,
@@ -288,12 +305,12 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetGcodeFile(string jobId)
     {
-        if (!_activeJobs.TryGetValue(jobId, out var job) || job.Status != "completed" || string.IsNullOrEmpty(job.GcodeFilePath))
+    if (!_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
         }
 
-        if (!System.IO.File.Exists(job.GcodeFilePath))
+    if (!IsSafePath(job.GcodeFilePath, _tempPath) || !System.IO.File.Exists(job.GcodeFilePath))
         {
             return NotFound();
         }
@@ -316,7 +333,7 @@ public class SlicerController : ControllerBase
             return NotFound();
         }
 
-        job.Status = "cancelled";
+    job.Status = SlicingJobStatus.Cancelled;
         job.Message = "Cancelled by user";
 
         _logger.LogInformation("Slicing job cancelled: {JobId}", jobId);
@@ -327,16 +344,18 @@ public class SlicerController : ControllerBase
     {
         try
         {
-            job.Status = "slicing";
+            job.Status = SlicingJobStatus.Slicing;
             job.Message = "Initializing slicer...";
 
             // Simulate slicing process with progress updates
             for (int i = 0; i <= 100; i += 10)
             {
-                if (job.Status == "cancelled")
+                #pragma warning disable CA1508 // condition can change via external cancellation endpoint
+                if (job.Status == SlicingJobStatus.Cancelled)
                 {
                     return;
                 }
+                #pragma warning restore CA1508
 
                 job.Progress = i;
                 job.Message = i switch
@@ -353,14 +372,19 @@ public class SlicerController : ControllerBase
                 await Task.Delay(1000); // Simulate work
             }
 
-            if (job.Status != "cancelled")
+            #pragma warning disable CA1508 // condition can change via external cancellation endpoint
+            if (job.Status != SlicingJobStatus.Cancelled)
             {
                 // Generate mock G-code file
                 var gcodeContent = GenerateMockGcode(job.Profile!);
                 var gcodeFilePath = Path.Combine(_tempPath, $"{job.JobId}_output.gcode");
+                if (!IsSafePath(gcodeFilePath, _tempPath))
+                {
+                    throw new IOException("Generated path outside temp root");
+                }
                 await System.IO.File.WriteAllTextAsync(gcodeFilePath, gcodeContent);
 
-                job.Status = "completed";
+                job.Status = SlicingJobStatus.Completed;
                 job.GcodeFilePath = gcodeFilePath;
                 job.EstimatedPrintTime = 3600; // 1 hour
                 job.EstimatedFilamentUsed = 15.5; // 15.5g
@@ -370,10 +394,11 @@ public class SlicerController : ControllerBase
 
                 _logger.LogInformation("Slicing job completed: {JobId}", job.JobId);
             }
+            #pragma warning restore CA1508
         }
         catch (Exception ex)
         {
-            job.Status = "error";
+            job.Status = SlicingJobStatus.Error;
             job.Message = $"Slicing failed: {ex.Message}";
             _logger.LogError(ex, "Slicing job failed: {JobId}", job.JobId);
         }
@@ -437,5 +462,19 @@ public class SlicerController : ControllerBase
         gcode.AppendLine("M84 ; Disable steppers");
 
         return gcode.ToString();
+    }
+
+    private static bool IsSafePath(string candidatePath, string root)
+    {
+        try
+        {
+            var fullRoot = Path.GetFullPath(root);
+            var fullCandidate = Path.GetFullPath(candidatePath);
+            return fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

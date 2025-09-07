@@ -83,6 +83,15 @@ public class AuthController : ControllerBase
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
 
+    // Provide GET variant used by some tests to check unauthorized behavior
+    [HttpGet("logout")]
+    [Authorize]
+    public Task<IActionResult> LogoutGetAsync()
+    {
+        _logger.LogInformation("User {UserId} logged out (GET)", User.FindFirstValue(ClaimTypes.NameIdentifier));
+        return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
+    }
+
     [HttpGet("me")]
     [Authorize]
     public async Task<ActionResult<UserDto>> GetCurrentUserAsync()

@@ -1,8 +1,5 @@
 using System.Net;
-using System.Net.Http.Json;
 using Farm.Web.Shared;
-using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
@@ -104,7 +101,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        var userToken = await CreateUserAndGetTokenAsync("getuser", "getuser@example.com");
+        await CreateUserAndGetTokenAsync("getuser", "getuser@example.com");
         
         // Get the user ID first
         _client.DefaultRequestHeaders.Authorization = 
@@ -167,7 +164,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     public async Task CreateUser_AsRegularUser_ShouldReturnForbidden()
     {
         // Arrange
-        var userToken = await CreateUserAndGetTokenAsync();
+    var userToken = await CreateUserAndGetTokenAsync();
         
         _client.DefaultRequestHeaders.Authorization = 
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userToken);
@@ -222,7 +219,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        var userToken = await CreateUserAndGetTokenAsync("updateuser", "update@example.com");
+        await CreateUserAndGetTokenAsync("updateuser", "update@example.com");
         
         // Get the user ID first
         _client.DefaultRequestHeaders.Authorization = 
@@ -292,7 +289,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        var userToken = await CreateUserAndGetTokenAsync("deleteuser", "delete@example.com");
+        await CreateUserAndGetTokenAsync("deleteuser", "delete@example.com");
         
         // Get the user ID first
         _client.DefaultRequestHeaders.Authorization = 
@@ -342,7 +339,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
     {
         // Arrange
         var adminToken = await CreateAdminAndGetTokenAsync();
-        var userToken = await CreateUserAndGetTokenAsync("deleteuser2", "delete2@example.com");
+    var userToken = await CreateUserAndGetTokenAsync("deleteuser2", "delete2@example.com");
         
         // Get the user ID
         _client.DefaultRequestHeaders.Authorization = 
