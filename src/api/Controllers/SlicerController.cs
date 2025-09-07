@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Farm.Web.Api.Controllers;
 
 /// <summary>
-/// Controller for slicer integration and G-code generation
+/// Controller for slicer integration and G-code generation using distributed microservices
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -18,7 +18,10 @@ public class SlicerController : ControllerBase
 {
     private readonly ILogger<SlicerController> _logger;
     private readonly AppDbContext _context;
+    private readonly ISlicerOrchestrator _slicerOrchestrator;
+    private readonly ISlicerFileStorage _fileStorage;
     private readonly string _tempPath;
+
     // Static shared in-memory job store so subsequent requests can see previously created jobs (controller is transient).
     private static readonly ConcurrentDictionary<string, SlicingJobDto> s_activeJobs = new();
     private static readonly HashSet<string> s_allowedEngines = new(StringComparer.OrdinalIgnoreCase)
@@ -27,11 +30,18 @@ public class SlicerController : ControllerBase
         "orcaslicer"
     };
 
-    public SlicerController(ILogger<SlicerController> logger, AppDbContext context, IConfiguration configuration)
+    public SlicerController(
+        ILogger<SlicerController> logger, 
+        AppDbContext context, 
+        ISlicerOrchestrator slicerOrchestrator,
+        ISlicerFileStorage fileStorage,
+        IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         _logger = logger;
         _context = context;
+        _slicerOrchestrator = slicerOrchestrator ?? throw new ArgumentNullException(nameof(slicerOrchestrator));
+        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
         _tempPath = configuration["TempStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "temp");
 
         // Ensure temp directory exists
@@ -42,12 +52,12 @@ public class SlicerController : ControllerBase
     }
 
     /// <summary>
-    /// Start slicing a 3D model
+    /// Start slicing a 3D model using distributed microservices
     /// </summary>
     // Parameters supplied via multipart form body; XML param tags removed after switching to manual form parsing.
     /// <returns>Slicing job information</returns>
     [HttpPost("slice")]
-    [ProducesResponseType(typeof(SliceResultDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(SlicingJobResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)] // 100MB limit
     public async Task<IActionResult> SliceModelAsync()
@@ -71,13 +81,13 @@ public class SlicerController : ControllerBase
         var slicerEngine = form["slicerEngine"].FirstOrDefault();
         if (string.IsNullOrEmpty(slicerEngine) || !s_allowedEngines.Contains(slicerEngine))
         {
-            return BadRequest("Valid slicer engine is required (prusaslicer or orcaslicer)");
+            return BadRequest("Valid printer ID is required");
         }
 
         var printerId = form["printerId"].FirstOrDefault();
         if (string.IsNullOrEmpty(printerId) || !Guid.TryParse(printerId, out var printerGuid))
         {
-            return BadRequest("Valid printer ID is required");
+            return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
         }
 
         var profileRaw = form["profile"].FirstOrDefault();
@@ -98,67 +108,141 @@ public class SlicerController : ControllerBase
             return BadRequest("Valid slicer profile is required");
         }
 
-        var jobId = Guid.NewGuid().ToString();
+        // Parse priority
+        var jobPriority = SlicingJobPriority.Normal;
+        if (!string.IsNullOrEmpty(priority) && !Enum.TryParse<SlicingJobPriority>(priority, true, out jobPriority))
+        {
+            return BadRequest($"Invalid priority: {priority}. Supported priorities: {string.Join(", ", Enum.GetNames<SlicingJobPriority>())}");
+        }
 
         try
         {
-            // Save model file temporarily
-            var safeExt = Path.GetExtension(modelFile.FileName);
-            if (string.IsNullOrEmpty(safeExt) || safeExt.Length > 10)
+            // Upload model file to storage
+            var fileKey = $"models/{Guid.NewGuid()}/{modelFile.FileName}";
+            string modelFileUrl;
+            
+            await using (var stream = modelFile.OpenReadStream())
             {
-                safeExt = ".stl"; // basic sanity fallback
-            }
-            var tempModelPath = Path.Combine(_tempPath, $"{jobId}_model{safeExt}");
-            // Ensure path stays within temp root
-            if (!IsSafePath(tempModelPath, _tempPath))
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to allocate temp file path");
-            }
-            using (var stream = new FileStream(tempModelPath, FileMode.Create))
-            {
-                await modelFile.CopyToAsync(stream);
+                modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, stream, "application/octet-stream");
             }
 
-            // Create slicing job
-            var job = new SlicingJobDto
+            // Create slicing request
+            var request = new SlicingJobRequest
             {
-                JobId = jobId,
-                Status = SlicingJobStatus.Queued,
-                Progress = 0,
-                SlicerEngine = slicerEngine,
+                UserId = Guid.NewGuid(), // TODO: Get from authenticated user context
                 PrinterId = printerGuid,
-                ModelFilePath = tempModelPath,
-                Profile = slicerProfile,
-                CreatedAt = DateTime.UtcNow
+                ModelFileUrl = modelFileUrl,
+                ModelFileName = modelFile.FileName,
+                SlicerEngine = slicerEngineType,
+                SlicerProfile = slicerProfile,
+                Priority = jobPriority,
+                Metadata = new Dictionary<string, object>
+                {
+                    ["OriginalFileName"] = modelFile.FileName,
+                    ["FileSize"] = modelFile.Length,
+                    ["UploadedAt"] = DateTime.UtcNow.ToString("O"),
+                    ["ClientIP"] = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"
+                }
             };
 
             s_activeJobs[jobId] = job; // Upsert into shared dictionary
 
-            // Start slicing process (in background)
-            _ = Task.Run(() => ProcessSlicingJobAsync(job));
-
-            var result = new SliceResultDto
-            {
-                JobId = jobId,
-                GcodeUrl = $"/api/slicer/job/{jobId}/gcode",
-                PrintTime = 0, // Will be updated when slicing completes
-                FilamentUsed = 0,
-                LayerCount = 0,
-                Metadata = new SliceMetadataDto
-                {
-                    SlicerVersion = slicerEngine == "prusaslicer" ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                    ProfileUsed = $"{slicerProfile!.Quality} - {slicerProfile.Material}",
-                    EstimatedCost = 0
-                }
-            };
-
-            _logger.LogInformation("Slicing job started: {JobId} using {SlicerEngine}", jobId, slicerEngine);
-            return Accepted(result);
+            return Ok(jobStatus);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to start slicing job");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
+            _logger.LogError(ex, "Failed to get status for job {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get job status");
+        }
+    }
+
+    /// <summary>
+    /// Cancel a slicing job
+    /// </summary>
+    /// <param name="jobId">Job ID</param>
+    /// <returns>Success status</returns>
+    [HttpPost("jobs/{jobId}/cancel")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CancelJobAsync(Guid jobId)
+    {
+        try
+        {
+            var cancelled = await _slicerOrchestrator.CancelJobAsync(jobId);
+            if (!cancelled)
+            {
+                return NotFound();
+            }
+
+            _logger.LogInformation("Cancelled slicing job {JobId}", jobId);
+            return Ok(new { success = true, message = "Job cancelled successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to cancel job {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to cancel job");
+        }
+    }
+
+    /// <summary>
+    /// Get available slicer engines and their status
+    /// </summary>
+    /// <returns>Available slicer engines</returns>
+    [HttpGet("engines")]
+    [ProducesResponseType(typeof(IEnumerable<SlicerEngineInfo>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAvailableEnginesAsync()
+    {
+        try
+        {
+            var engines = await _slicerOrchestrator.GetAvailableEnginesAsync();
+            return Ok(engines);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get available engines");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get available engines");
+        }
+    }
+
+    /// <summary>
+    /// Get queue statistics for all slicer engines
+    /// </summary>
+    /// <returns>Queue statistics</returns>
+    [HttpGet("queue/stats")]
+    [ProducesResponseType(typeof(Dictionary<SlicerEngineType, SlicerQueueStats>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetQueueStatsAsync()
+    {
+        try
+        {
+            var stats = await _slicerOrchestrator.GetAllQueueStatsAsync();
+            return Ok(stats);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get queue stats");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get queue stats");
+        }
+    }
+
+    /// <summary>
+    /// Get slicer system health
+    /// </summary>
+    /// <returns>System health information</returns>
+    [HttpGet("health")]
+    [ProducesResponseType(typeof(SlicerOrchestratorHealth), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetHealthAsync()
+    {
+        try
+        {
+            var health = await _slicerOrchestrator.GetHealthAsync();
+            var statusCode = health.IsHealthy ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable;
+            
+            return StatusCode(statusCode, health);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get slicer system health");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get system health");
         }
     }
 
