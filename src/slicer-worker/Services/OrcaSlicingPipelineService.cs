@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Farm.Web.Shared;
 
 namespace Farm.Slicer.Worker.Services;
@@ -14,6 +15,7 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly IConfiguration _configuration;
     private readonly string _workingDirectory;
     private readonly string _storageEndpoint;
+    private readonly string _orcaSlicerBinaryPath;
 
     public OrcaSlicingPipelineService(
         HttpClient httpClient,
@@ -27,6 +29,7 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         _configuration = configuration;
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/slicer-work";
         _storageEndpoint = configuration["Worker:StorageEndpoint"] ?? "http://api:5245";
+        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/usr/local/bin/orcaslicer";
 
         // Ensure working directory exists
         if (!Directory.Exists(_workingDirectory))
@@ -139,29 +142,116 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         var stopwatch = Stopwatch.StartNew();
         _logger.LogInformation("Running OrcaSlicer on {StlPath}", stlPath);
 
-        // For Phase 1, simulate OrcaSlicer by creating a mock G-code file
-        // In production, this would execute the actual OrcaSlicer binary
         var gcodeFilePath = Path.Combine(workDir, Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode");
         
-        // Simulate slicing time based on file size
-        var simulatedDuration = TimeSpan.FromSeconds(Math.Max(5, (job.InputFileSizeBytes ?? 1000000) / 100000));
-        _logger.LogInformation("Simulating OrcaSlicer processing for {Duration}", simulatedDuration);
-
-        // Report progress during "slicing"
-        var progressSteps = 10;
-        for (int i = 0; i < progressSteps; i++)
+        try
         {
-            await Task.Delay(simulatedDuration.Divide(progressSteps), cancellationToken);
-            var progress = 30 + (i * 50 / progressSteps); // Progress from 30% to 80%
-            await _progressReporter.ReportProgressAsync(job.Id, progress, $"Slicing layer {i * 100 / progressSteps}%", cancellationToken);
+            // Verify OrcaSlicer binary exists
+            if (!File.Exists(_orcaSlicerBinaryPath))
+            {
+                _logger.LogError("OrcaSlicer binary not found at {BinaryPath}", _orcaSlicerBinaryPath);
+                throw new InvalidOperationException($"OrcaSlicer binary not found at {_orcaSlicerBinaryPath}");
+            }
+
+            // Prepare OrcaSlicer command arguments
+            // Using CLI format: orcaslicer --config config.ini --output output.gcode input.stl
+            var arguments = $"--config \"{configPath}\" --output \"{gcodeFilePath}\" \"{stlPath}\"";
+            
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = _orcaSlicerBinaryPath,
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = workDir
+            };
+
+            _logger.LogInformation("Starting OrcaSlicer process: {FileName} {Arguments}", process.StartInfo.FileName, process.StartInfo.Arguments);
+
+            // Start progress monitoring task
+            var progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
+
+            process.Start();
+
+            // Read output and error streams
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+
+            // Wait for process completion
+            await process.WaitForExitAsync(cancellationToken);
+
+            // Wait for progress monitoring to complete
+            await progressTask;
+
+            var output = await outputTask;
+            var error = await errorTask;
+
+            _logger.LogDebug("OrcaSlicer output: {Output}", output);
+            
+            if (process.ExitCode != 0)
+            {
+                _logger.LogError("OrcaSlicer failed with exit code {ExitCode}. Error: {Error}", process.ExitCode, error);
+                throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
+            }
+
+            // Verify output file was created
+            if (!File.Exists(gcodeFilePath))
+            {
+                throw new InvalidOperationException("OrcaSlicer completed successfully but no G-code file was generated");
+            }
+
+            _logger.LogInformation("OrcaSlicer completed successfully in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+            return gcodeFilePath;
         }
+        catch (Exception ex) when (!(ex is OperationCanceledException))
+        {
+            _logger.LogError(ex, "Error running OrcaSlicer process");
+            throw;
+        }
+    }
 
-        // Generate mock G-code
-        var gcodeContent = GenerateMockGcode(job);
-        await File.WriteAllTextAsync(gcodeFilePath, gcodeContent, cancellationToken);
+    private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Monitor the process and report progress based on typical slicing phases
+            var startTime = DateTime.UtcNow;
+            var lastProgressReport = DateTime.UtcNow;
+            var currentProgress = 30; // Starting at 30% (after config preparation)
 
-        _logger.LogInformation("OrcaSlicer completed in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
-        return gcodeFilePath;
+            while (!process.HasExited && !cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+
+                // Report progress incrementally during slicing
+                var elapsed = DateTime.UtcNow - startTime;
+                
+                // Estimate progress based on time elapsed (crude but functional)
+                if (elapsed.TotalSeconds > 10 && currentProgress < 70)
+                {
+                    currentProgress = Math.Min(70, 30 + (int)(elapsed.TotalSeconds * 2));
+                    await _progressReporter.ReportProgressAsync(jobId, currentProgress, "Slicing in progress...", cancellationToken);
+                    lastProgressReport = DateTime.UtcNow;
+                }
+                else if (DateTime.UtcNow - lastProgressReport > TimeSpan.FromSeconds(10))
+                {
+                    // Send periodic heartbeat
+                    await _progressReporter.ReportProgressAsync(jobId, currentProgress, "Slicing in progress...", cancellationToken);
+                    lastProgressReport = DateTime.UtcNow;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when cancellation is requested
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error monitoring slicing progress for job {JobId}", jobId);
+        }
     }
 
     private async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
@@ -169,19 +259,104 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         var stopwatch = Stopwatch.StartNew();
         _logger.LogInformation("Extracting G-code metadata from {GcodePath}", gcodeFilePath);
 
-        // Simple metadata extraction for Phase 1
         var fileInfo = new FileInfo(gcodeFilePath);
         var lines = await File.ReadAllLinesAsync(gcodeFilePath, cancellationToken);
 
-        // Mock metadata extraction
+        // Initialize with defaults
         var metadata = new GcodeMetadata
         {
-            PrintTimeSeconds = 3600, // 1 hour
-            FilamentUsageGrams = 25.5,
-            LayerCount = 250
+            PrintTimeSeconds = 0,
+            FilamentUsageGrams = 0,
+            LayerCount = 0
         };
 
-        _logger.LogInformation("Extracted G-code metadata in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+        // Parse G-code comments for metadata (OrcaSlicer/PrusaSlicer format)
+        var printTimeRegex = new Regex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase);
+        var printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
+        var filamentRegex = new Regex(@";\s*filament used.*?(\d+\.?\d*)(?:mm|g)", RegexOptions.IgnoreCase);
+        var layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
+        var layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase);
+
+        var maxLayerNumber = 0;
+
+        foreach (var line in lines)
+        {
+            // Extract print time (format: estimated printing time: 1h 30m)
+            var timeMatch = printTimeRegex.Match(line);
+            if (timeMatch.Success)
+            {
+                var hours = int.Parse(timeMatch.Groups[1].Value);
+                var minutes = int.Parse(timeMatch.Groups[2].Value);
+                metadata.PrintTimeSeconds = hours * 3600 + minutes * 60;
+            }
+            else
+            {
+                // Try seconds format
+                var timeSecondsMatch = printTimeSecondsRegex.Match(line);
+                if (timeSecondsMatch.Success)
+                {
+                    metadata.PrintTimeSeconds = int.Parse(timeSecondsMatch.Groups[1].Value);
+                }
+            }
+
+            // Extract filament usage
+            var filamentMatch = filamentRegex.Match(line);
+            if (filamentMatch.Success)
+            {
+                var amount = double.Parse(filamentMatch.Groups[1].Value);
+                // Convert mm to grams (approximate: 1mm of 1.75mm PLA ≈ 0.0025g)
+                metadata.FilamentUsageGrams = line.Contains("mm") ? amount * 0.0025 : amount;
+            }
+
+            // Extract layer count from metadata
+            var layerCountMatch = layerRegex.Match(line);
+            if (layerCountMatch.Success)
+            {
+                metadata.LayerCount = int.Parse(layerCountMatch.Groups[1].Value);
+            }
+
+            // Count layers by LAYER comments as fallback
+            var layerCommentMatch = layerCommentRegex.Match(line);
+            if (layerCommentMatch.Success)
+            {
+                var layerNumber = int.Parse(layerCommentMatch.Groups[1].Value);
+                maxLayerNumber = Math.Max(maxLayerNumber, layerNumber);
+            }
+        }
+
+        // Use layer comment count as fallback if no layer_count metadata found
+        if (metadata.LayerCount == 0 && maxLayerNumber > 0)
+        {
+            metadata.LayerCount = maxLayerNumber + 1; // Layer numbers typically start at 0
+        }
+
+        // Fallback estimates if no metadata found in G-code
+        if (metadata.PrintTimeSeconds == 0)
+        {
+            // Estimate based on layer count and file size
+            var estimatedSeconds = metadata.LayerCount * 120; // 2 minutes per layer estimate
+            metadata.PrintTimeSeconds = estimatedSeconds > 0 ? estimatedSeconds : 1800; // Default 30 minutes
+        }
+
+        if (metadata.FilamentUsageGrams == 0)
+        {
+            // Estimate based on file size (rough approximation)
+            metadata.FilamentUsageGrams = Math.Max(5.0, fileInfo.Length / 50000.0); // Rough estimate
+        }
+
+        if (metadata.LayerCount == 0)
+        {
+            // Count layers by scanning for Z movements as last resort
+            metadata.LayerCount = lines.Count(line => line.StartsWith("G1 Z") || line.StartsWith("G0 Z"));
+            if (metadata.LayerCount == 0)
+            {
+                metadata.LayerCount = 100; // Default fallback
+            }
+        }
+
+        _logger.LogInformation("Extracted G-code metadata in {ElapsedMs}ms: {PrintTime}s print time, {Filament}g filament, {Layers} layers", 
+            stopwatch.ElapsedMilliseconds, metadata.PrintTimeSeconds, metadata.FilamentUsageGrams, metadata.LayerCount);
+        
         return metadata;
     }
 
@@ -204,53 +379,79 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private string GenerateOrcaSlicerConfig(SlicerProfileDto? profile)
     {
-        // Mock OrcaSlicer configuration for Phase 1
-        return $"""
-            # OrcaSlicer configuration generated at {DateTime.UtcNow:O}
-            layer_height = {profile?.LayerHeight ?? 0.2}
-            infill_percentage = {profile?.InfillPercentage ?? 20}
-            print_speed = {profile?.PrintSpeed ?? 50}
-            nozzle_temperature = {profile?.NozzleTemperature ?? 210}
-            bed_temperature = {profile?.BedTemperature ?? 60}
-            """;
+        // Generate real OrcaSlicer configuration in INI format
+        // Based on OrcaSlicer/PrusaSlicer configuration structure
+        var config = new System.Text.StringBuilder();
+        
+        // Version and compatibility
+        config.AppendLine("# Generated by PrintFarmer OrcaSlicer Worker");
+        config.AppendLine($"# Generated at {DateTime.UtcNow:O}");
+        config.AppendLine();
+        
+        // Print settings
+        config.AppendLine("[print]");
+        config.AppendLine($"layer_height = {profile?.LayerHeight ?? 0.2}");
+        config.AppendLine($"first_layer_height = {(profile?.LayerHeight ?? 0.2) * 1.5}");
+        config.AppendLine($"perimeters = 2");
+        config.AppendLine($"top_solid_layers = 3");
+        config.AppendLine($"bottom_solid_layers = 3");
+        config.AppendLine($"fill_density = {(profile?.InfillPercentage ?? 20) / 100.0:F2}");
+        config.AppendLine($"fill_pattern = cubic");
+        config.AppendLine($"external_perimeter_speed = {(profile?.PrintSpeed ?? 50) * 0.8:F0}");
+        config.AppendLine($"perimeter_speed = {profile?.PrintSpeed ?? 50}");
+        config.AppendLine($"infill_speed = {(profile?.PrintSpeed ?? 50) * 1.2:F0}");
+        config.AppendLine($"travel_speed = 120");
+        config.AppendLine($"first_layer_speed = {(profile?.PrintSpeed ?? 50) * 0.5:F0}");
+        config.AppendLine();
+        
+        // Material settings
+        config.AppendLine("[filament]");
+        config.AppendLine($"temperature = {profile?.NozzleTemperature ?? 210}");
+        config.AppendLine($"first_layer_temperature = {(profile?.NozzleTemperature ?? 210) + 5}");
+        config.AppendLine($"bed_temperature = {profile?.BedTemperature ?? 60}");
+        config.AppendLine($"first_layer_bed_temperature = {(profile?.BedTemperature ?? 60) + 5}");
+        config.AppendLine($"filament_diameter = 1.75");
+        config.AppendLine($"extrusion_multiplier = 1.0");
+        config.AppendLine($"filament_type = {profile?.Material ?? "PLA"}");
+        config.AppendLine();
+        
+        // Printer settings
+        config.AppendLine("[printer]");
+        config.AppendLine("bed_shape = 0x0,200x0,200x200,0x200");
+        config.AppendLine("print_center = 100,100");
+        config.AppendLine("z_offset = 0");
+        config.AppendLine("nozzle_diameter = 0.4");
+        config.AppendLine("extruder_count = 1");
+        config.AppendLine();
+        
+        // Support settings
+        if (profile?.Supports == true)
+        {
+            config.AppendLine("[support]");
+            config.AppendLine("support_material = 1");
+            config.AppendLine("support_material_auto = 1");
+            config.AppendLine("support_material_threshold = 45");
+            config.AppendLine("support_material_pattern = rectilinear");
+            config.AppendLine("support_material_spacing = 2.5");
+            config.AppendLine("support_material_interface_layers = 2");
+            config.AppendLine();
+        }
+        
+        // Quality settings based on layer height
+        config.AppendLine("[quality]");
+        var quality = (profile?.LayerHeight ?? 0.2) switch
+        {
+            <= 0.15 => "fine",
+            <= 0.25 => "normal", 
+            _ => "draft"
+        };
+        config.AppendLine($"quality = {quality}");
+        config.AppendLine();
+        
+        return config.ToString();
     }
 
-    private string GenerateMockGcode(DistributedSlicingJob job)
-    {
-        return $"""
-            ; Generated by OrcaSlicer 1.8.0 on {DateTime.UtcNow:O}
-            ; Job ID: {job.Id}
-            ; Model: {job.ModelFileName}
-            ; Estimated print time: 1h 0m
-            ; Filament used: 25.5g
-            ; Layer count: 250
-            
-            G28 ; Home all axes
-            G1 Z15.0 F6000 ; Move the platform down 15mm
-            G92 E0 ; Reset extruder
-            G1 F200 E3 ; Extrude 3mm of filament
-            G92 E0 ; Reset extruder
-            G1 F9000
-            M104 S210 ; Set extruder temperature
-            M140 S60 ; Set bed temperature
-            
-            ; Layer 1
-            G1 X10 Y10 F3000
-            G1 Z0.2 F1000
-            G1 X50 Y10 E1 F1500
-            G1 X50 Y50 E2
-            G1 X10 Y50 E3
-            G1 X10 Y10 E4
-            
-            ; End of print
-            M104 S0 ; Turn off extruder
-            M140 S0 ; Turn off bed
-            G28 X0 ; Home X axis
-            M84 ; Disable motors
-            """;
-    }
-
-    private class GcodeMetadata
+    private sealed class GcodeMetadata
     {
         public double PrintTimeSeconds { get; set; }
         public double FilamentUsageGrams { get; set; }

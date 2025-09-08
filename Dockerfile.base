@@ -28,9 +28,28 @@ RUN dotnet publish ./slicer-worker/Farm.Slicer.Worker.csproj \
 # Runtime stage - hardened minimal container
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 
-# Install curl for health checks and create non-root user
+# Install curl for health checks, OrcaSlicer dependencies, and create non-root user
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        ca-certificates \
+        libgtk-3-0 \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libstdc++6 \
+        libopengl0 \
+        xvfb \
+        && \
+    # Download and install OrcaSlicer AppImage
+    wget -O /tmp/orcaslicer.AppImage https://github.com/SoftFever/OrcaSlicer/releases/download/v1.8.1/OrcaSlicer_V1.8.1_Linux_x86_64.AppImage && \
+    chmod +x /tmp/orcaslicer.AppImage && \
+    cd /tmp && \
+    ./orcaslicer.AppImage --appimage-extract && \
+    mv squashfs-root /opt/orcaslicer && \
+    ln -s /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer && \
+    rm -f /tmp/orcaslicer.AppImage && \
+    # Clean up
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid 1000 sliceruser && \
     useradd --uid 1000 --gid sliceruser --shell /bin/bash --create-home sliceruser
@@ -52,6 +71,8 @@ ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+ENV DISPLAY=:99
+ENV QT_QPA_PLATFORM=offscreen
 
 # Expose port
 EXPOSE 8080
