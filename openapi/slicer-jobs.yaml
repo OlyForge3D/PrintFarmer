@@ -38,7 +38,7 @@ paths:
                 - modelFile
                 - printerId
                 - slicerEngine
-                - slicerProfile
+                /slicer/jobs/{jobId}:
               properties:
                 modelFile:
                   type: string
@@ -104,11 +104,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
-  /slicer/job/{jobId}:
+  /slicer/jobs/{jobId}:
     get:
       summary: Get slicing job status
-      description: Retrieve the current status and details of a slicing job
+      description: Retrieve the current status and details of a slicing job (canonical plural route)
       operationId: getJobStatus
       tags:
         - Slicer Jobs
@@ -177,6 +176,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /slicer/job/{jobId}:
+    get:
+      deprecated: true
+      summary: (Deprecated) Singular job status route
+      description: |
+        Deprecated singular form. Returns 302 redirect to /slicer/jobs/{jobId} when the job exists.
+        Will be removed after Sunset date. Clients should switch to /slicer/jobs/{jobId}.
+      operationId: getJobStatusLegacySingular
+      tags:
+        - Slicer Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '302':
+          description: Redirect to canonical plural endpoint
+          headers:
+            Deprecation:
+              description: RFC 8594 deprecation date of this endpoint (HTTP-date)
+              schema:
+                type: string
+            Sunset:
+              description: RFC 8594 sunset (final removal) date (HTTP-date)
+              schema:
+                type: string
+        '404':
+          description: Job not found
+
+  /slicer/jobs/{jobId}/gcode:
+    get:
+      summary: Download sliced G-code file
+      description: Retrieve the generated G-code file for a completed slicing job.
+      operationId: downloadGcode
+      tags:
+        - Slicer Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: G-code file content
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Job not found or not completed
+
+  /slicer/job/{jobId}/gcode:
+    get:
+      deprecated: true
+      summary: (Deprecated) Singular G-code download route
+      description: |
+        Deprecated singular form. Returns the same content as the plural route but will be removed after Sunset date.
+        Clients should switch to /slicer/jobs/{jobId}/gcode.
+      operationId: downloadGcodeLegacySingular
+      tags:
+        - Slicer Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: G-code file content
+          headers:
+            Deprecation:
+              description: RFC 8594 deprecation date of this endpoint (HTTP-date)
+              schema:
+                type: string
+            Sunset:
+              description: RFC 8594 sunset (final removal) date (HTTP-date)
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Job not found or not completed
 
   /slicer/jobs/{jobId}/cancel:
     post:

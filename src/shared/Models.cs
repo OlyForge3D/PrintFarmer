@@ -1009,6 +1009,9 @@ public class SliceResultDto
     public int PrintTime { get; set; } // in seconds
     public double FilamentUsed { get; set; } // in grams
     public int LayerCount { get; set; }
+    // Added for contract tests: current status and progress of the job
+    public string Status { get; set; } = string.Empty; // Queued, Slicing, Completed, Error, Cancelled
+    public int Progress { get; set; } // 0-100
     public SliceMetadataDto Metadata { get; set; } = new();
 }
 

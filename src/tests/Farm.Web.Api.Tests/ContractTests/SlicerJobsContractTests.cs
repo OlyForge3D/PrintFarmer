@@ -75,7 +75,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         var jobId = await SubmitTestJobAndGetIdAsync();
 
         // Act
-        var response = await _client.GetAsync($"/api/slicer/job/{jobId}");
+    var response = await _client.GetAsync($"/api/slicer/jobs/{jobId}");
 
         // Assert
         _output.WriteLine($"Response Status: {response.StatusCode}");
@@ -102,7 +102,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         var invalidJobId = Guid.NewGuid();
 
         // Act
-        var response = await _client.GetAsync($"/api/slicer/job/{invalidJobId}");
+    var response = await _client.GetAsync($"/api/slicer/jobs/{invalidJobId}");
 
         // Assert
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
@@ -229,6 +229,20 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
 
         // Assert
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetJobStatus_LegacySingularRoute_ShouldRedirectToPlural()
+    {
+        var jobId = await SubmitTestJobAndGetIdAsync();
+        var noRedirectClient = _factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var response = await noRedirectClient.GetAsync($"/api/slicer/job/{jobId}");
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.Found); // 302
+        response.Headers.Location.Should().NotBeNull();
+        response.Headers.Location!.ToString().Should().Be($"/api/slicer/jobs/{jobId}");
     }
 
     // Helper Methods

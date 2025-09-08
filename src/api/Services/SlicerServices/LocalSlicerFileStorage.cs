@@ -86,7 +86,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<Stream> DownloadFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task<Stream> DownloadFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -98,10 +98,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 throw new FileNotFoundException($"File not found: {keyOrUrl}");
             }
 
-            var fileStream = File.OpenRead(filePath);
+            var fileStream = (Stream)File.OpenRead(filePath);
             _logger.LogDebug("Downloaded file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
-            
-            return fileStream;
+            return Task.FromResult(fileStream);
         }
         catch (Exception ex)
         {
@@ -124,7 +123,6 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             var fileBytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
             _logger.LogDebug("Downloaded file bytes {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
-            
             return fileBytes;
         }
         catch (Exception ex)
@@ -134,22 +132,22 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<bool> FileExistsAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task<bool> FileExistsAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
             ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
-            return File.Exists(filePath);
+            return Task.FromResult(File.Exists(filePath));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to check if file exists {KeyOrUrl}", keyOrUrl);
-            return false;
+            return Task.FromResult(false);
         }
     }
 
-    public async Task DeleteFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task DeleteFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -161,6 +159,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 File.Delete(filePath);
                 _logger.LogDebug("Deleted file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
             }
+            return Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -169,7 +168,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<SlicerFileMetadata?> GetFileMetadataAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task<SlicerFileMetadata?> GetFileMetadataAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -178,14 +177,14 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             
             if (!File.Exists(filePath))
             {
-                return null;
+                return Task.FromResult<SlicerFileMetadata?>(null);
             }
 
             var fileInfo = new System.IO.FileInfo(filePath);
             var key = GetKeyFromFilePath(filePath);
             var storedContentType = TryReadSidecarContentType(filePath);
             
-            return new SlicerFileMetadata
+            var meta = new SlicerFileMetadata
             {
                 Key = key,
                 SizeBytes = fileInfo.Length,
@@ -199,6 +198,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                     ["Extension"] = fileInfo.Extension
                 }
             };
+            return Task.FromResult<SlicerFileMetadata?>(meta);
         }
         catch (Exception ex)
         {
@@ -207,12 +207,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<string> GenerateSignedUrlAsync(string keyOrUrl, TimeSpan expiration, CancellationToken cancellationToken = default)
+    public Task<string> GenerateSignedUrlAsync(string keyOrUrl, TimeSpan expiration, CancellationToken cancellationToken = default)
     {
         // For local file storage, we'll just return the file URL as-is
         // In a real implementation with S3/Azure Blob, this would generate a signed URL
     ArgumentNullException.ThrowIfNull(keyOrUrl);
-        return GetFileUrlFromKeyOrUrl(keyOrUrl);
+    return Task.FromResult(GetFileUrlFromKeyOrUrl(keyOrUrl));
     }
 
     public async Task CleanupTempFilesAsync(TimeSpan maxAge, CancellationToken cancellationToken = default)

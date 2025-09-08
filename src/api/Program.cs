@@ -356,12 +356,12 @@ builder.Services.AddAuthentication("Bearer")
             ClockSkew = TimeSpan.Zero
         };
 
-        if (builder.Environment.EnvironmentName == "Testing")
-        {
-            // Some tests construct tokens without issuer/audience; be permissive during test runs
-            tvp.ValidateIssuer = false;
-            tvp.ValidateAudience = false;
-        }
+    // NOTE: Previously issuer/audience validation was relaxed in the "Testing" environment.
+    // All integration tests now obtain tokens exclusively via the authentication endpoints,
+    // which generate tokens including both issuer and audience (see AuthenticationService).
+    // Enforcing validation in tests prevents accidental acceptance of malformed tokens.
+    // (If a future test truly needs to bypass these checks, generate a properly formed token
+    // instead of weakening validation here.)
 
         options.TokenValidationParameters = tvp;
     });
