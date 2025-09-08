@@ -242,7 +242,7 @@ public static class TestJobKafkaExtensions
     
     public static TopicPartitionOffset? GetKafkaMetadata(this TestJob job)
     {
-        return _kafkaMetadata.TryGetValue(job, out var metadata) ? metadata : null;
+        return _kafkaMetadata.TryGetValue(job, out var metadata) ? metadata : (TopicPartitionOffset?)null;
     }
     
     public static void SetKafkaMetadata(this TestJob job, TopicPartitionOffset metadata)

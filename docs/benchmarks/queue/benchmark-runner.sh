@@ -42,8 +42,8 @@ check_prerequisites() {
         exit 1
     fi
     
-    if ! command -v docker-compose &> /dev/null; then
-        error "Docker Compose is not installed or not in PATH"
+    if ! docker compose version &> /dev/null; then
+        error "Docker Compose is not installed or not available"
         exit 1
     fi
     
@@ -64,15 +64,15 @@ setup_infrastructure() {
     
     # Start Redis
     info "Starting Redis..."
-    docker-compose -f "$DOCKER_DIR/redis.yml" up -d
+    docker compose -f "$DOCKER_DIR/redis.yml" up -d
     
     # Start RabbitMQ
     info "Starting RabbitMQ..."
-    docker-compose -f "$DOCKER_DIR/rabbitmq.yml" up -d
+    docker compose -f "$DOCKER_DIR/rabbitmq.yml" up -d
     
     # Start Kafka
     info "Starting Kafka..."
-    docker-compose -f "$DOCKER_DIR/kafka.yml" up -d
+    docker compose -f "$DOCKER_DIR/kafka.yml" up -d
     
     # Wait for services to be ready
     wait_for_services
@@ -243,9 +243,9 @@ cleanup_infrastructure() {
     log "Cleaning up infrastructure..."
     
     # Stop and remove containers
-    docker-compose -f "$DOCKER_DIR/kafka.yml" down -v || true
-    docker-compose -f "$DOCKER_DIR/rabbitmq.yml" down -v || true
-    docker-compose -f "$DOCKER_DIR/redis.yml" down -v || true
+    docker compose -f "$DOCKER_DIR/kafka.yml" down -v || true
+    docker compose -f "$DOCKER_DIR/rabbitmq.yml" down -v || true
+    docker compose -f "$DOCKER_DIR/redis.yml" down -v || true
     
     # Clean up any remaining containers
     docker container prune -f || true

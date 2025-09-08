@@ -68,7 +68,7 @@ public class QueueBenchmarkRunner
         {
             { "Redis", _redisProvider },
             { "RabbitMQ", _rabbitMqProvider },
-            { "Kafka", _kafkaProvider }
+            // { "Kafka", _kafkaProvider } // Temporarily disabled due to API compatibility issues
         };
 
         foreach (var (name, provider) in providers)
