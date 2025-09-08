@@ -71,6 +71,64 @@ services:
       timeout: 10s
       retries: 3
 
+  # OrcaSlicer Worker for distributed slicing
+  orcaslicer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    network_mode: host
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8081
+      - ConnectionStrings__Redis=localhost:6379
+      - Worker__StorageEndpoint=http://localhost:5001
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__WorkerId=orcaslicer-worker-1
+    volumes:
+      - orcaslicer_temp:/app/temp
+      - gcode_storage:/app/gcode
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # PrusaSlicer Worker for distributed slicing
+  prusaslicer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prusaslicer
+    network_mode: host
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8082
+      - ConnectionStrings__Redis=localhost:6379
+      - Worker__StorageEndpoint=http://localhost:5001
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
+      - Worker__WorkerId=prusaslicer-worker-1
+    volumes:
+      - prusaslicer_temp:/app/temp
+      - gcode_storage:/app/gcode
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s  # PrusaSlicer takes longer to install
+
   # Optional: Load balancer for production
   nginx-proxy:
     image: nginx:alpine
@@ -82,6 +140,8 @@ services:
     depends_on:
       - frontend
       - api
+      - orcaslicer-worker
+      - prusaslicer-worker
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -94,3 +154,5 @@ volumes:
   model_uploads:
   gcode_storage:
   slicer_profiles:
+  orcaslicer_temp:
+  prusaslicer_temp:
