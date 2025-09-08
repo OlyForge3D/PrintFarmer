@@ -47,8 +47,14 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 new("status", job.Status.ToString()),
                 new("engine", job.SlicerEngine.ToString()),
                 new("created_at", job.CreatedAt.ToString("O")),
+                new("correlation_id", job.CorrelationId.ToString()),
+                new("checksum", job.Checksum),
                 new("data", jobJson)
             });
+
+            // Store correlation mapping for idempotency
+            var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum);
+            _ = transaction.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
 
             // Add to priority queue
             _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score);
@@ -58,8 +64,8 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             await transaction.ExecuteAsync();
 
-            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine}", 
-                job.Id, job.Priority, job.SlicerEngine);
+            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine} (correlation {CorrelationId})", 
+                job.Id, job.Priority, job.SlicerEngine, job.CorrelationId);
         }
         catch (Exception ex)
         {
@@ -412,5 +418,44 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         var estimatedSeconds = (queuedJobs * averageJobTime.TotalSeconds) / activeWorkers;
         
         return TimeSpan.FromSeconds(Math.Min(estimatedSeconds, TimeSpan.FromHours(24).TotalSeconds));
+    }
+
+    public async Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var correlationKey = GetCorrelationKey(correlationId, checksum);
+            var jobIdString = await _database.StringGetAsync(correlationKey);
+            
+            if (!jobIdString.HasValue) return null;
+            
+            if (!Guid.TryParse(jobIdString, out var jobId)) return null;
+            
+            return await GetJobAsync(jobId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to find existing job for correlation {CorrelationId}", correlationId);
+            throw;
+        }
+    }
+
+    public async Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var correlationKey = GetCorrelationKey(correlationId, checksum);
+            return await _database.KeyExistsAsync(correlationKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to check job existence for correlation {CorrelationId}", correlationId);
+            throw;
+        }
+    }
+
+    private string GetCorrelationKey(Guid correlationId, string checksum)
+    {
+        return $"slicer:correlation:{correlationId}:{checksum}";
     }
 }

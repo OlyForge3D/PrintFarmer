@@ -59,6 +59,16 @@ public interface ISlicerJobQueue
     /// Requeue failed jobs for retry
     /// </summary>
     Task RequeueFailedJobsAsync(int maxRetryCount = 3, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Find existing job by correlation ID and checksum for idempotency
+    /// </summary>
+    Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a job with the given correlation ID and checksum already exists
+    /// </summary>
+    Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

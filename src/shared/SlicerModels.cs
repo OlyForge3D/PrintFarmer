@@ -62,7 +62,7 @@ public enum SlicerEngineType
 }
 
 /// <summary>
-/// Request to submit a new slicing job
+/// Request to submit a new slicing job with message envelope for idempotency
 /// </summary>
 public class SlicingJobRequest
 {
@@ -74,6 +74,24 @@ public class SlicingJobRequest
     public SlicerProfileDto SlicerProfile { get; set; } = new();
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
     public Dictionary<string, object> Metadata { get; set; } = new();
+
+    /// <summary>
+    /// Message envelope for idempotency and tracking
+    /// Optional - will be generated if not provided
+    /// </summary>
+    public Slicer.Messaging.MessageEnvelope? Envelope { get; set; }
+
+    /// <summary>
+    /// Get or create message envelope for this request
+    /// </summary>
+    /// <returns>Message envelope for idempotency</returns>
+    public Slicer.Messaging.MessageEnvelope GetOrCreateEnvelope()
+    {
+        if (Envelope != null) return Envelope;
+
+        var jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(this);
+        return Slicer.Messaging.MessageEnvelope.Create(jobContent, SlicerEngine, Priority);
+    }
 }
 
 /// <summary>
@@ -90,7 +108,7 @@ public class SlicingJobResponse
 
 /// <summary>
 /// Extended slicing job for distributed processing 
-/// Builds on existing SlicingJobDto with additional distributed processing fields
+/// Builds on existing SlicingJobDto with additional distributed processing fields and envelope support
 /// </summary>
 public class DistributedSlicingJob : SlicingJobDto
 {
@@ -113,6 +131,64 @@ public class DistributedSlicingJob : SlicingJobDto
     public Dictionary<string, object> Metadata { get; set; } = new();
     public int RetryCount { get; set; } = 0;
     public DateTime? LastRetryAt { get; set; }
+
+    // Message envelope fields for idempotency
+    public Guid CorrelationId { get; set; } = Guid.NewGuid();
+    public string Checksum { get; set; } = string.Empty;
+    public int Attempt { get; set; } = 1;
+    public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
+    public string EnvelopeVersion { get; set; } = Slicer.Messaging.MessageEnvelope.CurrentVersion;
+
+    /// <summary>
+    /// Create distributed job from request with envelope
+    /// </summary>
+    /// <param name="request">Slicing job request</param>
+    /// <param name="envelope">Message envelope</param>
+    /// <returns>Distributed slicing job</returns>
+    public static DistributedSlicingJob FromRequest(SlicingJobRequest request, Slicer.Messaging.MessageEnvelope envelope)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        return new DistributedSlicingJob
+        {
+            Id = envelope.JobId,
+            UserId = request.UserId,
+            PrinterId = request.PrinterId,
+            ModelFileUrl = request.ModelFileUrl,
+            ModelFileName = request.ModelFileName,
+            SlicerEngine = request.SlicerEngine,
+            Profile = request.SlicerProfile,
+            Priority = request.Priority,
+            Status = SlicingJobStatus.Queued,
+            CreatedAt = DateTime.UtcNow,
+            Metadata = request.Metadata,
+            CorrelationId = envelope.CorrelationId,
+            Checksum = envelope.Checksum,
+            Attempt = envelope.Attempt,
+            SubmittedAt = envelope.SubmittedAt,
+            EnvelopeVersion = envelope.Version
+        };
+    }
+
+    /// <summary>
+    /// Get message envelope from job fields
+    /// </summary>
+    /// <returns>Message envelope</returns>
+    public Slicer.Messaging.MessageEnvelope GetEnvelope()
+    {
+        return new Slicer.Messaging.MessageEnvelope
+        {
+            JobId = Id,
+            SlicerType = SlicerEngine,
+            Priority = Priority,
+            Attempt = Attempt,
+            CorrelationId = CorrelationId,
+            Checksum = Checksum,
+            SubmittedAt = SubmittedAt,
+            Version = EnvelopeVersion
+        };
+    }
 
     // Map from base SlicingJobDto for compatibility
     public void UpdateFromBase(SlicingJobDto baseJob)
