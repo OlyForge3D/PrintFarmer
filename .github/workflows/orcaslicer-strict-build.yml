@@ -1,0 +1,77 @@
+name: OrcaSlicer Strict Build
+
+on:
+  push:
+    paths:
+      - "Dockerfile.orcaslicer"
+      - "Dockerfile.slicer-base"
+      - "src/orcaslicer-worker/**"
+      - "scripts/verify-orcaslicer-worker.sh"
+      - ".github/workflows/orcaslicer-strict-build.yml"
+  pull_request:
+    paths:
+      - "Dockerfile.orcaslicer"
+      - "Dockerfile.slicer-base"
+      - "src/orcaslicer-worker/**"
+      - "scripts/verify-orcaslicer-worker.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  build-orcaslicer-strict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        orca_version: ["1.8.1", "2.3.0"]
+        allow_stub: [false] # Can extend later with true for a soft-mode build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (optional for multi-arch)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build slicer-base (amd64)
+        run: |
+          echo "Building slicer-base (platform linux/amd64) for downstream stages"
+          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t slicer-base:latest .
+
+      - name: Build OrcaSlicer Worker (strict real binary)
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Building OrcaSlicer worker version=${{ matrix.orca_version }} ALLOW_STUB=${{ matrix.allow_stub }}"
+          docker build --platform linux/amd64 \
+            --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} \
+            --build-arg ALLOW_STUB=${{ matrix.allow_stub }} \
+            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
+            -f Dockerfile.orcaslicer \
+            -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+
+      - name: Run verification (require-real)
+        run: |
+          chmod +x scripts/verify-orcaslicer-worker.sh
+          docker run -d --name orca-test-${{ matrix.orca_version }} orcaslicer-worker:strict-${{ matrix.orca_version }}
+          sleep 6
+          scripts/verify-orcaslicer-worker.sh require-real
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo '--- Container Logs ---'
+          docker logs orca-test-${{ matrix.orca_version }} || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f orca-test-${{ matrix.orca_version }} || true
+          docker image rm orcaslicer-worker:strict-${{ matrix.orca_version }} || true

@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "shared", "shared", "{4F52FD
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Shared", "shared\Farm.Web.Shared.csproj", "{EF9CD938-1748-4F9C-B894-B15815353B16}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.OrcaSlicer.Worker", "orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj", "{4F0F2C41-6C6A-4E7F-9E57-5B4D6AA9C1F1}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Api.Tests", "tests\Farm.Web.Api.Tests\Farm.Web.Api.Tests.csproj", "{D83EEE3B-D3EC-4852-8DC1-7B7887BCF7FE}"

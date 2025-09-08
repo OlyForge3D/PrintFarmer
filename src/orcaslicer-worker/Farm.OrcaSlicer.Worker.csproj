@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Farm.OrcaSlicer.Worker</AssemblyName>
+    <RootNamespace>Farm.OrcaSlicer.Worker</RootNamespace>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../shared/Farm.Web.Shared.csproj" />
+  </ItemGroup>
+</Project>

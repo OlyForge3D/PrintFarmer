@@ -75,7 +75,7 @@ services:
   orcaslicer-worker:
     build:
       context: .
-      dockerfile: Dockerfile.base
+      dockerfile: Dockerfile.orcaslicer
     network_mode: host
     environment:
       - ASPNETCORE_ENVIRONMENT=Production

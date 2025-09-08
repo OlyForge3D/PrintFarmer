@@ -4,103 +4,133 @@ using Farm.PrusaSlicer.Worker.Health;
 using Farm.PrusaSlicer.Worker.Services;
 using StackExchange.Redis;
 
-var builder = WebApplication.CreateBuilder(args);
+namespace Farm.PrusaSlicer.Worker;
 
-// Configure logging
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-
-// Add Redis connection
-builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
+internal static class WorkerConstants
 {
-    var configuration = provider.GetService<IConfiguration>();
-    var connectionString = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
-    return ConnectionMultiplexer.Connect(connectionString);
-});
-
-// Add HTTP client for API communication
-builder.Services.AddHttpClient<HttpProgressReporter>();
-builder.Services.AddHttpClient<PrusaSlicingPipelineService>();
-
-// Add worker services
-builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
-builder.Services.AddScoped<ISlicingPipelineService, PrusaSlicingPipelineService>();
-builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>();
-
-// Add background services
-builder.Services.AddHostedService<GracefulShutdownService>();
-builder.Services.AddHostedService<QueueConsumerService>();
-
-// Add health checks
-builder.Services.AddHealthChecks()
-    .AddCheck<WorkerLivenessHealthCheck>("liveness")
-    .AddCheck<WorkerReadinessHealthCheck>("readiness")
-    .AddCheck("redis", () => 
-    {
-        try
-        {
-            var redis = builder.Services.BuildServiceProvider().GetRequiredService<IConnectionMultiplexer>();
-            return redis.IsConnected ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Redis not connected");
-        }
-        catch (Exception ex)
-        {
-            return HealthCheckResult.Unhealthy("Redis connection failed", ex);
-        }
-    });
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage();
+    public static readonly string[] Capabilities = { "prusaslicer", "stl-processing", "gcode-generation" };
 }
 
-// Liveness probe endpoint (simple ping)
-app.MapHealthChecks("/healthz", new HealthCheckOptions
+public static class Program
 {
-    Predicate = check => check.Name == "liveness",
-    ResponseWriter = async (context, report) =>
+    public static void Main(string[] args)
     {
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            System.Text.Json.JsonSerializer.Serialize(new 
-            { 
-                status = report.Status == HealthStatus.Healthy ? "ok" : "unhealthy",
-                timestamp = DateTime.UtcNow
-            })
-        );
+        var builder = WebApplication.CreateBuilder(args);
+
+        // Configure logging
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsole();
+
+        // Add Redis connection
+        builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
+        {
+            var configuration = provider.GetService<IConfiguration>();
+            var raw = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
+            if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
+            {
+                raw = raw.TrimEnd(',') + ",abortConnect=false";
+            }
+            try
+            {
+                return ConnectionMultiplexer.Connect(raw);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
+                return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
+            }
+        });
+
+        // HTTP clients
+        builder.Services.AddHttpClient<HttpProgressReporter>();
+        builder.Services.AddHttpClient<PrusaSlicingPipelineService>();
+
+        // Worker services
+        builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
+        builder.Services.AddSingleton<IPrusaBinaryDetector, PrusaBinaryDetector>();
+        builder.Services.AddScoped<ISlicingPipelineService, PrusaSlicingPipelineService>();
+        builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>();
+
+        // Background services
+        builder.Services.AddHostedService<GracefulShutdownService>();
+        builder.Services.AddHostedService<QueueConsumerService>();
+
+        // Health checks
+        builder.Services.AddHealthChecks()
+            .AddCheck<WorkerLivenessHealthCheck>("liveness")
+            .AddCheck<WorkerReadinessHealthCheck>("readiness")
+            .AddCheck<PrusaBinaryHealthCheck>("prusa_binary")
+            .AddCheck<RedisHealthCheck>("redis");
+
+        var app = builder.Build();
+
+        if (app.Environment.IsDevelopment())
+        {
+            app.UseDeveloperExceptionPage();
+        }
+
+        // Liveness
+        app.MapHealthChecks("/healthz", new HealthCheckOptions
+        {
+            Predicate = c => c.Name == "liveness",
+            ResponseWriter = async (context, report) =>
+            {
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    status = report.Status == HealthStatus.Healthy ? "ok" : "unhealthy",
+                    timestamp = DateTime.UtcNow
+                }));
+            }
+        });
+
+        // Relaxed readiness flag
+        var relaxedEnv = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
+        var relaxedReadiness = !string.IsNullOrEmpty(relaxedEnv) && relaxedEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
+        if (relaxedReadiness)
+        {
+            app.Logger.LogWarning("WORKER_RELAXED_READINESS=true -> prusa_binary will be excluded from readiness evaluation.");
+        }
+
+        app.MapHealthChecks("/health/ready", new HealthCheckOptions
+        {
+            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary"),
+            ResponseWriter = async (context, report) =>
+            {
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
+                    relaxed = relaxedReadiness,
+                    timestamp = DateTime.UtcNow,
+                    checks = report.Entries.ToDictionary(
+                        e => e.Key,
+                        e => new { status = e.Value.Status.ToString(), description = e.Value.Description }
+                    )
+                }));
+            }
+        });
+
+        app.MapHealthChecks("/ready", new HealthCheckOptions
+        {
+            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary")
+        });
+
+        app.MapGet("/", (IPrusaBinaryDetector detector) => Results.Ok(new
+        {
+            service = "prusaslicer-worker",
+            version = "1.0.0",
+            status = "running",
+            realBinary = detector.IsRealBinaryPresent(),
+            capabilities = WorkerConstants.Capabilities
+        }));
+
+        var prusaDetector = app.Services.GetRequiredService<IPrusaBinaryDetector>();
+        if (!prusaDetector.IsRealBinaryPresent())
+        {
+            app.Logger.LogWarning("PrusaSlicer binary not present (stub in use) - readiness will be unhealthy for prusa_binary.");
+        }
+
+        app.Run();
     }
-});
-
-// Readiness probe endpoint (can accept work)
-app.MapHealthChecks("/ready", new HealthCheckOptions
-{
-    Predicate = check => check.Name == "readiness" || check.Name == "redis",
-    ResponseWriter = async (context, report) =>
-    {
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            System.Text.Json.JsonSerializer.Serialize(new 
-            { 
-                status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
-                timestamp = DateTime.UtcNow,
-                checks = report.Entries.ToDictionary(
-                    entry => entry.Key,
-                    entry => new { status = entry.Value.Status.ToString(), description = entry.Value.Description }
-                )
-            })
-        );
-    }
-});
-
-// Root endpoint
-app.MapGet("/", () => Results.Ok(new 
-{ 
-    service = "prusaslicer-worker",
-    version = "1.0.0",
-    status = "running",
-    capabilities = new[] { "prusaslicer", "stl-processing", "gcode-generation" }
-}));
-
-app.Run();
+}

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Build the orcaslicer-worker image for amd64 to obtain a real (non-stub) OrcaSlicer binary even on arm64 hosts.
+# Requires docker buildx with an amd64 builder configured (example: docker run --privileged --rm tonistiigi/binfmt --install all).
+# Usage:
+#   scripts/build-orcaslicer-amd64.sh [tag]
+# Default tag: orcaslicer-worker:amd64
+TAG=${1:-orcaslicer-worker:amd64}
+
+if ! docker buildx version >/dev/null 2>&1; then
+  echo "[buildx] ERROR: docker buildx not available. Install Docker Buildx before using this script." >&2
+  exit 2
+fi
+
+echo "[buildx] Building image for linux/amd64 -> ${TAG}";
+DOCKER_BUILDKIT=1 docker buildx build \
+  --platform linux/amd64 \
+  -t "${TAG}" \
+  -f Dockerfile.orcaslicer \
+  --load .
+
+echo "[buildx] Build complete. To verify with strict mode using the amd64 image run:"
+echo "  ORCA_IMAGE=${TAG} scripts/verify-orcaslicer-worker.sh require-real"

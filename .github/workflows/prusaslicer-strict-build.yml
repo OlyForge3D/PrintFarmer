@@ -1,0 +1,74 @@
+name: PrusaSlicer Strict Build
+
+on:
+  push:
+    paths:
+      - "Dockerfile.prusaslicer"
+      - "Dockerfile.slicer-base"
+      - "src/prusaslicer-worker/**"
+      - "scripts/verify-prusaslicer-worker.sh"
+      - ".github/workflows/prusaslicer-strict-build.yml"
+  pull_request:
+    paths:
+      - "Dockerfile.prusaslicer"
+      - "Dockerfile.slicer-base"
+      - "src/prusaslicer-worker/**"
+      - "scripts/verify-prusaslicer-worker.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  build-prusaslicer-strict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        prusa_version: ["2.8.0"]
+        allow_stub: [false]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (optional for multi-arch)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build slicer-base (amd64)
+        run: |
+          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t slicer-base:latest .
+
+      - name: Build PrusaSlicer Worker (strict real binary)
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg PRUSASLICER_VERSION=${{ matrix.prusa_version }} \
+            --build-arg ALLOW_STUB=${{ matrix.allow_stub }} \
+            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
+            -f Dockerfile.prusaslicer \
+            -t prusaslicer-worker:strict-${{ matrix.prusa_version }} .
+
+      - name: Run verification (require-real)
+        run: |
+          chmod +x scripts/verify-prusaslicer-worker.sh
+          docker run -d --name prusa-test-${{ matrix.prusa_version }} prusaslicer-worker:strict-${{ matrix.prusa_version }}
+          sleep 6
+          scripts/verify-prusaslicer-worker.sh require-real prusaslicer-worker:strict-${{ matrix.prusa_version }} prusa-test-${{ matrix.prusa_version }}
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker logs prusa-test-${{ matrix.prusa_version }} || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f prusa-test-${{ matrix.prusa_version }} || true
+          docker image rm prusaslicer-worker:strict-${{ matrix.prusa_version }} || true
