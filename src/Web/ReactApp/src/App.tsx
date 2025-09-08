@@ -23,9 +23,10 @@ import './App.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (failureCount, error: any) => {
+      retry: (failureCount, error: unknown) => {
         // Don't retry for 4xx errors
-        if (error?.statusCode >= 400 && error?.statusCode < 500) {
+        const status = typeof error === 'object' && error !== null && 'statusCode' in error ? (error as { statusCode?: number }).statusCode : undefined;
+        if (typeof status === 'number' && status >= 400 && status < 500) {
           return false;
         }
         // Retry up to 3 times for other errors
@@ -105,6 +106,7 @@ function App() {
                   <Route path="/" element={<PrinterDashboard />} />
                   <Route path="/dashboard" element={<PrinterDashboard />} />
                   <Route path="/printers" element={<PrinterDashboard />} />
+                  <Route path="/printers/dashboard" element={<PrinterDashboard />} />
                   <Route path="/printers/table" element={<PrinterTableViewPage />} />
                   <Route path="/models" element={<ModelsPage />} />
                   <Route path="/harvest" element={<HarvestPage />} />

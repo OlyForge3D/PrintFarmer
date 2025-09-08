@@ -46,7 +46,7 @@ const navigation: NavigationItem[] = [
     icon: Printer,
     requiredPermission: { resource: 'printers', action: 'read' },
     children: [
-      { name: 'Dashboard', href: '/printers', icon: Grid3X3 },
+      { name: 'Dashboard', href: '/printers/dashboard', icon: Grid3X3 },
       { name: 'Table View', href: '/printers/table', icon: Table }
     ]
   },
@@ -268,10 +268,11 @@ export function Layout({ children }: LayoutProps) {
                       <NavLink
                         to={item.href}
                         onClick={() => setSidebarOpen(false)}
+                        end={!!item.children}
                         className={({ isActive }) =>
                           `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
                             isActive
-                              ? 'bg-pf-accent bg-opacity-20 text-pf-accent border-r-2 border-pf-accent'
+                              ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                               : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                           }`
                         }
@@ -292,7 +293,7 @@ export function Layout({ children }: LayoutProps) {
                                 className={({ isActive }) =>
                                   `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors ${
                                     isActive
-                                      ? 'bg-pf-accent bg-opacity-15 text-pf-accent'
+                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                                       : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                   }`
                                 }
@@ -322,10 +323,11 @@ export function Layout({ children }: LayoutProps) {
                   <div key={item.name}>
                     <NavLink
                       to={item.href}
+                      end={!!item.children}
                       className={({ isActive }) =>
                         `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
                           isActive
-                            ? 'bg-pf-accent bg-opacity-20 text-pf-accent border-r-2 border-pf-accent'
+                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                             : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                         }`
                       }
@@ -345,7 +347,7 @@ export function Layout({ children }: LayoutProps) {
                               className={({ isActive }) =>
                                 `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors ${
                                   isActive
-                                    ? 'bg-pf-accent bg-opacity-15 text-pf-accent'
+                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                 }`
                               }
