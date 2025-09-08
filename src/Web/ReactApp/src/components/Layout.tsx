@@ -42,7 +42,7 @@ const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { 
     name: 'Printers', 
-    href: '/printers', 
+    href: '/printers/dashboard', 
     icon: Printer,
     requiredPermission: { resource: 'printers', action: 'read' },
     children: [
@@ -111,9 +111,11 @@ export function Layout({ children }: LayoutProps) {
     setUserMenuOpen(false);
   };
 
-  const handleLoginSuccess = () => {
-    setShowLoginModal(false);
-    setShowRegisterModal(false);
+  // Track which parent menus are expanded
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (name: string) => {
+    setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
   };
 
   const switchToRegister = () => {
@@ -265,46 +267,55 @@ export function Layout({ children }: LayoutProps) {
                   const Icon = item.icon;
                   return (
                     <div key={item.name}>
-                      <NavLink
-                        to={item.href}
-                        onClick={() => setSidebarOpen(false)}
-                        end={!!item.children}
-                        className={({ isActive }) =>
-                          `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                            isActive
-                              ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                              : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                          }`
-                        }
-                      >
-                        <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                        {item.name}
-                      </NavLink>
-                      {/* Render submenu items if they exist */}
-                      {item.children && (
-                        <div className="ml-8 mt-1 space-y-1">
-                          {item.children.map((child) => {
-                            const ChildIcon = child.icon;
-                            return (
-                              <NavLink
-                                key={child.name}
-                                to={child.href}
-                                onClick={() => setSidebarOpen(false)}
-                                className={({ isActive }) =>
-                                  `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors ${
-                                    isActive
-                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                      : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                  }`
-                                }
-                              >
-                                <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                                {child.name}
-                              </NavLink>
-                            );
-                          })}
+                        <div className="flex flex-col">
+                          <button
+                            type="button"
+                            onClick={() => item.children ? toggleExpand(item.name) : setSidebarOpen(false)}
+                            className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
+                              // Determine active: if item has children, active if any child route is active (handled below)
+                              'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
+                            }`}
+                            aria-expanded={item.children ? !!expanded[item.name] : undefined}
+                            aria-controls={item.children ? `submenu-${item.name}` : undefined}
+                          >
+                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                            <span className="flex-1 text-left">{item.name}</span>
+                            {item.children && (
+                              <span className={`transform transition-transform duration-200 ml-2 ${expanded[item.name] ? 'rotate-90' : ''}`}>›</span>
+                            )}
+                          </button>
+                          {item.children && (
+                            <div
+                              id={`submenu-${item.name}`}
+                              className={`overflow-hidden transition-all duration-300 ease-in-out ${expanded[item.name] ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
+                            >
+                              <div className="ml-8 space-y-1">
+                                {item.children.map((child) => {
+                                  const ChildIcon = child.icon;
+                                  return (
+                                    <NavLink
+                                      key={child.name}
+                                      to={child.href}
+                                      onClick={() => setSidebarOpen(false)}
+                                      className={({ isActive }) =>
+                                        `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
+                                          isActive
+                                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                            : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+                                        }`
+                                      }
+                                    >
+                                      <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                      {child.name}
+                                    </NavLink>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      {/* Render submenu items if they exist */}
+                      
                     </div>
                   );
                 })}
@@ -321,44 +332,51 @@ export function Layout({ children }: LayoutProps) {
                 const Icon = item.icon;
                 return (
                   <div key={item.name}>
-                    <NavLink
-                      to={item.href}
-                      end={!!item.children}
-                      className={({ isActive }) =>
-                        `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                          isActive
-                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                            : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                        }`
-                      }
-                    >
-                      <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                      {item.name}
-                    </NavLink>
-                    {/* Render submenu items if they exist */}
-                    {item.children && (
-                      <div className="ml-8 mt-1 space-y-1">
-                        {item.children.map((child) => {
-                          const ChildIcon = child.icon;
-                          return (
-                            <NavLink
-                              key={child.name}
-                              to={child.href}
-                              className={({ isActive }) =>
-                                `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors ${
-                                  isActive
-                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                }`
-                              }
-                            >
-                              <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                              {child.name}
-                            </NavLink>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => item.children ? toggleExpand(item.name) : undefined}
+                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
+                          'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
+                        }`}
+                        aria-expanded={item.children ? !!expanded[item.name] : undefined}
+                        aria-controls={item.children ? `submenu-desktop-${item.name}` : undefined}
+                      >
+                        <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                        <span className="flex-1 text-left">{item.name}</span>
+                        {item.children && (
+                          <span className={`transform transition-transform duration-200 ml-2 ${expanded[item.name] ? 'rotate-90' : ''}`}>›</span>
+                        )}
+                      </button>
+                      {item.children && (
+                        <div
+                          id={`submenu-desktop-${item.name}`}
+                          className={`overflow-hidden transition-all duration-300 ease-in-out ${expanded[item.name] ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
+                        >
+                          <div className="ml-8 space-y-1">
+                            {item.children.map((child) => {
+                              const ChildIcon = child.icon;
+                              return (
+                                <NavLink
+                                  key={child.name}
+                                  to={child.href}
+                                  className={({ isActive }) =>
+                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
+                                      isActive
+                                        ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                        : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+                                    }`
+                                  }
+                                >
+                                  <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                  {child.name}
+                                </NavLink>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
@@ -105,7 +105,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<PrinterDashboard />} />
                   <Route path="/dashboard" element={<PrinterDashboard />} />
-                  <Route path="/printers" element={<PrinterDashboard />} />
+                  <Route path="/printers" element={<Navigate to="/printers/dashboard" replace />} />
                   <Route path="/printers/dashboard" element={<PrinterDashboard />} />
                   <Route path="/printers/table" element={<PrinterTableViewPage />} />
                   <Route path="/models" element={<ModelsPage />} />
