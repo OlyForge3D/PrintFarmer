@@ -498,21 +498,3 @@ public class SlicerServicesIntegrationTests : IDisposable
         return System.Text.Encoding.UTF8.GetBytes(content);
     }
 }
-
-/// <summary>
-/// Configuration options for integration tests
-/// </summary>
-public class LocalFileStorageOptions
-{
-    public string BasePath { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Mock slicer options for testing
-/// </summary>
-public class MockSlicerOptions
-{
-    public double InitialDelaySeconds { get; set; } = 1.0;
-    public double ProcessingTimeSeconds { get; set; } = 30.0;
-    public double FailureRate { get; set; } = 0.05;
-}

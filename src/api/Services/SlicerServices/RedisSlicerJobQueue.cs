@@ -216,7 +216,13 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 return null;
             }
 
-            return JsonSerializer.Deserialize<DistributedSlicingJob>(jobData);
+            string? jobDataString = jobData;
+            if (string.IsNullOrEmpty(jobDataString))
+            {
+                return null;
+            }
+            
+            return JsonSerializer.Deserialize<DistributedSlicingJob>(jobDataString);
         }
         catch (Exception ex)
         {
@@ -297,10 +303,14 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             
             foreach (var jobJson in completedJobs.Concat(failedJobs))
             {
-                var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobJson);
-                if (job?.UserId == userId)
+                string? jobJsonString = jobJson;
+                if (!string.IsNullOrEmpty(jobJsonString))
                 {
-                    jobs.Add(job);
+                    var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobJsonString);
+                    if (job?.UserId == userId)
+                    {
+                        jobs.Add(job);
+                    }
                 }
             }
 
@@ -341,9 +351,12 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             foreach (var jobJson in failedJobs)
             {
-                var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobJson);
-                if (job != null && job.RetryCount < maxRetryCount)
+                string? jobJsonString = jobJson;
+                if (!string.IsNullOrEmpty(jobJsonString))
                 {
+                    var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobJsonString);
+                    if (job != null && job.RetryCount < maxRetryCount)
+                    {
                     job.Status = SlicingJobStatus.Queued;
                     job.RetryCount++;
                     job.LastRetryAt = DateTime.UtcNow;
@@ -353,9 +366,10 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                     job.WorkerId = null;
 
                     // Remove from failed queue and re-enqueue
-                    await _database.SortedSetRemoveAsync(_failedKey, jobJson);
+                    await _database.SortedSetRemoveAsync(_failedKey, jobJsonString);
                     await EnqueueAsync(job, cancellationToken);
                     requeuedCount++;
+                    }
                 }
             }
 

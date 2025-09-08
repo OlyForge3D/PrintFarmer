@@ -81,13 +81,13 @@ public class SlicerController : ControllerBase
         var slicerEngine = form["slicerEngine"].FirstOrDefault();
         if (string.IsNullOrEmpty(slicerEngine) || !s_allowedEngines.Contains(slicerEngine))
         {
-            return BadRequest("Valid printer ID is required");
+            return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", s_allowedEngines)}");
         }
 
         var printerId = form["printerId"].FirstOrDefault();
         if (string.IsNullOrEmpty(printerId) || !Guid.TryParse(printerId, out var printerGuid))
         {
-            return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
+            return BadRequest("Valid printer ID is required");
         }
 
         var profileRaw = form["profile"].FirstOrDefault();
@@ -108,11 +108,18 @@ public class SlicerController : ControllerBase
             return BadRequest("Valid slicer profile is required");
         }
 
-        // Parse priority
+        // Parse priority from form data
+        var priority = form["priority"].FirstOrDefault();
         var jobPriority = SlicingJobPriority.Normal;
         if (!string.IsNullOrEmpty(priority) && !Enum.TryParse<SlicingJobPriority>(priority, true, out jobPriority))
         {
             return BadRequest($"Invalid priority: {priority}. Supported priorities: {string.Join(", ", Enum.GetNames<SlicingJobPriority>())}");
+        }
+
+        // Parse slicer engine type
+        if (!Enum.TryParse<SlicerEngineType>(slicerEngine, true, out var slicerEngineType))
+        {
+            return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
         }
 
         try
@@ -134,7 +141,7 @@ public class SlicerController : ControllerBase
                 ModelFileUrl = modelFileUrl,
                 ModelFileName = modelFile.FileName,
                 SlicerEngine = slicerEngineType,
-                SlicerProfile = slicerProfile,
+                SlicerProfile = slicerProfile ?? new SlicerProfileDto(),
                 Priority = jobPriority,
                 Metadata = new Dictionary<string, object>
                 {
@@ -145,14 +152,29 @@ public class SlicerController : ControllerBase
                 }
             };
 
-            s_activeJobs[jobId] = job; // Upsert into shared dictionary
+            // Submit job to orchestrator
+            var jobResponse = await _slicerOrchestrator.SubmitJobAsync(request);
+            
+            // Convert to legacy format for compatibility
+            var jobStatus = new SlicingJobDto
+            {
+                JobId = jobResponse.JobId.ToString(),
+                Status = jobResponse.Status,
+                Progress = 0,
+                SlicerEngine = slicerEngineType.ToString(),
+                PrinterId = printerGuid,
+                ModelFilePath = modelFile.FileName, // Use ModelFilePath instead of ModelFileName
+                CreatedAt = DateTime.UtcNow
+            };
+            
+            s_activeJobs[jobResponse.JobId.ToString()] = jobStatus;
 
-            return Ok(jobStatus);
+            return Accepted(jobResponse);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get status for job {JobId}", jobId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get job status");
+            _logger.LogError(ex, "Failed to submit slicing job");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to submit slicing job");
         }
     }
 
@@ -505,7 +527,7 @@ public class SlicerController : ControllerBase
             await SendProgressEventAsync(jobId, job.Progress, job.Status, job.Message);
 
             // Keep connection alive and send updates
-            while (_activeJobs.TryGetValue(jobId, out var currentJob) &&
+            while (s_activeJobs.TryGetValue(jobId, out var currentJob) &&
                 (currentJob.Status == SlicingJobStatus.Queued || currentJob.Status == SlicingJobStatus.Slicing))
             {
                 await Task.Delay(1000); // Update every second
@@ -589,7 +611,7 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetGcodeFile(string jobId)
     {
-        if (!_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
+        if (!s_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
         }
