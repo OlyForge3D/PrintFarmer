@@ -34,3 +34,17 @@ node_modules/
 *.db
 *.db-shm
 *.db-wal
+
+# Test repository-local temp artifacts
+src/tests/_temp/
+
+# Test result artifacts
+*.trx
+TestResults/
+
+# Coverage artifacts
+coverage/
+lcov.info
+coverage-final.json
+*.coverage
+*.coveragexml
