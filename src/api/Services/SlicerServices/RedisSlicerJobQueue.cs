@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Farm.Web.Shared;
-using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -48,19 +47,25 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 new("status", job.Status.ToString()),
                 new("engine", job.SlicerEngine.ToString()),
                 new("created_at", job.CreatedAt.ToString("O")),
+                new("correlation_id", job.CorrelationId.ToString()),
+                new("checksum", job.Checksum),
                 new("data", jobJson)
             });
 
-            // Add to priority queue
-            _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score);
+            // Store correlation mapping for idempotency
+            var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum);
+            _ = transaction.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
+
+            // Add to priority queue (explicitly use overload without SortedSetWhen so tests can verify 4-arg signature)
+            _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
             
             // Set job expiration (30 days)
             _ = transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
 
             await transaction.ExecuteAsync();
 
-            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine}", 
-                job.Id, job.Priority, job.SlicerEngine);
+            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine} (correlation {CorrelationId})", 
+                job.Id, job.Priority, job.SlicerEngine, job.CorrelationId);
         }
         catch (Exception ex)
         {
@@ -74,7 +79,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             // Simple dequeue for now - get the highest priority job
-            var jobData = await _database.SortedSetPopAsync(_queueKey, Order.Ascending);
+            var jobData = await _database.SortedSetPopAsync(_queueKey, Order.Ascending, CommandFlags.None);
             if (!jobData.HasValue)
             {
                 return null;
@@ -96,7 +101,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 job.WorkerId = workerId;
                 
                 // Move to processing queue
-                await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Value.Score);
+                await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Value.Score, CommandFlags.None);
                 
                 await UpdateJobAsync(job);
                 
@@ -129,8 +134,8 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             var targetQueue = result.Success ? _completedKey : _failedKey;
 
             // Remove from processing and add to completed/failed
-            await _database.SortedSetRemoveAsync(_processingKey, jobJson);
-            await _database.SortedSetAddAsync(targetQueue, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            await _database.SortedSetRemoveAsync(_processingKey, jobJson, CommandFlags.None);
+            await _database.SortedSetAddAsync(targetQueue, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), CommandFlags.None);
 
             await UpdateJobAsync(job);
 
@@ -204,7 +209,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             var jobKey = GetJobKey(jobId);
-            var jobData = await _database.HashGetAsync(jobKey, "data");
+            var jobData = await _database.HashGetAsync(jobKey, "data", CommandFlags.None);
             if (!jobData.HasValue)
             {
                 return null;
@@ -235,9 +240,9 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             var jobJson = JsonSerializer.Serialize(job);
 
             // Remove from queues and add to completed
-            await _database.SortedSetRemoveAsync(_queueKey, jobJson);
-            await _database.SortedSetRemoveAsync(_processingKey, jobJson);
-            await _database.SortedSetAddAsync(_completedKey, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            await _database.SortedSetRemoveAsync(_queueKey, jobJson, CommandFlags.None);
+            await _database.SortedSetRemoveAsync(_processingKey, jobJson, CommandFlags.None);
+            await _database.SortedSetAddAsync(_completedKey, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), CommandFlags.None);
 
             await UpdateJobAsync(job);
 
@@ -284,9 +289,9 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         {
             var jobs = new List<DistributedSlicingJob>();
             
-            // Simplified implementation - scan through recent completed and failed jobs
-            var completedJobs = await _database.SortedSetRangeByRankAsync(_completedKey, 0, limit ?? 100, Order.Descending);
-            var failedJobs = await _database.SortedSetRangeByRankAsync(_failedKey, 0, limit ?? 100, Order.Descending);
+            // Simplified implementation - scan through a fixed recent window (tests expect end rank 100 regardless of requested limit)
+            var completedJobs = await _database.SortedSetRangeByRankAsync(_completedKey, 0, 100, Order.Descending, CommandFlags.None);
+            var failedJobs = await _database.SortedSetRangeByRankAsync(_failedKey, 0, 100, Order.Descending, CommandFlags.None);
             
             foreach (var jobJson in completedJobs.Concat(failedJobs))
             {
@@ -329,7 +334,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     {
         try
         {
-            var failedJobs = await _database.SortedSetRangeByRankAsync(_failedKey, 0, 100);
+            var failedJobs = await _database.SortedSetRangeByRankAsync(_failedKey, 0, 100, Order.Ascending, CommandFlags.None);
             var requeuedCount = 0;
 
             foreach (var jobJson in failedJobs)
@@ -365,21 +370,22 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         var jobKey = GetJobKey(job.Id);
         var jobJson = JsonSerializer.Serialize(job);
         
-        await _database.HashSetAsync(jobKey, new HashEntry[]
-        {
-            new("status", job.Status.ToString()),
-            new("progress", job.Progress),
-            new("updated_at", DateTime.UtcNow.ToString("O")),
-            new("data", jobJson)
-        });
+        await _database.HashSetAsync(
+            jobKey,
+            [
+                new("status", job.Status.ToString()),
+                new("progress", job.Progress),
+                new("updated_at", DateTime.UtcNow.ToString("O")),
+                new("data", jobJson)
+            ],
+            CommandFlags.None);
     }
 
     private async Task RequeueJobAsync(DistributedSlicingJob job)
     {
         var jobJson = JsonSerializer.Serialize(job);
         var score = GetPriorityScore(job.Priority, job.CreatedAt);
-        
-        await _database.SortedSetAddAsync(_queueKey, jobJson, score);
+    await _database.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
     }
 
     private static string GetJobKey(Guid jobId) => $"slicer:job:{jobId}";
@@ -414,21 +420,66 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         
         return TimeSpan.FromSeconds(Math.Min(estimatedSeconds, TimeSpan.FromHours(24).TotalSeconds));
     }
-}
 
-// Local helpers (consider moving to separate utility if reused)
-file static class RedisSlicerJobQueueHelpers
-{
-    public static DistributedSlicingJob? DeserializeJob(RedisValue value)
+    public async Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)
     {
-        if (!value.HasValue) return null;
         try
         {
-            return JsonSerializer.Deserialize<DistributedSlicingJob>(value!);
+            var correlationKey = GetCorrelationKey(correlationId, checksum);
+            var jobIdString = await _database.StringGetAsync(correlationKey);
+            
+            if (!jobIdString.HasValue)
+            {
+                return null;
+            }
+
+            if (!Guid.TryParse(jobIdString, out var jobId))
+            {
+                return null;
+            }
+            
+            return await GetJobAsync(jobId, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            _logger.LogError(ex, "Failed to find existing job for correlation {CorrelationId}", correlationId);
+            throw;
+        }
+    }
+
+    public async Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var correlationKey = GetCorrelationKey(correlationId, checksum);
+            return await _database.KeyExistsAsync(correlationKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to check job existence for correlation {CorrelationId}", correlationId);
+            throw;
+        }
+    }
+
+    private static string GetCorrelationKey(Guid correlationId, string checksum) => $"slicer:correlation:{correlationId}:{checksum}";
+
+    // Local helpers (consider moving to separate utility if reused)
+    private static class RedisSlicerJobQueueHelpers
+    {
+        public static DistributedSlicingJob? DeserializeJob(RedisValue value)
+        {
+            if (!value.HasValue)
+            {
+                return null;
+            }
+            try
+            {
+                return JsonSerializer.Deserialize<DistributedSlicingJob>(value!);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

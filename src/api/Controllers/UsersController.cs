@@ -92,10 +92,7 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<UserDto>> CreateUserAsync([FromBody] CreateUserRequest request, CancellationToken ct)
     {
-        if (request == null)
-        {
-            return BadRequest("Request body required");
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.IsNullOrWhiteSpace(request.Username) ||
             string.IsNullOrWhiteSpace(request.Email) ||
@@ -170,10 +167,7 @@ public class UsersController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<UserDto>> UpdateUserAsync(Guid id, [FromBody] UpdateUserRequest request, CancellationToken ct)
     {
-        if (request == null)
-        {
-            return BadRequest("Request body required");
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         var user = await _db.Users.FindAsync(id);
         if (user == null)

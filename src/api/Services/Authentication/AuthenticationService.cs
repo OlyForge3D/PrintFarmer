@@ -79,17 +79,15 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(request);
             // If a user with the same username AND email already exists and the password matches,
             // treat registration as idempotent and return a valid authentication result.
             var existingExact = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Email == request.Email);
-            if (existingExact != null)
+            if (existingExact != null && _passwordHashing.VerifyPassword(request.Password, existingExact.PasswordHash))
             {
-                if (_passwordHashing.VerifyPassword(request.Password, existingExact.PasswordHash))
-                {
-                    var tokenExisting = await GenerateJwtTokenAsync(existingExact);
-                    var userDtoExisting = await GetUserWithRolesAndPermissionsAsync(existingExact.Id);
-                    return new AuthenticationResult(true, tokenExisting, DateTime.UtcNow.AddDays(7), userDtoExisting);
-                }
+                var tokenExisting = await GenerateJwtTokenAsync(existingExact);
+                var userDtoExisting = await GetUserWithRolesAndPermissionsAsync(existingExact.Id);
+                return new AuthenticationResult(true, tokenExisting, DateTime.UtcNow.AddDays(7), userDtoExisting);
             }
 
             // Check if username already exists

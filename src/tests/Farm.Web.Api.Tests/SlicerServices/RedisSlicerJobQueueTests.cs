@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using StackExchange.Redis;

@@ -554,10 +554,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterDto dto, CancellationToken ct)
     {
-        if (dto is null)
-        {
-            return BadRequest("Request body is required.");
-        }
+        ArgumentNullException.ThrowIfNull(dto);
         // Validate input using FluentValidation
         var validationResult = await validator.ValidateAsync(dto, ct);
         if (!validationResult.IsValid)
@@ -721,10 +718,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDto>> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
     {
-        if (dto is null)
-        {
-            return BadRequest("Request body is required.");
-        }
+        ArgumentNullException.ThrowIfNull(dto);
         var p = await db.Printers.FindAsync([id], ct);
         if (p is null)
         { return NotFound(); }

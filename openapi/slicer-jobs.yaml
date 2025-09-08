@@ -1,0 +1,608 @@
+openapi: 3.0.3
+info:
+  title: PrintFarmer Slicer Jobs API
+  description: |
+    REST API for managing 3D printing slicer jobs in PrintFarmer.
+    Provides endpoints for submitting slicing jobs, checking status, cancelling jobs, and managing slicer profiles.
+  version: 1.0.0
+  contact:
+    name: PrintFarmer API Support
+    url: https://github.com/jpapiez/PrintFarmer
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:5245/api
+    description: Local development server
+  - url: https://api.printfarmer.local/api
+    description: Production API server
+
+paths:
+  /slicer/slice:
+    post:
+      summary: Submit a slicing job
+      description: |
+        Submit a 3D model file for slicing using a specified slicer engine and profile.
+        Returns immediately with job details and estimated completion time.
+      operationId: submitSlicingJob
+      tags:
+        - Slicer Jobs
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - modelFile
+                - printerId
+                - slicerEngine
+                - slicerProfile
+              properties:
+                modelFile:
+                  type: string
+                  format: binary
+                  description: 3D model file to slice (STL, 3MF, OBJ)
+                printerId:
+                  type: string
+                  format: uuid
+                  description: Target printer ID
+                slicerEngine:
+                  $ref: '#/components/schemas/SlicerEngineType'
+                slicerProfile:
+                  type: string
+                  description: JSON-encoded slicer profile configuration
+                priority:
+                  $ref: '#/components/schemas/SlicingJobPriority'
+                  default: Normal
+            examples:
+              basicSlicing:
+                summary: Basic slicing job
+                value:
+                  printerId: "123e4567-e89b-12d3-a456-426614174000"
+                  slicerEngine: "OrcaSlicer"
+                  slicerProfile: '{"layerHeight": 0.2, "infillPercentage": 20}'
+                  priority: "Normal"
+      responses:
+        '202':
+          description: Slicing job accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlicingJobResponse'
+              examples:
+                success:
+                  summary: Job accepted successfully
+                  value:
+                    jobId: "550e8400-e29b-41d4-a716-446655440000"
+                    status: "Queued"
+                    estimatedCompletionTime: "2024-01-15T10:30:00Z"
+                    queuePosition: 2
+                    slicerWorkerUrl: "http://worker-01:8080"
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidFile:
+                  summary: Unsupported file format
+                  value:
+                    error: "Unsupported file format"
+                    details: "Only STL, 3MF, and OBJ files are supported"
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /slicer/job/{jobId}:
+    get:
+      summary: Get slicing job status
+      description: Retrieve the current status and details of a slicing job
+      operationId: getJobStatus
+      tags:
+        - Slicer Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Job status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlicingJobStatusResponse'
+              examples:
+                inProgress:
+                  summary: Job in progress
+                  value:
+                    jobId: "550e8400-e29b-41d4-a716-446655440000"
+                    status: "Slicing"
+                    progress: 65
+                    createdAt: "2024-01-15T10:00:00Z"
+                    startedAt: "2024-01-15T10:05:00Z"
+                    completedAt: null
+                    workerId: "worker-01"
+                    errorMessage: null
+                    resultFileUrl: null
+                    estimatedPrintTimeSeconds: 7200
+                    estimatedFilamentUsageGrams: 25.5
+                    layerCount: 450
+                    metadata:
+                      originalFileName: "model.stl"
+                      fileSize: 2048576
+                completed:
+                  summary: Job completed
+                  value:
+                    jobId: "550e8400-e29b-41d4-a716-446655440000"
+                    status: "Completed"
+                    progress: 100
+                    createdAt: "2024-01-15T10:00:00Z"
+                    startedAt: "2024-01-15T10:05:00Z"
+                    completedAt: "2024-01-15T10:25:00Z"
+                    workerId: "worker-01"
+                    errorMessage: null
+                    resultFileUrl: "https://storage.example.com/gcode/result.gcode"
+                    estimatedPrintTimeSeconds: 7200
+                    estimatedFilamentUsageGrams: 25.5
+                    layerCount: 450
+                    metadata:
+                      originalFileName: "model.stl"
+                      fileSize: 2048576
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /slicer/jobs/{jobId}/cancel:
+    post:
+      summary: Cancel a slicing job
+      description: |
+        Cancel a queued or in-progress slicing job.
+        Jobs that are already completed cannot be cancelled.
+      operationId: cancelJob
+      tags:
+        - Slicer Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: Unique job identifier
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Job cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Job cancelled successfully"
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Job cannot be cancelled (already completed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /slicer/profiles:
+    get:
+      summary: List available slicer profiles
+      description: |
+        Get a list of available slicer profiles for a specific printer.
+        Profiles define slicing settings like layer height, infill, temperatures, etc.
+      operationId: listSlicerProfiles
+      tags:
+        - Slicer Profiles
+      parameters:
+        - name: printerId
+          in: query
+          description: Filter profiles for specific printer
+          schema:
+            type: string
+            format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        - name: slicerType
+          in: query
+          description: Filter profiles by slicer engine type
+          schema:
+            $ref: '#/components/schemas/SlicerEngineType'
+          example: "OrcaSlicer"
+      responses:
+        '200':
+          description: Profiles retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SlicerProfile'
+              examples:
+                profiles:
+                  summary: Available profiles
+                  value:
+                    - id: "prof-001"
+                      name: "Standard PLA"
+                      description: "General purpose PLA profile"
+                      slicerType: "OrcaSlicer"
+                      layerHeight: 0.2
+                      infillPercentage: 20
+                      printSpeed: 50
+                      nozzleTemperature: 210
+                      bedTemperature: 60
+                      enableSupports: false
+                      material: "PLA"
+                      quality: "Standard"
+                      isDefault: true
+                      isPublic: true
+                    - id: "prof-002"
+                      name: "High Quality PETG"
+                      description: "Fine detail PETG profile"
+                      slicerType: "OrcaSlicer"
+                      layerHeight: 0.1
+                      infillPercentage: 30
+                      printSpeed: 40
+                      nozzleTemperature: 240
+                      bedTemperature: 80
+                      enableSupports: true
+                      material: "PETG"
+                      quality: "Fine"
+                      isDefault: false
+                      isPublic: true
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    SlicingJobResponse:
+      type: object
+      required:
+        - jobId
+        - status
+        - estimatedCompletionTime
+        - queuePosition
+      properties:
+        jobId:
+          type: string
+          format: uuid
+          description: Unique job identifier
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        status:
+          $ref: '#/components/schemas/SlicingJobStatus'
+        estimatedCompletionTime:
+          type: string
+          format: date-time
+          description: Estimated job completion time
+          example: "2024-01-15T10:30:00Z"
+        queuePosition:
+          type: integer
+          minimum: 0
+          description: Position in the processing queue
+          example: 2
+        slicerWorkerUrl:
+          type: string
+          format: uri
+          description: URL of the assigned worker instance
+          example: "http://worker-01:8080"
+
+    SlicingJobStatusResponse:
+      type: object
+      required:
+        - jobId
+        - status
+        - progress
+        - createdAt
+      properties:
+        jobId:
+          type: string
+          format: uuid
+          description: Unique job identifier
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        status:
+          $ref: '#/components/schemas/SlicingJobStatus'
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Job completion percentage
+          example: 65
+        createdAt:
+          type: string
+          format: date-time
+          description: Job creation timestamp
+          example: "2024-01-15T10:00:00Z"
+        startedAt:
+          type: string
+          format: date-time
+          description: Job start timestamp
+          example: "2024-01-15T10:05:00Z"
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          description: Job completion timestamp
+          example: "2024-01-15T10:25:00Z"
+          nullable: true
+        workerId:
+          type: string
+          description: Identifier of the assigned worker
+          example: "worker-01"
+          nullable: true
+        errorMessage:
+          type: string
+          description: Error message if job failed
+          example: "Model file corrupted"
+          nullable: true
+        resultFileUrl:
+          type: string
+          format: uri
+          description: URL to download the generated G-code file
+          example: "https://storage.example.com/gcode/result.gcode"
+          nullable: true
+        estimatedPrintTimeSeconds:
+          type: number
+          format: double
+          minimum: 0
+          description: Estimated print time in seconds
+          example: 7200
+        estimatedFilamentUsageGrams:
+          type: number
+          format: double
+          minimum: 0
+          description: Estimated filament usage in grams
+          example: 25.5
+        layerCount:
+          type: integer
+          minimum: 0
+          description: Total number of layers in the sliced model
+          example: 450
+        metadata:
+          type: object
+          description: Additional job metadata
+          additionalProperties: true
+          example:
+            originalFileName: "model.stl"
+            fileSize: 2048576
+
+    SlicerProfile:
+      type: object
+      required:
+        - id
+        - name
+        - slicerType
+        - layerHeight
+        - infillPercentage
+        - printSpeed
+        - nozzleTemperature
+        - bedTemperature
+        - material
+        - quality
+      properties:
+        id:
+          type: string
+          description: Unique profile identifier
+          example: "prof-001"
+        name:
+          type: string
+          description: Human-readable profile name
+          example: "Standard PLA"
+        description:
+          type: string
+          description: Profile description
+          example: "General purpose PLA profile"
+          nullable: true
+        slicerType:
+          $ref: '#/components/schemas/SlicerEngineType'
+        printerModelId:
+          type: string
+          format: uuid
+          description: Compatible printer model ID
+          example: "123e4567-e89b-12d3-a456-426614174000"
+          nullable: true
+        specificPrinterId:
+          type: string
+          format: uuid
+          description: Specific printer ID if profile is printer-specific
+          example: "123e4567-e89b-12d3-a456-426614174000"
+          nullable: true
+        layerHeight:
+          type: number
+          format: double
+          minimum: 0.05
+          maximum: 1.0
+          description: Layer height in millimeters
+          example: 0.2
+        infillPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Infill density percentage
+          example: 20
+        printSpeed:
+          type: integer
+          minimum: 1
+          maximum: 500
+          description: Print speed in mm/s
+          example: 50
+        nozzleTemperature:
+          type: integer
+          minimum: 100
+          maximum: 500
+          description: Nozzle temperature in Celsius
+          example: 210
+        bedTemperature:
+          type: integer
+          minimum: 0
+          maximum: 200
+          description: Bed temperature in Celsius
+          example: 60
+        enableSupports:
+          type: boolean
+          description: Enable automatic support generation
+          example: false
+        material:
+          type: string
+          description: Filament material type
+          example: "PLA"
+          enum:
+            - PLA
+            - ABS
+            - PETG
+            - TPU
+            - WOOD
+            - CARBON_FIBER
+            - OTHER
+        quality:
+          type: string
+          description: Print quality preset
+          example: "Standard"
+          enum:
+            - Draft
+            - Standard
+            - Fine
+            - Ultra Fine
+        advancedSettings:
+          type: string
+          description: JSON-encoded advanced slicer settings
+          example: '{"retraction": 5.0, "travelSpeed": 120}'
+          nullable: true
+        isDefault:
+          type: boolean
+          description: Whether this is the default profile for the material
+          example: true
+        isPublic:
+          type: boolean
+          description: Whether this profile is publicly available
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Profile creation timestamp
+          example: "2024-01-15T09:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Profile last update timestamp
+          example: "2024-01-15T09:30:00Z"
+
+    SlicingJobStatus:
+      type: string
+      description: Current status of the slicing job
+      enum:
+        - Queued
+        - Slicing
+        - Completed
+        - Error
+        - Cancelled
+      example: "Slicing"
+
+    SlicingJobPriority:
+      type: string
+      description: Job processing priority level
+      enum:
+        - Low
+        - Normal
+        - High
+        - Critical
+      default: Normal
+      example: "Normal"
+
+    SlicerEngineType:
+      type: string
+      description: Supported slicer engine types
+      enum:
+        - OrcaSlicer
+        - PrusaSlicer
+        - SuperSlicer
+        - Cura
+      example: "OrcaSlicer"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Invalid request parameters"
+        details:
+          type: string
+          description: Additional error details
+          example: "The specified printer ID does not exist"
+          nullable: true
+        code:
+          type: string
+          description: Error code for programmatic handling
+          example: "PRINTER_NOT_FOUND"
+          nullable: true
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Slicer Jobs
+    description: Operations for managing slicing jobs
+  - name: Slicer Profiles
+    description: Operations for managing slicer profiles and configurations

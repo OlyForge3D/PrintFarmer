@@ -1,6 +1,5 @@
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 

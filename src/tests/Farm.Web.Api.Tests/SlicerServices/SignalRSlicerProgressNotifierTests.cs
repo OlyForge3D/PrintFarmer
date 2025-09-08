@@ -1,6 +1,5 @@
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;

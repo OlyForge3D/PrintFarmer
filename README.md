@@ -17,13 +17,15 @@ A React TypeScript dashboard for managing multiple 3D printers.
 **📋 [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
 **🔧 [Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging  
 **🐳 [Docker Deployment Guide](DOCKER_DEPLOYMENT.md)** - Production containers, scaling, monitoring  
+**🏗️ [Slicer Microservices Architecture](documentation/architecture/slicer-microservices.md)** - Distributed slicing system architecture and ADRs  
 **📡 [Service Interfaces Documentation](INTERFACE_DOCUMENTATION_SUMMARY.md)** - Complete API service interfaces with XML documentation  
-**🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standardsle 3D printers. Supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and streams live status via SignalR.
+**🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards
 **🧊 Soft Freeze Policy**: See `SOFT_FREEZE.md` (active if `.soft-freeze` file present)
 
 ## Features
 - **Multi-backend Support**: Moonraker and PrusaLink API integration
 - **Real-time Updates**: Live printer status via SignalR
+- **Distributed Slicing**: Microservices architecture for scalable G-code generation
 - **Network Discovery**: Automatic detection of printers on your network
 - **Modern UI**: React TypeScript frontend with responsive design
 - **Flexible Database**: SQLite, PostgreSQL, SQL Server, MySQL support
