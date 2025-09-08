@@ -358,3 +358,70 @@ dotnet_diagnostic.CA2016.severity = suggestion
 dotnet_diagnostic.CA1852.severity = suggestion
 dotnet_diagnostic.CA1822.severity = suggestion
 
+# ------------------------------------------------------------
+# Phased Analyzer Remediation Strategy
+# ------------------------------------------------------------
+# We are adopting a phased escalation model so we can merge incremental fixes
+# without blocking on the entire analyzer backlog. Diagnostics are grouped:
+#   Phase 1 (Security & Correctness)   -> escalate to warning/error now
+#   Phase 2 (API Surface & Contracts)  -> escalate after phase 1 complete
+#   Phase 3 (Performance)              -> optimize after stability
+#   Phase 4 (Maintainability & Style)  -> final polish
+#   Phase 5 (Optional Domain Modeling) -> nice-to-have refinements
+#
+# Tag format used below:
+#   PHASE1, PHASE2, ... in trailing comments for clarity and searchability.
+# Do NOT lower severities once raised without a conscious exception record.
+# ------------------------------------------------------------
+
+# -------------------------
+# Phase 1: Security & Correctness (PROMOTED)
+# -------------------------
+# JWT / cryptography / token validation / insecure randomness / argument validation
+# Elevate critical issues to errors so they fail fast in CI.
+
+# CA5404: Do not disable token lifetime validation (critical for JWT) (PHASE1)
+dotnet_diagnostic.CA5404.severity = error
+
+# CA5394: Do not use insecure randomness (PHASE1)
+dotnet_diagnostic.CA5394.severity = error
+
+# CA2201: Do not raise reserved exception types (broad Exception) (PHASE1)
+dotnet_diagnostic.CA2201.severity = warning
+
+# CA1062: Validate public method arguments (PHASE1)
+dotnet_diagnostic.CA1062.severity = warning
+
+# S5445: Disable weak JWT-related patterns (placeholder Sonar rule) (PHASE1)
+dotnet_diagnostic.S5445.severity = warning
+
+# S4823: Sensitive info logging (ensure secrets not logged) (PHASE1)
+dotnet_diagnostic.S4823.severity = warning
+
+# SCS0005 (example placeholder for insecure RNG) (PHASE1)
+dotnet_diagnostic.SCS0005.severity = warning
+
+# -------------------------
+# Phase 2: API Surface & Contracts (Deferred)
+# -------------------------
+# (Will be escalated after Phase 1 completion)
+# CA1054 / CA1056 / CA1055: URI/URL usage
+# CA2227: Collection properties should be read only
+# CA1032: Exception constructors
+# CA1724: Type names conflict with namespaces
+
+# -------------------------
+# Phase 3: Performance (Deferred)
+# -------------------------
+# CA1825 / CA1834 etc.
+
+# -------------------------
+# Phase 4: Maintainability & Style (Deferred)
+# -------------------------
+# CA1508 / S125 / S106 etc.
+
+# -------------------------
+# Phase 5: Domain Modeling Enhancements (Deferred)
+# -------------------------
+# Future richer types & invariants
+
