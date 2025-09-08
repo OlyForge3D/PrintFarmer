@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1
+# Base hardened container for PrintFarmer slicer workers
+# Provides minimal runtime with health endpoints and graceful shutdown
+
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy project files for dependency restoration
+COPY src/shared/*.csproj ./shared/
+COPY src/slicer-worker/*.csproj ./slicer-worker/
+COPY Directory.Build.props ./
+
+# Restore dependencies
+RUN dotnet restore ./slicer-worker/Farm.Slicer.Worker.csproj
+
+# Copy source code
+COPY src/shared/ ./shared/
+COPY src/slicer-worker/ ./slicer-worker/
+
+# Build and publish the worker
+RUN dotnet publish ./slicer-worker/Farm.Slicer.Worker.csproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    --verbosity minimal
+
+# Runtime stage - hardened minimal container
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+
+# Install curl for health checks and create non-root user
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid 1000 sliceruser && \
+    useradd --uid 1000 --gid sliceruser --shell /bin/bash --create-home sliceruser
+
+WORKDIR /app
+
+# Copy application files
+COPY --from=build /app/publish .
+
+# Create directories for worker data with proper permissions
+RUN mkdir -p /app/data /app/temp /app/logs && \
+    chown -R sliceruser:sliceruser /app
+
+# Switch to non-root user
+USER sliceruser
+
+# Set environment variables for worker
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+
+# Expose port
+EXPOSE 8080
+
+# Health check configuration
+# Liveness probe - checks if container is alive
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+# Labels for container metadata
+LABEL maintainer="PrintFarmer Team" \
+      description="Base hardened container for slicer workers" \
+      version="1.0.0" \
+      component="slicer-worker-base"
+
+# Graceful shutdown configuration
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["dotnet", "Farm.Slicer.Worker.dll"]
