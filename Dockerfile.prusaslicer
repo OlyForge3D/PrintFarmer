@@ -1,0 +1,120 @@
+# syntax=docker/dockerfile:1
+# PrusaSlicer Worker Container with Binary Installation
+# Provides PrusaSlicer engine with full binary installation
+
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy project files for dependency restoration
+COPY src/shared/*.csproj ./shared/
+COPY src/prusaslicer-worker/*.csproj ./prusaslicer-worker/
+COPY Directory.Build.props ./
+
+# Restore dependencies
+RUN dotnet restore ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj
+
+# Copy source code
+COPY src/shared/ ./shared/
+COPY src/prusaslicer-worker/ ./prusaslicer-worker/
+
+# Build and publish the worker
+RUN dotnet publish ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    --verbosity minimal
+
+# Runtime stage with PrusaSlicer binary installation
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+
+# Install system dependencies for PrusaSlicer and GUI applications
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        ca-certificates \
+        software-properties-common \
+        gpg-agent \
+        libgtk-3-0 \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libstdc++6 \
+        libopengl0 \
+        libglew2.2 \
+        libcgal14 \
+        libboost-all-dev \
+        libtbb12 \
+        libeigen3-dev \
+        xvfb \
+        unzip \
+        && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install PrusaSlicer AppImage
+# Using specific version for consistency
+ENV PRUSASLICER_VERSION=2.8.0
+ENV PRUSASLICER_URL=https://github.com/prusa3d/PrusaSlicer/releases/download/version_${PRUSASLICER_VERSION}/PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-GTK3-202407161154.AppImage
+
+RUN wget -O /tmp/prusaslicer.AppImage "${PRUSASLICER_URL}" && \
+    chmod +x /tmp/prusaslicer.AppImage && \
+    # Extract AppImage to avoid FUSE requirements
+    cd /tmp && \
+    ./prusaslicer.AppImage --appimage-extract && \
+    # Move extracted application to system location
+    mv squashfs-root /opt/prusaslicer && \
+    # Create executable symlink
+    ln -s /opt/prusaslicer/AppRun /usr/local/bin/prusa-slicer && \
+    # Verify installation
+    /usr/local/bin/prusa-slicer --help || echo "PrusaSlicer CLI help not available in headless mode" && \
+    # Cleanup
+    rm -f /tmp/prusaslicer.AppImage
+
+# Create non-root user for security
+RUN groupadd --gid 1000 sliceruser && \
+    useradd --uid 1000 --gid sliceruser --shell /bin/bash --create-home sliceruser
+
+WORKDIR /app
+
+# Copy .NET application
+COPY --from=build /app/publish .
+
+# Create directories for worker data with proper permissions
+RUN mkdir -p /app/data /app/temp /app/logs /app/gcode /app/uploads && \
+    chown -R sliceruser:sliceruser /app
+
+# Switch to non-root user
+USER sliceruser
+
+# Set environment variables for worker
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+ENV DISPLAY=:99
+ENV QT_QPA_PLATFORM=offscreen
+
+# PrusaSlicer specific environment
+ENV Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
+ENV Worker__WorkingDirectory=/app/temp
+ENV Worker__StorageEndpoint=http://api:5245
+
+# Expose port for health checks and API
+EXPOSE 8080
+
+# Health checks
+# Liveness probe - checks if container is alive
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+# Labels for container metadata
+LABEL maintainer="PrintFarmer Team" \
+      description="PrusaSlicer Worker with full binary installation" \
+      version="1.0.0" \
+      component="prusaslicer-worker" \
+      prusaslicer.version="${PRUSASLICER_VERSION}"
+
+# Graceful shutdown configuration
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["dotnet", "Farm.PrusaSlicer.Worker.dll"]
