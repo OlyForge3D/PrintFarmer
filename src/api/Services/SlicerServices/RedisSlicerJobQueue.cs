@@ -15,12 +15,12 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     
     // Redis keys
     // Keys retained for future expansion (currently used in stats operations)
-    private readonly string _jobsKey = "slicer:jobs"; // stored job hashes
+    // private readonly string _jobsKey = "slicer:jobs"; // reserved for future detailed hash lookups
     private readonly string _queueKey = "slicer:queue";
     private readonly string _processingKey = "slicer:processing";
     private readonly string _completedKey = "slicer:completed";
     private readonly string _failedKey = "slicer:failed";
-    private readonly string _workersKey = "slicer:workers";
+    // private readonly string _workersKey = "slicer:workers"; // reserved for future worker tracking
 
     public RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlicerJobQueue> logger)
     {
@@ -350,6 +350,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                     job.CompletedAt = null;
                     job.WorkerId = null;
 
+                    // Remove from failed queue and re-enqueue
                     await _database.SortedSetRemoveAsync(_failedKey, jobJson);
                     await EnqueueAsync(job, cancellationToken);
                     requeuedCount++;

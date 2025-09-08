@@ -342,16 +342,14 @@ public class SlicerOrchestratorTests
     public async Task GetUserJobsAsync_ShouldReturnUserJobs()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-    var jobs = new List<DistributedSlicingJob>();
+    var userId = Guid.NewGuid();
     var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
     job1.UserId = userId;
     job1.Status = SlicingJobStatus.Completed;
-    jobs.Add(job1);
     var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
     job2.UserId = userId;
     job2.Status = SlicingJobStatus.Slicing;
-    jobs.Add(job2);
+    var jobs = new List<DistributedSlicingJob> { job1, job2 };
 
         _mockJobQueue.Setup(q => q.GetUserJobsAsync(userId, null, It.IsAny<CancellationToken>())).ReturnsAsync(jobs);
 

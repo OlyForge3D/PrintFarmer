@@ -1,22 +1,22 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Layout } from '@/components/Layout';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
-import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
-import { ModelsPage } from '@/pages/ModelsPage';
-import { HarvestPage } from '@/pages/HarvestPage';
-import { FilesPage } from '@/pages/FilesPage';
+import { SetupWizard } from '@/components/SetupWizard';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import { CatalogPage } from '@/pages/CatalogPage';
+import { FilesPage } from '@/pages/FilesPage';
+import { HarvestPage } from '@/pages/HarvestPage';
+import { ModelsPage } from '@/pages/ModelsPage';
+import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { UserManagementPage } from '@/pages/UserManagementPage';
-import { Layout } from '@/components/Layout';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { AuthProvider } from '@/contexts/AuthContext';
-import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { SetupWizard } from '@/components/SetupWizard';
-import { ThemeProvider } from '@/contexts/ThemeContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { useEffect, useState } from 'react';
+import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import './App.css';
 
 // Create a query client for React Query
@@ -24,11 +24,12 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (failureCount, error: unknown) => {
+        // Don't retry client (4xx) errors
         const statusCode = typeof error === 'object' && error && 'statusCode' in error
           ? (error as { statusCode?: number }).statusCode
           : undefined;
         if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
-          return false; // don't retry client errors
+          return false;
         }
         return failureCount < 3; // retry other errors up to 3 times
       },
@@ -105,7 +106,8 @@ function App() {
                 <Routes>
                   <Route path="/" element={<PrinterDashboard />} />
                   <Route path="/dashboard" element={<PrinterDashboard />} />
-                  <Route path="/printers" element={<PrinterDashboard />} />
+                  <Route path="/printers" element={<Navigate to="/printers/dashboard" replace />} />
+                  <Route path="/printers/dashboard" element={<PrinterDashboard />} />
                   <Route path="/printers/table" element={<PrinterTableViewPage />} />
                   <Route path="/models" element={<ModelsPage />} />
                   <Route path="/harvest" element={<HarvestPage />} />
@@ -113,13 +115,13 @@ function App() {
                   <Route path="/catalog" element={<CatalogPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/spools" element={<SpoolsPage />} />
-                  <Route 
-                    path="/admin/users" 
+                  <Route
+                    path="/admin/users"
                     element={
                       <ProtectedRoute requiredRole="farm_admin">
                         <UserManagementPage />
                       </ProtectedRoute>
-                    } 
+                    }
                   />
                   {/* Add more routes as needed */}
                 </Routes>

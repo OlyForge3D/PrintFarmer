@@ -65,7 +65,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             // Validate checksum if envelope was provided externally
             if (request.Envelope != null)
             {
-                // Create content for checksum validation (fix: removed invalid 'Slicer.Messaging' prefix)
+                // Create content for checksum validation
                 var jobContent = SlicingJobContent.FromRequest(request);
                 if (!envelope.ValidateChecksum(jobContent))
                 {
@@ -97,7 +97,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             var queueStatsForNew = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
             var estimatedCompletion = DateTime.UtcNow.Add(queueStatsForNew.EstimatedWaitTime);
 
-            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}", 
+            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}",
                 job.Id, envelope.CorrelationId, request.UserId, request.SlicerEngine);
 
             return new SlicingJobResponse

@@ -496,13 +496,3 @@ public class SlicerServicesIntegrationTests : IDisposable
         return System.Text.Encoding.UTF8.GetBytes(content);
     }
 }
-
-/// <summary>
-/// Configuration options for integration tests
-/// </summary>
-// NOTE: Removed duplicate TestLocalFileStorageOptions; using production LocalFileStorageOptions instead.
-
-/// <summary>
-/// Mock slicer options for testing
-/// </summary>
-// NOTE: Removed duplicate TestMockSlicerOptions; using production MockSlicerOptions instead.

@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Farm.Slicer.Worker.Health;
+using Farm.Slicer.Worker.Services;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,14 +10,43 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
-// Add health checks
-builder.Services.AddHealthChecks()
-    .AddCheck<WorkerLivenessHealthCheck>("liveness")
-    .AddCheck<WorkerReadinessHealthCheck>("readiness");
+// Add Redis connection
+builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
+{
+    var configuration = provider.GetService<IConfiguration>();
+    var connectionString = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(connectionString);
+});
+
+// Add HTTP client for API communication
+builder.Services.AddHttpClient<HttpProgressReporter>();
+builder.Services.AddHttpClient<OrcaSlicingPipelineService>();
 
 // Add worker services
 builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
+builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>();
+builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>();
+
+// Add background services
 builder.Services.AddHostedService<GracefulShutdownService>();
+builder.Services.AddHostedService<QueueConsumerService>();
+
+// Add health checks
+builder.Services.AddHealthChecks()
+    .AddCheck<WorkerLivenessHealthCheck>("liveness")
+    .AddCheck<WorkerReadinessHealthCheck>("readiness")
+    .AddCheck("redis", () => 
+    {
+        try
+        {
+            var redis = builder.Services.BuildServiceProvider().GetRequiredService<IConnectionMultiplexer>();
+            return redis.IsConnected ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Redis not connected");
+        }
+        catch (Exception ex)
+        {
+            return HealthCheckResult.Unhealthy("Redis connection failed", ex);
+        }
+    });
 
 var app = builder.Build();
 
@@ -45,7 +76,7 @@ app.MapHealthChecks("/healthz", new HealthCheckOptions
 // Readiness probe endpoint (can accept work)
 app.MapHealthChecks("/ready", new HealthCheckOptions
 {
-    Predicate = check => check.Name == "readiness",
+    Predicate = check => check.Name == "readiness" || check.Name == "redis",
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json";
@@ -53,7 +84,11 @@ app.MapHealthChecks("/ready", new HealthCheckOptions
             System.Text.Json.JsonSerializer.Serialize(new 
             { 
                 status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
-                timestamp = DateTime.UtcNow
+                timestamp = DateTime.UtcNow,
+                checks = report.Entries.ToDictionary(
+                    entry => entry.Key,
+                    entry => new { status = entry.Value.Status.ToString(), description = entry.Value.Description }
+                )
             })
         );
     }
@@ -62,9 +97,10 @@ app.MapHealthChecks("/ready", new HealthCheckOptions
 // Root endpoint
 app.MapGet("/", () => Results.Ok(new 
 { 
-    service = "slicer-worker",
+    service = "orcaslicer-worker",
     version = "1.0.0",
-    status = "running"
+    status = "running",
+    capabilities = new[] { "orcaslicer", "stl-processing", "gcode-generation" }
 }));
 
 app.Run();

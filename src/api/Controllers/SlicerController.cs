@@ -108,12 +108,18 @@ public class SlicerController : ControllerBase
             return BadRequest("Valid slicer profile is required");
         }
 
-        // Parse priority
+        // Parse priority from form data
         var priorityRaw = form["priority"].FirstOrDefault();
         var jobPriority = SlicingJobPriority.Normal;
         if (!string.IsNullOrWhiteSpace(priorityRaw) && !Enum.TryParse(priorityRaw, true, out jobPriority))
         {
             return BadRequest($"Invalid priority: {priorityRaw}. Supported priorities: {string.Join(", ", Enum.GetNames<SlicingJobPriority>())}");
+        }
+
+        // Parse slicer engine type
+        if (!Enum.TryParse<SlicerEngineType>(slicerEngine, true, out var slicerEngineType))
+        {
+            return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
         }
 
         try
@@ -597,7 +603,7 @@ public class SlicerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetGcodeFile(string jobId)
     {
-    if (!s_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
+        if (!s_activeJobs.TryGetValue(jobId, out var job) || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
         }
