@@ -4,8 +4,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
-  check_suite:
-    types: [completed]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -16,7 +14,9 @@ permissions:
 
 jobs:
   dependabot-auto-merge:
+    # Ensure this job only evaluates on pull_request events to avoid referencing absent fields during workflow_run events
     if: >-
+      github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
       (startsWith(github.event.pull_request.head.ref, 'dependabot/') ||
        (github.actor == 'dependabot[bot]' || github.actor == 'dependabot'))
@@ -47,11 +47,4 @@ jobs:
             ⚠️ Major dependency update detected. This PR will not be auto-merged.
             Please review breaking changes and merge manually once validated.
 
-  keep-deps-fresh:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Re-run Dependabot (noop placeholder)
-        run: echo "Dependabot runs on its own schedule defined in dependabot.yml"
+  # Removed unused 'keep-deps-fresh' scheduled job (handled by dependency-maintenance workflow and dependabot schedule)

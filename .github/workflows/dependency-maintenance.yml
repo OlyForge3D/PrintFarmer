@@ -1,0 +1,127 @@
+name: Dependency Maintenance (Prune + Stale Close)
+
+on:
+  schedule:
+    - cron: '20 4 * * *' # Daily 04:20 UTC combined maintenance
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  dependency-maintenance:
+    runs-on: ubuntu-latest
+    env:
+      KEEP_OPEN_LABEL: keep-open
+      SECURITY_REVIEWED_LABEL: security-reviewed
+      KEEP_OPEN_MAX_DAYS: 30
+      STALE_DAYS: 5
+      EXEMPT_STALE_LABELS: 'no-autoclose,security,keep-open'
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List Dependabot PRs
+        id: list_all
+        run: |
+          gh pr list --search "is:open is:pr author:dependabot" --json number,title,updatedAt,createdAt,labels,headRefName > all_prs.json
+          jq 'length' all_prs.json | xargs echo "Total dependabot PRs:" 
+          cat all_prs.json
+
+      - name: Prune keep-open labels exceeding max age
+        id: prune
+        run: |
+          set -euo pipefail
+          now_epoch=$(date -u +%s)
+          max_days=${KEEP_OPEN_MAX_DAYS}
+          removed=0
+          kept=0
+          jq -c '.[]' all_prs.json | while read -r pr; do
+            num=$(echo "$pr" | jq -r '.number')
+            title=$(echo "$pr" | jq -r '.title')
+            updatedAt=$(echo "$pr" | jq -r '.updatedAt')
+            createdAt=$(echo "$pr" | jq -r '.createdAt')
+            labels=$(echo "$pr" | jq -r '[.labels[].name]|join(",")')
+            last_iso=${updatedAt:-$createdAt}
+            last_epoch=$(date -u -d "$last_iso" +%s || echo 0)
+            age_days=$(( (now_epoch - last_epoch)/86400 ))
+
+            echo "$labels" | grep -qi "\b${KEEP_OPEN_LABEL}\b" || { continue; }
+
+            # Preserve keep-open if security-reviewed present
+            if echo "$labels" | grep -qi "\b${SECURITY_REVIEWED_LABEL}\b"; then
+              echo "PR #$num keep-open retained (security-reviewed, age ${age_days}d)"
+              kept=$((kept+1))
+              continue
+            fi
+
+            if (( age_days > max_days )); then
+              echo "Removing keep-open from PR #$num (age ${age_days}d) - $title"
+              gh issue edit "$num" --remove-label "$KEEP_OPEN_LABEL" || true
+              gh pr comment "$num" --body "Removed '${KEEP_OPEN_LABEL}' label after ${age_days} days without merge. Re-review or relabel if still needed." || true
+              removed=$((removed+1))
+            else
+              echo "Keep-open still within age for PR #$num (${age_days}d)"
+              kept=$((kept+1))
+            fi
+          done
+          echo "removed=$removed" >> $GITHUB_OUTPUT
+          echo "kept=$kept" >> $GITHUB_OUTPUT
+
+      - name: Refresh PR list post-prune
+        run: |
+          gh pr list --search "is:open is:pr author:dependabot" --json number,title,updatedAt,createdAt,labels,headRefName > all_prs_after_prune.json
+
+      - name: Close stale dependency PRs (no exempt labels, > STALE_DAYS inactivity)
+        id: stale
+        run: |
+          set -euo pipefail
+          threshold_days=${STALE_DAYS}
+          threshold_seconds=$((threshold_days*24*3600))
+            now_epoch=$(date -u +%s)
+          closed=0
+          kept=0
+          IFS=',' read -ra exempt_arr <<< "$EXEMPT_STALE_LABELS"
+          jq -c '.[]' all_prs_after_prune.json | while read -r pr; do
+            num=$(echo "$pr" | jq -r '.number')
+            branch=$(echo "$pr" | jq -r '.headRefName')
+            updatedAt=$(echo "$pr" | jq -r '.updatedAt')
+            createdAt=$(echo "$pr" | jq -r '.createdAt')
+            title=$(echo "$pr" | jq -r '.title')
+            labels=$(echo "$pr" | jq -r '[.labels[].name]|join(",")')
+            [[ $branch == dependabot/* ]] || { kept=$((kept+1)); continue; }
+            skip=false
+            for lbl in "${exempt_arr[@]}"; do
+              if echo "$labels" | grep -qi "\b${lbl}\b"; then skip=true; break; fi
+            done
+            $skip && { kept=$((kept+1)); continue; }
+            last_ts_iso=${updatedAt:-$createdAt}
+            last_epoch=$(date -u -d "$last_ts_iso" +%s || echo 0)
+            age_seconds=$((now_epoch - last_epoch))
+            if (( age_seconds > threshold_seconds )); then
+              echo "Closing stale PR #$num (age $((age_seconds/86400))d) - $title"
+              gh pr comment "$num" --body "Closing as stale (no activity > ${threshold_days} days). Reopen or rebase if still needed." || true
+              gh pr close "$num" || true
+              closed=$((closed+1))
+            else
+              kept=$((kept+1))
+            fi
+          done
+          echo "closed=$closed" >> $GITHUB_OUTPUT
+          echo "kept=$kept" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        run: |
+          echo "### Dependency Maintenance Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Prune keep-open**" >> $GITHUB_STEP_SUMMARY
+          echo "- Removed: ${{ steps.prune.outputs.removed || '0' }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Retained: ${{ steps.prune.outputs.kept || '0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Close stale**" >> $GITHUB_STEP_SUMMARY
+          echo "- Closed: ${{ steps.stale.outputs.closed || '0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Kept: ${{ steps.stale.outputs.kept || '0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Parameters**" >> $GITHUB_STEP_SUMMARY
+          echo "- KEEP_OPEN_MAX_DAYS=${KEEP_OPEN_MAX_DAYS}" >> $GITHUB_STEP_SUMMARY
+          echo "- STALE_DAYS=${STALE_DAYS}" >> $GITHUB_STEP_SUMMARY
