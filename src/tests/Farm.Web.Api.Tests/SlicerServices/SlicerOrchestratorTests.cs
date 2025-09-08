@@ -162,7 +162,7 @@ public class SlicerOrchestratorTests
         // Arrange
         var request = CreateValidSlicingJobRequest();
         request.ModelFileName = "test.xyz"; // Unsupported extension
-        
+
         _mockOrcaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _mockFileStorage.Setup(f => f.FileExistsAsync(request.ModelFileUrl, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
@@ -283,7 +283,7 @@ public class SlicerOrchestratorTests
             ActiveWorkers = 2,
             EstimatedWaitTime = TimeSpan.FromMinutes(10)
         };
-        
+
         var prusaQueueStats = new SlicerQueueStats
         {
             QueuedJobs = 1,
@@ -295,7 +295,7 @@ public class SlicerOrchestratorTests
             .ReturnsAsync(orcaQueueStats);
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(SlicerEngineType.PrusaSlicer, It.IsAny<CancellationToken>()))
             .ReturnsAsync(prusaQueueStats);
-        
+
         _mockOrcaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _mockPrusaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
@@ -304,13 +304,13 @@ public class SlicerOrchestratorTests
 
         // Assert
         result.Should().HaveCount(2);
-        
+
         var orcaEngine = result.First(e => e.Engine == SlicerEngineType.OrcaSlicer);
         orcaEngine.Version.Should().Be("1.8.0-test");
         orcaEngine.IsHealthy.Should().BeTrue();
         orcaEngine.QueueDepth.Should().Be(3);
         orcaEngine.ActiveWorkers.Should().Be(2);
-        
+
         var prusaEngine = result.First(e => e.Engine == SlicerEngineType.PrusaSlicer);
         prusaEngine.Version.Should().Be("2.7.0-test");
         prusaEngine.IsHealthy.Should().BeFalse();
@@ -342,14 +342,14 @@ public class SlicerOrchestratorTests
     public async Task GetUserJobsAsync_ShouldReturnUserJobs()
     {
         // Arrange
-    var userId = Guid.NewGuid();
-    var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
-    job1.UserId = userId;
-    job1.Status = SlicingJobStatus.Completed;
-    var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
-    job2.UserId = userId;
-    job2.Status = SlicingJobStatus.Slicing;
-    var jobs = new List<DistributedSlicingJob> { job1, job2 };
+        var userId = Guid.NewGuid();
+        var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
+        job1.UserId = userId;
+        job1.Status = SlicingJobStatus.Completed;
+        var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
+        job2.UserId = userId;
+        job2.Status = SlicingJobStatus.Slicing;
+        var jobs = new List<DistributedSlicingJob> { job1, job2 };
 
         _mockJobQueue.Setup(q => q.GetUserJobsAsync(userId, null, It.IsAny<CancellationToken>())).ReturnsAsync(jobs);
 
@@ -358,7 +358,7 @@ public class SlicerOrchestratorTests
 
         // Assert
         result.Should().HaveCount(2);
-    result.TrueForAll(j => j.JobId != Guid.Empty).Should().BeTrue();
+        result.TrueForAll(j => j.JobId != Guid.Empty).Should().BeTrue();
     }
 
     [Fact]
@@ -367,13 +367,13 @@ public class SlicerOrchestratorTests
         // Arrange
         _mockOrcaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _mockPrusaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        
+
         var queueStats = new SlicerQueueStats { QueuedJobs = 2, ActiveWorkers = 1 };
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(It.IsAny<SlicerEngineType>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(queueStats);
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(queueStats);
-        
+
         _mockFileStorage.Setup(f => f.FileExistsAsync("health-check-non-existent-file", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
@@ -395,13 +395,13 @@ public class SlicerOrchestratorTests
         // Arrange
         _mockOrcaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
         _mockPrusaSlicerEngine.Setup(e => e.IsHealthyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        
+
         var queueStats = new SlicerQueueStats();
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(It.IsAny<SlicerEngineType>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(queueStats);
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(queueStats);
-        
+
         _mockFileStorage.Setup(f => f.FileExistsAsync("health-check-non-existent-file", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
@@ -413,7 +413,7 @@ public class SlicerOrchestratorTests
     }
 
     // Helper methods
-    
+
     private static SlicingJobRequest CreateValidSlicingJobRequest()
     {
         return new SlicingJobRequest

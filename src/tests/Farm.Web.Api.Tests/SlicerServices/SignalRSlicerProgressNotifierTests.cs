@@ -20,7 +20,7 @@ public class SignalRSlicerProgressNotifierTests
 
     public SignalRSlicerProgressNotifierTests()
     {
-    _mockHubContext = new Mock<IHubContext<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>>();
+        _mockHubContext = new Mock<IHubContext<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>>();
         _mockClients = new Mock<IHubClients>();
         _mockClientProxy = new Mock<IClientProxy>();
         _mockGroupManager = new Mock<IGroupManager>();
@@ -68,7 +68,7 @@ public class SignalRSlicerProgressNotifierTests
         // Arrange
         var jobId = Guid.NewGuid();
         var connectionId = "connection-123";
-        
+
         var update = new SlicingProgressUpdate
         {
             JobId = jobId,
@@ -117,10 +117,10 @@ public class SignalRSlicerProgressNotifierTests
         // Assert
         _mockClients.Verify(c => c.Group($"User-{job.UserId}"), Times.Once);
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
-        
+
         _mockClientProxy.Verify(p => p.SendCoreAsync(
             "SlicingCompleted",
-            It.Is<object[]>(args => args.Length == 1 && 
+            It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 ((SlicingCompletionNotification)args[0]).Success &&
                 ((SlicingCompletionNotification)args[0]).ResultFileUrl != null &&
@@ -151,10 +151,10 @@ public class SignalRSlicerProgressNotifierTests
         // Assert
         _mockClients.Verify(c => c.Group($"User-{job.UserId}"), Times.Once);
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
-        
+
         _mockClientProxy.Verify(p => p.SendCoreAsync(
             "SlicingCompleted",
-            It.Is<object[]>(args => args.Length == 1 && 
+            It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 !((SlicingCompletionNotification)args[0]).Success &&
                 ((SlicingCompletionNotification)args[0]).ErrorMessage == result.Error
@@ -170,7 +170,7 @@ public class SignalRSlicerProgressNotifierTests
         var job = CreateDistributedSlicingJob();
         var connectionId1 = "connection-1";
         var connectionId2 = "connection-2";
-        
+
         var result = new SlicingResult { Success = true };
 
         // Subscribe connections to job
@@ -181,14 +181,14 @@ public class SignalRSlicerProgressNotifierTests
         await _notifier.NotifyCompletionAsync(job, result);
 
         // Assert
-        _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list => 
+        _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list =>
             list.Contains(connectionId1) && list.Contains(connectionId2)
         )), Times.Once);
 
         // Verify subsequent progress updates don't go to these connections (cleanup worked)
         var progressUpdate = new SlicingProgressUpdate { JobId = job.Id, Progress = 100 };
         await _notifier.NotifyProgressAsync(progressUpdate);
-        
+
         // Should only send to monitors, not to the cleaned-up subscribers
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.AtLeast(1));
     }
@@ -206,10 +206,10 @@ public class SignalRSlicerProgressNotifierTests
         // Assert
         _mockClients.Verify(c => c.Group($"User-{job.UserId}"), Times.Once);
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
-        
+
         _mockClientProxy.Verify(p => p.SendCoreAsync(
             "SlicingFailed",
-            It.Is<object[]>(args => args.Length == 1 && 
+            It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingFailureNotification)args[0]).JobId == job.Id &&
                 ((SlicingFailureNotification)args[0]).ErrorMessage == errorMessage
             ),
@@ -254,9 +254,9 @@ public class SignalRSlicerProgressNotifierTests
         await _notifier.NotifyProgressAsync(update);
 
         // Assert
-        _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list => 
-            list.Contains(connectionId1) && 
-            list.Contains(connectionId2) && 
+        _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list =>
+            list.Contains(connectionId1) &&
+            list.Contains(connectionId2) &&
             list.Contains(connectionId3)
         )), Times.Once);
     }
@@ -281,7 +281,7 @@ public class SignalRSlicerProgressNotifierTests
         await _notifier.NotifyProgressAsync(update);
 
         // Assert - Should only send to remaining subscriber
-        _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list => 
+        _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list =>
             list.Contains(connectionId2) && !list.Contains(connectionId1)
         )), Times.Once);
     }
@@ -354,10 +354,10 @@ public class SignalRSlicerProgressNotifierTests
         // Add some progress notifications
         for (int i = 0; i < 5; i++)
         {
-            tasks.Add(_notifier.NotifyProgressAsync(new SlicingProgressUpdate 
-            { 
-                JobId = jobId, 
-                Progress = i * 20 
+            tasks.Add(_notifier.NotifyProgressAsync(new SlicingProgressUpdate
+            {
+                JobId = jobId,
+                Progress = i * 20
             }));
         }
 
@@ -392,7 +392,7 @@ public class SignalRSlicerProgressNotifierTests
         // Assert
         _mockClientProxy.Verify(p => p.SendCoreAsync(
             "SlicingProgress",
-            It.Is<object[]>(args => args.Length == 1 && 
+            It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingProgressUpdate)args[0]).Progress == progress &&
                 ((SlicingProgressUpdate)args[0]).CurrentStep == step
             ),
@@ -404,7 +404,7 @@ public class SignalRSlicerProgressNotifierTests
     public async Task Constructor_NullHubContext_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             new SignalRSlicerProgressNotifier(null!, _mockLogger.Object));
     }
 
@@ -412,7 +412,7 @@ public class SignalRSlicerProgressNotifierTests
     public async Task Constructor_NullLogger_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             new SignalRSlicerProgressNotifier(_mockHubContext.Object, null!));
     }
 

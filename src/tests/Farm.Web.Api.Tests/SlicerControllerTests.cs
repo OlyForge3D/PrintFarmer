@@ -220,7 +220,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
 
         result.Should().NotBeNull();
         result!.JobId.Should().NotBeNullOrEmpty();
-    result.GcodeUrl.Should().Contain($"/api/slicer/jobs/{result.JobId}/gcode");
+        result.GcodeUrl.Should().Contain($"/api/slicer/jobs/{result.JobId}/gcode");
         result.Metadata.Should().NotBeNull();
         result.Metadata.SlicerVersion.Should().Be("PrusaSlicer 2.7.0");
     }
@@ -348,7 +348,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         var sliceResult = await StartTestSlicingJobAsync();
 
         // Act
-    var response = await _client.GetAsync($"/api/slicer/jobs/{sliceResult.JobId}");
+        var response = await _client.GetAsync($"/api/slicer/jobs/{sliceResult.JobId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -365,7 +365,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         var nonExistentJobId = "non-existent-job";
 
         // Act
-    var response = await _client.GetAsync($"/api/slicer/jobs/{nonExistentJobId}");
+        var response = await _client.GetAsync($"/api/slicer/jobs/{nonExistentJobId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -378,12 +378,12 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         var sliceResult = await StartTestSlicingJobAsync();
 
         // Act
-    var response = await _client.PostAsync($"/api/slicer/jobs/{sliceResult.JobId}/cancel", null);
+        var response = await _client.PostAsync($"/api/slicer/jobs/{sliceResult.JobId}/cancel", null);
 
         // Assert
-    response.StatusCode.Should().Be(HttpStatusCode.OK);
-    var json = await response.Content.ReadAsStringAsync();
-    json.Should().Contain("success").And.Contain("true");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await response.Content.ReadAsStringAsync();
+        json.Should().Contain("success").And.Contain("true");
     }
 
     [Fact]
@@ -393,7 +393,7 @@ public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
         var nonExistentJobId = "non-existent-job";
 
         // Act
-    var response = await _client.PostAsync($"/api/slicer/jobs/{nonExistentJobId}/cancel", null);
+        var response = await _client.PostAsync($"/api/slicer/jobs/{nonExistentJobId}/cancel", null);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);

@@ -107,8 +107,8 @@ public class MockOrcaSlicerEngineTests
         progressUpdates.First().Progress.Should().Be(0);
         progressUpdates.Last().Progress.Should().Be(100);
         progressUpdates.Should().Contain(u => u.CurrentStep == "Validating model");
-    // Allow for nullable CurrentStep; ensure at least one update has the slicing layer step
-    progressUpdates.Should().Contain(u => u.CurrentStep != null && u.CurrentStep.Contains("Slicing layer"));
+        // Allow for nullable CurrentStep; ensure at least one update has the slicing layer step
+        progressUpdates.Should().Contain(u => u.CurrentStep != null && u.CurrentStep.Contains("Slicing layer"));
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class MockOrcaSlicerEngineTests
         // Arrange
         var job = CreateValidSlicingJob();
         var cts = new CancellationTokenSource();
-        
+
         // Cancel after a very short delay to test cancellation during processing
         _ = Task.Delay(TimeSpan.FromMilliseconds(100), CancellationToken.None).ContinueWith(_ => cts.Cancel(), TaskScheduler.Default);
 
@@ -189,7 +189,7 @@ public class MockOrcaSlicerEngineTests
         // Assert
         result.Success.Should().BeTrue();
         result.LayerCount.Should().BeGreaterThan(0);
-        
+
         // Finer layer heights should result in more layers
         if (layerHeight <= 0.1)
         {
@@ -219,7 +219,7 @@ public class MockOrcaSlicerEngineTests
         // Assert
         result.Success.Should().BeTrue();
         result.Metadata.Should().ContainKey("GeneratedGcode");
-        
+
         // Mock G-code should contain temperature settings
         var gcode = result.Metadata["GeneratedGcode"].ToString();
         gcode.Should().Contain($"M104 S{expectedNozzleTemp}"); // Nozzle temperature
@@ -283,7 +283,7 @@ public class MockOrcaSlicerEngineTests
     {
         // Arrange
         var job = CreateValidSlicingJob();
-        
+
         // Act
         var result = await _engine.EstimateProcessingTimeAsync(job);
 
@@ -298,7 +298,7 @@ public class MockOrcaSlicerEngineTests
         // Arrange
         var simpleJob = CreateValidSlicingJob();
         simpleJob.Profile = new SlicerProfileDto { LayerHeight = 0.3, InfillPercentage = 10 };
-        
+
         var complexJob = CreateValidSlicingJob();
         complexJob.Profile = new SlicerProfileDto { LayerHeight = 0.1, InfillPercentage = 80 };
 
@@ -316,7 +316,7 @@ public class MockOrcaSlicerEngineTests
         // Arrange
         var smallJob = CreateValidSlicingJob();
         smallJob.InputFileSizeBytes = 1024 * 1024; // 1MB
-        
+
         var largeJob = CreateValidSlicingJob();
         largeJob.InputFileSizeBytes = 10 * 1024 * 1024; // 10MB
 

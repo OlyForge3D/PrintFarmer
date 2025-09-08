@@ -69,7 +69,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         // Arrange
         _output.WriteLine("Starting PrusaSlicer worker with Docker Compose...");
-        
+
         // Act - Start only the PrusaSlicer worker and its dependencies
         var startResult = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "prusaslicer-worker");
         Assert.True(startResult.Success, $"Docker Compose start failed: {startResult.ErrorOutput}");
@@ -79,7 +79,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 
         // Check health status
         var healthResult = await CheckServiceHealthAsync("prusaslicer-worker", 8082);
-        
+
         // Assert
         Assert.True(healthResult.IsHealthy, $"PrusaSlicer worker health check failed: {healthResult.Message}");
         _output.WriteLine($"PrusaSlicer worker is healthy: {healthResult.Message}");
@@ -94,7 +94,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 
         // Act - Check if PrusaSlicer binary is installed
         var execResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "ls", "-la", "/usr/local/bin/prusa-slicer");
-        
+
         // Assert
         Assert.True(execResult.Success, $"PrusaSlicer binary not found: {execResult.ErrorOutput}");
         Assert.Contains("prusa-slicer", execResult.Output);
@@ -112,9 +112,9 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // Arrange & Act
         _output.WriteLine("Starting complete microservices stack...");
         var result = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "api", "orcaslicer-worker", "prusaslicer-worker");
-        
+
         Assert.True(result.Success, $"Failed to start microservices: {result.ErrorOutput}");
-        
+
         // Wait for services to initialize
         await Task.Delay(TimeSpan.FromSeconds(60));
 
@@ -131,9 +131,9 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 
         // API must be healthy
         Assert.True(apiHealth.IsHealthy, $"API service unhealthy: {apiHealth.Message}");
-        
+
         // At least one slicer worker should be healthy
-        Assert.True(orcaHealth.IsHealthy || prusaHealth.IsHealthy, 
+        Assert.True(orcaHealth.IsHealthy || prusaHealth.IsHealthy,
             "At least one slicer worker should be healthy");
     }
 
@@ -157,7 +157,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // Verify distinct worker IDs
         var orcaIdResult = await RunDockerComposeCommandAsync("exec", "-T", "orcaslicer-worker", "printenv", "Worker__WorkerId");
         var prusaIdResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "printenv", "Worker__WorkerId");
-        
+
         Assert.NotEqual(orcaIdResult.Output.Trim(), prusaIdResult.Output.Trim());
         _output.WriteLine($"Worker IDs are distinct: Orca='{orcaIdResult.Output.Trim()}', Prusa='{prusaIdResult.Output.Trim()}'");
     }
@@ -170,7 +170,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         await Task.Delay(TimeSpan.FromSeconds(45));
 
         // Act - Check PrusaSlicer version
-        var versionResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", 
+        var versionResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker",
             "/usr/local/bin/prusa-slicer", "--help");
 
         // Assert
@@ -197,14 +197,14 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // 2. Submit a slicing job via API
         // 3. Verify job is picked up by PrusaSlicer worker
         // 4. Verify G-code is generated and returned
-        
+
         // Arrange
         await RunDockerComposeCommandAsync("up", "-d");
         await Task.Delay(TimeSpan.FromMinutes(2)); // Allow full startup
 
         // This would require an actual API client and test STL file
         // Implementation would depend on the API design
-        
+
         _output.WriteLine("End-to-end test would be implemented here");
     }
 
@@ -236,17 +236,17 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         };
 
         _output.WriteLine($"Running: {command} {string.Join(" ", args)}");
-        
+
         process.Start();
-        
+
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        
+
         await process.WaitForExitAsync();
-        
+
         var output = await outputTask;
         var error = await errorTask;
-        
+
         return (process.ExitCode == 0, output, error);
     }
 
@@ -256,10 +256,10 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         {
             using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             var url = $"http://localhost:{port}{endpoint}";
-            
+
             var response = await httpClient.GetAsync(url);
             var content = await response.Content.ReadAsStringAsync();
-            
+
             if (response.IsSuccessStatusCode)
             {
                 return (true, $"{serviceName} is healthy at {url}: {content}");
@@ -282,12 +282,12 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         {
             directory = directory.Parent;
         }
-        
+
         if (directory == null)
         {
             throw new InvalidOperationException("Could not find repository root (global.json not found)");
         }
-        
+
         return directory.FullName;
     }
 

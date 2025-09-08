@@ -41,7 +41,7 @@ public class SlicingProgressControllerTests : IClassFixture<CustomWebApplication
         read.Should().BeGreaterThan(0);
         var chunk = Encoding.UTF8.GetString(buffer, 0, read);
         chunk.Should().Contain("data:");
-    // Enum values are capitalized in the API payload, accept either Queued or Slicing
-    chunk.Should().MatchRegex("\"status\":\"(Queued|Slicing)\"");
+        // Enum values are capitalized in the API payload, accept either Queued or Slicing
+        chunk.Should().MatchRegex("\"status\":\"(Queued|Slicing)\"");
     }
 }

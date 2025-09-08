@@ -46,7 +46,7 @@ public class SlicerOrchestratorIdempotencyTests
     {
         // Arrange
         var request = CreateValidSlicingJobRequest();
-        
+
         // Create envelope with specific correlation ID to simulate duplicate
         var correlationId = Guid.NewGuid();
         var jobContent = SlicingJobContent.FromRequest(request);
@@ -92,11 +92,11 @@ public class SlicerOrchestratorIdempotencyTests
         result.Status.Should().Be(SlicingJobStatus.Slicing);
 
         // Verify that new job was NOT enqueued
-        _mockJobQueue.Verify(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()), 
+        _mockJobQueue.Verify(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        
+
         // Verify that duplicate check was called
-        _mockJobQueue.Verify(q => q.FindExistingJobAsync(correlationId, envelope.Checksum, It.IsAny<CancellationToken>()), 
+        _mockJobQueue.Verify(q => q.FindExistingJobAsync(correlationId, envelope.Checksum, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -141,7 +141,7 @@ public class SlicerOrchestratorIdempotencyTests
         ), It.IsAny<CancellationToken>()), Times.Once);
 
         // Verify duplicate check was performed
-        _mockJobQueue.Verify(q => q.FindExistingJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), 
+        _mockJobQueue.Verify(q => q.FindExistingJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -150,14 +150,14 @@ public class SlicerOrchestratorIdempotencyTests
     {
         // Arrange
         var request = CreateValidSlicingJobRequest();
-        
+
         // Create envelope with different content than request (simulate tampering)
         var differentContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(), // Different user
             ModelFileUrl = "https://different.example.com/model.stl"
         };
-        
+
         var envelope = MessageEnvelope.Create(differentContent, request.SlicerEngine, request.Priority);
         request.Envelope = envelope; // Attach envelope with mismatched checksum
 
@@ -174,7 +174,7 @@ public class SlicerOrchestratorIdempotencyTests
         exception.ParamName.Should().Be("request");
 
         // Verify that job was NOT enqueued due to checksum mismatch
-        _mockJobQueue.Verify(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()), 
+        _mockJobQueue.Verify(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -223,12 +223,12 @@ public class SlicerOrchestratorIdempotencyTests
         // Arrange
         var request1 = CreateValidSlicingJobRequest();
         var request2 = CreateValidSlicingJobRequest();
-        
+
         // Same content but different correlation IDs
         request2.UserId = request1.UserId;
         request2.PrinterId = request1.PrinterId;
         request2.ModelFileUrl = request1.ModelFileUrl;
-        
+
         var queueStats = new SlicerQueueStats
         {
             QueuedJobs = 1,
@@ -252,9 +252,9 @@ public class SlicerOrchestratorIdempotencyTests
 
         // Assert
         result1.JobId.Should().NotBe(result2.JobId); // Different job IDs
-        
+
         // Verify both jobs were enqueued
-        _mockJobQueue.Verify(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()), 
+        _mockJobQueue.Verify(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
     }
 

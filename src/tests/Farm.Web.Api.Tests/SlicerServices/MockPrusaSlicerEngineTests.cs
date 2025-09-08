@@ -25,7 +25,7 @@ public class MockPrusaSlicerEngineTests
             FailureRate = 0.0, // No random failures in tests
             InitialDelaySeconds = 0.1
         };
-        
+
         var logger = new TestLogger<MockPrusaSlicerEngine>();
         _engine = new MockPrusaSlicerEngine(Options.Create(_options), logger);
     }
@@ -87,7 +87,7 @@ public class MockPrusaSlicerEngineTests
         Assert.True(result.EstimatedPrintTimeSeconds > 0);
         Assert.True(result.EstimatedFilamentUsageGrams > 0);
         Assert.True(result.LayerCount > 0);
-        
+
         // Verify PrusaSlicer-specific metadata
         Assert.Equal("PrusaSlicer", result.Metadata["SlicerEngine"]);
         Assert.Contains("2.8.0", result.Metadata["SlicerVersion"]);
@@ -96,7 +96,7 @@ public class MockPrusaSlicerEngineTests
         // Verify progress updates were reported
         Assert.NotEmpty(progressUpdates);
         Assert.All(progressUpdates, update => Assert.Equal(job.Id, update.JobId));
-        
+
         _output.WriteLine($"Slicing completed in {result.ProcessingTimeSeconds:F2}s");
         _output.WriteLine($"Output: {result.OutputFileSizeBytes} bytes, {result.LayerCount} layers");
         _output.WriteLine($"Estimated: {result.EstimatedPrintTimeSeconds:F0}s print time, {result.EstimatedFilamentUsageGrams:F1}g filament");
@@ -108,7 +108,7 @@ public class MockPrusaSlicerEngineTests
         // Arrange
         var job = CreateTestJob();
         var progressUpdates = new List<SlicingProgressUpdate>();
-        var progress = new Progress<SlicingProgressUpdate>(update => 
+        var progress = new Progress<SlicingProgressUpdate>(update =>
         {
             progressUpdates.Add(update);
             _output.WriteLine($"Progress: {update.Progress}% - {update.CurrentStep}");
@@ -120,15 +120,15 @@ public class MockPrusaSlicerEngineTests
         // Assert
         Assert.True(result.Success);
         Assert.NotEmpty(progressUpdates);
-        
+
         // Verify progress sequence
         Assert.Contains(progressUpdates, u => u.Progress == 0 && u.CurrentStep == "Loading model");
         Assert.Contains(progressUpdates, u => u.Progress == 100);
-        
+
         // Verify progress is monotonically increasing
         for (int i = 1; i < progressUpdates.Count; i++)
         {
-            Assert.True(progressUpdates[i].Progress >= progressUpdates[i-1].Progress);
+            Assert.True(progressUpdates[i].Progress >= progressUpdates[i - 1].Progress);
         }
     }
 
@@ -145,7 +145,7 @@ public class MockPrusaSlicerEngineTests
         Assert.True(result.Success);
         Assert.Equal("PrusaSlicer", result.Metadata["SlicerEngine"]);
         Assert.StartsWith("2.8.0", result.Metadata["SlicerVersion"]);
-        
+
         // Verify profile information is included
         Assert.Equal("0.20", result.Metadata["LayerHeight"]);
         Assert.Equal("20", result.Metadata["InfillPercentage"]);
@@ -159,11 +159,11 @@ public class MockPrusaSlicerEngineTests
         // Arrange
         var job = CreateTestJob();
         using var cts = new CancellationTokenSource();
-        
+
         // Act
         var sliceTask = _engine.SliceAsync(job, cancellationToken: cts.Token);
         cts.Cancel(); // Cancel immediately
-        
+
         var result = await sliceTask;
 
         // Assert

@@ -156,7 +156,7 @@ public class JobStateMachineTests
         action.Should().Throw<InvalidJobStateTransitionException>()
               .WithMessage($"Invalid transition from {fromState} to {toState}")
               .Which.FromState.Should().Be(fromState);
-        
+
         action.Should().Throw<InvalidJobStateTransitionException>()
               .Which.ToState.Should().Be(toState);
     }
@@ -239,12 +239,12 @@ public class JobStateMachineTests
         var validStates = JobStateMachine.GetValidNextStates(JobState.Processing);
 
         // Assert
-        validStates.Should().BeEquivalentTo(new[] 
-        { 
-            JobState.Succeeded, 
-            JobState.Failed, 
-            JobState.Cancelled, 
-            JobState.DeadLetter 
+        validStates.Should().BeEquivalentTo(new[]
+        {
+            JobState.Succeeded,
+            JobState.Failed,
+            JobState.Cancelled,
+            JobState.DeadLetter
         });
     }
 

@@ -76,7 +76,7 @@ public class MixedSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicat
         // Act
         logger.LogInformation("Submitting OrcaSlicer job...");
         var orcaResponse = await orchestrator.SubmitJobAsync(orcaRequest);
-        
+
         logger.LogInformation("Submitting PrusaSlicer job...");
         var prusaResponse = await orchestrator.SubmitJobAsync(prusaRequest);
 
@@ -146,7 +146,7 @@ public class MixedSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicat
 
         // Assert
         Assert.NotNull(allStats);
-        
+
         if (allStats.ContainsKey(SlicerEngineType.OrcaSlicer))
         {
             var orcaStats = allStats[SlicerEngineType.OrcaSlicer];
@@ -193,7 +193,7 @@ public class MixedSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicat
         // Arrange
         using var scope = _factory.Services.CreateScope();
         var engines = scope.ServiceProvider.GetServices<ISlicerEngine>();
-        
+
         var orcaEngine = engines.First(e => e.EngineType == SlicerEngineType.OrcaSlicer);
         var prusaEngine = engines.First(e => e.EngineType == SlicerEngineType.PrusaSlicer);
 
@@ -220,12 +220,12 @@ public class MixedSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicat
         // Assert
         Assert.True(orcaResult.Success);
         Assert.True(prusaResult.Success);
-        
+
         Assert.Contains("OrcaSlicer", orcaResult.Metadata["SlicerEngine"]);
         Assert.Contains("PrusaSlicer", prusaResult.Metadata["SlicerEngine"]);
-        
+
         Assert.NotEqual(orcaResult.Metadata["SlicerVersion"], prusaResult.Metadata["SlicerVersion"]);
-        
+
         _output.WriteLine($"OrcaSlicer result: {orcaResult.EstimatedPrintTimeSeconds}s, {orcaResult.LayerCount} layers");
         _output.WriteLine($"PrusaSlicer result: {prusaResult.EstimatedPrintTimeSeconds}s, {prusaResult.LayerCount} layers");
     }
@@ -235,30 +235,30 @@ public class MixedSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicat
     {
         // This test ensures that the abstraction layer works correctly
         // and there's no code duplication beyond the adapter layer
-        
+
         // Arrange
         using var scope = _factory.Services.CreateScope();
         var engines = scope.ServiceProvider.GetServices<ISlicerEngine>().ToList();
-        
+
         // Act & Assert
         Assert.Contains(engines, e => e.EngineType == SlicerEngineType.OrcaSlicer);
         Assert.Contains(engines, e => e.EngineType == SlicerEngineType.PrusaSlicer);
-        
+
         foreach (var engine in engines)
         {
             // Each engine should implement the same interface
             Assert.IsAssignableFrom<ISlicerEngine>(engine);
-            
+
             // Each engine should have distinct file extension support
             Assert.NotEmpty(engine.SupportedFileExtensions);
-            
+
             // Each engine should report its health independently
             var health = await engine.IsHealthyAsync();
             Assert.IsType<bool>(health);
-            
+
             _output.WriteLine($"Engine {engine.EngineType}: Healthy={health}, Extensions={engine.SupportedFileExtensions.Count}");
         }
-        
+
         // Verify abstraction: Different engine types but same interface contract
         var engineTypes = engines.Select(e => e.EngineType).Distinct().ToList();
         Assert.Contains(SlicerEngineType.OrcaSlicer, engineTypes);

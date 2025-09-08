@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Tests.ContractTests;
 /// </summary>
 public class SlicerJobsProtoCompilationTests
 {
-    private static readonly string[] s_supportedFormats = ["stl", "3mf", "obj"]; 
+    private static readonly string[] s_supportedFormats = ["stl", "3mf", "obj"];
     [Fact]
     public void SubmitJobRequest_CanBeCreatedAndSerialized()
     {
@@ -48,9 +48,9 @@ public class SlicerJobsProtoCompilationTests
         Assert.False(string.IsNullOrEmpty(request.JobId));
         Assert.False(string.IsNullOrEmpty(request.ModelFileUrl));
         Assert.Equal(SlicerEngineType.SlicerEngineOrca, request.SlicerEngine);
-    Assert.Equal(JobPriority.Normal, request.Priority);
+        Assert.Equal(JobPriority.Normal, request.Priority);
         Assert.NotNull(request.SlicerProfile);
-    Assert.Equal(2, request.Metadata.Count);
+        Assert.Equal(2, request.Metadata.Count);
 
         // Test serialization roundtrip
         var bytes = request.ToByteArray();
@@ -84,11 +84,11 @@ public class SlicerJobsProtoCompilationTests
 
         // Assert
         Assert.NotNull(response);
-    Assert.Equal(JobStatus.Slicing, response.Status);
+        Assert.Equal(JobStatus.Slicing, response.Status);
         Assert.Equal(45, response.ProgressPercentage);
         Assert.True(response.StartedAt > 0);
         Assert.Equal("worker-01", response.WorkerId);
-    Assert.Single(response.Metadata);
+        Assert.Single(response.Metadata);
 
         // Test serialization
         var bytes = response.ToByteArray();
@@ -119,7 +119,7 @@ public class SlicerJobsProtoCompilationTests
 
         // Assert
         Assert.NotNull(update);
-    Assert.Equal(JobStatus.Slicing, update.Status);
+        Assert.Equal(JobStatus.Slicing, update.Status);
         Assert.Equal(75, update.ProgressPercentage);
         Assert.Equal("Generating toolpaths", update.CurrentStep);
         Assert.Equal(600, update.EstimatedRemainingSeconds);
@@ -170,13 +170,13 @@ public class SlicerJobsProtoCompilationTests
 
         workerInfo.SupportedEngines.Add(SlicerEngineType.SlicerEngineOrca);
         workerInfo.SupportedEngines.Add(SlicerEngineType.SlicerEnginePrusa);
-    workerInfo.Capabilities.SupportedFileFormats.AddRange(s_supportedFormats);
+        workerInfo.Capabilities.SupportedFileFormats.AddRange(s_supportedFormats);
         workerInfo.ActiveJobIds.AddRange(new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() });
 
         // Assert
         Assert.NotNull(workerInfo);
         Assert.Equal("worker-01", workerInfo.WorkerId);
-    Assert.Equal(WorkerStatus.Busy, workerInfo.Status);
+        Assert.Equal(WorkerStatus.Busy, workerInfo.Status);
         Assert.Equal(2, workerInfo.SupportedEngines.Count);
         Assert.Equal(3, workerInfo.Capabilities.SupportedFileFormats.Count);
         Assert.Equal(2, workerInfo.ActiveJobIds.Count);
@@ -197,22 +197,22 @@ public class SlicerJobsProtoCompilationTests
     public void AllJobStatusEnumValues_AreValid()
     {
         // Act & Assert - Ensure all enum values are defined
-    Assert.True(Enum.IsDefined(JobStatus.Unknown));
-    Assert.True(Enum.IsDefined(JobStatus.Queued));
-    Assert.True(Enum.IsDefined(JobStatus.Slicing));
-    Assert.True(Enum.IsDefined(JobStatus.Completed));
-    Assert.True(Enum.IsDefined(JobStatus.Error));
-    Assert.True(Enum.IsDefined(JobStatus.Cancelled));
+        Assert.True(Enum.IsDefined(JobStatus.Unknown));
+        Assert.True(Enum.IsDefined(JobStatus.Queued));
+        Assert.True(Enum.IsDefined(JobStatus.Slicing));
+        Assert.True(Enum.IsDefined(JobStatus.Completed));
+        Assert.True(Enum.IsDefined(JobStatus.Error));
+        Assert.True(Enum.IsDefined(JobStatus.Cancelled));
     }
 
     [Fact]
     public void AllSlicerEngineTypeEnumValues_AreValid()
     {
         // Act & Assert - Ensure all enum values are defined
-    Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineUnknown));
-    Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineOrca));
-    Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEnginePrusa));
-    Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineSuper));
-    Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineCura));
+        Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineUnknown));
+        Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineOrca));
+        Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEnginePrusa));
+        Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineSuper));
+        Assert.True(Enum.IsDefined(SlicerEngineType.SlicerEngineCura));
     }
 }

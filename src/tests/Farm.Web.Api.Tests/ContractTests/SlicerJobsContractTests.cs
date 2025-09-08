@@ -13,7 +13,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
     private readonly ITestOutputHelper _output;
-    private static readonly string[] s_expectedInitialStatuses = ["Queued", "Slicing"]; 
+    private static readonly string[] s_expectedInitialStatuses = ["Queued", "Slicing"];
 
     public SlicerJobsContractTests(CustomWebApplicationFactory factory, ITestOutputHelper output)
     {
@@ -60,7 +60,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
 
         var responseContent = await response.Content.ReadAsStringAsync();
         var jobResponse = JsonSerializer.Deserialize<JsonDocument>(responseContent);
-        
+
         Assert.NotNull(jobResponse);
         Assert.True(jobResponse.RootElement.TryGetProperty("jobId", out var jobIdProp));
         Assert.True(Guid.TryParse(jobIdProp.GetString(), out _));
@@ -75,7 +75,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         var jobId = await SubmitTestJobAndGetIdAsync();
 
         // Act
-    var response = await _client.GetAsync($"/api/slicer/jobs/{jobId}");
+        var response = await _client.GetAsync($"/api/slicer/jobs/{jobId}");
 
         // Assert
         _output.WriteLine($"Response Status: {response.StatusCode}");
@@ -86,7 +86,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
 
         var responseContent = await response.Content.ReadAsStringAsync();
         var statusResponse = JsonSerializer.Deserialize<JsonDocument>(responseContent);
-        
+
         Assert.NotNull(statusResponse);
         Assert.True(statusResponse.RootElement.TryGetProperty("jobId", out var jobIdProp));
         Assert.Equal(jobId.ToString(), jobIdProp.GetString());
@@ -102,7 +102,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         var invalidJobId = Guid.NewGuid();
 
         // Act
-    var response = await _client.GetAsync($"/api/slicer/jobs/{invalidJobId}");
+        var response = await _client.GetAsync($"/api/slicer/jobs/{invalidJobId}");
 
         // Assert
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
@@ -122,14 +122,14 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         _output.WriteLine($"Response Content: {await response.Content.ReadAsStringAsync()}");
 
         // Should return 200 for successful cancellation or 409 if already completed
-        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK || 
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK ||
                    response.StatusCode == System.Net.HttpStatusCode.Conflict);
 
         if (response.StatusCode == System.Net.HttpStatusCode.OK)
         {
             var responseContent = await response.Content.ReadAsStringAsync();
             var cancelResponse = JsonSerializer.Deserialize<JsonDocument>(responseContent);
-            
+
             Assert.NotNull(cancelResponse);
             Assert.True(cancelResponse.RootElement.TryGetProperty("success", out var successProp));
             Assert.True(successProp.GetBoolean());
@@ -164,7 +164,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
 
         var responseContent = await response.Content.ReadAsStringAsync();
         var profiles = JsonSerializer.Deserialize<JsonDocument>(responseContent);
-        
+
         Assert.NotNull(profiles);
         Assert.True(profiles.RootElement.ValueKind == JsonValueKind.Array);
 
@@ -264,7 +264,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
 
         var responseContent = await response.Content.ReadAsStringAsync();
         var jobResponse = JsonSerializer.Deserialize<JsonDocument>(responseContent);
-        
+
         var jobIdString = jobResponse!.RootElement.GetProperty("jobId").GetString();
         return Guid.Parse(jobIdString!);
     }
@@ -281,7 +281,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     endloop
   endfacet
 endsolid test";
-        
+
         return Encoding.ASCII.GetBytes(stlContent);
     }
 }
