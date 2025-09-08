@@ -15,8 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXEMPT_LABEL: keep-open
+      SECURITY_REVIEWED_LABEL: security-reviewed
     steps:
-      - name: Add exempt label if reviewer is maintainer
+      - name: Add exempt (and security-reviewed) label if reviewer is maintainer
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEWER: ${{ github.event.review.user.login }}
@@ -37,17 +38,37 @@ jobs:
               echo "Reviewer lacks required permission (need write/maintain/admin). Skipping."; exit 0 ;;
           esac
 
-          # Check if label already present
+          # Collect existing labels
           existing_labels=$(gh issue view "$PR_NUMBER" --json labels --jq '.labels[].name')
-          if echo "$existing_labels" | grep -q "^${EXEMPT_LABEL}$"; then
-            echo "Label '${EXEMPT_LABEL}' already present. Nothing to do."
-            exit 0
+          echo "Existing labels: $existing_labels"
+
+          added_any=false
+
+            # Always ensure keep-open label
+          if echo "$existing_labels" | grep -qx "${EXEMPT_LABEL}"; then
+            echo "Label '${EXEMPT_LABEL}' already present."
+          else
+            echo "Adding label '${EXEMPT_LABEL}' to PR #$PR_NUMBER"
+            gh issue edit "$PR_NUMBER" --add-label "$EXEMPT_LABEL"
+            added_any=true
           fi
 
-          echo "Adding label '${EXEMPT_LABEL}' to PR #$PR_NUMBER"
-          gh issue edit "$PR_NUMBER" --add-label "$EXEMPT_LABEL"
+          # If PR already has security label, also add SECURITY_REVIEWED_LABEL
+          if echo "$existing_labels" | grep -qi '^security$'; then
+            if echo "$existing_labels" | grep -qx "${SECURITY_REVIEWED_LABEL}"; then
+              echo "Security-reviewed label already present."
+            else
+              echo "Adding '${SECURITY_REVIEWED_LABEL}' due to security label present."
+              gh issue edit "$PR_NUMBER" --add-label "$SECURITY_REVIEWED_LABEL"
+              added_any=true
+            fi
+          fi
 
-          gh pr comment "$PR_NUMBER" --body "Maintainer review detected (permission: $perm). Applied '${EXEMPT_LABEL}' label to prevent stale auto-close."
+          if [ "$added_any" = true ]; then
+            gh pr comment "$PR_NUMBER" --body "Maintainer review detected (permission: $perm). Applied labels to prevent premature stale closure.${existing_labels:+ Existing labels were: $existing_labels}" || true
+          else
+            echo "No new labels added."
+          fi
 
       - name: Summary
         if: always()
@@ -56,4 +77,5 @@ jobs:
           echo "- PR: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
           echo "- Reviewer: ${{ github.event.review.user.login }}" >> $GITHUB_STEP_SUMMARY
           echo "- State: ${{ github.event.review.state }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Applied Label: ${EXEMPT_LABEL}" >> $GITHUB_STEP_SUMMARY
+          echo "- Exempt Label: ${EXEMPT_LABEL}" >> $GITHUB_STEP_SUMMARY
+          echo "- Security Reviewed Label: ${SECURITY_REVIEWED_LABEL}" >> $GITHUB_STEP_SUMMARY
