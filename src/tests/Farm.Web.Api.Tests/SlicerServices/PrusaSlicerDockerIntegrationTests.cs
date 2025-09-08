@@ -41,7 +41,9 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         // Cleanup: Stop any running containers
-    private async Task<(bool Success, string Output, string ErrorOutput)> RunDockerComposeCommandAsync(params string[] args)
+        try
+        {
+            await RunDockerComposeCommandAsync("down", "--volumes", "--remove-orphans");
         }
         catch (Exception ex)
         {
