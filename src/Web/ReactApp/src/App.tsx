@@ -23,13 +23,14 @@ import './App.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (failureCount, error: any) => {
-        // Don't retry for 4xx errors
-        if (error?.statusCode >= 400 && error?.statusCode < 500) {
-          return false;
+      retry: (failureCount, error: unknown) => {
+        const statusCode = typeof error === 'object' && error && 'statusCode' in error
+          ? (error as { statusCode?: number }).statusCode
+          : undefined;
+        if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+          return false; // don't retry client errors
         }
-        // Retry up to 3 times for other errors
-        return failureCount < 3;
+        return failureCount < 3; // retry other errors up to 3 times
       },
       staleTime: 30000, // 30 seconds
       gcTime: 300000, // 5 minutes
@@ -75,7 +76,7 @@ function App() {
   if (checkingSetup) {
     return (
       <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+  <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
       </div>
     );
   }

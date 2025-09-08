@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -54,12 +55,17 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             onClick={handleClose}
             disabled={isLoading}
             className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+            aria-label="Close sign in modal"
+            title="Close"
+            type="button"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {isLoading && (
+          <div className="p-6"><FormSkeleton fields={2} /></div>
+        )}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4" aria-live="polite">
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
               {error}
@@ -124,7 +130,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             >
               {isLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                   Signing In...
                 </>
               ) : (

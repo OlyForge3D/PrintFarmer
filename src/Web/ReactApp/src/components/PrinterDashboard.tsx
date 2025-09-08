@@ -7,6 +7,7 @@ import { AddPrinterButton } from './AddPrinterButton';
 import { PrinterDiscoveryModal } from './PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import { SystemHealth } from './SystemHealth';
+import { PrinterCardSkeleton } from './skeletons/PrinterCardSkeleton';
 import type { Printer } from '@/types/api';
 import { 
   Printer as PrinterIcon, 
@@ -124,20 +125,17 @@ export function PrinterDashboard() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="animate-pulse" role="status" aria-busy="true">
-            <span className="sr-only">Loading printers...</span>
-            <div className="h-8 bg-pf-bg-1 rounded w-48 mb-4"></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-24 bg-pf-bg-1 rounded-xl"></div>
-              ))}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-80 bg-pf-bg-1 rounded-xl"></div>
-              ))}
-            </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
+          <div className="h-8 w-48 bg-pf-bg-1 rounded mb-6 animate-pulse" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-24 bg-pf-bg-1 rounded-xl animate-pulse" />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <PrinterCardSkeleton key={i} />
+            ))}
           </div>
         </div>
       </div>

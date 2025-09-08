@@ -108,7 +108,7 @@ function GCodePath({ layer, visible }: { layer: GCodeLayer; visible: boolean }) 
   );
 }
 
-interface GCodeViewerProps {
+export interface GCodeViewerProps {
   gcodeUrl: string;
   className?: string;
 }
@@ -188,7 +188,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   if (!gcode) {
     return (
       <div className={`${className} flex items-center justify-center`}>
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }

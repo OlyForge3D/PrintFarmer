@@ -78,6 +78,13 @@
   --pf-focus-ring-offset: #0b1020;
   --pf-hover-overlay: rgba(255, 255, 255, 0.05);
   --pf-active-overlay: rgba(255, 255, 255, 0.1);
+
+  /* Skeleton / shimmer surfaces */
+  --pf-skeleton-bg: #1e293b;          /* Neutral surface for skeleton blocks */
+  --pf-skeleton-bg-alt: #243145;       /* Slight variation for layered skeletons */
+  --pf-skeleton-accent: #334155;       /* Accent bar / progress shimmer */
+  --pf-focus-outline: var(--pf-accent-2);
+  color-scheme: dark;
 }
 
 /* Light theme variant (for future implementation) */
@@ -145,6 +152,12 @@
   --pf-focus-ring-offset: #ffffff;
   --pf-hover-overlay: rgba(0, 0, 0, 0.05);
   --pf-active-overlay: rgba(0, 0, 0, 0.1);
+
+  --pf-skeleton-bg: #e2e8f0;
+  --pf-skeleton-bg-alt: #f1f5f9;
+  --pf-skeleton-accent: #cbd5e1;
+  --pf-focus-outline: var(--pf-accent-2);
+  color-scheme: light;
 }
 
 /* High contrast mode (accessibility enhancement) */
@@ -155,6 +168,9 @@
     --pf-text-secondary: #d1d5db;
     --pf-border: #4b5563;
     --pf-border-light: #6b7280;
+  --pf-skeleton-bg: #374151; /* Darker to maintain contrast */
+  --pf-skeleton-bg-alt: #4b5563;
+  --pf-skeleton-accent: #6b7280;
   }
   
   [data-theme="light"] {
@@ -162,6 +178,9 @@
     --pf-text-secondary: #374151;
     --pf-border: #6b7280;
     --pf-border-light: #4b5563;
+  --pf-skeleton-bg: #d1d5db;
+  --pf-skeleton-bg-alt: #e5e7eb;
+  --pf-skeleton-accent: #9ca3af;
   }
 }
 
@@ -170,6 +189,8 @@
   :root {
     /* Disable transitions for users who prefer reduced motion */
     --pf-transition-duration: 0ms;
+  /* Provide a static experience for skeletons */
+  --pf-skeleton-animation: none;
   }
 }
 

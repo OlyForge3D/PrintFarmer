@@ -5,11 +5,11 @@ import {
   Edit, 
   Trash2, 
   Shield, 
-  ShieldCheck, 
   Search,
   UserX,
   UserCheck
 } from 'lucide-react';
+import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface User {
@@ -44,23 +44,6 @@ export function UserManagementPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-
-  // Check if user has admin access
-  if (!hasRole('farm_admin')) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Shield className="h-16 w-16 mx-auto text-red-500 mb-4" />
-          <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
-            Access Denied
-          </h2>
-          <p className="text-pf-text-secondary">
-            You need administrator privileges to access user management.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   useEffect(() => {
     loadUsers();
@@ -139,10 +122,31 @@ export function UserManagementPage() {
     }
   };
 
+  // Early access check AFTER hooks to avoid conditional hook usage
+  if (!hasRole('farm_admin')) {
+    return (
+      <div className="flex items-center justify-center min-h-screen" aria-live="polite" aria-label="Access denied message">
+        <div className="text-center" role="alert">
+          <Shield className="h-16 w-16 mx-auto text-red-500 mb-4" aria-hidden="true" />
+          <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
+            Access Denied
+          </h2>
+          <p className="text-pf-text-secondary">
+            You need administrator privileges to access user management.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+      <div className="p-6" aria-busy="true" aria-live="polite" aria-label="Loading users">
+        <h1 className="text-2xl font-bold text-pf-text-primary mb-4 flex items-center">
+          <Users className="h-6 w-6 mr-2" aria-hidden="true" />
+          User Management
+        </h1>
+        <TableSkeleton rows={6} cols={6} />
       </div>
     );
   }

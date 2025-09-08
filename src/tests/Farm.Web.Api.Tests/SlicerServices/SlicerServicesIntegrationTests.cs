@@ -3,7 +3,7 @@ using Farm.Web.Shared;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Options; // retained for configuration delegate
 using Moq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -502,17 +502,9 @@ public class SlicerServicesIntegrationTests : IDisposable
 /// <summary>
 /// Configuration options for integration tests
 /// </summary>
-public class LocalFileStorageOptions
-{
-    public string BasePath { get; set; } = string.Empty;
-}
+// NOTE: Removed duplicate TestLocalFileStorageOptions; using production LocalFileStorageOptions instead.
 
 /// <summary>
 /// Mock slicer options for testing
 /// </summary>
-public class MockSlicerOptions
-{
-    public double InitialDelaySeconds { get; set; } = 1.0;
-    public double ProcessingTimeSeconds { get; set; } = 30.0;
-    public double FailureRate { get; set; } = 0.05;
-}
+// NOTE: Removed duplicate TestMockSlicerOptions; using production MockSlicerOptions instead.

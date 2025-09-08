@@ -15,7 +15,8 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     private readonly ILogger<RedisSlicerJobQueue> _logger;
     
     // Redis keys
-    private readonly string _jobsKey = "slicer:jobs";
+    // Keys retained for future expansion (currently used in stats operations)
+    private readonly string _jobsKey = "slicer:jobs"; // stored job hashes
     private readonly string _queueKey = "slicer:queue";
     private readonly string _processingKey = "slicer:processing";
     private readonly string _completedKey = "slicer:completed";
@@ -79,7 +80,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 return null;
             }
 
-            var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobData.Value.Element!);
+            var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobData.Value.Element);
             
             if (job != null && preferredEngine != null && job.SlicerEngine != preferredEngine)
             {
@@ -204,13 +205,11 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         {
             var jobKey = GetJobKey(jobId);
             var jobData = await _database.HashGetAsync(jobKey, "data");
-            
             if (!jobData.HasValue)
             {
                 return null;
             }
-
-            return JsonSerializer.Deserialize<DistributedSlicingJob>(jobData);
+            return RedisSlicerJobQueueHelpers.DeserializeJob(jobData);
         }
         catch (Exception ex)
         {
@@ -291,7 +290,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             
             foreach (var jobJson in completedJobs.Concat(failedJobs))
             {
-                var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobJson);
+                var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobJson);
                 if (job?.UserId == userId)
                 {
                     jobs.Add(job);
@@ -335,7 +334,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             foreach (var jobJson in failedJobs)
             {
-                var job = JsonSerializer.Deserialize<DistributedSlicingJob>(jobJson);
+                var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobJson);
                 if (job != null && job.RetryCount < maxRetryCount)
                 {
                     job.Status = SlicingJobStatus.Queued;
@@ -346,7 +345,6 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                     job.CompletedAt = null;
                     job.WorkerId = null;
 
-                    // Remove from failed queue and re-enqueue
                     await _database.SortedSetRemoveAsync(_failedKey, jobJson);
                     await EnqueueAsync(job, cancellationToken);
                     requeuedCount++;
@@ -405,12 +403,32 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
     private static TimeSpan EstimateWaitTime(long queuedJobs, int activeWorkers)
     {
-        if (activeWorkers == 0) return TimeSpan.FromHours(24); // Unknown
+        if (activeWorkers == 0)
+        {
+            return TimeSpan.FromHours(24); // Unknown
+        }
         
         // Very rough estimate: assume 5 minutes per job on average
         var averageJobTime = TimeSpan.FromMinutes(5);
         var estimatedSeconds = (queuedJobs * averageJobTime.TotalSeconds) / activeWorkers;
         
         return TimeSpan.FromSeconds(Math.Min(estimatedSeconds, TimeSpan.FromHours(24).TotalSeconds));
+    }
+}
+
+// Local helpers (consider moving to separate utility if reused)
+file static class RedisSlicerJobQueueHelpers
+{
+    public static DistributedSlicingJob? DeserializeJob(RedisValue value)
+    {
+        if (!value.HasValue) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<DistributedSlicingJob>(value!);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

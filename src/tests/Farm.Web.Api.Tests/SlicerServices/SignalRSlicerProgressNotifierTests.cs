@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// </summary>
 public class SignalRSlicerProgressNotifierTests
 {
-    private readonly Mock<IHubContext<SlicerProgressHub>> _mockHubContext;
+    private readonly Mock<IHubContext<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>> _mockHubContext;
     private readonly Mock<IHubClients> _mockClients;
     private readonly Mock<IClientProxy> _mockClientProxy;
     private readonly Mock<IGroupManager> _mockGroupManager;
@@ -21,7 +21,7 @@ public class SignalRSlicerProgressNotifierTests
 
     public SignalRSlicerProgressNotifierTests()
     {
-        _mockHubContext = new Mock<IHubContext<SlicerProgressHub>>();
+    _mockHubContext = new Mock<IHubContext<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>>();
         _mockClients = new Mock<IHubClients>();
         _mockClientProxy = new Mock<IClientProxy>();
         _mockGroupManager = new Mock<IGroupManager>();
@@ -123,8 +123,9 @@ public class SignalRSlicerProgressNotifierTests
             "SlicingCompleted",
             It.Is<object[]>(args => args.Length == 1 && 
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
-                ((SlicingCompletionNotification)args[0]).Success == true &&
-                ((SlicingCompletionNotification)args[0]).ResultFileUrl == result.ResultFileUrl
+                ((SlicingCompletionNotification)args[0]).Success &&
+                ((SlicingCompletionNotification)args[0]).ResultFileUrl != null &&
+                ((SlicingCompletionNotification)args[0]).ResultFileUrl!.ToString() == result.ResultFileUrl
             ),
             It.IsAny<CancellationToken>()
         ), Times.AtLeast(2)); // Once for user group, once for monitors
@@ -156,7 +157,7 @@ public class SignalRSlicerProgressNotifierTests
             "SlicingCompleted",
             It.Is<object[]>(args => args.Length == 1 && 
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
-                ((SlicingCompletionNotification)args[0]).Success == false &&
+                !((SlicingCompletionNotification)args[0]).Success &&
                 ((SlicingCompletionNotification)args[0]).ErrorMessage == result.Error
             ),
             It.IsAny<CancellationToken>()
@@ -440,7 +441,4 @@ public class SignalRSlicerProgressNotifierTests
 /// <summary>
 /// Mock SignalR Hub for testing
 /// </summary>
-public class SlicerProgressHub : Hub
-{
-    // Empty hub implementation for testing
-}
+// NOTE: Removed duplicate SlicerProgressHub test stub; using production hub class instead.

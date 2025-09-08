@@ -344,11 +344,15 @@ public class SlicerOrchestratorTests
     {
         // Arrange
         var userId = Guid.NewGuid();
-        var jobs = new List<DistributedSlicingJob>
-        {
-            CreateDistributedSlicingJob(Guid.NewGuid()) { UserId = userId, Status = SlicingJobStatus.Completed },
-            CreateDistributedSlicingJob(Guid.NewGuid()) { UserId = userId, Status = SlicingJobStatus.Slicing }
-        };
+    var jobs = new List<DistributedSlicingJob>();
+    var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
+    job1.UserId = userId;
+    job1.Status = SlicingJobStatus.Completed;
+    jobs.Add(job1);
+    var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
+    job2.UserId = userId;
+    job2.Status = SlicingJobStatus.Slicing;
+    jobs.Add(job2);
 
         _mockJobQueue.Setup(q => q.GetUserJobsAsync(userId, null, It.IsAny<CancellationToken>())).ReturnsAsync(jobs);
 
@@ -357,7 +361,7 @@ public class SlicerOrchestratorTests
 
         // Assert
         result.Should().HaveCount(2);
-        result.All(j => j.JobId != Guid.Empty).Should().BeTrue();
+    result.TrueForAll(j => j.JobId != Guid.Empty).Should().BeTrue();
     }
 
     [Fact]

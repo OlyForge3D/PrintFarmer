@@ -1,11 +1,19 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
-// Lazy load heavy three.js based viewers; map named export to default expected by React.lazy
-const ModelViewer = React.lazy(() => import('@/components/3d/ModelViewer').then(m => ({ default: m.ModelViewer })));
-const GCodeViewer = React.lazy(() => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer })));
+// Lazy load heavy three.js based viewers with manual preload support
+import { lazyWithPreload } from '@/utils/lazyWithPreload';
+import type { ModelViewerProps } from '@/components/3d/ModelViewer';
+import type { GCodeViewerProps } from '@/components/3d/GCodeViewer';
+const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
+  () => import('@/components/3d/ModelViewer').then(m => ({ default: m.ModelViewer }))
+);
+const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
+  () => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer }))
+);
 import { SlicerConfigModal } from '@/components/slicer/SlicerConfigModal';
 import { slicerService } from '@/services/slicerService';
+import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 
 interface Model {
   id: string;
@@ -140,7 +148,7 @@ export const ModelsPage: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
@@ -273,6 +281,8 @@ export const ModelsPage: React.FC = () => {
               {/* Quick actions overlay */}
               <div className="absolute top-2 right-2 flex space-x-1">
                 <button
+                  onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                  onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
                   onClick={() => setViewerModel(model)}
                   className="p-2 bg-white/80 hover:bg-white rounded shadow"
                   title="View 3D Model"
@@ -331,7 +341,7 @@ export const ModelsPage: React.FC = () => {
               </button>
             </div>
             <div className="p-4">
-              <Suspense fallback={<div className="h-96 w-full flex items-center justify-center">Loading 3D Viewer...</div>}>
+              <Suspense fallback={<ViewerSkeleton variant="model" />}> 
                 <ModelViewer
                   modelUrl={viewerModel.url}
                   fileType={viewerModel.fileType}
@@ -357,7 +367,7 @@ export const ModelsPage: React.FC = () => {
               </button>
             </div>
             <div className="p-4">
-              <Suspense fallback={<div className="h-96 w-full flex items-center justify-center">Loading G-code Viewer...</div>}>
+              <Suspense fallback={<ViewerSkeleton variant="gcode" />}> 
                 <GCodeViewer gcodeUrl={gcodeViewer.url} />
               </Suspense>
             </div>

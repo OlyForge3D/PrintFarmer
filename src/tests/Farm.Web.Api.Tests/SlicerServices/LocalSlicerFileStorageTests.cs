@@ -481,7 +481,6 @@ public class LocalSlicerFileStorageTests : IDisposable
 /// <summary>
 /// Configuration options for LocalSlicerFileStorage
 /// </summary>
-public class LocalFileStorageOptions
-{
-    public string BasePath { get; set; } = string.Empty;
-}
+// NOTE: Removed duplicate LocalFileStorageOptions test shim.
+// The production options class (Farm.Web.Api.Services.SlicerServices.LocalFileStorageOptions)
+// is used directly via the using directive at the top of this file.

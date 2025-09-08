@@ -138,7 +138,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   if (loading) {
     return (
       <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+  <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
       </div>
     );
   }
@@ -305,7 +305,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           >
             {creating ? (
               <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                 Creating Administrator...
               </>
             ) : (
