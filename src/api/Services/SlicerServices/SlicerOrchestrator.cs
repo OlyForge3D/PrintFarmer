@@ -1,4 +1,5 @@
 using Farm.Web.Shared;
+using Farm.Web.Shared.Slicer.Messaging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -36,21 +37,40 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             // Validate the request
             await ValidateRequestAsync(request, cancellationToken);
 
-            // Create the job
-            var job = new DistributedSlicingJob
+            // Get or create message envelope for idempotency
+            var envelope = request.GetOrCreateEnvelope();
+            
+            // Check for existing job (idempotency)
+            var existingJob = await _jobQueue.FindExistingJobAsync(envelope.CorrelationId, envelope.Checksum, cancellationToken);
+            if (existingJob != null)
             {
-                Id = Guid.NewGuid(),
-                UserId = request.UserId,
-                PrinterId = request.PrinterId,
-                ModelFileUrl = request.ModelFileUrl,
-                ModelFileName = request.ModelFileName,
-                SlicerEngine = request.SlicerEngine,
-                Profile = request.SlicerProfile, // Use the Profile property from base class
-                Priority = request.Priority,
-                Status = SlicingJobStatus.Queued,
-                CreatedAt = DateTime.UtcNow,
-                Metadata = request.Metadata
-            };
+                _logger.LogInformation("Found existing job {JobId} for correlation {CorrelationId}, returning existing response", 
+                    existingJob.Id, envelope.CorrelationId);
+
+                // Return existing job response
+                var queueStats = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
+                return new SlicingJobResponse
+                {
+                    JobId = existingJob.Id,
+                    Status = existingJob.Status,
+                    EstimatedCompletionTime = existingJob.CompletedAt ?? DateTime.UtcNow.Add(queueStats.EstimatedWaitTime),
+                    QueuePosition = existingJob.Status == SlicingJobStatus.Queued ? (int)queueStats.QueuedJobs : 0,
+                    SlicerWorkerUrl = GetSlicerWorkerUrl(request.SlicerEngine)
+                };
+            }
+
+            // Validate checksum if envelope was provided externally
+            if (request.Envelope != null)
+            {
+                var jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(request);
+                if (!envelope.ValidateChecksum(jobContent))
+                {
+                    throw new ArgumentException("Request content does not match envelope checksum", nameof(request));
+                }
+            }
+
+            // Create new job with envelope
+            var job = DistributedSlicingJob.FromRequest(request, envelope);
 
             // Get file size for tracking
             try
@@ -70,18 +90,18 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             await _jobQueue.EnqueueAsync(job, cancellationToken);
 
             // Get queue stats for estimated completion time
-            var queueStats = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
-            var estimatedCompletion = DateTime.UtcNow.Add(queueStats.EstimatedWaitTime);
+            var queueStatsForNew = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
+            var estimatedCompletion = DateTime.UtcNow.Add(queueStatsForNew.EstimatedWaitTime);
 
-            _logger.LogInformation("Submitted slicing job {JobId} for user {UserId} with engine {SlicerEngine}", 
-                job.Id, request.UserId, request.SlicerEngine);
+            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}", 
+                job.Id, envelope.CorrelationId, request.UserId, request.SlicerEngine);
 
             return new SlicingJobResponse
             {
                 JobId = job.Id,
                 Status = SlicingJobStatus.Queued,
                 EstimatedCompletionTime = estimatedCompletion,
-                QueuePosition = (int)queueStats.QueuedJobs, // Approximate
+                QueuePosition = (int)queueStatsForNew.QueuedJobs, // Approximate
                 SlicerWorkerUrl = GetSlicerWorkerUrl(request.SlicerEngine)
             };
         }
