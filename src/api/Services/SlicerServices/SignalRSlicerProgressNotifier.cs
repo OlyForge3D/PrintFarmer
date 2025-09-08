@@ -1,6 +1,5 @@
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -24,12 +23,13 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 
     public async Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(update);
         try
         {
             // Get subscribers for this job
             var connectionIds = GetJobSubscribers(update.JobId);
             
-            if (connectionIds.Any())
+            if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingProgress", update, cancellationToken);
@@ -49,6 +49,8 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 
     public async Task NotifyCompletionAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(result);
         try
         {
             var completionNotification = new SlicingCompletionNotification
@@ -57,20 +59,24 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
                 UserId = job.UserId,
                 Status = job.Status,
                 Success = result.Success,
-                ResultFileUrl = result.ResultFileUrl,
+                ResultFileUrl = string.IsNullOrWhiteSpace(result.ResultFileUrl) ? null : new Uri(result.ResultFileUrl, UriKind.RelativeOrAbsolute),
                 ProcessingTimeSeconds = result.ProcessingTimeSeconds,
                 EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams,
                 LayerCount = result.LayerCount,
                 ErrorMessage = result.Error,
-                CompletedAt = job.CompletedAt ?? DateTime.UtcNow,
-                Metadata = job.Metadata
+                CompletedAt = job.CompletedAt ?? DateTime.UtcNow
             };
+
+            foreach (var kv in job.Metadata)
+            {
+                completionNotification.Metadata[kv.Key] = kv.Value;
+            }
 
             // Get subscribers for this job
             var connectionIds = GetJobSubscribers(job.Id);
             
-            if (connectionIds.Any())
+            if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingCompleted", completionNotification, cancellationToken);
@@ -96,6 +102,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 
     public async Task NotifyFailureAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
         try
         {
             var failureNotification = new SlicingFailureNotification
@@ -106,14 +113,18 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
                 ErrorMessage = errorMessage,
                 FailedAt = job.CompletedAt ?? DateTime.UtcNow,
                 RetryCount = job.RetryCount,
-                CanRetry = job.RetryCount < 3,
-                Metadata = job.Metadata
+                CanRetry = job.RetryCount < 3
             };
+
+            foreach (var kv in job.Metadata)
+            {
+                failureNotification.Metadata[kv.Key] = kv.Value;
+            }
 
             // Get subscribers for this job
             var connectionIds = GetJobSubscribers(job.Id);
             
-            if (connectionIds.Any())
+            if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingFailed", failureNotification, cancellationToken);
@@ -140,31 +151,31 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
     }
 
-    public async Task SubscribeToJobAsync(Guid jobId, string connectionId, CancellationToken cancellationToken = default)
+    public Task SubscribeToJobAsync(Guid jobId, string connectionId, CancellationToken cancellationToken = default)
     {
         lock (_lockObject)
         {
-            if (!_jobSubscriptions.ContainsKey(jobId))
+            if (!_jobSubscriptions.TryGetValue(jobId, out var set))
             {
-                _jobSubscriptions[jobId] = new HashSet<string>();
+                set = new HashSet<string>();
+                _jobSubscriptions[jobId] = set;
             }
-            
-            _jobSubscriptions[jobId].Add(connectionId);
+
+            set.Add(connectionId);
         }
 
         _logger.LogDebug("Added subscription for job {JobId} from connection {ConnectionId}", jobId, connectionId);
+        return Task.CompletedTask;
     }
 
-    public async Task UnsubscribeFromJobAsync(Guid jobId, string connectionId, CancellationToken cancellationToken = default)
+    public Task UnsubscribeFromJobAsync(Guid jobId, string connectionId, CancellationToken cancellationToken = default)
     {
         lock (_lockObject)
         {
-            if (_jobSubscriptions.ContainsKey(jobId))
+            if (_jobSubscriptions.TryGetValue(jobId, out var set))
             {
-                _jobSubscriptions[jobId].Remove(connectionId);
-                
-                // Clean up empty subscription sets
-                if (_jobSubscriptions[jobId].Count == 0)
+                set.Remove(connectionId);
+                if (set.Count == 0)
                 {
                     _jobSubscriptions.Remove(jobId);
                 }
@@ -172,15 +183,18 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
 
         _logger.LogDebug("Removed subscription for job {JobId} from connection {ConnectionId}", jobId, connectionId);
+        return Task.CompletedTask;
     }
 
     private List<string> GetJobSubscribers(Guid jobId)
     {
         lock (_lockObject)
         {
-            return _jobSubscriptions.TryGetValue(jobId, out var subscribers) 
-                ? subscribers.ToList() 
-                : new List<string>();
+            if (_jobSubscriptions.TryGetValue(jobId, out var subscribers))
+            {
+                return new List<string>(subscribers);
+            }
+            return new List<string>();
         }
     }
 
@@ -262,14 +276,14 @@ public class SlicingCompletionNotification
     public Guid UserId { get; set; }
     public SlicingJobStatus Status { get; set; }
     public bool Success { get; set; }
-    public string? ResultFileUrl { get; set; }
+    public Uri? ResultFileUrl { get; set; }
     public double ProcessingTimeSeconds { get; set; }
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CompletedAt { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; } = new();
 }
 
 /// <summary>
@@ -284,5 +298,5 @@ public class SlicingFailureNotification
     public DateTime FailedAt { get; set; }
     public int RetryCount { get; set; }
     public bool CanRetry { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; } = new();
 }

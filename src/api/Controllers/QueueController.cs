@@ -144,10 +144,7 @@ public class QueueController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> AddJobToQueueAsync([FromBody] QueuePrintJobDto request)
     {
-        if (request == null)
-        {
-            return BadRequest("Job request is required");
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         try
         {
@@ -317,6 +314,7 @@ public class QueueController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateJobPriorityAsync(Guid id, [FromBody] UpdateJobPriorityDto request)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var job = await _context.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
@@ -364,6 +362,7 @@ public class QueueController : ControllerBase
 
     private async Task<Guid?> FindBestAvailablePrinterAsync(QueuePrintJobDto request)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var printers = await _context.Printers
             .Include(p => p.Capabilities)
             .Where(p => p.Capabilities != null && p.Capabilities.IsAvailable)

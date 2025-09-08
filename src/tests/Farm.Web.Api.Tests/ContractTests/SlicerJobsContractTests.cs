@@ -1,10 +1,4 @@
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using Xunit;
 using Xunit.Abstractions;
-using Microsoft.AspNetCore.Mvc.Testing;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 
@@ -19,6 +13,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
     private readonly ITestOutputHelper _output;
+    private static readonly string[] s_expectedInitialStatuses = ["Queued", "Slicing"]; 
 
     public SlicerJobsContractTests(CustomWebApplicationFactory factory, ITestOutputHelper output)
     {
@@ -28,7 +23,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Fact]
-    public async Task SubmitSlicingJob_WithValidRequest_ShouldReturn202Accepted()
+    public async Task SubmitSlicingJob_WithValidRequest_ShouldReturn202AcceptedAsync()
     {
         // Arrange - Create a test 3D model file
         var testModelContent = CreateTestStlContent();
@@ -70,17 +65,17 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         Assert.True(jobResponse.RootElement.TryGetProperty("jobId", out var jobIdProp));
         Assert.True(Guid.TryParse(jobIdProp.GetString(), out _));
         Assert.True(jobResponse.RootElement.TryGetProperty("status", out var statusProp));
-        Assert.Contains(statusProp.GetString(), new[] { "Queued", "Slicing" });
+        Assert.Contains(statusProp.GetString(), s_expectedInitialStatuses);
     }
 
     [Fact]
     public async Task GetJobStatus_WithValidJobId_ShouldReturn200OK()
     {
         // Arrange - First submit a job to get a valid job ID
-        var jobId = await SubmitTestJobAndGetId();
+        var jobId = await SubmitTestJobAndGetIdAsync();
 
         // Act
-        var response = await _client.GetAsync($"/api/slicer/job/{jobId}");
+    var response = await _client.GetAsync($"/api/slicer/jobs/{jobId}");
 
         // Assert
         _output.WriteLine($"Response Status: {response.StatusCode}");
@@ -107,7 +102,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         var invalidJobId = Guid.NewGuid();
 
         // Act
-        var response = await _client.GetAsync($"/api/slicer/job/{invalidJobId}");
+    var response = await _client.GetAsync($"/api/slicer/jobs/{invalidJobId}");
 
         // Assert
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
@@ -117,7 +112,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     public async Task CancelJob_WithValidJobId_ShouldReturn200OK()
     {
         // Arrange - Submit a job and get its ID
-        var jobId = await SubmitTestJobAndGetId();
+        var jobId = await SubmitTestJobAndGetIdAsync();
 
         // Act
         var response = await _client.PostAsync($"/api/slicer/jobs/{jobId}/cancel", null);
@@ -198,7 +193,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Fact]
-    public async Task SubmitSlicingJob_WithInvalidFile_ShouldReturn400BadRequest()
+    public async Task SubmitSlicingJob_WithInvalidFile_ShouldReturn400BadRequestAsync()
     {
         // Arrange - Create invalid file content
         var invalidContent = Encoding.UTF8.GetBytes("This is not a valid 3D model file");
@@ -218,7 +213,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Fact]
-    public async Task SubmitSlicingJob_WithMissingPrinterId_ShouldReturn400BadRequest()
+    public async Task SubmitSlicingJob_WithMissingPrinterId_ShouldReturn400BadRequestAsync()
     {
         // Arrange
         var testModelContent = CreateTestStlContent();
@@ -236,9 +231,23 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task GetJobStatus_LegacySingularRoute_ShouldRedirectToPlural()
+    {
+        var jobId = await SubmitTestJobAndGetIdAsync();
+        var noRedirectClient = _factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var response = await noRedirectClient.GetAsync($"/api/slicer/job/{jobId}");
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.Found); // 302
+        response.Headers.Location.Should().NotBeNull();
+        response.Headers.Location!.ToString().Should().Be($"/api/slicer/jobs/{jobId}");
+    }
+
     // Helper Methods
 
-    private async Task<Guid> SubmitTestJobAndGetId()
+    private async Task<Guid> SubmitTestJobAndGetIdAsync()
     {
         var testModelContent = CreateTestStlContent();
         var printerId = Guid.NewGuid();

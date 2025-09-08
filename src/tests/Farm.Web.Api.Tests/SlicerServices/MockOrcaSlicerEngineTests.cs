@@ -1,6 +1,5 @@
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -108,7 +107,8 @@ public class MockOrcaSlicerEngineTests
         progressUpdates.First().Progress.Should().Be(0);
         progressUpdates.Last().Progress.Should().Be(100);
         progressUpdates.Should().Contain(u => u.CurrentStep == "Validating model");
-        progressUpdates.Should().Contain(u => u.CurrentStep.Contains("Slicing layer"));
+    // Allow for nullable CurrentStep; ensure at least one update has the slicing layer step
+    progressUpdates.Should().Contain(u => u.CurrentStep != null && u.CurrentStep.Contains("Slicing layer"));
     }
 
     [Fact]
@@ -385,9 +385,6 @@ public class MockOrcaSlicerEngineTests
 /// <summary>
 /// Configuration options for MockOrcaSlicerEngine
 /// </summary>
-public class MockSlicerOptions
-{
-    public double InitialDelaySeconds { get; set; } = 1.0;
-    public double ProcessingTimeSeconds { get; set; } = 30.0;
-    public double FailureRate { get; set; } = 0.05; // 5% failure rate by default
-}
+// NOTE: Removed duplicate MockSlicerOptions test shim.
+// The production options class (Farm.Web.Api.Services.SlicerServices.MockSlicerOptions)
+// is referenced via using at top of file.

@@ -218,6 +218,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             <button
               onClick={handleClose}
               className="text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
+              aria-label="Close add printer dialog"
+              title="Close"
             >
               <X className="w-6 h-6" />
             </button>
@@ -261,6 +263,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   value={formData.backend}
                   onChange={(e) => handleInputChange('backend', parseInt(e.target.value))}
                   className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                  aria-label="Backend type"
                 >
                   <option value={PrinterBackends.Moonraker}>Moonraker (Klipper)</option>
                   <option value={PrinterBackends.PrusaLink}>PrusaLink (Prusa)</option>
@@ -316,6 +319,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   value={formData.manufacturerId || ''}
                   onChange={(e) => handleInputChange('manufacturerId', e.target.value)}
                   className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                  aria-label="Manufacturer"
                 >
                   <option value="">Select manufacturer...</option>
                   {manufacturers.map((mfg) => (
@@ -334,6 +338,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   onChange={(e) => handleInputChange('modelId', e.target.value)}
                   disabled={!formData.manufacturerId}
                   className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent disabled:opacity-50"
+                  aria-label="Printer model"
                 >
                   <option value="">Select model...</option>
                   {filteredModels.map((model) => (
@@ -359,6 +364,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   }}
                   max={new Date().toISOString().split('T')[0]}
                   title="Click to open date picker"
+                  aria-label="Date acquired"
                 />
               </div>
               {formData.dateAcquired && (
@@ -400,7 +406,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               >
                 {isLoading ? (
                   <>
-                    <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                    <div className="pf-animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
                     Adding...
                   </>
                 ) : (

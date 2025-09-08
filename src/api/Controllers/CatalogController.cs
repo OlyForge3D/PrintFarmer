@@ -87,10 +87,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     [ProducesResponseType(409)]
     public async Task<ActionResult<ModelDto>> CreateModelAsync([FromBody] CreateModelRequest req, CancellationToken ct)
     {
-        if (req is null)
-        {
-            return BadRequest("Request body is required");
-        }
+        ArgumentNullException.ThrowIfNull(req);
         if (req.ManufacturerId == Guid.Empty)
         {
             return BadRequest("ManufacturerId is required");
@@ -171,10 +168,7 @@ public class CatalogController(AppDbContext db) : ControllerBase
     [ProducesResponseType(404)]
     public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
     {
-        if (req is null)
-        {
-            return BadRequest("Request body is required");
-        }
+        ArgumentNullException.ThrowIfNull(req);
         var model = await db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null)
         {

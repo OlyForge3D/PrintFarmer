@@ -28,7 +28,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         // Arrange
         using var scope = _factory.Services.CreateScope();
         var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
-        
+
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
@@ -38,7 +38,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfile = new SlicerProfileDto
             {
-                LayerHeight = 0.2m,
+                LayerHeight = 0.2,
                 InfillPercentage = 20,
                 PrintSpeed = 50,
                 NozzleTemperature = 210,
@@ -55,7 +55,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         Assert.NotEqual(Guid.Empty, response.JobId);
         Assert.Equal(SlicingJobStatus.Queued, response.Status);
         Assert.NotEmpty(response.SlicerWorkerUrl);
-        
+
         _output.WriteLine($"Job submitted: {response.JobId}");
         _output.WriteLine($"Status: {response.Status}");
         _output.WriteLine($"Queue position: {response.QueuePosition}");
@@ -74,7 +74,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         // Arrange
         using var scope = _factory.Services.CreateScope();
         var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
-        
+
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
@@ -82,7 +82,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
             ModelFileUrl = "https://example.com/small-test.stl",
             ModelFileName = "small-test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
-            SlicerProfile = new SlicerProfileDto { LayerHeight = 0.3m },
+            SlicerProfile = new SlicerProfileDto { LayerHeight = 0.3 },
             Priority = SlicingJobPriority.High
         };
 
@@ -91,7 +91,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
 
         // Assert initial state
         Assert.Equal(SlicingJobStatus.Queued, response.Status);
-        
+
         _output.WriteLine($"Job {response.JobId} submitted successfully");
         _output.WriteLine($"Initial status: {response.Status}");
         _output.WriteLine($"Estimated completion: {response.EstimatedCompletionTime}");
@@ -129,8 +129,8 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         // Assert
         Assert.NotNull(health);
         Assert.True(health.IsHealthy);
-        Assert.Contains("OrcaSlicer", health.AvailableEngines);
-        
+        Assert.Contains("OrcaSlicer", health.Engines.Keys.Select(k => k.ToString()));
+
         _output.WriteLine($"Orchestrator health: {JsonSerializer.Serialize(health, new JsonSerializerOptions { WriteIndented = true })}");
     }
 
@@ -140,7 +140,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         // Arrange
         using var scope = _factory.Services.CreateScope();
         var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
-        
+
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),

@@ -1,6 +1,5 @@
 using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -32,7 +31,11 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
     public async Task<SlicingJobResponse> SubmitJobAsync(SlicingJobRequest request, CancellationToken cancellationToken = default)
     {
-        try
+    // Capture for logging after null check
+    // Null guard (CA1062)
+    ArgumentNullException.ThrowIfNull(request);
+    var userIdForLog = request.UserId;
+    try
         {
             // Validate the request
             await ValidateRequestAsync(request, cancellationToken);
@@ -62,6 +65,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             // Validate checksum if envelope was provided externally
             if (request.Envelope != null)
             {
+                // Create content for checksum validation
                 var jobContent = SlicingJobContent.FromRequest(request);
                 if (!envelope.ValidateChecksum(jobContent))
                 {
@@ -93,7 +97,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             var queueStatsForNew = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
             var estimatedCompletion = DateTime.UtcNow.Add(queueStatsForNew.EstimatedWaitTime);
 
-            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}", 
+            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}",
                 job.Id, envelope.CorrelationId, request.UserId, request.SlicerEngine);
 
             return new SlicingJobResponse
@@ -107,7 +111,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to submit slicing job for user {UserId}", request.UserId);
+            _logger.LogError(ex, "Failed to submit slicing job for user {UserId}", userIdForLog);
             throw;
         }
     }
@@ -202,7 +206,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 });
             }
 
-            return engineInfos.OrderBy(e => e.Engine).ToList();
+            return [.. engineInfos.OrderBy(e => e.Engine)];
         }
         catch (Exception ex)
         {
@@ -238,7 +242,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         {
             var jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
             
-            return jobs.Select(job => new SlicingJobStatusResponse
+            return [.. jobs.Select(job => new SlicingJobStatusResponse
             {
                 JobId = job.Id,
                 Status = job.Status,
@@ -253,7 +257,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
                 LayerCount = job.LayerCount ?? 0,
                 Metadata = job.Metadata
-            }).ToList();
+            })];
         }
         catch (Exception ex)
         {
@@ -337,23 +341,28 @@ public class SlicerOrchestrator : ISlicerOrchestrator
     private async Task ValidateRequestAsync(SlicingJobRequest request, CancellationToken cancellationToken)
     {
         // Validate required fields
+    ArgumentNullException.ThrowIfNull(request);
+
         if (request.UserId == Guid.Empty)
+        {
             throw new ArgumentException("UserId is required", nameof(request));
-        
+        }
         if (request.PrinterId == Guid.Empty)
+        {
             throw new ArgumentException("PrinterId is required", nameof(request));
-            
+        }
         if (string.IsNullOrWhiteSpace(request.ModelFileUrl))
+        {
             throw new ArgumentException("ModelFileUrl is required", nameof(request));
+        }
 
         // Validate slicer engine is available
-        if (!_slicerEngines.ContainsKey(request.SlicerEngine))
+        if (!_slicerEngines.TryGetValue(request.SlicerEngine, out var engine))
         {
             throw new ArgumentException($"Slicer engine {request.SlicerEngine} is not available", nameof(request));
         }
 
         // Check if slicer engine is healthy
-        var engine = _slicerEngines[request.SlicerEngine];
         var isHealthy = await engine.IsHealthyAsync(cancellationToken);
         if (!isHealthy)
         {

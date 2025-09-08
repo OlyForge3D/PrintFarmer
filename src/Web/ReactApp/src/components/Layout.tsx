@@ -1,6 +1,7 @@
 import { LoginModal } from '@/components/auth/LoginModal';
 import { RegisterModal } from '@/components/auth/RegisterModal';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { BuildInfo } from '@/components/BuildInfo';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSignalRConnection } from '@/hooks/useSignalR';
 import {
@@ -200,9 +201,9 @@ export function Layout({ children }: LayoutProps) {
   }, [location.pathname, filteredNavigation]);
 
   return (
-    <div className="min-h-screen bg-pf-bg-0">
-      {/* Live region for accessibility announcements */}
-      <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
+      <div className="min-h-screen bg-pf-bg-0 flex flex-col">
+        {/* Live region for accessibility announcements */}
+        <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
       {/* Top Header Bar */}
       <header className="bg-pf-bg-1 border-b border-pf-border sticky top-0 z-50">
         <div className="flex items-center justify-between h-16 px-4">
@@ -211,6 +212,8 @@ export function Layout({ children }: LayoutProps) {
             {/* Mobile menu button */}
             <button
               type="button"
+              aria-label="Open navigation menu"
+              title="Open navigation menu"
               className="lg:hidden p-2 rounded-md text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent"
               onClick={() => setSidebarOpen(true)}
             >
@@ -318,7 +321,7 @@ export function Layout({ children }: LayoutProps) {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-4rem)]">
+  <div className="flex flex-1 h-[calc(100vh-4rem)]">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
@@ -327,6 +330,8 @@ export function Layout({ children }: LayoutProps) {
               <div className="absolute top-0 right-0 -mr-12 pt-2">
                 <button
                   type="button"
+                  aria-label="Close navigation menu"
+                  title="Close navigation menu"
                   className="ml-1 flex h-10 w-10 items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-pf-accent"
                   onClick={() => setSidebarOpen(false)}
                 >
@@ -350,7 +355,7 @@ export function Layout({ children }: LayoutProps) {
                         type="button"
                         onClick={() => item.children ? toggleExpand(item.name) : (setSidebarOpen(false))}
                         className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
-                        aria-expanded={item.children ? isExpanded : undefined}
+                        aria-expanded={item.children ? (isExpanded ? true : false) : undefined}
                         aria-controls={item.children ? `submenu-${item.name}` : undefined}
                         aria-describedby={item.children ? `desc-mobile-${item.name.replace(/\s+/g, '-').toLowerCase()}` : undefined}
                       >
@@ -415,7 +420,7 @@ export function Layout({ children }: LayoutProps) {
                         onClick={() => item.children ? toggleExpand(item.name) : undefined}
                         className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                           }`}
-                        aria-expanded={item.children ? !!expanded[item.name] : undefined}
+                        aria-expanded={item.children ? (expanded[item.name] ? true : false) : undefined}
                         aria-controls={item.children ? `submenu-desktop-${item.name}` : undefined}
                         aria-describedby={item.children ? `desc-desktop-${item.name.replace(/\s+/g, '-').toLowerCase()}` : undefined}
                       >
@@ -476,6 +481,13 @@ export function Layout({ children }: LayoutProps) {
         />
       )}
 
+      <footer className="bg-pf-bg-1 border-t border-pf-border px-4 py-2 text-xs text-pf-text-tertiary flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <span>&copy; {new Date().getFullYear()} PrintFarmer</span>
+        </div>
+        <BuildInfo />
+      </footer>
+
       {/* Authentication Modals */}
       <LoginModal
         isOpen={showLoginModal}
@@ -490,3 +502,5 @@ export function Layout({ children }: LayoutProps) {
     </div>
   );
 }
+
+// Footer with build info now moved out of header for persistent display

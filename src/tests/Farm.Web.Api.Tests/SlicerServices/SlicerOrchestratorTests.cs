@@ -1,6 +1,5 @@
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 
@@ -343,16 +342,14 @@ public class SlicerOrchestratorTests
     public async Task GetUserJobsAsync_ShouldReturnUserJobs()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
-        job1.UserId = userId;
-        job1.Status = SlicingJobStatus.Completed;
-        
-        var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
-        job2.UserId = userId;
-        job2.Status = SlicingJobStatus.Slicing;
-        
-        var jobs = new List<DistributedSlicingJob> { job1, job2 };
+    var userId = Guid.NewGuid();
+    var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
+    job1.UserId = userId;
+    job1.Status = SlicingJobStatus.Completed;
+    var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
+    job2.UserId = userId;
+    job2.Status = SlicingJobStatus.Slicing;
+    var jobs = new List<DistributedSlicingJob> { job1, job2 };
 
         _mockJobQueue.Setup(q => q.GetUserJobsAsync(userId, null, It.IsAny<CancellationToken>())).ReturnsAsync(jobs);
 
@@ -361,7 +358,7 @@ public class SlicerOrchestratorTests
 
         // Assert
         result.Should().HaveCount(2);
-        result.All(j => j.JobId != Guid.Empty).Should().BeTrue();
+    result.TrueForAll(j => j.JobId != Guid.Empty).Should().BeTrue();
     }
 
     [Fact]

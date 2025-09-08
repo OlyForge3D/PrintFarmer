@@ -1,18 +1,13 @@
 import { useBasicHealth, useHealthStatus } from '@/hooks/useApi';
 import { isDetailedHealthStatus } from '@/types/api';
-import { AlertCircle, CheckCircle, Loader, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { SystemHealthSkeleton } from './skeletons/SystemHealthSkeleton';
+
 
 export function SystemHealth() {
   const { data: basic, isLoading, error } = useBasicHealth();
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center space-x-2">
-        <Loader className="h-4 w-4 animate-spin text-gray-500" />
-        <span className="text-xs text-gray-500">Checking...</span>
-      </div>
-    );
-  }
+  if (isLoading) return <SystemHealthSkeleton compact />;
 
   if (error || !basic) {
     return (
@@ -47,16 +42,7 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
   const { data: health, isLoading, error } = useHealthStatus();
   const detailedHealth = isDetailedHealthStatus(health) ? health : undefined;
 
-  if (isLoading) {
-    return (
-      <div className={`bg-white rounded-lg shadow p-4 ${className}`}>
-        <h3 className="text-lg font-medium mb-4">System Health</h3>
-        <div className="flex items-center justify-center py-8">
-          <Loader className="h-8 w-8 animate-spin text-gray-500" />
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <SystemHealthSkeleton className={className} />;
 
   if (error || !detailedHealth) {
     return (
@@ -105,7 +91,7 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
       <h3 className="text-lg font-medium mb-4">System Health</h3>
 
       <div className="space-y-3">
-        {/* Overall Status */}
+  {/* Overall Status */}
         {renderHealthStatus(detailedHealth.status ?? 'Unknown', 'Overall System')}
 
         {/* Database Status */}

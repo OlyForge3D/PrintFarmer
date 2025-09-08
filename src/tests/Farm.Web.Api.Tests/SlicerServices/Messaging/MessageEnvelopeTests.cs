@@ -1,7 +1,5 @@
 using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
-using FluentAssertions;
-using System.Text.Json;
 
 namespace Farm.Web.Api.Tests.SlicerServices.Messaging;
 

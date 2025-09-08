@@ -1,11 +1,13 @@
 ﻿using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
+using System.Collections.Concurrent;
 
 namespace Farm.Web.Api.Tests;
 
@@ -16,6 +18,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     public Mock<IMoonrakerClient> MockMoonrakerClient { get; private set; }
     public Mock<IPrusaLinkClient> MockPrusaLinkClient { get; private set; }
     public Mock<ISdcpClient> MockSdcpClient { get; private set; }
+    public Mock<ISlicerJobQueue> MockSlicerJobQueue { get; private set; } = null!;
+    public Mock<ISlicerFileStorage> MockSlicerFileStorage { get; private set; } = null!;
+    public Mock<ISlicerProgressNotifier> MockSlicerProgressNotifier { get; private set; } = null!;
+
+    private readonly ConcurrentDictionary<Guid, DistributedSlicingJob> _slicerJobs = new();
 
     public CustomWebApplicationFactory()
     {
@@ -39,9 +46,14 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         MockMoonrakerClient = new Mock<IMoonrakerClient>();
         MockPrusaLinkClient = new Mock<IPrusaLinkClient>();
         MockSdcpClient = new Mock<ISdcpClient>();
+        MockSlicerJobQueue = new Mock<ISlicerJobQueue>();
+        MockSlicerFileStorage = new Mock<ISlicerFileStorage>();
+        MockSlicerProgressNotifier = new Mock<ISlicerProgressNotifier>();
 
         // Set up default mock behaviors
         SetupDefaultMockBehaviors();
+
+        SetupSlicerServiceMocks();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -118,6 +130,26 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton(MockMoonrakerClient.Object);
             services.AddSingleton(MockPrusaLinkClient.Object);
             services.AddSingleton(MockSdcpClient.Object);
+
+            // Slicer service registrations (test-only DI wiring)
+            services.Configure<MockSlicerOptions>(o =>
+            {
+                o.InitialDelaySeconds = 0.01;
+                o.ProcessingTimeSeconds = 0.1; // fast deterministic
+                o.FailureRate = 0.0;
+            });
+
+            // File storage is fully mocked; still register options for any resolution paths
+            services.Configure<LocalFileStorageOptions>(o =>
+            {
+                o.BasePath = Path.Combine(Path.GetTempPath(), "slicer-test-storage");
+            });
+
+            services.AddSingleton(MockSlicerJobQueue.Object);
+            services.AddSingleton(MockSlicerFileStorage.Object);
+            services.AddSingleton(MockSlicerProgressNotifier.Object);
+            services.AddScoped<ISlicerEngine, MockOrcaSlicerEngine>();
+            services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         });
 
         // Set up default mock behaviors
@@ -161,7 +193,71 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // Set up default discovery behavior to return empty list
         MockNetworkDiscoveryService
             .Setup(x => x.DiscoverPrintersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DiscoveredPrinterDto>());
+            .ReturnsAsync([]);
+    }
+
+    private void SetupSlicerServiceMocks()
+    {
+        // Basic deterministic queue stats
+        MockSlicerJobQueue.Setup(q => q.GetQueueStatsAsync(It.IsAny<SlicerEngineType?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SlicerEngineType? engine, CancellationToken _) => new SlicerQueueStats
+            {
+                Engine = engine ?? SlicerEngineType.OrcaSlicer,
+                QueuedJobs = 0,
+                ProcessingJobs = 0,
+                CompletedJobs = 0,
+                FailedJobs = 0,
+                ActiveWorkers = 0,
+                AverageProcessingTimeSeconds = 10,
+                EstimatedWaitTime = TimeSpan.Zero,
+                LastUpdated = DateTime.UtcNow
+            });
+
+        // Capture jobs enqueued so status queries work
+        MockSlicerJobQueue.Setup(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()))
+            .Callback<DistributedSlicingJob, CancellationToken>((job, _) =>
+            {
+                job.Status = SlicingJobStatus.Queued;
+                _slicerJobs[job.Id] = job;
+            })
+            .Returns(Task.CompletedTask);
+
+        MockSlicerJobQueue.Setup(q => q.GetJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => _slicerJobs.TryGetValue(id, out var job) ? job : null);
+
+        MockSlicerJobQueue.Setup(q => q.FindExistingJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid cid, string checksum, CancellationToken _) => _slicerJobs.Values.FirstOrDefault(j => j.CorrelationId == cid && j.Checksum == checksum));
+
+        MockSlicerJobQueue.Setup(q => q.GetUserJobsAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid userId, int? limit, CancellationToken _) => _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50).ToList());
+
+        // File storage mocks (accept any path & simulate existence)
+        MockSlicerFileStorage.Setup(fs => fs.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        MockSlicerFileStorage.Setup(fs => fs.GetFileMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SlicerFileMetadata { SizeBytes = 1024, ContentType = "application/octet-stream" });
+        MockSlicerFileStorage.Setup(fs => fs.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(new byte[128]));
+        MockSlicerFileStorage.Setup(fs => fs.DownloadFileBytesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new byte[128]);
+        MockSlicerFileStorage.Setup(fs => fs.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string key, Stream _, string _, CancellationToken _) => $"memory://{key}");
+        MockSlicerFileStorage.Setup(fs => fs.UploadFileAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string key, byte[] _, string _, CancellationToken _) => $"memory://{key}");
+        MockSlicerFileStorage.Setup(fs => fs.GenerateSignedUrlAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string key, TimeSpan _, CancellationToken _) => $"memory://{key}?sig=dev-test");
+
+        // Progress notifier no-ops
+        MockSlicerProgressNotifier.Setup(p => p.NotifyProgressAsync(It.IsAny<SlicingProgressUpdate>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        MockSlicerProgressNotifier.Setup(p => p.NotifyCompletionAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<SlicingResult>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        MockSlicerProgressNotifier.Setup(p => p.NotifyFailureAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        MockSlicerProgressNotifier.Setup(p => p.SubscribeToJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        MockSlicerProgressNotifier.Setup(p => p.UnsubscribeFromJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
     }
 
     private void TryDelete()

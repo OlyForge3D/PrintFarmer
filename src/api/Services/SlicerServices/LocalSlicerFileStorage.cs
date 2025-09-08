@@ -1,5 +1,4 @@
 using Farm.Web.Shared;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -28,6 +27,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(key);
+            ArgumentNullException.ThrowIfNull(fileStream);
+            ArgumentNullException.ThrowIfNull(contentType);
             var filePath = GetFilePath(key);
             var directory = Path.GetDirectoryName(filePath);
             
@@ -38,6 +40,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             await using var fileWriteStream = File.Create(filePath);
             await fileStream.CopyToAsync(fileWriteStream, cancellationToken);
+
+            // Persist minimal metadata (e.g., content type) alongside the file
+            TryWriteSidecarMetadata(filePath, contentType);
 
             _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
             
@@ -54,6 +59,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(key);
+            ArgumentNullException.ThrowIfNull(fileData);
+            ArgumentNullException.ThrowIfNull(contentType);
             var filePath = GetFilePath(key);
             var directory = Path.GetDirectoryName(filePath);
             
@@ -63,6 +71,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             }
 
             await File.WriteAllBytesAsync(filePath, fileData, cancellationToken);
+
+            // Persist minimal metadata (e.g., content type) alongside the file
+            TryWriteSidecarMetadata(filePath, contentType);
 
             _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
             
@@ -75,10 +86,11 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<Stream> DownloadFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task<Stream> DownloadFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
             
             if (!File.Exists(filePath))
@@ -86,10 +98,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 throw new FileNotFoundException($"File not found: {keyOrUrl}");
             }
 
-            var fileStream = File.OpenRead(filePath);
+            var fileStream = (Stream)File.OpenRead(filePath);
             _logger.LogDebug("Downloaded file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
-            
-            return fileStream;
+            return Task.FromResult(fileStream);
         }
         catch (Exception ex)
         {
@@ -102,6 +113,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
             
             if (!File.Exists(filePath))
@@ -111,7 +123,6 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             var fileBytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
             _logger.LogDebug("Downloaded file bytes {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
-            
             return fileBytes;
         }
         catch (Exception ex)
@@ -121,24 +132,26 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<bool> FileExistsAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task<bool> FileExistsAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
-            return File.Exists(filePath);
+            return Task.FromResult(File.Exists(filePath));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to check if file exists {KeyOrUrl}", keyOrUrl);
-            return false;
+            return Task.FromResult(false);
         }
     }
 
-    public async Task DeleteFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task DeleteFileAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
             
             if (File.Exists(filePath))
@@ -146,6 +159,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 File.Delete(filePath);
                 _logger.LogDebug("Deleted file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
             }
+            return Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -154,25 +168,27 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<SlicerFileMetadata?> GetFileMetadataAsync(string keyOrUrl, CancellationToken cancellationToken = default)
+    public Task<SlicerFileMetadata?> GetFileMetadataAsync(string keyOrUrl, CancellationToken cancellationToken = default)
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
             
             if (!File.Exists(filePath))
             {
-                return null;
+                return Task.FromResult<SlicerFileMetadata?>(null);
             }
 
             var fileInfo = new System.IO.FileInfo(filePath);
             var key = GetKeyFromFilePath(filePath);
+            var storedContentType = TryReadSidecarContentType(filePath);
             
-            return new SlicerFileMetadata
+            var meta = new SlicerFileMetadata
             {
                 Key = key,
                 SizeBytes = fileInfo.Length,
-                ContentType = GetContentType(fileInfo.Extension),
+                ContentType = storedContentType ?? GetContentType(fileInfo.Extension),
                 CreatedAt = fileInfo.CreationTimeUtc,
                 LastModified = fileInfo.LastWriteTimeUtc,
                 ETag = GenerateETag(fileInfo),
@@ -182,6 +198,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                     ["Extension"] = fileInfo.Extension
                 }
             };
+            return Task.FromResult<SlicerFileMetadata?>(meta);
         }
         catch (Exception ex)
         {
@@ -190,11 +207,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
-    public async Task<string> GenerateSignedUrlAsync(string keyOrUrl, TimeSpan expiration, CancellationToken cancellationToken = default)
+    public Task<string> GenerateSignedUrlAsync(string keyOrUrl, TimeSpan expiration, CancellationToken cancellationToken = default)
     {
         // For local file storage, we'll just return the file URL as-is
         // In a real implementation with S3/Azure Blob, this would generate a signed URL
-        return GetFileUrlFromKeyOrUrl(keyOrUrl);
+    ArgumentNullException.ThrowIfNull(keyOrUrl);
+    return Task.FromResult(GetFileUrlFromKeyOrUrl(keyOrUrl));
     }
 
     public async Task CleanupTempFilesAsync(TimeSpan maxAge, CancellationToken cancellationToken = default)
@@ -271,6 +289,14 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             var key = uri.AbsolutePath.TrimStart('/');
             return GetFilePath(key);
         }
+        if (keyOrUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            // Use local file path from URI
+            if (Uri.TryCreate(keyOrUrl, UriKind.Absolute, out var fileUri))
+            {
+                return fileUri.LocalPath;
+            }
+        }
         
         // If it's already a file path within our base directory, use it directly
         if (keyOrUrl.StartsWith(_options.BasePath))
@@ -322,7 +348,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             ".stl" => "model/stl",
             ".obj" => "model/obj",
-            ".3mf" => "model/3mf",
+            ".3mf" => "application/vnd.ms-3mfdocument",
             ".ply" => "model/ply",
             ".gcode" => "text/plain",
             ".json" => "application/json",
@@ -337,6 +363,46 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         // Simple ETag based on last write time and size
         var hash = $"{fileInfo.LastWriteTimeUtc.Ticks}-{fileInfo.Length}".GetHashCode();
         return $"\"{hash:X}\"";
+    }
+
+    private static string GetSidecarPath(string filePath) => filePath + ".meta.json";
+
+    private void TryWriteSidecarMetadata(string filePath, string contentType)
+    {
+        try
+        {
+            var metaPath = GetSidecarPath(filePath);
+            var meta = new { ContentType = contentType };
+            var json = System.Text.Json.JsonSerializer.Serialize(meta);
+            File.WriteAllText(metaPath, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write sidecar metadata for {FilePath}", filePath);
+        }
+    }
+
+    private string? TryReadSidecarContentType(string filePath)
+    {
+        try
+        {
+            var metaPath = GetSidecarPath(filePath);
+            if (!File.Exists(metaPath))
+            {
+                return null;
+            }
+            var json = File.ReadAllText(metaPath);
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("ContentType", out var ctElem) && ctElem.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return ctElem.GetString();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read sidecar metadata for {FilePath}", filePath);
+        }
+        return null;
     }
 }
 

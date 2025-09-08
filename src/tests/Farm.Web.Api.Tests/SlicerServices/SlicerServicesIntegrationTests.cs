@@ -1,9 +1,7 @@
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;

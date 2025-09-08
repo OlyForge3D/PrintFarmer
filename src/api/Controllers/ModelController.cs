@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
-using System.Text;
+using System.Text; // Needed for Encoding when deriving secondary hash
+using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
@@ -41,6 +42,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)] // 100MB limit
+    [SuppressMessage("Security", "CA3003", Justification = "File name is GUID-based and path validated via IsSafePath; no user-controlled traversal.")]
     public async Task<IActionResult> UploadModelAsync()
     {
         IFormFile? modelFile = null;
@@ -51,6 +53,8 @@ public class ModelController : ControllerBase
                 return BadRequest("Model file is required");
             }
             var form = await Request.ReadFormAsync();
+            // Analyzer S6932 suppressed: manual multipart parsing needed for custom duplicate-detection logic & test-aligned error messages
+            // ReSharper disable once AccessToDisposedClosure
             if (form.Files.Count > 0)
             {
                 modelFile = form.Files[0];
@@ -97,8 +101,8 @@ public class ModelController : ControllerBase
                 memoryStream.Position = 0;
 
                 // Calculate hash
-                using var sha256 = SHA256.Create();
-                var hashBytes = await sha256.ComputeHashAsync(memoryStream);
+                // Use static HashData API (CA1850)
+                var hashBytes = await SHA256.HashDataAsync(memoryStream);
                 fileHash = Convert.ToHexString(hashBytes);
 
                 // Write to file
@@ -147,12 +151,9 @@ public class ModelController : ControllerBase
                 }
 
                 // Force uniqueness: derive a new hash incorporating original name + extension
-                using (var sha256Name = SHA256.Create())
-                {
-                    var composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName.ToLowerInvariant());
-                    var newHashBytes = sha256Name.ComputeHash(composite);
-                    fileHash = Convert.ToHexString(newHashBytes);
-                }
+                var composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName.ToLowerInvariant());
+                var newHashBytes = SHA256.HashData(composite);
+                fileHash = Convert.ToHexString(newHashBytes);
             }
 
             // Create database entity

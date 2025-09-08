@@ -35,9 +35,9 @@
     "src"
   ],
   "exclude": [
-    "**/*.spec.e2e.*",
-    "src/test",
-    "**/*.test.ts",
-    "**/*.test.tsx"
+  "src/test",
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*.spec.e2e.*"
   ]
 }

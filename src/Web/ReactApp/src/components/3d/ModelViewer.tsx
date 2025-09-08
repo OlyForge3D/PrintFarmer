@@ -14,7 +14,7 @@ import { STLLoader } from 'three-stdlib';
 import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 
-interface ModelViewerProps {
+export interface ModelViewerProps {
   modelUrl: string;
   fileType: 'stl' | '3mf' | 'obj' | 'ply';
   showGrid?: boolean;
@@ -111,7 +111,14 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       <Canvas
         camera={{ position: [50, 50, 50], fov: 45 }}
         shadows
-        onError={(error: any) => setError(error.message || 'Failed to load model')}
+        onError={(error: unknown) => {
+          if (error && typeof error === 'object' && 'message' in error) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            setError((error as any).message ?? 'Failed to load model');
+          } else {
+            setError('Failed to load model');
+          }
+        }}
       >
         {/* Lighting */}
         <ambientLight intensity={0.4} />

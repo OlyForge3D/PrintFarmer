@@ -1,0 +1,17 @@
+<Project>
+  <!-- Test-only analyzer suppressions. This file applies to all projects under src/tests/ -->
+  <PropertyGroup>
+    <!-- Suppress noisy rules in tests: Sonar (S*), IDisposableAnalyzers (IDISP*), some CA*, and CS1998 -->
+    <NoWarn>$(NoWarn);
+      S2699;  <!-- Tests without explicit assertions -->
+      S2930;  <!-- Dispose local disposable (often fine in tests) -->
+      S1481;  <!-- Unused local variable in tests -->
+      S6602;S6603;S6608; <!-- LINQ performance suggestions -->
+      S3878;  <!-- Array creation suggestions -->
+      S4144;  <!-- Duplicate method bodies in tests -->
+      IDISP006;IDISP025;IDISP005; <!-- IDisposable analyzer warnings in tests -->
+      CA1861;CA1849; <!-- Perf and Cancel() async suggestions in tests -->
+      CS1998  <!-- async method lacks await in tests -->
+    </NoWarn>
+  </PropertyGroup>
+</Project>

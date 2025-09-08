@@ -1,10 +1,19 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Box, Trash2, Play, Eye, Settings } from 'lucide-react';
-import { ModelViewer } from '@/components/3d/ModelViewer';
-import { GCodeViewer } from '@/components/3d/GCodeViewer';
+import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
+// Lazy load heavy three.js based viewers with manual preload support
+import { lazyWithPreload } from '@/utils/lazyWithPreload';
+import type { ModelViewerProps } from '@/components/3d/ModelViewer';
+import type { GCodeViewerProps } from '@/components/3d/GCodeViewer';
+const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
+  () => import('@/components/3d/ModelViewer').then(m => ({ default: m.ModelViewer }))
+);
+const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
+  () => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer }))
+);
 import { SlicerConfigModal } from '@/components/slicer/SlicerConfigModal';
 import { slicerService } from '@/services/slicerService';
+import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 
 interface Model {
   id: string;
@@ -114,7 +123,8 @@ export const ModelsPage: React.FC = () => {
       } catch (error) {
         console.error('Upload failed:', error);
         setUploadProgress(prev => {
-          const { [file.name]: _, ...rest } = prev;
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { [file.name]: _omit, ...rest } = prev; // remove failed file key
           return rest;
         });
       }
@@ -133,15 +143,12 @@ export const ModelsPage: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const getFileType = (fileName: string): 'stl' | '3mf' | 'obj' | 'ply' => {
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    return (extension as 'stl' | '3mf' | 'obj' | 'ply') || 'stl';
-  };
+  // Removed unused getFileType helper
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
@@ -213,16 +220,25 @@ export const ModelsPage: React.FC = () => {
                           {uploadProgress[file.name]}%
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-1">
-                          <div 
-                            className="bg-blue-600 h-1 rounded-full transition-all duration-300"
-                            style={{ width: `${uploadProgress[file.name]}%` }}
-                          />
+                          {(() => {
+                            const pct = uploadProgress[file.name] ?? 0;
+                            const bucket = Math.min(100, Math.max(0, Math.round(pct / 5) * 5));
+                            const widthClass = `w-[${bucket}%]` as const; // Tailwind arbitrary width
+                            return (
+                              <div
+                                className={`bg-blue-600 h-1 rounded-full transition-all duration-300 ${widthClass}`}
+                                aria-label={`Upload progress ${pct} percent`}
+                              />
+                            );
+                          })()}
                         </div>
                       </div>
                     )}
                     <button
                       onClick={() => removeFile(index)}
                       className="p-1 hover:bg-gray-200 rounded"
+                      aria-label="Remove file"
+                      title="Remove file"
                     >
                       <Trash2 className="w-4 h-4 text-gray-500" />
                     </button>
@@ -265,6 +281,8 @@ export const ModelsPage: React.FC = () => {
               {/* Quick actions overlay */}
               <div className="absolute top-2 right-2 flex space-x-1">
                 <button
+                  onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                  onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
                   onClick={() => setViewerModel(model)}
                   className="p-2 bg-white/80 hover:bg-white rounded shadow"
                   title="View 3D Model"
@@ -323,11 +341,13 @@ export const ModelsPage: React.FC = () => {
               </button>
             </div>
             <div className="p-4">
-              <ModelViewer
-                modelUrl={viewerModel.url}
-                fileType={viewerModel.fileType}
-                className="h-96 w-full"
-              />
+              <Suspense fallback={<ViewerSkeleton variant="model" />}> 
+                <ModelViewer
+                  modelUrl={viewerModel.url}
+                  fileType={viewerModel.fileType}
+                  className="h-96 w-full"
+                />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -347,7 +367,9 @@ export const ModelsPage: React.FC = () => {
               </button>
             </div>
             <div className="p-4">
-              <GCodeViewer gcodeUrl={gcodeViewer.url} />
+              <Suspense fallback={<ViewerSkeleton variant="gcode" />}> 
+                <GCodeViewer gcodeUrl={gcodeViewer.url} />
+              </Suspense>
             </div>
           </div>
         </div>

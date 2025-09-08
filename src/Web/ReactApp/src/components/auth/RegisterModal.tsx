@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, UserPlus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -116,12 +117,20 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             onClick={handleClose}
             disabled={isLoading}
             className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+            aria-label="Close registration modal"
+            title="Close"
+            type="button"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {isLoading && (
+          <div className="p-6"><FormSkeleton fields={6} /></div>
+        )}
+  <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="sr-only" role="status" aria-live="polite">
+            {isLoading ? 'Creating account...' : 'Form ready'}
+          </div>
           {allErrors.length > 0 && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm space-y-1">
               {allErrors.map((err, index) => (
@@ -261,7 +270,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             >
               {isLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                   Creating Account...
                 </>
               ) : (

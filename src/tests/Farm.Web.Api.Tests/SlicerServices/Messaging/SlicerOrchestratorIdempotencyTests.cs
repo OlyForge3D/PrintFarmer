@@ -1,7 +1,6 @@
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
-using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 

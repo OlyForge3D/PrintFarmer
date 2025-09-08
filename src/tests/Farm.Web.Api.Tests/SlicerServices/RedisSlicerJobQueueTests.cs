@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
-using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using StackExchange.Redis;
@@ -33,31 +32,31 @@ public class RedisSlicerJobQueueTests
     [Fact]
     public async Task EnqueueAsync_ValidJob_ShouldStoreJobAndAddToQueue()
     {
-        // Arrange
-        var job = CreateDistributedSlicingJob();
-        
-        _mockDatabase.Setup(d => d.CreateTransaction()).Returns(Mock.Of<ITransaction>());
-        var mockTransaction = Mock.Get(_mockDatabase.Object.CreateTransaction());
-        mockTransaction.Setup(t => t.ExecuteAsync()).ReturnsAsync(true);
+    // Arrange
+    var job = CreateDistributedSlicingJob();
+
+    var transactionMock = new Mock<ITransaction>();
+    transactionMock.Setup(t => t.ExecuteAsync(It.IsAny<CommandFlags>())).ReturnsAsync(true);
+    _mockDatabase.Setup(d => d.CreateTransaction(It.IsAny<object>())).Returns(transactionMock.Object);
 
         // Act
         await _queue.EnqueueAsync(job);
 
         // Assert
-        mockTransaction.Verify(t => t.HashSetAsync(
-            It.Is<RedisKey>(k => k.ToString().Contains($"slicer:job:{job.Id}")),
-            It.IsAny<HashEntry[]>(),
-            It.IsAny<CommandFlags>()
-        ), Times.Once);
+        transactionMock.Verify(t => t.HashSetAsync(
+                It.Is<RedisKey>(k => k.ToString().Contains($"slicer:job:{job.Id}")),
+                It.IsAny<HashEntry[]>(),
+                It.IsAny<CommandFlags>()
+            ), Times.Once);
 
-        mockTransaction.Verify(t => t.SortedSetAddAsync(
-            "slicer:queue",
-            It.IsAny<RedisValue>(),
-            It.IsAny<double>(),
-            It.IsAny<CommandFlags>()
-        ), Times.Once);
+        transactionMock.Verify(t => t.SortedSetAddAsync(
+                "slicer:queue",
+                It.IsAny<RedisValue>(),
+                It.IsAny<double>(),
+                It.IsAny<CommandFlags>()
+            ), Times.Once);
 
-        mockTransaction.Verify(t => t.ExecuteAsync(), Times.Once);
+        transactionMock.Verify(t => t.ExecuteAsync(It.IsAny<CommandFlags>()), Times.Once);
     }
 
     [Fact]
@@ -66,17 +65,17 @@ public class RedisSlicerJobQueueTests
         // Arrange
         var normalJob = CreateDistributedSlicingJob();
         normalJob.Priority = SlicingJobPriority.Normal;
-        
+
         var highPriorityJob = CreateDistributedSlicingJob();
         highPriorityJob.Priority = SlicingJobPriority.High;
-        
+
         var capturedScores = new List<double>();
-        
-        _mockDatabase.Setup(d => d.CreateTransaction()).Returns(Mock.Of<ITransaction>());
-        var mockTransaction = Mock.Get(_mockDatabase.Object.CreateTransaction());
-        mockTransaction.Setup(t => t.ExecuteAsync()).ReturnsAsync(true);
-        
-        mockTransaction.Setup(t => t.SortedSetAddAsync(
+
+        var transactionMock = new Mock<ITransaction>();
+        transactionMock.Setup(t => t.ExecuteAsync(It.IsAny<CommandFlags>())).ReturnsAsync(true);
+        _mockDatabase.Setup(d => d.CreateTransaction(It.IsAny<object>())).Returns(transactionMock.Object);
+
+        transactionMock.Setup(t => t.SortedSetAddAsync(
             "slicer:queue",
             It.IsAny<RedisValue>(),
             It.IsAny<double>(),
@@ -100,7 +99,7 @@ public class RedisSlicerJobQueueTests
         var jobJson = JsonSerializer.Serialize(job);
         var workerId = "worker-123";
 
-        _mockDatabase.Setup(d => d.SortedSetPopAsync("slicer:queue", Order.Ascending, It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.SortedSetPopAsync("slicer:queue", Order.Ascending, CommandFlags.None))
             .ReturnsAsync(new SortedSetEntry(jobJson, 1000.0));
 
         // Act
@@ -125,7 +124,7 @@ public class RedisSlicerJobQueueTests
     public async Task DequeueAsync_NoAvailableJobs_ShouldReturnNull()
     {
         // Arrange
-        _mockDatabase.Setup(d => d.SortedSetPopAsync("slicer:queue", Order.Ascending, It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.SortedSetPopAsync("slicer:queue", Order.Ascending, CommandFlags.None))
             .ReturnsAsync(new SortedSetEntry?());
 
         // Act
@@ -145,7 +144,7 @@ public class RedisSlicerJobQueueTests
         var jobJson = JsonSerializer.Serialize(orcaJob);
         var workerId = "prusa-worker";
 
-        _mockDatabase.Setup(d => d.SortedSetPopAsync("slicer:queue", Order.Ascending, It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.SortedSetPopAsync("slicer:queue", Order.Ascending, CommandFlags.None))
             .ReturnsAsync(new SortedSetEntry(jobJson, 1000.0));
 
         // Act
@@ -243,7 +242,7 @@ public class RedisSlicerJobQueueTests
         var jobKey = $"slicer:job:{jobId}";
         var jobJson = JsonSerializer.Serialize(job);
 
-        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", CommandFlags.None))
             .ReturnsAsync(jobJson);
 
         // Act
@@ -270,7 +269,7 @@ public class RedisSlicerJobQueueTests
         var jobKey = $"slicer:job:{jobId}";
         var jobJson = JsonSerializer.Serialize(job);
 
-        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", CommandFlags.None))
             .ReturnsAsync(jobJson);
 
         // Act
@@ -296,7 +295,7 @@ public class RedisSlicerJobQueueTests
         var jobJson = JsonSerializer.Serialize(job);
         var jobKey = $"slicer:job:{jobId}";
 
-        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", CommandFlags.None))
             .ReturnsAsync(jobJson);
 
         // Act
@@ -316,7 +315,7 @@ public class RedisSlicerJobQueueTests
         var jobId = Guid.NewGuid();
         var jobKey = $"slicer:job:{jobId}";
 
-        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", It.IsAny<CommandFlags>()))
+        _mockDatabase.Setup(d => d.HashGetAsync(jobKey, "data", CommandFlags.None))
             .ReturnsAsync(RedisValue.Null);
 
         // Act
@@ -486,9 +485,9 @@ public class RedisSlicerJobQueueTests
         _mockDatabase.Setup(d => d.SortedSetRangeByRankAsync("slicer:failed", 0, 100, It.IsAny<Order>(), It.IsAny<CommandFlags>()))
             .ReturnsAsync(failedJobs);
 
-        _mockDatabase.Setup(d => d.CreateTransaction()).Returns(Mock.Of<ITransaction>());
-        var mockTransaction = Mock.Get(_mockDatabase.Object.CreateTransaction());
-        mockTransaction.Setup(t => t.ExecuteAsync()).ReturnsAsync(true);
+    var transactionMock = new Mock<ITransaction>();
+    transactionMock.Setup(t => t.ExecuteAsync(It.IsAny<CommandFlags>())).ReturnsAsync(true);
+    _mockDatabase.Setup(d => d.CreateTransaction(It.IsAny<object>())).Returns(transactionMock.Object);
 
         // Act
         await _queue.RequeueFailedJobsAsync(maxRetryCount);
@@ -498,7 +497,7 @@ public class RedisSlicerJobQueueTests
         _mockDatabase.Verify(d => d.SortedSetRemoveAsync("slicer:failed", It.IsAny<RedisValue>(), It.IsAny<CommandFlags>()), Times.Once);
         
         // Should enqueue it again
-        mockTransaction.Verify(t => t.SortedSetAddAsync("slicer:queue", It.IsAny<RedisValue>(), It.IsAny<double>(), It.IsAny<CommandFlags>()), Times.Once);
+    transactionMock.Verify(t => t.SortedSetAddAsync("slicer:queue", It.IsAny<RedisValue>(), It.IsAny<double>(), It.IsAny<CommandFlags>()), Times.Once);
     }
 
     [Theory]
@@ -516,15 +515,15 @@ public class RedisSlicerJobQueueTests
         
         var capturedScores = new List<double>();
 
-        _mockDatabase.Setup(d => d.CreateTransaction()).Returns(Mock.Of<ITransaction>());
-        var mockTransaction = Mock.Get(_mockDatabase.Object.CreateTransaction());
-        mockTransaction.Setup(t => t.ExecuteAsync()).ReturnsAsync(true);
-        
-        mockTransaction.Setup(t => t.SortedSetAddAsync(
-            "slicer:queue",
-            It.IsAny<RedisValue>(),
-            It.IsAny<double>(),
-            It.IsAny<CommandFlags>()
+    var transactionMock = new Mock<ITransaction>();
+    transactionMock.Setup(t => t.ExecuteAsync(It.IsAny<CommandFlags>())).ReturnsAsync(true);
+    _mockDatabase.Setup(d => d.CreateTransaction(It.IsAny<object>())).Returns(transactionMock.Object);
+
+    transactionMock.Setup(t => t.SortedSetAddAsync(
+        "slicer:queue",
+        It.IsAny<RedisValue>(),
+        It.IsAny<double>(),
+        It.IsAny<CommandFlags>()
         )).Callback<RedisKey, RedisValue, double, CommandFlags>((k, v, score, f) => capturedScores.Add(score));
 
         // Act
