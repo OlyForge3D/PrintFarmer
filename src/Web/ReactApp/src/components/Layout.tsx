@@ -1,29 +1,30 @@
-import type { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
-import { useSignalRConnection } from '@/hooks/useSignalR';
-import { useAuth } from '@/contexts/AuthContext';
 import { LoginModal } from '@/components/auth/LoginModal';
 import { RegisterModal } from '@/components/auth/RegisterModal';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { 
-  Home,
-  Printer, 
-  Cog, 
-  Users,
-  Menu,
-  X,
+import { useAuth } from '@/contexts/AuthContext';
+import { useSignalRConnection } from '@/hooks/useSignalR';
+import {
   Box,
+  ChevronRight,
+  Cog,
   FileText,
-  Table,
   Grid3X3,
+  Home,
+  Layers,
+  LogIn,
+  LogOut,
+  Menu,
+  Printer,
+  Settings,
+  Table,
   User,
   UserCheck,
-  LogOut,
-  LogIn,
-  Settings,
-  Layers
+  Users,
+  X
 } from 'lucide-react';
-import { useState } from 'react';
+import type { ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 
 interface LayoutProps {
   children: ReactNode;
@@ -40,9 +41,9 @@ interface NavigationItem {
 
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
-  { 
-    name: 'Printers', 
-    href: '/printers/dashboard', 
+  {
+    name: 'Printers',
+    href: '/printers/dashboard',
     icon: Printer,
     requiredPermission: { resource: 'printers', action: 'read' },
     children: [
@@ -50,27 +51,27 @@ const navigation: NavigationItem[] = [
       { name: 'Table View', href: '/printers/table', icon: Table }
     ]
   },
-  { 
-    name: '3D Models', 
-    href: '/models', 
+  {
+    name: '3D Models',
+    href: '/models',
     icon: Box,
     requiredPermission: { resource: 'models', action: 'read' }
   },
-  { 
-    name: 'G-code Harvest', 
-    href: '/harvest', 
+  {
+    name: 'G-code Harvest',
+    href: '/harvest',
     icon: Cog,
     requiredPermission: { resource: 'gcode_harvest', action: 'read' }
   },
-  { 
-    name: 'G-code Files', 
-    href: '/files', 
+  {
+    name: 'G-code Files',
+    href: '/files',
     icon: FileText,
     requiredPermission: { resource: 'gcode_harvest', action: 'read' }
   },
-  { 
-    name: 'Admin', 
-    href: '#', 
+  {
+    name: 'Admin',
+    href: '#',
     icon: Settings,
     requiredRole: 'farm_admin',
     children: [
@@ -79,9 +80,9 @@ const navigation: NavigationItem[] = [
       { name: 'Spools', href: '/spools', icon: Box }
     ]
   },
-  { 
-    name: 'User Management', 
-    href: '/admin/users', 
+  {
+    name: 'User Management',
+    href: '/admin/users',
     icon: Users,
     requiredRole: 'farm_admin'
   }
@@ -90,6 +91,7 @@ const navigation: NavigationItem[] = [
 export function Layout({ children }: LayoutProps) {
   const { isConnected } = useSignalRConnection();
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -111,11 +113,33 @@ export function Layout({ children }: LayoutProps) {
     setUserMenuOpen(false);
   };
 
-  // Track which parent menus are expanded
+  // Track which parent menus are expanded (with persistence)
+  const LOCAL_STORAGE_KEY = 'pf_nav_expanded_v1';
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [announcement, setAnnouncement] = useState('');
+  const announcementTimer = useRef<number | null>(null);
 
   const toggleExpand = (name: string) => {
-    setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
+    setExpanded(prev => {
+      const nextValue = !prev[name];
+      const next = { ...prev, [name]: nextValue };
+      // Find item to get child count (from filtered list so it's permission-safe)
+      const itemDef = filteredNavigation.find(i => i.name === name);
+      const childCount = itemDef?.children?.length ?? 0;
+      const message = nextValue
+        ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
+        : `${name} section collapsed.`;
+      setAnnouncement(message);
+      // Clear previous timer
+      if (announcementTimer.current) {
+        clearTimeout(announcementTimer.current);
+      }
+      announcementTimer.current = window.setTimeout(() => {
+        setAnnouncement('');
+        announcementTimer.current = null;
+      }, 2500);
+      return next;
+    });
   };
 
   const switchToRegister = () => {
@@ -128,8 +152,57 @@ export function Layout({ children }: LayoutProps) {
     setShowLoginModal(true);
   };
 
+  // Motion preference
+  const prefersReducedMotion = useMemo(() => {
+    if (typeof window === 'undefined' || !('matchMedia' in window)) return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }, []);
+
+  // Hydrate expanded state
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          setExpanded(parsed);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Persist expanded changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(expanded));
+    } catch {
+      // ignore
+    }
+  }, [expanded]);
+
+  // Auto-expand groups containing current route
+  useEffect(() => {
+    const path = location.pathname;
+    setExpanded(prev => {
+      const next = { ...prev };
+      filteredNavigation.forEach(item => {
+        if (item.children) {
+          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+          if (hasActiveChild) {
+            next[item.name] = true;
+          }
+        }
+      });
+      return next;
+    });
+  }, [location.pathname, filteredNavigation]);
+
   return (
     <div className="min-h-screen bg-pf-bg-0">
+      {/* Live region for accessibility announcements */}
+      <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
       {/* Top Header Bar */}
       <header className="bg-pf-bg-1 border-b border-pf-border sticky top-0 z-50">
         <div className="flex items-center justify-between h-16 px-4">
@@ -143,7 +216,7 @@ export function Layout({ children }: LayoutProps) {
             >
               <Menu className="h-5 w-5" />
             </button>
-            
+
             {/* App logo and name */}
             <div className="flex items-center space-x-3">
               <div className="flex items-center justify-center w-8 h-8 bg-pf-accent rounded-md">
@@ -157,12 +230,11 @@ export function Layout({ children }: LayoutProps) {
           <div className="flex items-center space-x-4">
             {/* Theme toggle */}
             <ThemeToggle size="sm" />
-            
+
             {/* Connection status */}
             <div className="flex items-center space-x-2">
-              <div className={`h-2 w-2 rounded-full ${
-                isConnected ? 'bg-green-500' : 'bg-red-500'
-              }`} />
+              <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'
+                }`} />
               <span className="text-sm text-pf-text-tertiary">
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
@@ -261,61 +333,61 @@ export function Layout({ children }: LayoutProps) {
                   <X className="h-6 w-6 text-pf-text-primary" />
                 </button>
               </div>
-              
+
               <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
-                {filteredNavigation.map((item) => {
+                {filteredNavigation.map(item => {
                   const Icon = item.icon;
+                  const isExpanded = !!expanded[item.name];
                   return (
-                    <div key={item.name}>
-                        <div className="flex flex-col">
-                          <button
-                            type="button"
-                            onClick={() => item.children ? toggleExpand(item.name) : setSidebarOpen(false)}
-                            className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
-                              // Determine active: if item has children, active if any child route is active (handled below)
-                              'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                            }`}
-                            aria-expanded={item.children ? !!expanded[item.name] : undefined}
-                            aria-controls={item.children ? `submenu-${item.name}` : undefined}
-                          >
-                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                            <span className="flex-1 text-left">{item.name}</span>
-                            {item.children && (
-                              <span className={`transform transition-transform duration-200 ml-2 ${expanded[item.name] ? 'rotate-90' : ''}`}>›</span>
-                            )}
-                          </button>
-                          {item.children && (
-                            <div
-                              id={`submenu-${item.name}`}
-                              className={`overflow-hidden transition-all duration-300 ease-in-out ${expanded[item.name] ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
-                            >
-                              <div className="ml-8 space-y-1">
-                                {item.children.map((child) => {
-                                  const ChildIcon = child.icon;
-                                  return (
-                                    <NavLink
-                                      key={child.name}
-                                      to={child.href}
-                                      onClick={() => setSidebarOpen(false)}
-                                      className={({ isActive }) =>
-                                        `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
-                                          isActive
-                                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                            : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                        }`
-                                      }
-                                    >
-                                      <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                                      {child.name}
-                                    </NavLink>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
+                    <div key={item.name} className="flex flex-col">
+                      {/* Hidden hint description for screen readers */}
+                      {item.children && (
+                        <span id={`desc-mobile-${item.name.replace(/\s+/g, '-').toLowerCase()}`} className="sr-only">
+                          Press Enter or Space to toggle this section.
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => item.children ? toggleExpand(item.name) : (setSidebarOpen(false))}
+                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                        aria-expanded={item.children ? isExpanded : undefined}
+                        aria-controls={item.children ? `submenu-${item.name}` : undefined}
+                        aria-describedby={item.children ? `desc-mobile-${item.name.replace(/\s+/g, '-').toLowerCase()}` : undefined}
+                      >
+                        <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                        <span className="flex-1 text-left">{item.name}</span>
+                        {item.children && (
+                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+                        )}
+                      </button>
+                      {item.children && (
+                        <div
+                          id={`submenu-${item.name}`}
+                          className={`overflow-hidden ${prefersReducedMotion ? '' : 'transition-all duration-300 ease-in-out'} ${isExpanded ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
+                        >
+                          <div className="ml-8 space-y-1">
+                            {item.children.map(child => {
+                              const ChildIcon = child.icon;
+                              return (
+                                <NavLink
+                                  key={child.name}
+                                  to={child.href}
+                                  onClick={() => setSidebarOpen(false)}
+                                  className={({ isActive }) =>
+                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                      : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+                                    }`
+                                  }
+                                >
+                                  <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                  {child.name}
+                                </NavLink>
+                              );
+                            })}
+                          </div>
                         </div>
-                      {/* Render submenu items if they exist */}
-                      
+                      )}
                     </div>
                   );
                 })}
@@ -333,25 +405,30 @@ export function Layout({ children }: LayoutProps) {
                 return (
                   <div key={item.name}>
                     <div className="flex flex-col">
+                      {item.children && (
+                        <span id={`desc-desktop-${item.name.replace(/\s+/g, '-').toLowerCase()}`} className="sr-only">
+                          Press Enter or Space to toggle this section.
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => item.children ? toggleExpand(item.name) : undefined}
-                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
-                          'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                        }`}
+                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
+                          }`}
                         aria-expanded={item.children ? !!expanded[item.name] : undefined}
                         aria-controls={item.children ? `submenu-desktop-${item.name}` : undefined}
+                        aria-describedby={item.children ? `desc-desktop-${item.name.replace(/\s+/g, '-').toLowerCase()}` : undefined}
                       >
                         <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
                         <span className="flex-1 text-left">{item.name}</span>
                         {item.children && (
-                          <span className={`transform transition-transform duration-200 ml-2 ${expanded[item.name] ? 'rotate-90' : ''}`}>›</span>
+                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${expanded[item.name] ? 'rotate-90' : ''}`} aria-hidden="true" />
                         )}
                       </button>
                       {item.children && (
                         <div
                           id={`submenu-desktop-${item.name}`}
-                          className={`overflow-hidden transition-all duration-300 ease-in-out ${expanded[item.name] ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
+                          className={`overflow-hidden ${prefersReducedMotion ? '' : 'transition-all duration-300 ease-in-out'} ${expanded[item.name] ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
                         >
                           <div className="ml-8 space-y-1">
                             {item.children.map((child) => {
@@ -361,10 +438,9 @@ export function Layout({ children }: LayoutProps) {
                                   key={child.name}
                                   to={child.href}
                                   className={({ isActive }) =>
-                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
-                                      isActive
-                                        ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                        : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                      : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                     }`
                                   }
                                 >
