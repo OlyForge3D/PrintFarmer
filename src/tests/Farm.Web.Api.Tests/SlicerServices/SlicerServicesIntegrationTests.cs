@@ -19,21 +19,21 @@ public class SlicerServicesIntegrationTests : IDisposable
 
     public SlicerServicesIntegrationTests()
     {
-        _tempStoragePath = Path.Combine(Path.GetTempPath(), "slicer-integration-tests", Guid.NewGuid().ToString());
+        _tempStoragePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-integration-tests");
         _mockJobQueue = new Mock<ISlicerJobQueue>();
         _mockProgressNotifier = new Mock<ISlicerProgressNotifier>();
 
         var services = new ServiceCollection();
-        
+
         // Add logging
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
-        
+
         // Configure file storage
         services.Configure<LocalFileStorageOptions>(options =>
         {
             options.BasePath = _tempStoragePath;
         });
-        
+
         // Configure mock slicer with fast processing
         services.Configure<MockSlicerOptions>(options =>
         {
@@ -56,7 +56,7 @@ public class SlicerServicesIntegrationTests : IDisposable
     public void Dispose()
     {
         _serviceProvider?.Dispose();
-        
+
         if (Directory.Exists(_tempStoragePath))
         {
             Directory.Delete(_tempStoragePath, recursive: true);
@@ -276,7 +276,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         // Test valid model
         var validModelContent = CreateTestStlContent();
         using var validStream = new MemoryStream(validModelContent);
-        
+
         // Test empty model
         using var emptyStream = new MemoryStream();
 
@@ -371,7 +371,7 @@ public class SlicerServicesIntegrationTests : IDisposable
     {
         // Arrange
         var slicerEngine = _serviceProvider.GetRequiredService<ISlicerEngine>();
-        
+
         var job = CreateDistributedSlicingJob();
         job.Profile = new SlicerProfileDto
         {
@@ -388,7 +388,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         // Assert
         result.Success.Should().BeTrue();
         result.Metadata.Should().ContainKey("GeneratedGcode");
-        
+
         var gcode = result.Metadata["GeneratedGcode"].ToString();
         gcode.Should().Contain($"M104 S{nozzleTemp}"); // Nozzle temperature
         gcode.Should().Contain($"M140 S{bedTemp}"); // Bed temperature

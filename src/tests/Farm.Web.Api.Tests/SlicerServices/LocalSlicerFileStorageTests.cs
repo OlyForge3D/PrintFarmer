@@ -18,8 +18,8 @@ public class LocalSlicerFileStorageTests : IDisposable
     public LocalSlicerFileStorageTests()
     {
         _mockLogger = new Mock<ILogger<LocalSlicerFileStorage>>();
-        _tempBasePath = Path.Combine(Path.GetTempPath(), "slicer-storage-tests", Guid.NewGuid().ToString());
-        
+        _tempBasePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
+
         _options = new LocalFileStorageOptions
         {
             BasePath = _tempBasePath
@@ -101,7 +101,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         // Verify directory structure was created
         var filePath = Path.Combine(_tempBasePath, key);
         File.Exists(filePath).Should().BeTrue();
-        
+
         var directoryPath = Path.GetDirectoryName(filePath);
         Directory.Exists(directoryPath).Should().BeTrue();
     }
@@ -119,11 +119,11 @@ public class LocalSlicerFileStorageTests : IDisposable
 
         // Assert
         stream.Should().NotBeNull();
-        
+
         using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
         var downloadedContent = memoryStream.ToArray();
-        
+
         downloadedContent.Should().BeEquivalentTo(originalContent);
     }
 
@@ -152,11 +152,11 @@ public class LocalSlicerFileStorageTests : IDisposable
 
         // Assert
         stream.Should().NotBeNull();
-        
+
         using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
         var downloadedContent = memoryStream.ToArray();
-        
+
         downloadedContent.Should().BeEquivalentTo(originalContent);
     }
 
@@ -235,7 +235,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         var key = "test-delete/file.3mf";
         var content = CreateTestFileContent();
         await _storage.UploadFileAsync(key, content, "application/octet-stream");
-        
+
         // Verify file exists first
         var existsBefore = await _storage.FileExistsAsync(key);
         existsBefore.Should().BeTrue();
@@ -265,9 +265,9 @@ public class LocalSlicerFileStorageTests : IDisposable
         var key = "test-metadata/file.stl";
         var content = CreateTestFileContent();
         var beforeUpload = DateTime.UtcNow;
-        
+
         await _storage.UploadFileAsync(key, content, "application/vnd.ms-3mfdocument");
-        
+
         var afterUpload = DateTime.UtcNow;
 
         // Act
@@ -322,11 +322,11 @@ public class LocalSlicerFileStorageTests : IDisposable
         var oldKey = "temp/old-file.stl";
         var newKey = "temp/new-file.stl";
         var content = CreateTestFileContent();
-        
+
         // Upload files
         await _storage.UploadFileAsync(oldKey, content, "application/octet-stream");
         await _storage.UploadFileAsync(newKey, content, "application/octet-stream");
-        
+
         // Make one file appear old by manually setting its creation time
         var oldFilePath = Path.Combine(_tempBasePath, oldKey);
         var oldTime = DateTime.UtcNow.AddDays(-2);
@@ -339,7 +339,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         // Assert
         var oldExists = await _storage.FileExistsAsync(oldKey);
         var newExists = await _storage.FileExistsAsync(newKey);
-        
+
         oldExists.Should().BeFalse(); // Old file should be deleted
         newExists.Should().BeTrue();  // New file should remain
     }
@@ -351,7 +351,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         var key1 = "temp/file1.stl";
         var key2 = "temp/file2.obj";
         var content = CreateTestFileContent();
-        
+
         await _storage.UploadFileAsync(key1, content, "application/octet-stream");
         await _storage.UploadFileAsync(key2, content, "application/octet-stream");
 
@@ -361,7 +361,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         // Assert
         var exists1 = await _storage.FileExistsAsync(key1);
         var exists2 = await _storage.FileExistsAsync(key2);
-        
+
         exists1.Should().BeTrue();
         exists2.Should().BeTrue();
     }
@@ -402,7 +402,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         {
             var key = $"concurrent/file-{i}.stl";
             var content = CreateTestFileContent($"Content for file {i}");
-            
+
             tasks.Add(_storage.UploadFileAsync(key, content, "application/octet-stream"));
         }
 
@@ -421,15 +421,14 @@ public class LocalSlicerFileStorageTests : IDisposable
     public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
     {
         // Arrange & Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
-            new LocalSlicerFileStorage(null!, _mockLogger.Object));
+        Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _mockLogger.Object));
     }
 
     [Fact]
     public void Constructor_ValidOptions_ShouldCreateBaseDirectory()
     {
         // Arrange
-        var newTempPath = Path.Combine(Path.GetTempPath(), "test-directory-creation", Guid.NewGuid().ToString());
+    var newTempPath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
         var options = new LocalFileStorageOptions { BasePath = newTempPath };
         var optionsWrapper = Options.Create(options);
 

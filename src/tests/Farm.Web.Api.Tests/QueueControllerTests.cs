@@ -44,7 +44,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [Fact]
     public async Task GetQueueOverview_ShouldReturnPrinterQueues_WhenPrintersExistAsync()
     {
-    // Arrange - Create a printer with capabilities
+        // Arrange - Create a printer with capabilities
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Test Printer");
 
         // Act
@@ -332,7 +332,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [InlineData(PrintJobPriority.High, 2)]
     public async Task QueuePriority_ShouldOrderJobsCorrectlyAsync(PrintJobPriority priority, int expectedPriorityValue)
     {
-    // Arrange - Create printer and gcode file
+        // Arrange - Create printer and gcode file
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Priority Order Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("priority-order.gcode");
 
@@ -357,7 +357,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [Fact]
     public async Task GetQueueOverview_ShouldShowCorrectCounts_WhenJobsExistAsync()
     {
-    // Arrange - Create printer and multiple jobs
+        // Arrange - Create printer and multiple jobs
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Count Test Printer");
         var gcodeFile = await CreateTestGcodeFileAsync("count-test.gcode");
 
@@ -411,7 +411,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [Fact]
     public async Task PrinterCompatibility_ShouldMatchByMaterialTypeAsync()
     {
-    // Arrange - Create printer with specific material support
+        // Arrange - Create printer with specific material support
         var printer = await CreateTestPrinterWithCapabilitiesAsync("Material Match Printer", supportedMaterials: ["PLA", "PETG", "ABS"]);
         var gcodeFile = await CreateTestGcodeFileAsync("material-test.gcode");
 
@@ -482,7 +482,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
             Id = Guid.NewGuid(),
             OriginalFileName = filename,
             DisplayName = Path.GetFileNameWithoutExtension(filename),
-            FilePath = Path.Combine(Path.GetTempPath(), filename),
+            FilePath = Farm.Web.Api.Tests.TestInfrastructure.TestPaths.GetTempFilePath(filename),
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString("N"),
             Source = GcodeSource.Upload,

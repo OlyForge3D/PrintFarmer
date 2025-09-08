@@ -26,8 +26,9 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     public CustomWebApplicationFactory()
     {
-        var dbFile = $"farm_test_{Guid.NewGuid():N}.db";
-        _dbPath = Path.Combine(Path.GetTempPath(), dbFile);
+        var dbFile = $"farm_test_{Guid.NewGuid():N}.db"; // repository-local temp db file
+        var tempDir = Farm.Web.Api.Tests.TestInfrastructure.TestPaths.GetUniqueTempDirectory();
+        _dbPath = Path.Combine(tempDir, dbFile);
         TryDelete();
 
         // Ensure Program.cs picks up the test-specific database path early
@@ -142,7 +143,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // File storage is fully mocked; still register options for any resolution paths
             services.Configure<LocalFileStorageOptions>(o =>
             {
-                o.BasePath = Path.Combine(Path.GetTempPath(), "slicer-test-storage");
+                o.BasePath = Path.Combine(Farm.Web.Api.Tests.TestInfrastructure.TestPaths.RepoTempRoot, "slicer-test-storage");
             });
 
             services.AddSingleton(MockSlicerJobQueue.Object);
@@ -229,7 +230,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             .ReturnsAsync((Guid cid, string checksum, CancellationToken _) => _slicerJobs.Values.FirstOrDefault(j => j.CorrelationId == cid && j.Checksum == checksum));
 
         MockSlicerJobQueue.Setup(q => q.GetUserJobsAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid userId, int? limit, CancellationToken _) => _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50).ToList());
+            .ReturnsAsync((Guid userId, int? limit, CancellationToken _) =>
+            {
+                var list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
+                return list.ToList();
+            });
 
         // File storage mocks (accept any path & simulate existence)
         MockSlicerFileStorage.Setup(fs => fs.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
