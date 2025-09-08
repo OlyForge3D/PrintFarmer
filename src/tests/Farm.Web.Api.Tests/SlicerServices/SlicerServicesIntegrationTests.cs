@@ -47,6 +47,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         services.AddSingleton(_mockProgressNotifier.Object);
         services.AddScoped<ISlicerFileStorage, LocalSlicerFileStorage>();
         services.AddScoped<ISlicerEngine, MockOrcaSlicerEngine>();
+        services.AddScoped<ISlicerEngine, MockPrusaSlicerEngine>();
         services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
 
         _serviceProvider = services.BuildServiceProvider();

@@ -1,0 +1,184 @@
+# PrintFarmer Microservices Architecture with Dual Slicer Workers
+# Supports both OrcaSlicer and PrusaSlicer workers for distributed slicing
+version: '3.8'
+
+services:
+  # Redis for job queuing and worker coordination
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - printfarmer-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # Database (PostgreSQL for production microservices)
+  database:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: printfarmer
+      POSTGRES_USER: printfarmer
+      POSTGRES_PASSWORD: printfarmer_password
+    ports:
+      - "5432:5432"
+    networks:
+      - printfarmer-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PrintFarmer API - Core microservice
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "5001:8080"
+    networks:
+      - printfarmer-network
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - DB_PROVIDER=PostgreSQL
+      - ConnectionStrings__DefaultConnection=Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password
+      - ConnectionStrings__Redis=redis:6379
+      - CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080
+      - DEPLOYMENT_MODE=microservices
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - SlicerOrchestrator__EnableDistributedSlicing=true
+      - SlicerOrchestrator__Workers__OrcaSlicer=http://orcaslicer-worker:8080
+      - SlicerOrchestrator__Workers__PrusaSlicer=http://prusaslicer-worker:8080
+    volumes:
+      - app_data:/data
+      - model_uploads:/app/uploads
+      - gcode_storage:/app/gcode
+      - slicer_profiles:/app/profiles
+    depends_on:
+      redis:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  # OrcaSlicer Worker - Distributed slicing microservice
+  orcaslicer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    ports:
+      - "8081:8080"
+    networks:
+      - printfarmer-network
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__Redis=redis:6379
+      - Worker__StorageEndpoint=http://api:8080
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__WorkerId=orcaslicer-worker-1
+      - Worker__QueueName=orcaslicer-jobs
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Farm.Slicer.Worker=Debug
+    volumes:
+      - orcaslicer_temp:/app/temp
+      - gcode_storage:/app/gcode
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  # PrusaSlicer Worker - Distributed slicing microservice
+  prusaslicer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prusaslicer
+    ports:
+      - "8082:8080"
+    networks:
+      - printfarmer-network
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__Redis=redis:6379
+      - Worker__StorageEndpoint=http://api:8080
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
+      - Worker__WorkerId=prusaslicer-worker-1
+      - Worker__QueueName=prusaslicer-jobs
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Farm.PrusaSlicer.Worker=Debug
+    volumes:
+      - prusaslicer_temp:/app/temp
+      - gcode_storage:/app/gcode
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # PrusaSlicer binary installation takes longer
+
+  # React Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    networks:
+      - printfarmer-network
+    environment:
+      - VITE_API_BASE_URL=http://localhost:5001/api
+      - VITE_SIGNALR_URL=http://localhost:5001/hubs/printers
+      - NGINX_PROXY_API=http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  printfarmer-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  postgres_data:
+  app_data:
+  model_uploads:
+  gcode_storage:
+  slicer_profiles:
+  orcaslicer_temp:
+  prusaslicer_temp:

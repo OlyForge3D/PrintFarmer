@@ -8,6 +8,8 @@ using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services.SlicerServices;
+using StackExchange.Redis;
 using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
@@ -242,6 +244,25 @@ builder.Services.AddScoped<GcodeHarvestService>();
 
 // Harvest queue services
 builder.Services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
+
+// Slicer services
+builder.Services.Configure<MockSlicerOptions>(builder.Configuration.GetSection("MockSlicer"));
+builder.Services.Configure<LocalFileStorageOptions>(builder.Configuration.GetSection("LocalFileStorage"));
+
+// Add Redis connection for slicer job queue
+builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
+{
+    var configuration = provider.GetService<IConfiguration>();
+    var connectionString = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(connectionString);
+});
+
+builder.Services.AddScoped<ISlicerEngine, MockOrcaSlicerEngine>();
+builder.Services.AddScoped<ISlicerEngine, MockPrusaSlicerEngine>();
+builder.Services.AddScoped<ISlicerJobQueue, RedisSlicerJobQueue>();
+builder.Services.AddScoped<ISlicerFileStorage, LocalSlicerFileStorage>();
+builder.Services.AddScoped<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
+builder.Services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
 
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
