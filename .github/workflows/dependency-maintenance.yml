@@ -2,7 +2,7 @@ name: Dependency Maintenance (Prune + Stale Close)
 
 on:
   schedule:
-    - cron: '20 4 * * *' # Daily 04:20 UTC combined maintenance
+    - cron: "20 4 * * *" # Daily 04:20 UTC combined maintenance
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
       SECURITY_REVIEWED_LABEL: security-reviewed
       KEEP_OPEN_MAX_DAYS: 30
       STALE_DAYS: 5
-      EXEMPT_STALE_LABELS: 'no-autoclose,security,keep-open'
+      EXEMPT_STALE_LABELS: "no-autoclose,security,keep-open"
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
