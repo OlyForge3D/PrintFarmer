@@ -62,7 +62,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             // Validate checksum if envelope was provided externally
             if (request.Envelope != null)
             {
-                var jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(request);
+                var jobContent = SlicingJobContent.FromRequest(request);
                 if (!envelope.ValidateChecksum(jobContent))
                 {
                     throw new ArgumentException("Request content does not match envelope checksum", nameof(request));

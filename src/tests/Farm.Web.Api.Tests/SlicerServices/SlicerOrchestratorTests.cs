@@ -344,11 +344,15 @@ public class SlicerOrchestratorTests
     {
         // Arrange
         var userId = Guid.NewGuid();
-        var jobs = new List<DistributedSlicingJob>
-        {
-            CreateDistributedSlicingJob(Guid.NewGuid()) { UserId = userId, Status = SlicingJobStatus.Completed },
-            CreateDistributedSlicingJob(Guid.NewGuid()) { UserId = userId, Status = SlicingJobStatus.Slicing }
-        };
+        var job1 = CreateDistributedSlicingJob(Guid.NewGuid());
+        job1.UserId = userId;
+        job1.Status = SlicingJobStatus.Completed;
+        
+        var job2 = CreateDistributedSlicingJob(Guid.NewGuid());
+        job2.UserId = userId;
+        job2.Status = SlicingJobStatus.Slicing;
+        
+        var jobs = new List<DistributedSlicingJob> { job1, job2 };
 
         _mockJobQueue.Setup(q => q.GetUserJobsAsync(userId, null, It.IsAny<CancellationToken>())).ReturnsAsync(jobs);
 

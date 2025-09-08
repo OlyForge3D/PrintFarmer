@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
