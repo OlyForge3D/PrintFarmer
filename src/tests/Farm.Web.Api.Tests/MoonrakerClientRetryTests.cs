@@ -75,12 +75,12 @@ public class MoonrakerClientRetryTests
                 var s = await client.GetStatusAsync(Base);
                 if (!s.IsOnline)
                 {
-                    throw new Exception("offline");
+                    throw new HttpRequestException("offline");
                 }
             }, maxRetries: 2, initialDelayMs: 1, operationName: "StatusCheck");
         };
 
-        await act.Should().ThrowAsync<Exception>();
+    await act.Should().ThrowAsync<HttpRequestException>();
         attempts.Should().Be(3);
     }
 

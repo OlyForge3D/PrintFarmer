@@ -253,11 +253,18 @@ public class AuthenticationService : IAuthenticationService
                 ValidIssuer = _configuration["Jwt:Issuer"],
                 ValidateAudience = true,
                 ValidAudience = _configuration["Jwt:Audience"],
-                ValidateLifetime = false, // We'll handle lifetime validation elsewhere
+                ValidateLifetime = true, // CA5404: must be true
                 ClockSkew = TimeSpan.Zero
             };
 
-            var principal = tokenHandler.ValidateToken(token, validationParameters, out _);
+            var principal = tokenHandler.ValidateToken(token, validationParameters, out var securityToken);
+
+            // Additional defense-in-depth: ensure token not expired (redundant with ValidateLifetime=true but explicit for clarity)
+            if (securityToken is JwtSecurityToken jwt && jwt.ValidTo < DateTime.UtcNow)
+            {
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
             return Task.FromResult<ClaimsPrincipal?>(principal);
         }
         catch

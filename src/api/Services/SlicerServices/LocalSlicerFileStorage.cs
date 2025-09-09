@@ -15,7 +15,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     {
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        
+
         // Ensure base directory exists
         if (!Directory.Exists(_options.BasePath))
         {
@@ -32,7 +32,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             ArgumentNullException.ThrowIfNull(contentType);
             var filePath = GetFilePath(key);
             var directory = Path.GetDirectoryName(filePath);
-            
+
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
@@ -45,7 +45,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             TryWriteSidecarMetadata(filePath, contentType);
 
             _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
-            
+
             return GetFileUrl(key);
         }
         catch (Exception ex)
@@ -64,7 +64,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             ArgumentNullException.ThrowIfNull(contentType);
             var filePath = GetFilePath(key);
             var directory = Path.GetDirectoryName(filePath);
-            
+
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
@@ -76,7 +76,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             TryWriteSidecarMetadata(filePath, contentType);
 
             _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
-            
+
             return GetFileUrl(key);
         }
         catch (Exception ex)
@@ -92,7 +92,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
-            
+
             if (!File.Exists(filePath))
             {
                 throw new FileNotFoundException($"File not found: {keyOrUrl}");
@@ -115,7 +115,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
-            
+
             if (!File.Exists(filePath))
             {
                 throw new FileNotFoundException($"File not found: {keyOrUrl}");
@@ -153,7 +153,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
-            
+
             if (File.Exists(filePath))
             {
                 File.Delete(filePath);
@@ -174,7 +174,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             ArgumentNullException.ThrowIfNull(keyOrUrl);
             var filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
-            
+
             if (!File.Exists(filePath))
             {
                 return Task.FromResult<SlicerFileMetadata?>(null);
@@ -183,7 +183,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             var fileInfo = new System.IO.FileInfo(filePath);
             var key = GetKeyFromFilePath(filePath);
             var storedContentType = TryReadSidecarContentType(filePath);
-            
+
             var meta = new SlicerFileMetadata
             {
                 Key = key,
@@ -211,17 +211,17 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     {
         // For local file storage, we'll just return the file URL as-is
         // In a real implementation with S3/Azure Blob, this would generate a signed URL
-    ArgumentNullException.ThrowIfNull(keyOrUrl);
-    return Task.FromResult(GetFileUrlFromKeyOrUrl(keyOrUrl));
+        ArgumentNullException.ThrowIfNull(keyOrUrl);
+        return Task.FromResult(GetFileUrlFromKeyOrUrl(keyOrUrl));
     }
 
-    public async Task CleanupTempFilesAsync(TimeSpan maxAge, CancellationToken cancellationToken = default)
+    public void CleanupTempFiles(TimeSpan maxAge, CancellationToken cancellationToken = default)
     {
         try
         {
             var cutoffTime = DateTime.UtcNow.Subtract(maxAge);
             var tempDirectory = Path.Combine(_options.BasePath, "temp");
-            
+
             if (!Directory.Exists(tempDirectory))
             {
                 return;
@@ -289,21 +289,19 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             var key = uri.AbsolutePath.TrimStart('/');
             return GetFilePath(key);
         }
-        if (keyOrUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        if (keyOrUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase) &&
+            Uri.TryCreate(keyOrUrl, UriKind.Absolute, out var fileUri))
         {
             // Use local file path from URI
-            if (Uri.TryCreate(keyOrUrl, UriKind.Absolute, out var fileUri))
-            {
-                return fileUri.LocalPath;
-            }
+            return fileUri.LocalPath;
         }
-        
+
         // If it's already a file path within our base directory, use it directly
         if (keyOrUrl.StartsWith(_options.BasePath))
         {
             return keyOrUrl;
         }
-        
+
         // Otherwise treat as a key
         return GetFilePath(keyOrUrl);
     }
@@ -314,7 +312,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             return $"file://{GetFilePath(key)}";
         }
-        
+
         return $"{_options.BaseUrl.TrimEnd('/')}/{key}";
     }
 
@@ -325,14 +323,14 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             return keyOrUrl;
         }
-        
+
         // If it's a file path, convert to key and then to URL
         if (keyOrUrl.StartsWith(_options.BasePath))
         {
             var key = GetKeyFromFilePath(keyOrUrl);
             return GetFileUrl(key);
         }
-        
+
         // Otherwise treat as a key
         return GetFileUrl(keyOrUrl);
     }

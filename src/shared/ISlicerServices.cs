@@ -71,46 +71,7 @@ public interface ISlicerJobQueue
     Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Interface for slicer engine implementations
-/// </summary>
-public interface ISlicerEngine
-{
-    /// <summary>
-    /// Type of slicer engine
-    /// </summary>
-    SlicerEngineType EngineType { get; }
-
-    /// <summary>
-    /// Version of the slicer
-    /// </summary>
-    string Version { get; }
-
-    /// <summary>
-    /// Check if the slicer is available and healthy
-    /// </summary>
-    Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Slice a 3D model file
-    /// </summary>
-    Task<SlicingResult> SliceAsync(DistributedSlicingJob job, IProgress<SlicingProgressUpdate>? progressCallback = null, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Validate a 3D model file
-    /// </summary>
-    Task<SlicerValidationResult> ValidateModelAsync(Stream modelFile, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Get estimated processing time for a job
-    /// </summary>
-    Task<TimeSpan> EstimateProcessingTimeAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Get supported file extensions
-    /// </summary>
-    IReadOnlyList<string> SupportedFileExtensions { get; }
-}
+// In-process ISlicerEngine concept removed (migrated to external worker services). Placeholder deleted.
 
 /// <summary>
 /// Interface for file storage operations
@@ -160,7 +121,7 @@ public interface ISlicerFileStorage
     /// <summary>
     /// Cleanup temporary files older than specified age
     /// </summary>
-    Task CleanupTempFilesAsync(TimeSpan maxAge, CancellationToken cancellationToken = default);
+    void CleanupTempFiles(TimeSpan maxAge, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -248,18 +209,18 @@ public class SlicerQueueStats
     public long FailedJobs { get; set; }
     public int ActiveWorkers { get; set; }
     public double AverageProcessingTimeSeconds { get; set; }
-    public TimeSpan EstimatedWaitTime { get; set; }
+    public TimeSpan? EstimatedWaitTime { get; set; }
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
 
 public class SlicerValidationResult
 {
     public bool IsValid { get; set; }
-    public List<string> Issues { get; set; } = new();
-    public List<string> Warnings { get; set; } = new();
+    public List<string> Issues { get; set; } = [];
+    public List<string> Warnings { get; set; } = [];
     public long FileSizeBytes { get; set; }
     public string? FileType { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; set; } = [];
 }
 
 public class SlicerFileMetadata
@@ -270,7 +231,7 @@ public class SlicerFileMetadata
     public DateTime CreatedAt { get; set; }
     public DateTime LastModified { get; set; }
     public string? ETag { get; set; }
-    public Dictionary<string, string> CustomMetadata { get; set; } = new();
+    public Dictionary<string, string> CustomMetadata { get; set; } = [];
 }
 
 public class SlicerEngineInfo
@@ -281,13 +242,13 @@ public class SlicerEngineInfo
     public int ActiveWorkers { get; set; }
     public long QueueDepth { get; set; }
     public IReadOnlyList<string> SupportedExtensions { get; set; } = Array.Empty<string>();
-    public TimeSpan EstimatedWaitTime { get; set; }
+    public TimeSpan? EstimatedWaitTime { get; set; }
 }
 
 public class SlicerOrchestratorHealth
 {
     public bool IsHealthy { get; set; }
-    public Dictionary<SlicerEngineType, SlicerEngineInfo> Engines { get; set; } = new();
+    public Dictionary<SlicerEngineType, SlicerEngineInfo> Engines { get; set; } = [];
     public bool JobQueueHealthy { get; set; }
     public bool FileStorageHealthy { get; set; }
     public int TotalActiveJobs { get; set; }

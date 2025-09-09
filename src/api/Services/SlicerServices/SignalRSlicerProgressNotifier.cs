@@ -10,7 +10,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 {
     private readonly IHubContext<SlicerProgressHub> _hubContext;
     private readonly ILogger<SignalRSlicerProgressNotifier> _logger;
-    private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = new();
+    private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = [];
     private readonly object _lockObject = new();
 
     public SignalRSlicerProgressNotifier(
@@ -28,15 +28,15 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         {
             // Get subscribers for this job
             var connectionIds = GetJobSubscribers(update.JobId);
-            
+
             if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingProgress", update, cancellationToken);
-                _logger.LogDebug("Sent progress update for job {JobId} to {SubscriberCount} subscribers: {Progress}%", 
+                _logger.LogDebug("Sent progress update for job {JobId} to {SubscriberCount} subscribers: {Progress}%",
                     update.JobId, connectionIds.Count, update.Progress);
             }
-            
+
             // Also send to a general group for monitoring dashboards
             await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SlicingProgress", update, cancellationToken);
         }
@@ -75,18 +75,18 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 
             // Get subscribers for this job
             var connectionIds = GetJobSubscribers(job.Id);
-            
+
             if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingCompleted", completionNotification, cancellationToken);
-                _logger.LogInformation("Sent completion notification for job {JobId} to {SubscriberCount} subscribers", 
+                _logger.LogInformation("Sent completion notification for job {JobId} to {SubscriberCount} subscribers",
                     job.Id, connectionIds.Count);
             }
 
             // Send to user's personal group
             await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("SlicingCompleted", completionNotification, cancellationToken);
-            
+
             // Send to monitoring group
             await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SlicingCompleted", completionNotification, cancellationToken);
 
@@ -123,18 +123,18 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 
             // Get subscribers for this job
             var connectionIds = GetJobSubscribers(job.Id);
-            
+
             if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingFailed", failureNotification, cancellationToken);
-                _logger.LogInformation("Sent failure notification for job {JobId} to {SubscriberCount} subscribers", 
+                _logger.LogInformation("Sent failure notification for job {JobId} to {SubscriberCount} subscribers",
                     job.Id, connectionIds.Count);
             }
 
             // Send to user's personal group
             await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("SlicingFailed", failureNotification, cancellationToken);
-            
+
             // Send to monitoring group
             await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SlicingFailed", failureNotification, cancellationToken);
 
@@ -157,7 +157,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         {
             if (!_jobSubscriptions.TryGetValue(jobId, out var set))
             {
-                set = new HashSet<string>();
+                set = [];
                 _jobSubscriptions[jobId] = set;
             }
 
@@ -192,9 +192,9 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         {
             if (_jobSubscriptions.TryGetValue(jobId, out var subscribers))
             {
-                return new List<string>(subscribers);
+                return [.. subscribers];
             }
-            return new List<string>();
+            return [];
         }
     }
 
@@ -262,7 +262,7 @@ public class SlicerProgressHub : Hub
         // Clean up any job subscriptions for this connection
         // This is a simplified cleanup - in production you might want to track subscriptions per connection
         _logger.LogDebug("Connection {ConnectionId} disconnected", Context.ConnectionId);
-        
+
         await base.OnDisconnectedAsync(exception);
     }
 }
@@ -283,7 +283,7 @@ public class SlicingCompletionNotification
     public int LayerCount { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CompletedAt { get; set; }
-    public Dictionary<string, object> Metadata { get; } = new();
+    public Dictionary<string, object> Metadata { get; } = [];
 }
 
 /// <summary>
@@ -298,5 +298,5 @@ public class SlicingFailureNotification
     public DateTime FailedAt { get; set; }
     public int RetryCount { get; set; }
     public bool CanRetry { get; set; }
-    public Dictionary<string, object> Metadata { get; } = new();
+    public Dictionary<string, object> Metadata { get; } = [];
 }

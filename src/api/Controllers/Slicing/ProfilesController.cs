@@ -233,11 +233,11 @@ public class ProfilesController : ControllerBase
 
     private static List<SlicerProfileDto> DefaultProfiles()
     {
-        return new List<SlicerProfileDto>
-        {
+        return
+        [
             new() { LayerHeight = 0.3, InfillPercentage = 10, PrintSpeed = 60, NozzleTemperature = 210, BedTemperature = 60, Supports = false, Material = "PLA", Quality = "draft" },
             new() { LayerHeight = 0.2, InfillPercentage = 20, PrintSpeed = 50, NozzleTemperature = 210, BedTemperature = 60, Supports = false, Material = "PLA", Quality = "standard" },
             new() { LayerHeight = 0.15, InfillPercentage = 25, PrintSpeed = 40, NozzleTemperature = 210, BedTemperature = 60, Supports = true, Material = "PLA", Quality = "fine" }
-        };
+        ];
     }
 }

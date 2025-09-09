@@ -12,7 +12,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     private readonly IConnectionMultiplexer _redis;
     private readonly IDatabase _database;
     private readonly ILogger<RedisSlicerJobQueue> _logger;
-    
+
     // Redis keys
     // Keys retained for future expansion (currently used in stats operations)
     // private readonly string _jobsKey = "slicer:jobs"; // reserved for future detailed hash lookups
@@ -38,7 +38,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             // Use a transaction to ensure atomicity
             var transaction = _database.CreateTransaction();
-            
+
             // Store job details
             var jobKey = GetJobKey(job.Id);
             _ = transaction.HashSetAsync(jobKey, new HashEntry[]
@@ -58,13 +58,13 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             // Add to priority queue (explicitly use overload without SortedSetWhen so tests can verify 4-arg signature)
             _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
-            
+
             // Set job expiration (30 days)
             _ = transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
 
             await transaction.ExecuteAsync();
 
-            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine} (correlation {CorrelationId})", 
+            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine} (correlation {CorrelationId})",
                 job.Id, job.Priority, job.SlicerEngine, job.CorrelationId);
         }
         catch (Exception ex)
@@ -86,7 +86,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             }
 
             var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobData.Value.Element);
-            
+
             if (job != null && preferredEngine != null && job.SlicerEngine != preferredEngine)
             {
                 // Re-queue if engine doesn't match preference
@@ -99,12 +99,12 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 job.Status = SlicingJobStatus.Slicing;
                 job.StartedAt = DateTime.UtcNow;
                 job.WorkerId = workerId;
-                
+
                 // Move to processing queue
                 await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Value.Score, CommandFlags.None);
-                
+
                 await UpdateJobAsync(job);
-                
+
                 _logger.LogInformation("Dequeued slicing job {JobId} for worker {WorkerId}", job.Id, workerId);
             }
 
@@ -186,7 +186,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             }
 
             await _database.HashSetAsync(jobKey, updates);
-            
+
             // Also update the job data if we have it
             var job = await GetJobAsync(jobId, cancellationToken);
             if (job != null)
@@ -288,11 +288,11 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             var jobs = new List<DistributedSlicingJob>();
-            
+
             // Simplified implementation - scan through a fixed recent window (tests expect end rank 100 regardless of requested limit)
             var completedJobs = await _database.SortedSetRangeByRankAsync(_completedKey, 0, 100, Order.Descending, CommandFlags.None);
             var failedJobs = await _database.SortedSetRangeByRankAsync(_failedKey, 0, 100, Order.Descending, CommandFlags.None);
-            
+
             foreach (var jobJson in completedJobs.Concat(failedJobs))
             {
                 var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobJson);
@@ -316,11 +316,11 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             var cutoffTimestamp = DateTimeOffset.UtcNow.Subtract(maxAge).ToUnixTimeSeconds();
-            
+
             var removedCompleted = await _database.SortedSetRemoveRangeByScoreAsync(_completedKey, 0, cutoffTimestamp);
             var removedFailed = await _database.SortedSetRemoveRangeByScoreAsync(_failedKey, 0, cutoffTimestamp);
 
-            _logger.LogInformation("Cleaned up {CompletedCount} completed and {FailedCount} failed jobs older than {MaxAge}", 
+            _logger.LogInformation("Cleaned up {CompletedCount} completed and {FailedCount} failed jobs older than {MaxAge}",
                 removedCompleted, removedFailed, maxAge);
         }
         catch (Exception ex)
@@ -370,7 +370,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     {
         var jobKey = GetJobKey(job.Id);
         var jobJson = JsonSerializer.Serialize(job);
-        
+
         await _database.HashSetAsync(
             jobKey,
             [
@@ -386,7 +386,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     {
         var jobJson = JsonSerializer.Serialize(job);
         var score = GetPriorityScore(job.Priority, job.CreatedAt);
-    await _database.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
+        await _database.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
     }
 
     private static string GetJobKey(Guid jobId) => $"slicer:job:{jobId}";
@@ -402,7 +402,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             SlicingJobPriority.Low => 3000.0,
             _ => 2000.0
         };
-        
+
         // Add timestamp component to maintain FIFO within same priority
         var timestampComponent = createdAt.Ticks / 10000000.0; // Convert to seconds
         return priorityValue + timestampComponent;
@@ -414,11 +414,11 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         {
             return TimeSpan.FromHours(24); // Unknown
         }
-        
+
         // Very rough estimate: assume 5 minutes per job on average
         var averageJobTime = TimeSpan.FromMinutes(5);
         var estimatedSeconds = (queuedJobs * averageJobTime.TotalSeconds) / activeWorkers;
-        
+
         return TimeSpan.FromSeconds(Math.Min(estimatedSeconds, TimeSpan.FromHours(24).TotalSeconds));
     }
 
@@ -428,7 +428,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         {
             var correlationKey = GetCorrelationKey(correlationId, checksum);
             var jobIdString = await _database.StringGetAsync(correlationKey);
-            
+
             if (!jobIdString.HasValue)
             {
                 return null;
@@ -438,7 +438,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             {
                 return null;
             }
-            
+
             return await GetJobAsync(jobId, cancellationToken);
         }
         catch (Exception ex)

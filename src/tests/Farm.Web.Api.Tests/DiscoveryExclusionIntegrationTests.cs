@@ -18,6 +18,10 @@ public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFa
 
     public DiscoveryExclusionIntegrationTests(WebApplicationFactory<Program> factory)
     {
+        if (factory is null)
+        {
+            throw new ArgumentNullException(nameof(factory));
+        }
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>

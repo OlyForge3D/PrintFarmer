@@ -13,7 +13,7 @@ public class VersionInfo
     public string Firmware { get; set; } = string.Empty;
     public string? Sdk { get; set; }
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO for JSON transport; setter needed for deserialization")]
-    public Dictionary<string, object> Capabilities { get; set; } = new();
+    public Dictionary<string, object> Capabilities { get; set; } = [];
 }
 
 // Printer Information

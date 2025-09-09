@@ -11,6 +11,10 @@ public class SlicingProgressControllerTests : IClassFixture<CustomWebApplication
 
     public SlicingProgressControllerTests(CustomWebApplicationFactory factory)
     {
+        if (factory is null)
+        {
+            throw new ArgumentNullException(nameof(factory));
+        }
         _client = factory.CreateClient();
     }
 

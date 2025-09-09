@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Web.Api.Infrastructure.Temp;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
@@ -245,8 +246,7 @@ builder.Services.AddScoped<GcodeHarvestService>();
 // Harvest queue services
 builder.Services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
 
-// Slicer services
-builder.Services.Configure<MockSlicerOptions>(builder.Configuration.GetSection("MockSlicer"));
+// Slicer services (MockSlicerOptions removed with in-process engine deprecation)
 builder.Services.Configure<LocalFileStorageOptions>(builder.Configuration.GetSection("LocalFileStorage"));
 
 // Add Redis connection for slicer job queue
@@ -257,12 +257,12 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
     return ConnectionMultiplexer.Connect(connectionString);
 });
 
-builder.Services.AddScoped<ISlicerEngine, MockOrcaSlicerEngine>();
-builder.Services.AddScoped<ISlicerEngine, MockPrusaSlicerEngine>();
+// In-process slicer engines removed (external workers handle slicing). DI registrations deleted.
 builder.Services.AddScoped<ISlicerJobQueue, RedisSlicerJobQueue>();
 builder.Services.AddScoped<ISlicerFileStorage, LocalSlicerFileStorage>();
 builder.Services.AddScoped<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
 builder.Services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
+builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
@@ -361,7 +361,11 @@ builder.Services.AddAuthentication("Bearer")
             options.RequireHttpsMetadata = false;
         }
 
-        var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured");
+        var key = builder.Configuration["Jwt:Key"];
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("JWT Key not configured. Provide a 32+ character secret via environment variable Jwt__Key or user-secrets in development.");
+        }
         var issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
         var audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
 
@@ -377,12 +381,12 @@ builder.Services.AddAuthentication("Bearer")
             ClockSkew = TimeSpan.Zero
         };
 
-    // NOTE: Previously issuer/audience validation was relaxed in the "Testing" environment.
-    // All integration tests now obtain tokens exclusively via the authentication endpoints,
-    // which generate tokens including both issuer and audience (see AuthenticationService).
-    // Enforcing validation in tests prevents accidental acceptance of malformed tokens.
-    // (If a future test truly needs to bypass these checks, generate a properly formed token
-    // instead of weakening validation here.)
+        // NOTE: Previously issuer/audience validation was relaxed in the "Testing" environment.
+        // All integration tests now obtain tokens exclusively via the authentication endpoints,
+        // which generate tokens including both issuer and audience (see AuthenticationService).
+        // Enforcing validation in tests prevents accidental acceptance of malformed tokens.
+        // (If a future test truly needs to bypass these checks, generate a properly formed token
+        // instead of weakening validation here.)
 
         options.TokenValidationParameters = tvp;
     });
@@ -540,6 +544,15 @@ app.MapPost("/api/network-discovery/settings", ([FromServices] INetworkDiscovery
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+// Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
+app.MapGet("/diagnostics/temp-root", (Microsoft.AspNetCore.Hosting.IWebHostEnvironment env, Farm.Web.Api.Infrastructure.Temp.ITempPathProvider provider) =>
+{
+    if (env.IsProduction())
+    {
+        return Results.StatusCode(StatusCodes.Status404NotFound);
+    }
+    return Results.Ok(new { tempRoot = provider.GetTempRoot() });
+});
 // Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 

@@ -73,7 +73,7 @@ public class SlicingJobRequest
     public SlicerEngineType SlicerEngine { get; set; } = SlicerEngineType.OrcaSlicer;
     public SlicerProfileDto SlicerProfile { get; set; } = new();
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; set; } = [];
 
     /// <summary>
     /// Message envelope for idempotency and tracking
@@ -128,7 +128,7 @@ public class DistributedSlicingJob : SlicingJobDto
     public long? OutputFileSizeBytes { get; set; }
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; set; } = [];
     public int RetryCount { get; set; } = 0;
     public DateTime? LastRetryAt { get; set; }
 
@@ -248,7 +248,7 @@ public class SlicingJobStatusResponse
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = new();
+    public Dictionary<string, object> Metadata { get; set; } = [];
 }
 
 /// <summary>
@@ -265,7 +265,7 @@ public class SlicingResult
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
-    public Dictionary<string, string> Metadata { get; set; } = new();
+    public Dictionary<string, string> Metadata { get; set; } = [];
 }
 
 /// <summary>
@@ -281,7 +281,7 @@ public class SlicerHealthCheckResponse
     public long AvailableMemoryMB { get; set; }
     public DateTime? LastJobCompletedAt { get; set; }
     public bool IsHealthy { get; set; }
-    public Dictionary<string, object> Details { get; set; } = new();
+    public Dictionary<string, object> Details { get; set; } = [];
 }
 
 /// <summary>
@@ -295,9 +295,18 @@ public class SlicerWorkerConfiguration
     public int MaxRetryCount { get; set; } = 3;
     public TimeSpan JobTimeout { get; set; } = TimeSpan.FromMinutes(60);
     public TimeSpan HealthCheckInterval { get; set; } = TimeSpan.FromSeconds(30);
-    public string TempDirectory { get; set; } = Path.GetTempPath();
+    // Temp directory is now expected to be injected / set explicitly via WithTempDirectory or composition root.
+    // Default falls back to current working directory /temp to avoid system global temp (macOS TCC prompts).
+    public string TempDirectory { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "temp");
     public long MaxFileSizeBytes { get; set; } = 100_000_000; // 100MB
-    public Dictionary<string, object> SlicerSpecificSettings { get; set; } = new();
+    public Dictionary<string, object> SlicerSpecificSettings { get; set; } = [];
+
+    public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)
+    {
+        var cfg = new SlicerWorkerConfiguration { TempDirectory = tempRoot };
+        configure?.Invoke(cfg);
+        return cfg;
+    }
 }
 
 /// <summary>
@@ -310,7 +319,7 @@ public class SlicingProgressUpdate
     public SlicingJobStatus Status { get; set; }
     public string? CurrentStep { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public Dictionary<string, object> AdditionalData { get; set; } = new();
+    public Dictionary<string, object> AdditionalData { get; set; } = [];
 }
 
 /// <summary>

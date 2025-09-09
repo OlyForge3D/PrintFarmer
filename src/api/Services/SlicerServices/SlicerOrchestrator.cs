@@ -12,42 +12,39 @@ public class SlicerOrchestrator : ISlicerOrchestrator
     private readonly ISlicerFileStorage _fileStorage;
     private readonly ISlicerProgressNotifier _progressNotifier;
     private readonly ILogger<SlicerOrchestrator> _logger;
-    private readonly Dictionary<SlicerEngineType, ISlicerEngine> _slicerEngines;
+    private readonly Dictionary<SlicerEngineType, EngineMetadata> _engineCatalog;
 
     public SlicerOrchestrator(
         ISlicerJobQueue jobQueue,
         ISlicerFileStorage fileStorage,
         ISlicerProgressNotifier progressNotifier,
-        IEnumerable<ISlicerEngine> slicerEngines,
         ILogger<SlicerOrchestrator> logger)
     {
         _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
         _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        
-        _slicerEngines = slicerEngines.ToDictionary(e => e.EngineType, e => e);
+
+        _engineCatalog = BuildStaticCatalog();
     }
 
     public async Task<SlicingJobResponse> SubmitJobAsync(SlicingJobRequest request, CancellationToken cancellationToken = default)
     {
-    // Capture for logging after null check
-    // Null guard (CA1062)
-    ArgumentNullException.ThrowIfNull(request);
-    var userIdForLog = request.UserId;
-    try
+        ArgumentNullException.ThrowIfNull(request);
+        var userIdForLog = request.UserId;
+        try
         {
             // Validate the request
             await ValidateRequestAsync(request, cancellationToken);
 
             // Get or create message envelope for idempotency
             var envelope = request.GetOrCreateEnvelope();
-            
+
             // Check for existing job (idempotency)
             var existingJob = await _jobQueue.FindExistingJobAsync(envelope.CorrelationId, envelope.Checksum, cancellationToken);
             if (existingJob != null)
             {
-                _logger.LogInformation("Found existing job {JobId} for correlation {CorrelationId}, returning existing response", 
+                _logger.LogInformation("Found existing job {JobId} for correlation {CorrelationId}, returning existing response",
                     existingJob.Id, envelope.CorrelationId);
 
                 // Return existing job response
@@ -56,7 +53,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 {
                     JobId = existingJob.Id,
                     Status = existingJob.Status,
-                    EstimatedCompletionTime = existingJob.CompletedAt ?? DateTime.UtcNow.Add(queueStats.EstimatedWaitTime),
+                    EstimatedCompletionTime = existingJob.CompletedAt ?? DateTime.UtcNow.Add(queueStats.EstimatedWaitTime ?? TimeSpan.Zero),
                     QueuePosition = existingJob.Status == SlicingJobStatus.Queued ? (int)queueStats.QueuedJobs : 0,
                     SlicerWorkerUrl = GetSlicerWorkerUrl(request.SlicerEngine)
                 };
@@ -95,7 +92,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
             // Get queue stats for estimated completion time
             var queueStatsForNew = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
-            var estimatedCompletion = DateTime.UtcNow.Add(queueStatsForNew.EstimatedWaitTime);
+            var estimatedCompletion = DateTime.UtcNow.Add(queueStatsForNew.EstimatedWaitTime ?? TimeSpan.Zero);
 
             _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}",
                 job.Id, envelope.CorrelationId, request.UserId, request.SlicerEngine);
@@ -168,7 +165,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             }
 
             await _jobQueue.CancelJobAsync(jobId, cancellationToken);
-            
+
             // Notify about cancellation
             await _progressNotifier.NotifyFailureAsync(job, "Job cancelled by user", cancellationToken);
 
@@ -184,35 +181,53 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
     public async Task<List<SlicerEngineInfo>> GetAvailableEnginesAsync(CancellationToken cancellationToken = default)
     {
-        try
+        var engineInfos = new List<SlicerEngineInfo>();
+        var failures = 0;
+
+        foreach (var kvp in _engineCatalog)
         {
-            var engineInfos = new List<SlicerEngineInfo>();
-
-            foreach (var kvp in _slicerEngines)
+            var meta = kvp.Value;
+            try
             {
-                var engine = kvp.Value;
-                var queueStats = await _jobQueue.GetQueueStatsAsync(engine.EngineType, cancellationToken);
-                var isHealthy = await engine.IsHealthyAsync(cancellationToken);
-
+                var queueStats = await _jobQueue.GetQueueStatsAsync(meta.EngineType, cancellationToken);
                 engineInfos.Add(new SlicerEngineInfo
                 {
-                    Engine = engine.EngineType,
-                    Version = engine.Version,
-                    IsHealthy = isHealthy,
+                    Engine = meta.EngineType,
+                    Version = meta.Version,
+                    IsHealthy = true,
                     ActiveWorkers = queueStats.ActiveWorkers,
                     QueueDepth = queueStats.QueuedJobs,
-                    SupportedExtensions = engine.SupportedFileExtensions,
+                    SupportedExtensions = meta.SupportedExtensions,
                     EstimatedWaitTime = queueStats.EstimatedWaitTime
                 });
             }
+            catch (Exception ex)
+            {
+                failures++;
+                _logger.LogWarning(ex, "Queue stats retrieval failed for engine {Engine}", meta.EngineType);
+                // Return an unhealthy placeholder so the UI can still show engine availability and degraded status
+                engineInfos.Add(new SlicerEngineInfo
+                {
+                    Engine = meta.EngineType,
+                    Version = meta.Version,
+                    IsHealthy = false,
+                    ActiveWorkers = 0,
+                    QueueDepth = 0,
+                    SupportedExtensions = meta.SupportedExtensions,
+                    EstimatedWaitTime = null
+                });
+            }
+        }
 
-            return [.. engineInfos.OrderBy(e => e.Engine)];
-        }
-        catch (Exception ex)
+        // If every engine failed, escalate as an error
+        if (failures == _engineCatalog.Count)
         {
-            _logger.LogError(ex, "Failed to get available engines");
-            throw;
+            var ex = new InvalidOperationException("Failed to retrieve queue stats for all slicer engines");
+            _logger.LogError(ex, "All engine queue stats retrievals failed");
+            throw ex;
         }
+
+        return [.. engineInfos.OrderBy(e => e.Engine)];
     }
 
     public async Task<Dictionary<SlicerEngineType, SlicerQueueStats>> GetAllQueueStatsAsync(CancellationToken cancellationToken = default)
@@ -221,7 +236,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         {
             var stats = new Dictionary<SlicerEngineType, SlicerQueueStats>();
 
-            foreach (var engineType in _slicerEngines.Keys)
+            foreach (var engineType in _engineCatalog.Keys)
             {
                 var queueStats = await _jobQueue.GetQueueStatsAsync(engineType, cancellationToken);
                 stats[engineType] = queueStats;
@@ -241,7 +256,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         try
         {
             var jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
-            
+
             return [.. jobs.Select(job => new SlicingJobStatusResponse
             {
                 JobId = job.Id,
@@ -268,80 +283,88 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
     public async Task<SlicerOrchestratorHealth> GetHealthAsync(CancellationToken cancellationToken = default)
     {
-        try
+        var health = new SlicerOrchestratorHealth
         {
-            var health = new SlicerOrchestratorHealth
-            {
-                IsHealthy = true,
-                JobQueueHealthy = true,
-                FileStorageHealthy = true
-            };
+            IsHealthy = true,
+            JobQueueHealthy = true,
+            FileStorageHealthy = true
+        };
 
-            // Check each engine
-            foreach (var kvp in _slicerEngines)
-            {
-                var engine = kvp.Value;
-                var queueStats = await _jobQueue.GetQueueStatsAsync(engine.EngineType, cancellationToken);
-                var isHealthy = await engine.IsHealthyAsync(cancellationToken);
+        var engineFailures = 0;
 
-                health.Engines[engine.EngineType] = new SlicerEngineInfo
+        foreach (var kvp in _engineCatalog)
+        {
+            var meta = kvp.Value;
+            try
+            {
+                var queueStats = await _jobQueue.GetQueueStatsAsync(meta.EngineType, cancellationToken);
+                health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
-                    Engine = engine.EngineType,
-                    Version = engine.Version,
-                    IsHealthy = isHealthy,
+                    Engine = meta.EngineType,
+                    Version = meta.Version,
+                    IsHealthy = true,
                     ActiveWorkers = queueStats.ActiveWorkers,
                     QueueDepth = queueStats.QueuedJobs,
-                    SupportedExtensions = engine.SupportedFileExtensions,
+                    SupportedExtensions = meta.SupportedExtensions,
                     EstimatedWaitTime = queueStats.EstimatedWaitTime
                 };
-
                 health.TotalActiveJobs += queueStats.ActiveWorkers;
                 health.TotalQueuedJobs += queueStats.QueuedJobs;
-
-                if (!isHealthy)
+            }
+            catch (Exception ex)
+            {
+                engineFailures++;
+                _logger.LogWarning(ex, "Health check failed for engine {Engine}", meta.EngineType);
+                health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
-                    health.IsHealthy = false;
-                }
+                    Engine = meta.EngineType,
+                    Version = meta.Version,
+                    IsHealthy = false,
+                    ActiveWorkers = 0,
+                    QueueDepth = 0,
+                    SupportedExtensions = meta.SupportedExtensions,
+                    EstimatedWaitTime = null
+                };
+                health.IsHealthy = false; // degraded
             }
+        }
 
-            // Test job queue connectivity
-            try
-            {
-                await _jobQueue.GetQueueStatsAsync(null, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Job queue health check failed");
-                health.JobQueueHealthy = false;
-                health.IsHealthy = false;
-            }
-
-            // Test file storage connectivity (simplified test)
-            try
-            {
-                // This is a simple connectivity test - in production you might want a dedicated health check method
-                await _fileStorage.FileExistsAsync("health-check-non-existent-file", cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "File storage health check failed");
-                health.FileStorageHealthy = false;
-                health.IsHealthy = false;
-            }
-
-            return health;
+        // Job queue broad connectivity test
+        try
+        {
+            await _jobQueue.GetQueueStatsAsync(null, cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get orchestrator health");
-            return new SlicerOrchestratorHealth { IsHealthy = false };
+            _logger.LogWarning(ex, "Job queue health check failed");
+            health.JobQueueHealthy = false;
+            health.IsHealthy = false;
         }
+
+        // File storage test
+        try
+        {
+            await _fileStorage.FileExistsAsync("health-check-non-existent-file", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "File storage health check failed");
+            health.FileStorageHealthy = false;
+            health.IsHealthy = false;
+        }
+
+        // If every engine failed mark overall unhealthy (already set) – nothing extra needed except logging.
+        if (engineFailures == _engineCatalog.Count)
+        {
+            _logger.LogError("All engines failed health checks");
+        }
+
+        return health;
     }
 
     private async Task ValidateRequestAsync(SlicingJobRequest request, CancellationToken cancellationToken)
     {
-        // Validate required fields
-    ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request);
 
         if (request.UserId == Guid.Empty)
         {
@@ -357,16 +380,9 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
 
         // Validate slicer engine is available
-        if (!_slicerEngines.TryGetValue(request.SlicerEngine, out var engine))
+        if (!_engineCatalog.TryGetValue(request.SlicerEngine, out var engineMeta))
         {
             throw new ArgumentException($"Slicer engine {request.SlicerEngine} is not available", nameof(request));
-        }
-
-        // Check if slicer engine is healthy
-        var isHealthy = await engine.IsHealthyAsync(cancellationToken);
-        if (!isHealthy)
-        {
-            throw new InvalidOperationException($"Slicer engine {request.SlicerEngine} is currently unavailable");
         }
 
         // Validate file exists and is supported
@@ -378,18 +394,30 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
         // Check file extension
         var extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl).ToLowerInvariant();
-        if (!engine.SupportedFileExtensions.Contains(extension))
+        if (!engineMeta.SupportedExtensions.Contains(extension))
         {
             throw new ArgumentException($"File extension {extension} is not supported by {request.SlicerEngine}");
         }
 
         // Validate file size
         var metadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl, cancellationToken);
-        if (metadata != null && metadata.SizeBytes > 100_000_000) // 100MB limit
+        if (metadata != null && metadata.SizeBytes > 100_000_000)
         {
             throw new ArgumentException("File size exceeds maximum limit of 100MB");
         }
     }
+
+    private static readonly string[] s_orcaSupportedExtensions = [".stl", ".3mf", ".obj"]; // reuse to avoid repeated allocations
+    private static readonly string[] s_prusaSupportedExtensions = [".stl", ".3mf", ".obj"]; // same set currently
+
+    private static Dictionary<SlicerEngineType, EngineMetadata> BuildStaticCatalog() =>
+        new()
+        {
+            [SlicerEngineType.OrcaSlicer] = new EngineMetadata(SlicerEngineType.OrcaSlicer, "1.8.x", s_orcaSupportedExtensions),
+            [SlicerEngineType.PrusaSlicer] = new EngineMetadata(SlicerEngineType.PrusaSlicer, "2.8.0", s_prusaSupportedExtensions)
+        };
+
+    private sealed record EngineMetadata(SlicerEngineType EngineType, string Version, IReadOnlyList<string> SupportedExtensions);
 
     private static string GetSlicerWorkerUrl(SlicerEngineType engineType)
     {

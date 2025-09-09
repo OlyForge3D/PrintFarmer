@@ -12,6 +12,8 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
 {
     public void Apply(OpenApiSchema schema, SchemaFilterContext context)
     {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(context);
         var t = context.Type;
 
         if (t == typeof(CreatePrinterDto))
@@ -240,6 +242,30 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
                 ["buildPlateY"] = new OpenApiDouble(220),
                 ["buildPlateZ"] = new OpenApiDouble(250)
             };
+        }
+        else if (t == typeof(SlicerQueueStats))
+        {
+            // Ensure nullable TimeSpan? shows as nullable with descriptive example
+            if (schema.Properties.TryGetValue("estimatedWaitTime", out var prop))
+            {
+                prop.Nullable = true; // Explicitly mark nullable for clarity in UI
+                prop.Description = (prop.Description is null
+                    ? "Estimated wait time before a new job can start; null indicates unknown or unavailable."
+                    : prop.Description + " Null indicates unknown or unavailable.");
+                // Provide example of a populated value; absence will imply null possibility
+                prop.Example = new OpenApiString("00:05:00");
+            }
+        }
+        else if (t == typeof(SlicerEngineInfo))
+        {
+            if (schema.Properties.TryGetValue("estimatedWaitTime", out var prop))
+            {
+                prop.Nullable = true;
+                prop.Description = (prop.Description is null
+                    ? "Estimated wait time for this engine; null when engine is unhealthy or wait cannot be determined."
+                    : prop.Description + " Null when engine is unhealthy or undeterminable.");
+                prop.Example = new OpenApiString("00:02:30");
+            }
         }
     }
 }

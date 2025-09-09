@@ -132,14 +132,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton(MockPrusaLinkClient.Object);
             services.AddSingleton(MockSdcpClient.Object);
 
-            // Slicer service registrations (test-only DI wiring)
-            services.Configure<MockSlicerOptions>(o =>
+            // Replace temp path provider with test-specific implementation confined to repo
+            var existingTemp = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Infrastructure.Temp.ITempPathProvider));
+            if (existingTemp != null)
             {
-                o.InitialDelaySeconds = 0.01;
-                o.ProcessingTimeSeconds = 0.1; // fast deterministic
-                o.FailureRate = 0.0;
-            });
+                services.Remove(existingTemp);
+            }
+            services.AddSingleton<Farm.Web.Api.Infrastructure.Temp.ITempPathProvider>(new TestInfrastructure.TestTempPathProvider());
 
+            // Slicer service registrations: in-process engines removed; only orchestrator + queue abstractions used.
             // File storage is fully mocked; still register options for any resolution paths
             services.Configure<LocalFileStorageOptions>(o =>
             {
@@ -149,7 +150,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton(MockSlicerJobQueue.Object);
             services.AddSingleton(MockSlicerFileStorage.Object);
             services.AddSingleton(MockSlicerProgressNotifier.Object);
-            services.AddScoped<ISlicerEngine, MockOrcaSlicerEngine>();
             services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         });
 

@@ -155,7 +155,7 @@ public record SlicingJobContent
     public SlicerEngineType SlicerEngine { get; init; }
     public SlicerProfileDto SlicerProfile { get; init; } = new();
     public SlicingJobPriority Priority { get; init; } = SlicingJobPriority.Normal;
-    public Dictionary<string, object> Metadata { get; init; } = new();
+    public Dictionary<string, object> Metadata { get; init; } = [];
     
     /// <summary>
     /// Create job content from SlicingJobRequest for checksum calculation

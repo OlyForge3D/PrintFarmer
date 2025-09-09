@@ -22,13 +22,16 @@ public static class SlicingJobStore
     {
         if (_jobs.TryGetValue(id, out var direct))
         {
-            job = direct; return true;
+            job = direct;
+            return true;
         }
         var compact = id.Replace("-", string.Empty, StringComparison.Ordinal);
         if (compact != id && _jobs.TryGetValue(compact, out var alt))
         {
-            job = alt; return true;
+            job = alt;
+            return true;
         }
-        job = null; return false;
+        job = null;
+        return false;
     }
 }

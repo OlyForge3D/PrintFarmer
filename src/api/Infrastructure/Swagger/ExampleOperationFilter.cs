@@ -11,6 +11,8 @@ public sealed class ExampleOperationFilter : IOperationFilter
 {
     public void Apply(OpenApiOperation operation, OperationFilterContext context)
     {
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentNullException.ThrowIfNull(context);
         if (operation.RequestBody != null)
         {
             foreach (var content in operation.RequestBody.Content.Values)

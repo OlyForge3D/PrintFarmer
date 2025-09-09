@@ -334,7 +334,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         File.SetLastWriteTimeUtc(oldFilePath, oldTime);
 
         // Act
-        await _storage.CleanupTempFilesAsync(TimeSpan.FromDays(1));
+        _storage.CleanupTempFiles(TimeSpan.FromDays(1));
 
         // Assert
         var oldExists = await _storage.FileExistsAsync(oldKey);
@@ -356,7 +356,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         await _storage.UploadFileAsync(key2, content, "application/octet-stream");
 
         // Act
-        await _storage.CleanupTempFilesAsync(TimeSpan.FromMinutes(1));
+        _storage.CleanupTempFiles(TimeSpan.FromMinutes(1));
 
         // Assert
         var exists1 = await _storage.FileExistsAsync(key1);
@@ -428,7 +428,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     public void Constructor_ValidOptions_ShouldCreateBaseDirectory()
     {
         // Arrange
-    var newTempPath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
+        var newTempPath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
         var options = new LocalFileStorageOptions { BasePath = newTempPath };
         var optionsWrapper = Options.Create(options);
 

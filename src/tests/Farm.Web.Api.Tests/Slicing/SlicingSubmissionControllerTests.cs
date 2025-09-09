@@ -13,6 +13,10 @@ public class SlicingSubmissionControllerTests : IClassFixture<CustomWebApplicati
 
     public SlicingSubmissionControllerTests(CustomWebApplicationFactory factory)
     {
+        if (factory is null)
+        {
+            throw new ArgumentNullException(nameof(factory));
+        }
         _client = factory.CreateClient();
     }
 

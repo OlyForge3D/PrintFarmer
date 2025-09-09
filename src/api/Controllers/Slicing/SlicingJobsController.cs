@@ -9,8 +9,13 @@ namespace Farm.Web.Api.Controllers.Slicing;
 public class SlicingJobsController : ControllerBase
 {
     private readonly ILogger<SlicingJobsController> _logger;
+    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
 
-    public SlicingJobsController(ILogger<SlicingJobsController> logger) => _logger = logger;
+    public SlicingJobsController(ILogger<SlicingJobsController> logger, Infrastructure.Temp.ITempPathProvider tempPathProvider)
+    {
+        _logger = logger;
+        _tempPathProvider = tempPathProvider;
+    }
 
     // Canonical plural route
     [HttpGet("jobs/{jobId}")]
@@ -76,12 +81,12 @@ public class SlicingJobsController : ControllerBase
         {
             return NotFound();
         }
-    // Add deprecation signalling headers (RFC 8594) before issuing redirect
-    var deprecationDate = new DateTime(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
-    var sunsetDate = new DateTime(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
-    Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
-    Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
-    // Issue 302 redirect to canonical plural endpoint
+        // Add deprecation signalling headers (RFC 8594) before issuing redirect
+        var deprecationDate = new DateTime(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
+        var sunsetDate = new DateTime(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
+        Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
+        Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
+        // Issue 302 redirect to canonical plural endpoint
         return Redirect($"/api/slicer/jobs/{jobId}");
     }
 
@@ -104,7 +109,7 @@ public class SlicingJobsController : ControllerBase
         }
 
         var originalPath = job.GcodeFilePath!;
-        var tempRoot = Path.GetFullPath(Path.GetTempPath());
+        var tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
         // Rebuild path from trusted root to mitigate stored path tampering
         var fileName = Path.GetFileName(originalPath);
         if (string.IsNullOrWhiteSpace(fileName))

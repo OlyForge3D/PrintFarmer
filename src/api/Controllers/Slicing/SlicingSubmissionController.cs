@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Farm.Web.Api.Controllers.Slicing;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,16 +9,19 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Tags("Slicer Submission")]
 public class SlicingSubmissionController : ControllerBase
 {
-    private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase){"prusaslicer","orcaslicer"};
+    private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
     private readonly ISlicerFileStorage _fileStorage;
     private readonly ILogger<SlicingSubmissionController> _logger;
-    private readonly string _tempPath;
-
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg)
+    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
+    private readonly string _tempRoot;
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider)
     {
-        _fileStorage = fileStorage; _logger = logger;
-        _tempPath = cfg["TempStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "temp");
-        Directory.CreateDirectory(_tempPath);
+        ArgumentNullException.ThrowIfNull(cfg);
+        _fileStorage = fileStorage;
+        _logger = logger;
+        _tempPathProvider = tempPathProvider;
+        _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
+        Directory.CreateDirectory(_tempRoot);
     }
 
     [HttpPost("slice")]
@@ -28,35 +30,68 @@ public class SlicingSubmissionController : ControllerBase
     [RequestSizeLimit(100_000_000)]
     public async Task<IActionResult> SliceAsync()
     {
-        if (!Request.HasFormContentType) return BadRequest("Multipart form data is required");
+        if (!Request.HasFormContentType)
+        {
+            return BadRequest("Multipart form data is required");
+        }
+
         var form = await Request.ReadFormAsync();
         var modelFile = form.Files.Count > 0 ? form.Files[0] : null;
-        if (modelFile == null || modelFile.Length == 0) return BadRequest("Model file is required");
-        if (Path.GetExtension(modelFile.FileName).ToLowerInvariant() != ".stl") return BadRequest("Invalid model file type");
+        if (modelFile == null || modelFile.Length == 0)
+        {
+            return BadRequest("Model file is required");
+        }
+
+        if (!string.Equals(Path.GetExtension(modelFile.FileName), ".stl", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Invalid model file type");
+        }
+
         try
         {
             using var validationStream = modelFile.OpenReadStream();
             using var reader = new StreamReader(validationStream, leaveOpen: true);
             var first = await reader.ReadLineAsync() ?? string.Empty;
-            if (!first.StartsWith("solid", StringComparison.OrdinalIgnoreCase)) return BadRequest("Invalid model file");
-        } catch { return BadRequest("Invalid model file"); }
+            if (!first.StartsWith("solid", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("Invalid model file");
+            }
+        }
+        catch { return BadRequest("Invalid model file"); }
 
         var slicerEngine = form["slicerEngine"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(slicerEngine) || !AllowedEngines.Contains(slicerEngine)) return BadRequest("Valid slicer engine is required");
+        if (string.IsNullOrWhiteSpace(slicerEngine) || !AllowedEngines.Contains(slicerEngine))
+        {
+            return BadRequest("Valid slicer engine is required");
+        }
+
         var printerId = form["printerId"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out var printerGuid)) return BadRequest("Valid printer ID is required");
+        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out var printerGuid))
+        {
+            return BadRequest("Valid printer ID is required");
+        }
 
         var profileRaw = form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
-        if (string.IsNullOrEmpty(profileRaw)) return BadRequest("Valid slicer profile is required");
+        if (string.IsNullOrEmpty(profileRaw))
+        {
+            return BadRequest("Valid slicer profile is required");
+        }
+
         SlicerProfileDto? profile;
-        try { profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw); }
+        try
+        { profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw); }
         catch { return BadRequest("Invalid slicer profile format"); }
 
         var priorityRaw = form["priority"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(priorityRaw) && !Enum.TryParse(priorityRaw, true, out SlicingJobPriority _))
+        {
             return BadRequest($"Invalid priority: {priorityRaw}. Supported priorities: {string.Join(", ", Enum.GetNames<SlicingJobPriority>())}");
+        }
+
         if (!Enum.TryParse<SlicerEngineType>(slicerEngine, true, out _))
+        {
             return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
+        }
 
         try
         {
@@ -81,8 +116,9 @@ public class SlicingSubmissionController : ControllerBase
             SlicingJobStore.Add(job);
             _ = Task.Run(() => SimulateAsync(job));
 
-            var version = slicerEngine.Equals("prusaslicer", StringComparison.OrdinalIgnoreCase)?"PrusaSlicer 2.7.0":"OrcaSlicer 1.8.0";
-            var response = new {
+            var version = slicerEngine.Equals("prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0";
+            var response = new
+            {
                 jobId = job.JobId,
                 status = job.Status.ToString(),
                 progress = job.Progress,
@@ -101,14 +137,14 @@ public class SlicingSubmissionController : ControllerBase
         }
     }
 
-    private static async Task SimulateAsync(SlicingJobDto job)
+    private async Task SimulateAsync(SlicingJobDto job)
     {
         try
         {
-            job.Status = SlicingJobStatus.Slicing; job.Message = "Initializing slicer...";
+            job.Status = SlicingJobStatus.Slicing;
+            job.Message = "Initializing slicer...";
             for (var i = 0; i <= 100; i += 10)
             {
-                if (job.Status == SlicingJobStatus.Cancelled) return;
                 job.Progress = i;
                 job.Message = i switch
                 {
@@ -122,18 +158,15 @@ public class SlicingSubmissionController : ControllerBase
                 };
                 await Task.Delay(1000);
             }
-            if (job.Status != SlicingJobStatus.Cancelled)
-            {
-                var gcodeContent = $"; Mock G-code for job {job.JobId}\nG28";
-                var path = Path.Combine(Path.GetTempPath(), $"{job.JobId}_output.gcode");
-                await System.IO.File.WriteAllTextAsync(path, gcodeContent);
-                job.GcodeFilePath = path;
-                job.Status = SlicingJobStatus.Completed;
-                job.EstimatedPrintTime = 3600;
-                job.EstimatedFilamentUsed = 15.5;
-                job.LayerCount = 200;
-                job.CompletedAt = DateTime.UtcNow;
-            }
+            var gcodeContent = $"; Mock G-code for job {job.JobId}\\nG28";
+            var path = Path.Combine(_tempRoot, $"{job.JobId}_output.gcode");
+            await System.IO.File.WriteAllTextAsync(path, gcodeContent);
+            job.GcodeFilePath = path;
+            job.Status = SlicingJobStatus.Completed;
+            job.EstimatedPrintTime = 3600;
+            job.EstimatedFilamentUsed = 15.5;
+            job.LayerCount = 200;
+            job.CompletedAt = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
