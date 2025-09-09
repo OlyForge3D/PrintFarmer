@@ -12,32 +12,32 @@ public enum JobState
     /// Job has been created and is waiting to be assigned
     /// </summary>
     Queued = 0,
-    
+
     /// <summary>
     /// Job has been assigned to a processor but not yet started
     /// </summary>
     Dispatched = 1,
-    
+
     /// <summary>
     /// Job is actively being processed
     /// </summary>
     Processing = 2,
-    
+
     /// <summary>
     /// Job completed successfully (terminal state)
     /// </summary>
     Succeeded = 3,
-    
+
     /// <summary>
     /// Job failed during processing (terminal state)
     /// </summary>
     Failed = 4,
-    
+
     /// <summary>
     /// Job was cancelled by user or system (terminal state)
     /// </summary>
     Cancelled = 5,
-    
+
     /// <summary>
     /// Job failed in an unrecoverable way and cannot be retried (terminal state)
     /// </summary>
@@ -51,7 +51,7 @@ public class InvalidJobStateTransitionException : InvalidOperationException
 {
     public JobState FromState { get; }
     public JobState ToState { get; }
-    
+
     public InvalidJobStateTransitionException(JobState fromState, JobState toState)
         : base($"Invalid transition from {fromState} to {toState}")
     {
@@ -122,7 +122,7 @@ public static class JobStateMachine
     /// <returns>Collection of valid next states</returns>
     public static IReadOnlyCollection<JobState> GetValidNextStates(JobState currentState)
     {
-        return ValidTransitions.TryGetValue(currentState, out var validStates) 
+        return ValidTransitions.TryGetValue(currentState, out var validStates)
             ? validStates.ToList().AsReadOnly()
             : Array.Empty<JobState>();
     }

@@ -80,7 +80,7 @@ public class MoonrakerClientRetryTests
             }, maxRetries: 2, initialDelayMs: 1, operationName: "StatusCheck");
         };
 
-    await act.Should().ThrowAsync<HttpRequestException>();
+        await act.Should().ThrowAsync<HttpRequestException>();
         attempts.Should().Be(3);
     }
 

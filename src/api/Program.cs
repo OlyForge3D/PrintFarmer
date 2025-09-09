@@ -450,6 +450,18 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// Log effective temp root (non-production) for diagnostics
+try
+{
+    var env = app.Services.GetRequiredService<IHostEnvironment>();
+    if (!env.IsProduction())
+    {
+        var tempProvider = app.Services.GetRequiredService<ITempPathProvider>();
+        app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+    }
+}
+catch { /* ignore diagnostics failure */ }
+
 // === MIDDLEWARE PIPELINE ===
 
 // Global exception handling

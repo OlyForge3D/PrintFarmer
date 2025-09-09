@@ -14,9 +14,9 @@ public class WorkerLivenessHealthCheck(ILogger<WorkerLivenessHealthCheck> logger
         {
             // Basic liveness check - if we can execute this code, the process is alive
             var uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
-            
+
             logger.LogDebug("Liveness check - Worker has been running for {Uptime}", uptime);
-            
+
             return Task.FromResult(HealthCheckResult.Healthy("Worker process is alive", new Dictionary<string, object>
             {
                 ["uptime"] = uptime.ToString(),

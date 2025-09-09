@@ -39,7 +39,7 @@ public class HttpProgressReporter : IProgressReporter
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             var response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", content, cancellationToken);
-            
+
             if (response.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Reported progress for job {JobId}: {Progress}% - {Message}", jobId, progress, message);
@@ -77,7 +77,7 @@ public class HttpProgressReporter : IProgressReporter
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", content, cancellationToken);
-            
+
             if (response.IsSuccessStatusCode)
             {
                 _logger.LogInformation("Reported completion for job {JobId}", job.Id);
@@ -110,7 +110,7 @@ public class HttpProgressReporter : IProgressReporter
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", content, cancellationToken);
-            
+
             if (response.IsSuccessStatusCode)
             {
                 _logger.LogInformation("Reported failure for job {JobId}: {ErrorMessage}", jobId, errorMessage);

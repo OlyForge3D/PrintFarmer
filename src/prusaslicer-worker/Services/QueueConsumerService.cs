@@ -38,16 +38,16 @@ public class QueueConsumerService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("OrcaSlicer worker {WorkerId} starting queue consumer", _workerId);
-        
+
         var database = _redis.GetDatabase();
-        
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 // Try to dequeue a job from the Redis queue (blocking pop with timeout)
                 var result = await database.ListRightPopLeftPushAsync(_queueKey, _processingKey);
-                
+
                 if (!result.HasValue)
                 {
                     // No job available, wait a bit before checking again
@@ -132,7 +132,7 @@ public class QueueConsumerService : BackgroundService
         {
             var duration = DateTime.UtcNow - startTime;
             _logger.LogError(ex, "Failed to process job {JobId} after {Duration}ms", job.Id, duration.TotalMilliseconds);
-            
+
             job.Status = SlicingJobStatus.Error;
             job.CompletedAt = DateTime.UtcNow;
             job.ErrorMessage = ex.Message;

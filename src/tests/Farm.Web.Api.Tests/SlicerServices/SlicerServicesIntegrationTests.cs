@@ -21,7 +21,7 @@ public class SlicerServicesIntegrationTests : IDisposable
 
     public SlicerServicesIntegrationTests()
     {
-    _tempStoragePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-integration-tests");
+        _tempStoragePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-integration-tests");
         _mockJobQueue = new Mock<ISlicerJobQueue>();
         _mockProgressNotifier = new Mock<ISlicerProgressNotifier>();
 

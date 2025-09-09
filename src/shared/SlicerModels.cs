@@ -6,7 +6,7 @@ namespace Farm.Web.Shared;
 /// Extended status enum for distributed slicing jobs
 /// Uses the existing SlicingJobStatus from Models.cs and adds Processing state
 /// </summary>
-public static class SlicingJobStatusExtensions 
+public static class SlicingJobStatusExtensions
 {
     /// <summary>
     /// Convert legacy status to new processing status
@@ -19,7 +19,7 @@ public static class SlicingJobStatusExtensions
             _ => status
         };
     }
-    
+
     /// <summary>
     /// Check if status indicates job is in progress
     /// </summary>
@@ -27,7 +27,7 @@ public static class SlicingJobStatusExtensions
     {
         return status == SlicingJobStatus.Slicing;
     }
-    
+
     /// <summary>
     /// Check if status indicates job is complete
     /// </summary>
@@ -87,8 +87,10 @@ public class SlicingJobRequest
     /// <returns>Message envelope for idempotency</returns>
     public Slicer.Messaging.MessageEnvelope GetOrCreateEnvelope()
     {
-        if (Envelope != null) return Envelope;
-
+        if (Envelope != null)
+        {
+            return Envelope;
+        }
         var jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(this);
         return Slicer.Messaging.MessageEnvelope.Create(jobContent, SlicerEngine, Priority);
     }
@@ -112,13 +114,13 @@ public class SlicingJobResponse
 /// </summary>
 public class DistributedSlicingJob : SlicingJobDto
 {
-    public new Guid Id { get; set; } = Guid.NewGuid();
+    public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
     public string ModelFileUrl { get; set; } = string.Empty;
     public string ModelFileName { get; set; } = string.Empty;
-    public SlicerEngineType SlicerEngine { get; set; }
+    public SlicerEngineType EngineType { get; set; }
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
-    
+
     // Extended distributed processing fields
     public DateTime? StartedAt { get; set; }
     public string? WorkerId { get; set; }
@@ -129,7 +131,7 @@ public class DistributedSlicingJob : SlicingJobDto
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public Dictionary<string, object> Metadata { get; set; } = [];
-    public int RetryCount { get; set; } = 0;
+    public int RetryCount { get; set; } = 0; // explicit for clarity (analyzer suggestion acceptable to ignore)
     public DateTime? LastRetryAt { get; set; }
 
     // Message envelope fields for idempotency
@@ -157,7 +159,7 @@ public class DistributedSlicingJob : SlicingJobDto
             PrinterId = request.PrinterId,
             ModelFileUrl = request.ModelFileUrl,
             ModelFileName = request.ModelFileName,
-            SlicerEngine = request.SlicerEngine,
+            EngineType = request.SlicerEngine,
             Profile = request.SlicerProfile,
             Priority = request.Priority,
             Status = SlicingJobStatus.Queued,
@@ -180,7 +182,7 @@ public class DistributedSlicingJob : SlicingJobDto
         return new Slicer.Messaging.MessageEnvelope
         {
             JobId = Id,
-            SlicerType = SlicerEngine,
+            SlicerType = EngineType,
             Priority = Priority,
             Attempt = Attempt,
             CorrelationId = CorrelationId,
@@ -193,10 +195,11 @@ public class DistributedSlicingJob : SlicingJobDto
     // Map from base SlicingJobDto for compatibility
     public void UpdateFromBase(SlicingJobDto baseJob)
     {
+        ArgumentNullException.ThrowIfNull(baseJob);
         JobId = baseJob.JobId;
         Status = baseJob.Status;
         Progress = baseJob.Progress;
-        SlicerEngine = Enum.TryParse<SlicerEngineType>(baseJob.SlicerEngine, true, out var engine) ? engine : SlicerEngineType.OrcaSlicer;
+        EngineType = Enum.TryParse<SlicerEngineType>(baseJob.SlicerEngine, true, out var engine) ? engine : SlicerEngineType.OrcaSlicer;
         PrinterId = baseJob.PrinterId;
         ModelFilePath = baseJob.ModelFilePath;
         GcodeFilePath = baseJob.GcodeFilePath;
@@ -217,7 +220,7 @@ public class DistributedSlicingJob : SlicingJobDto
             Status = Status,
             Progress = Progress,
             Message = ErrorMessage,
-            SlicerEngine = SlicerEngine.ToString(),
+            SlicerEngine = EngineType.ToString(),
             PrinterId = PrinterId,
             ModelFilePath = ModelFileUrl, // Legacy field mapping
             GcodeFilePath = ResultFileUrl,

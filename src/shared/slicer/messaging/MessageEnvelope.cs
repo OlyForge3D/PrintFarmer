@@ -65,14 +65,14 @@ public record MessageEnvelope
     public static string GenerateChecksum(object content)
     {
         ArgumentNullException.ThrowIfNull(content);
-        
-        var json = JsonSerializer.Serialize(content, new JsonSerializerOptions 
-        { 
+
+        var json = JsonSerializer.Serialize(content, new JsonSerializerOptions
+        {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = false,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
-        
+
         using var sha256 = SHA256.Create();
         var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(json));
         return Convert.ToBase64String(hashBytes);
@@ -109,9 +109,9 @@ public record MessageEnvelope
     public static MessageEnvelope CreateRetry(MessageEnvelope originalEnvelope)
     {
         ArgumentNullException.ThrowIfNull(originalEnvelope);
-        
-        return originalEnvelope with 
-        { 
+
+        return originalEnvelope with
+        {
             JobId = Guid.NewGuid(), // New job ID for retry
             Attempt = originalEnvelope.Attempt + 1,
             SubmittedAt = DateTime.UtcNow
@@ -136,9 +136,10 @@ public record MessageEnvelope
     /// <returns>True if envelopes represent the same logical job</returns>
     public bool IsDuplicateOf(MessageEnvelope other)
     {
-        if (other is null) return false;
-        
-        return CorrelationId == other.CorrelationId && 
+        if (other is null)
+            return false;
+
+        return CorrelationId == other.CorrelationId &&
                string.Equals(Checksum, other.Checksum, StringComparison.Ordinal);
     }
 }
@@ -156,7 +157,7 @@ public record SlicingJobContent
     public SlicerProfileDto SlicerProfile { get; init; } = new();
     public SlicingJobPriority Priority { get; init; } = SlicingJobPriority.Normal;
     public Dictionary<string, object> Metadata { get; init; } = [];
-    
+
     /// <summary>
     /// Create job content from SlicingJobRequest for checksum calculation
     /// </summary>
@@ -165,7 +166,7 @@ public record SlicingJobContent
     public static SlicingJobContent FromRequest(SlicingJobRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        
+
         return new SlicingJobContent
         {
             UserId = request.UserId,

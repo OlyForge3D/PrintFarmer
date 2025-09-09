@@ -7,7 +7,7 @@ namespace Farm.PrusaSlicer.Worker.Health;
 /// This is used by Kubernetes readiness probes to determine if traffic should be sent to the pod
 /// </summary>
 public class WorkerReadinessHealthCheck(
-    IWorkerStateService workerStateService, 
+    IWorkerStateService workerStateService,
     ILogger<WorkerReadinessHealthCheck> logger) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
@@ -15,15 +15,15 @@ public class WorkerReadinessHealthCheck(
         try
         {
             var state = workerStateService.GetWorkerState();
-            
+
             // Check if worker is ready to accept jobs
-            var isReady = state.IsInitialized && 
-                         !state.IsShuttingDown && 
+            var isReady = state.IsInitialized &&
+                         !state.IsShuttingDown &&
                          state.ActiveJobs < state.MaxConcurrentJobs;
-            
-            logger.LogDebug("Readiness check - Worker ready: {IsReady}, ActiveJobs: {ActiveJobs}/{MaxJobs}", 
+
+            logger.LogDebug("Readiness check - Worker ready: {IsReady}, ActiveJobs: {ActiveJobs}/{MaxJobs}",
                 isReady, state.ActiveJobs, state.MaxConcurrentJobs);
-            
+
             var data = new Dictionary<string, object>
             {
                 ["initialized"] = state.IsInitialized,
@@ -32,8 +32,8 @@ public class WorkerReadinessHealthCheck(
                 ["maxConcurrentJobs"] = state.MaxConcurrentJobs,
                 ["workerId"] = state.WorkerId
             };
-            
-            return Task.FromResult(isReady 
+
+            return Task.FromResult(isReady
                 ? HealthCheckResult.Healthy("Worker is ready to accept jobs", data)
                 : HealthCheckResult.Unhealthy("Worker is not ready to accept jobs", null, data));
         }
