@@ -1,8 +1,10 @@
 using System.Text;
 using System.Text.Json;
 using Farm.Web.Shared;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 
-namespace Farm.OrcaSlicer.Worker.Services;
+namespace Farm.Slicer.Worker.Core;
 
 public class HttpProgressReporter : IProgressReporter
 {
@@ -16,26 +18,30 @@ public class HttpProgressReporter : IProgressReporter
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(configuration);
-        _apiBaseUrl = configuration["Worker:ApiBaseUrl"] ?? "http://api:5245";
-        _workerId = Environment.MachineName + "-" + Environment.ProcessId;
+        _apiBaseUrl = configuration["Worker:ApiBaseUrl"] ?? "http://api:8080";
+        _workerId = WorkerIdentity.Create();
+    }
+
+    private static StringContent ToJsonContent(object payload)
+    {
+        var json = JsonSerializer.Serialize(payload);
+        return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
     public async Task ReportProgressAsync(Guid jobId, int progress, string message, CancellationToken cancellationToken = default)
     {
         try
         {
-            var progressUpdate = new { JobId = jobId, WorkerId = _workerId, Progress = progress, Message = message, Timestamp = DateTime.UtcNow };
-            var json = JsonSerializer.Serialize(progressUpdate);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", content, cancellationToken);
+            var payload = new { JobId = jobId, WorkerId = _workerId, Progress = progress, Message = message, Timestamp = DateTime.UtcNow };
+            var response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to report progress for job {JobId}: {StatusCode}", jobId, response.StatusCode);
+                _logger.LogWarning("Progress report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reporting progress for job {JobId}", jobId);
+            _logger.LogError(ex, "Error reporting progress {JobId}", jobId);
         }
     }
 
@@ -45,7 +51,7 @@ public class HttpProgressReporter : IProgressReporter
         ArgumentNullException.ThrowIfNull(result);
         try
         {
-            var completion = new
+            var payload = new
             {
                 JobId = job.Id,
                 WorkerId = _workerId,
@@ -58,17 +64,15 @@ public class HttpProgressReporter : IProgressReporter
                 CompletedAt = DateTime.UtcNow,
                 Metadata = result.Metadata
             };
-            var json = JsonSerializer.Serialize(completion);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", content, cancellationToken);
+            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to report completion for job {JobId}: {StatusCode}", job.Id, response.StatusCode);
+                _logger.LogWarning("Completion report failed {JobId} status {StatusCode}", job.Id, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reporting completion for job {JobId}", job.Id);
+            _logger.LogError(ex, "Error reporting completion {JobId}", job.Id);
         }
     }
 
@@ -76,18 +80,16 @@ public class HttpProgressReporter : IProgressReporter
     {
         try
         {
-            var failure = new { JobId = jobId, WorkerId = _workerId, Status = SlicingJobStatus.Error, ErrorMessage = errorMessage, CompletedAt = DateTime.UtcNow };
-            var json = JsonSerializer.Serialize(failure);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", content, cancellationToken);
+            var payload = new { JobId = jobId, WorkerId = _workerId, Status = SlicingJobStatus.Error, ErrorMessage = errorMessage, CompletedAt = DateTime.UtcNow };
+            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to report failure for job {JobId}: {StatusCode}", jobId, response.StatusCode);
+                _logger.LogWarning("Failure report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reporting failure for job {JobId}", jobId);
+            _logger.LogError(ex, "Error reporting failure {JobId}", jobId);
         }
     }
 }

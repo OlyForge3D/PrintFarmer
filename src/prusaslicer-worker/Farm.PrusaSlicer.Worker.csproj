@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../shared/Farm.Web.Shared.csproj" />
+    <ProjectReference Include="../worker-shared/Farm.Slicer.Worker.Core.csproj" />
   </ItemGroup>
 
 </Project>

@@ -15,7 +15,7 @@ PrintFarmer's slicer microservices architecture enables distributed processing o
 
 ## Architecture Overview
 
-The slicer microservices architecture consists of five core components:
+The slicer microservices architecture consists of five core components. A shared worker core library (`Farm.Slicer.Worker.Core`) now encapsulates common worker mechanics (queue consumption, progress reporting, worker state, graceful shutdown) so engine workers only supply engine-specific slicing pipelines and binary detection:
 
 ```mermaid
 graph TB

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Farm.Slicer.Worker.Core;
 
 namespace Farm.PrusaSlicer.Worker.Health;
 

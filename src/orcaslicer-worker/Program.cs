@@ -2,13 +2,14 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using StackExchange.Redis;
 
 namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
-    public static readonly string[] Capabilities = { "orcaslicer", "stl-processing", "gcode-generation" };
+    public static readonly string[] Capabilities = ["orcaslicer", "stl-processing", "gcode-generation"];
 }
 
 public static class Program
@@ -41,18 +42,18 @@ public static class Program
         });
 
         // HTTP clients
-        builder.Services.AddHttpClient<HttpProgressReporter>();
-        builder.Services.AddHttpClient<OrcaSlicingPipelineService>();
+        builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
+        builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
 
-        // Worker services
-        builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
-        builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>();
-        builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>();
-        builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>();
+        // Worker services (shared core + engine specific)
+        builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
+        builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
+        builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
+        builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
 
-        // Background services
-        builder.Services.AddHostedService<GracefulShutdownService>();
-        builder.Services.AddHostedService<QueueConsumerService>();
+        // Background services (shared graceful shutdown + queue consumer derived)
+        builder.Services.AddHostedService<GracefulShutdownService>(); // shared
+        builder.Services.AddHostedService<QueueConsumerService>(); // derived
 
         // Health checks
         builder.Services.AddHealthChecks()

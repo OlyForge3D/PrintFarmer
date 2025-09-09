@@ -87,6 +87,14 @@ PrintFarmer now uses dedicated engine-specific worker services for G-code genera
 | OrcaSlicer Worker | Slicing via OrcaSlicer engine | `Dockerfile.orcaslicer` | `orcaslicer-jobs` |
 | PrusaSlicer Worker | Slicing via PrusaSlicer engine | `Dockerfile.prusaslicer` | `prusaslicer-jobs` |
 
+All engine workers now share a unified core library (`worker-shared` / `Farm.Slicer.Worker.Core`) that provides:
+- Base Redis queue consumer with processing list tracking
+- Shared progress reporting over HTTP
+- Centralized worker state (active jobs, shutdown flag, capacity)
+- Graceful shutdown background service
+
+Engine-specific projects only implement their slicing pipeline (`*SlicingPipelineService`) and binary detection logic. Former duplicated per-engine implementations (`HttpProgressReporter`, `WorkerStateService`, `GracefulShutdownService`, interface definitions) have been removed in favor of the shared core abstractions. Temporary placeholder stubs used during the migration have now been cleared (empty files replaced/removed) so only the shared `Farm.Slicer.Worker.Core` definitions remain.
+
 Base runtime image layering:
 1. `Dockerfile.slicer-base` – Neutral hardened runtime (GTK/offscreen deps, non-root user, health infra)
 2. Engine Dockerfile – Adds engine binary + worker application (entrypoint provided by project)
@@ -94,12 +102,16 @@ Base runtime image layering:
 Removed legacy components:
 - Generic `slicer-worker` project (superseded by per-engine workers)
 - Historical `Dockerfile.base` (replaced by `Dockerfile.slicer-base`)
+- Duplicated per-worker infrastructure classes (now centralized in `Farm.Slicer.Worker.Core`)
 
 To add a new engine worker:
-1. Create a new project `Farm.<EngineName>Slicer.Worker` modeled after existing workers.
-2. Add a Dockerfile similar to `Dockerfile.orcaslicer` layering on `Dockerfile.slicer-base`.
-3. Register it in `docker-compose.microservices.yml` and add its URL under `SlicerOrchestrator__Workers__<EngineName>` in the API service environment.
-4. Define a distinct Redis queue name (e.g., `<engine>-jobs`).
+1. Create a new project `Farm.<EngineName>Slicer.Worker` modeled after an existing worker.
+2. Reference the shared core project (`worker-shared/Farm.Slicer.Worker.Core.csproj`).
+3. Implement `ISlicingPipelineService` for the engine-specific slicing logic.
+4. Implement any engine-specific binary detection (`I<Engine>BinaryDetector`).
+5. Add a Dockerfile similar to `Dockerfile.orcaslicer` layering on `Dockerfile.slicer-base`.
+6. Register it in `docker-compose.microservices.yml` and configure `SlicerOrchestrator__Workers__<EngineName>` env var in the API service.
+7. Define a distinct Redis queue name (e.g., `<engine>-jobs`).
 
 Shared environment variables (ports, Redis, storage endpoint, queue naming) are documented here:
 **➡️ [Shared Worker Environment Variables](docs/slicer/worker-environment.md)**
@@ -113,7 +125,7 @@ Graceful shutdown: workers finish active jobs then exit (shutdown timeout manage
 
 ## Detailed Documentation
 
-**� [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
+**📋 [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
 **🔧 [Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging  
 **🐳 [Docker Deployment Guide](DOCKER_DEPLOYMENT.md)** - Production containers, scaling, monitoring  
 **🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Farm.Web.Shared;
+using Farm.Slicer.Worker.Core; // shared interfaces
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
