@@ -1,79 +1,74 @@
-# PrusaSlicer Worker (Dedicated Engine Service)
+# PrusaSlicer Worker Container
 
-Status: EXPERIMENTAL (mirrors OrcaSlicer worker pattern). Will replace any legacy Prusa logic previously embedded in the generic `slicer-worker`.
+Dedicated worker service providing distributed slicing via PrusaSlicer, layered on the neutral `slicer-base` image.
 
-## Purpose
+## Architecture Layers
 
-Provides an isolated microservice that performs STL → G-code slicing using PrusaSlicer. This separation:
+1. `slicer-base` (Dockerfile.slicer-base): Common runtime deps, non-root user, health infra
+2. `Dockerfile.prusaslicer`: Installs PrusaSlicer AppImage + publishes Prusa worker app
 
-- Eliminates cross‑engine conditional code
-- Allows independent scaling & updates of PrusaSlicer runtime
-- Enables per‑engine dependency pinning and security scanning
-- Simplifies future addition of more engines (e.g., Cura, Bamboo Studio) by cloning the pattern
+## Key Files
 
-## Image Composition
-
-```
-Dockerfile.prusaslicer
-  ├─ Stage: build (dotnet/sdk:9.0)  -> publishes Farm.PrusaSlicer.Worker
-  └─ Stage: final (slicer-base) + installs PrusaSlicer AppImage -> /usr/local/bin/prusa-slicer
-```
-
-Now re-layered on shared `Dockerfile.slicer-base` (GTK/offscreen libs, xvfb, non-root user) eliminating duplication.
-
-## Key Paths
-
-- Binary: `/usr/local/bin/prusa-slicer`
-- Working directory: `/app/temp`
-- Health endpoints:
-  - Liveness: `GET /healthz`
-  - Readiness: `GET /ready`
+| File                      | Purpose                                             |
+| ------------------------- | --------------------------------------------------- |
+| `Dockerfile.slicer-base`  | Reusable base (no slicer binaries)                  |
+| `Dockerfile.prusaslicer`  | Prusa worker image (adds PrusaSlicer + worker app)  |
+| `src/prusaslicer-worker/` | Worker implementation (Prusa pipeline)              |
+| `docker-compose.yml`      | Service definition `prusaslicer-worker`             |
 
 ## Environment Variables
 
-| Variable                   | Default                     | Description                                |
-| -------------------------- | --------------------------- | ------------------------------------------ |
-| `Worker__PrusaSlicerPath`  | /usr/local/bin/prusa-slicer | Path to slicer binary                      |
-| `Worker__WorkingDirectory` | /app/temp                   | Per-job temp work tree                     |
-| `Worker__StorageEndpoint`  | http://api:5245             | API endpoint for (future) upload callbacks |
+Shared worker variables are defined in `docs/slicer/worker-environment.md`. Only Prusa-specific and notable mappings are shown here.
 
-## Adding to docker-compose
+| Variable                   | Description                           | Default / Example                 |
+| -------------------------- | ------------------------------------- | --------------------------------- |
+| `ASPNETCORE_URLS`          | Internal binding (always 8080)        | `http://+:8080`                   |
+| (Host port mapping)        | External port via compose             | 8082 -> 8080 (example)            |
+| `Worker__PrusaSlicerPath`  | Prusa binary path override            | `/usr/local/bin/prusa-slicer`     |
+| `Worker__WorkingDirectory` | Temp working dir for jobs             | `/app/temp`                       |
+| `Worker__StorageEndpoint`  | API endpoint for artifact uploads     | `http://api:8080` (compose net)   |
+| `ConnectionStrings__Redis` | Redis connection (queue + pub/sub)    | `redis:6379` (compose)            |
 
-Example service block (microservices file):
+## Health Endpoints
 
-```yaml
-prusaslicer-worker:
-  build:
-    context: .
-    dockerfile: Dockerfile.prusaslicer
-  image: prusaslicer-worker
-  restart: unless-stopped
-  environment:
-    ASPNETCORE_ENVIRONMENT: Production
-  depends_on:
-    - api
+| Path       | Purpose                    |
+| ---------- | -------------------------- |
+| `/healthz` | Liveness (fast)            |
+| `/ready`   | Readiness (includes Redis) |
+
+## Build & Run (Standalone)
+
+```bash
+# Build base and Prusa worker
+docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base .
+docker build -f Dockerfile.prusaslicer -t printfarmer/prusaslicer-worker .
+
+# Run (example)
+docker run --rm -p 8082:8080 \
+  -e ConnectionStrings__Redis=host.docker.internal:6379 \
+  -e Worker__StorageEndpoint=http://host.docker.internal:5245 \
+  printfarmer/prusaslicer-worker
 ```
 
 ## Verification Script
 
-Implemented: `scripts/verify-prusaslicer-worker.sh`
-
-- Starts ephemeral container
+`scripts/verify-prusaslicer-worker.sh`:
+- Launches ephemeral container
 - Waits for `/healthz`
-- Verifies `/usr/local/bin/prusa-slicer` executable
-- Prints first line of `--help` (non-fatal if warnings)
+- Confirms binary executable
+- Outputs first line of `--help` (non-fatal warnings allowed)
 
 ## Migration Notes
 
-Legacy generic worker is now deprecated. Remaining Prusa logic residing there should be removed once integration tests are updated to target this service directly. After test parity:
+Older configurations (pre-Sept 2025) relied on a generic `slicer-worker` and (now deleted) `Dockerfile.base`. Those have been removed. Update any CI pipelines referencing them to use:
+ - `Dockerfile.prusaslicer`
+ - `src/prusaslicer-worker/`
 
-1. Delete `slicer-worker` project
-2. Remove any cross-engine abstractions no longer necessary
-3. Introduce unified orchestration (API queue dispatches by engine type)
+> Per-engine isolation is the permanent model. Avoid reintroducing a monolithic worker.
 
-## Next Steps
+## Future Enhancements
 
-- [x] Add verification script
-- [x] Refactor to reuse `Dockerfile.slicer-base`
-- [ ] Wire CI job to build & verify image
-- [ ] Update integration tests to spawn prusaslicer-worker container
+- SBOM & provenance attestation
+- Multi-arch builds (amd64 + arm64)
+- Cached AppImage acquisition via build arg
+- Structured metrics (jobs, durations, failures)

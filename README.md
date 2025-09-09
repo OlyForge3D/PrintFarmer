@@ -101,6 +101,11 @@ To add a new engine worker:
 3. Register it in `docker-compose.microservices.yml` and add its URL under `SlicerOrchestrator__Workers__<EngineName>` in the API service environment.
 4. Define a distinct Redis queue name (e.g., `<engine>-jobs`).
 
+Shared environment variables (ports, Redis, storage endpoint, queue naming) are documented here:
+**➡️ [Shared Worker Environment Variables](docs/slicer/worker-environment.md)**
+
+Port mapping: each worker listens internally on `8080`; external host ports (e.g. `8081` Orca, `8082` Prusa) are defined by compose/Kubernetes configuration, not by changing `ASPNETCORE_URLS` inside the image.
+
 Health & readiness endpoints: each worker exposes `/healthz` (liveness) and readiness via the same endpoint (engine initialization performs binary detection early and fails fast if missing).
 
 Graceful shutdown: workers finish active jobs then exit (shutdown timeout managed by host/container orchestrator; future enhancement could add configurable timeout via `WORKER_SHUTDOWN_TIMEOUT`).

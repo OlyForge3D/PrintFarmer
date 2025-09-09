@@ -20,13 +20,16 @@ Layers:
 
 ## Environment Variables
 
-| Variable                   | Description               | Default                     |
-| -------------------------- | ------------------------- | --------------------------- |
-| `ASPNETCORE_URLS`          | Kestrel binding           | `http://+:8081` (compose)   |
-| `Worker__OrcaSlicerPath`   | Orca binary path          | `/usr/local/bin/orcaslicer` |
-| `Worker__WorkingDirectory` | Temp working dir for jobs | `/app/temp`                 |
-| `Worker__StorageEndpoint`  | API endpoint for uploads  | `http://api:5245`           |
-| `ConnectionStrings__Redis` | Redis connection          | `localhost:6379`            |
+Shared variables are defined centrally in `docs/slicer/worker-environment.md` (avoid duplication). Below are Orca-specific or notable overrides.
+
+| Variable                   | Description                              | Default                         |
+| -------------------------- | ---------------------------------------- | -------------------------------- |
+| `ASPNETCORE_URLS`          | Internal binding (always port 8080)      | `http://+:8080`                  |
+| (Host port mapping)        | External host port via compose           | 8081 -> 8080 (example)           |
+| `Worker__OrcaSlicerPath`   | Orca binary path override                | `/usr/local/bin/orcaslicer`      |
+| `Worker__WorkingDirectory` | Temp working dir for jobs                | `/app/temp`                      |
+| `Worker__StorageEndpoint`  | API endpoint for artifact uploads        | `http://api:8080` (compose net)  |
+| `ConnectionStrings__Redis` | Redis connection (job queue, pub/sub)    | `redis:6379` in compose / local  |
 
 ## Health Endpoints
 
@@ -38,7 +41,7 @@ Layers:
 ## Build & Run (Standalone)
 
 ```bash
-# Build base and orca worker
+# Build base and Orca worker
 docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base .
 docker build -f Dockerfile.orcaslicer -t printfarmer/orcaslicer-worker .
 
@@ -51,10 +54,9 @@ docker run --rm -p 8081:8080 \
 
 ## Future Enhancements
 
-- Introduce dedicated `src/orcaslicer-worker` project (current phase reuses `slicer-worker`).
-- Add SBOM & provenance attestation per image.
-- Multi-arch (amd64 + arm64) build matrix.
-- Cache AppImage download via build args / ARG override.
+- SBOM & provenance attestation per image
+- Multi-arch (amd64 + arm64) build matrix
+- Cached AppImage acquisition via build args / ARG override
 
 ## Migration Notes
 

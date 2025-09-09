@@ -81,8 +81,8 @@ services:
   orcaslicer-worker:
     build:
       context: .
-  # Deprecated legacy base replaced by slicer-base + engine-specific images
-  # dockerfile: Dockerfile.base (removed)
+      dockerfile: Dockerfile.orcaslicer
+    image: orcaslicer-worker
     ports:
       - "8081:8080"
     networks:
@@ -97,7 +97,6 @@ services:
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__QueueName=orcaslicer-jobs
       - Logging__LogLevel__Default=Information
-  # Removed legacy generic slicer-worker; keeping only engine-specific logging categories.
     volumes:
       - orcaslicer_temp:/app/temp
       - gcode_storage:/app/gcode
