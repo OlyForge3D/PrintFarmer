@@ -31,6 +31,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
     public async Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
         try
         {
             var jobJson = JsonSerializer.Serialize(job);
@@ -41,16 +42,16 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             // Store job details
             var jobKey = GetJobKey(job.Id);
-            _ = transaction.HashSetAsync(jobKey, new HashEntry[]
-            {
-                new("id", job.Id.ToString()),
-                new("status", job.Status.ToString()),
-                new("engine", job.SlicerEngine.ToString()),
-                new("created_at", job.CreatedAt.ToString("O")),
-                new("correlation_id", job.CorrelationId.ToString()),
-                new("checksum", job.Checksum),
-                new("data", jobJson)
-            });
+            _ = transaction.HashSetAsync(jobKey,
+            [
+                new HashEntry("id", job.Id.ToString()),
+                new HashEntry("status", job.Status.ToString()),
+                new HashEntry("engine", job.SlicerEngine.ToString()),
+                new HashEntry("created_at", job.CreatedAt.ToString("O")),
+                new HashEntry("correlation_id", job.CorrelationId.ToString()),
+                new HashEntry("checksum", job.Checksum),
+                new HashEntry("data", jobJson)
+            ]);
 
             // Store correlation mapping for idempotency
             var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum);
@@ -87,7 +88,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobData.Value.Element);
 
-            if (job != null && preferredEngine != null && job.SlicerEngine != preferredEngine)
+            if (job != null && preferredEngine != null && job.EngineType != preferredEngine)
             {
                 // Re-queue if engine doesn't match preference
                 await RequeueJobAsync(job);
@@ -119,6 +120,8 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
     public async Task CompleteJobAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(result);
         try
         {
             job.Status = result.Success ? SlicingJobStatus.Completed : SlicingJobStatus.Error;
@@ -174,7 +177,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             var jobKey = GetJobKey(jobId);
-            var updates = new HashEntry[]
+            var updates = new List<HashEntry>
             {
                 new("progress", progress),
                 new("updated_at", DateTime.UtcNow.ToString("O"))
@@ -182,10 +185,10 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
             if (currentStep != null)
             {
-                updates = updates.Append(new HashEntry("current_step", currentStep)).ToArray();
+                updates.Add(new HashEntry("current_step", currentStep));
             }
 
-            await _database.HashSetAsync(jobKey, updates);
+            await _database.HashSetAsync(jobKey, [.. updates]);
 
             // Also update the job data if we have it
             var job = await GetJobAsync(jobId, cancellationToken);
@@ -368,6 +371,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
     private async Task UpdateJobAsync(DistributedSlicingJob job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         var jobKey = GetJobKey(job.Id);
         var jobJson = JsonSerializer.Serialize(job);
 

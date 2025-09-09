@@ -1,7 +1,8 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
-using Farm.Web.Shared;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+using StackExchange.Redis;
 
 namespace Farm.OrcaSlicer.Worker;
 
@@ -16,74 +17,85 @@ public static class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // Basic configuration
-        builder.Services.AddLogging();
-        builder.Services.AddHttpClient();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsole();
 
-        // Worker state & graceful shutdown services
-        builder.Services.AddSingleton<WorkerStateService>();
-        builder.Services.AddHostedService<GracefulShutdownService>();
+        // Redis
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+        {
+            var configuration = builder.Configuration;
+            var raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
+            if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
+            {
+                raw = raw.TrimEnd(',') + ",abortConnect=false";
+            }
+            try
+            {
+                return ConnectionMultiplexer.Connect(raw);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
+                return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
+            }
+        });
+
+        // HTTP clients
+        builder.Services.AddHttpClient<HttpProgressReporter>();
+        builder.Services.AddHttpClient<OrcaSlicingPipelineService>();
+
+        // Worker services
+        builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
         builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>();
+        builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>();
+        builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>();
+
+        // Background services
+        builder.Services.AddHostedService<GracefulShutdownService>();
+        builder.Services.AddHostedService<QueueConsumerService>();
 
         // Health checks
-        var livenessTag = new[] { "liveness" };
-        var readinessTag = new[] { "readiness" };
         builder.Services.AddHealthChecks()
-            .AddCheck<WorkerLivenessHealthCheck>("worker_liveness", failureStatus: HealthStatus.Unhealthy, tags: livenessTag)
-            .AddCheck<WorkerReadinessHealthCheck>("worker_readiness", failureStatus: HealthStatus.Degraded, tags: readinessTag)
-            .AddCheck<OrcaBinaryHealthCheck>("orca_binary", failureStatus: HealthStatus.Unhealthy, tags: readinessTag);
-
-        // Slicing pipeline
-        builder.Services.AddTransient<IProgressReporter, HttpProgressReporter>();
-        builder.Services.AddTransient<ISlicingPipelineService, OrcaSlicingPipelineService>();
+            .AddCheck<WorkerLivenessHealthCheck>("liveness")
+            .AddCheck<WorkerReadinessHealthCheck>("readiness")
+            .AddCheck<OrcaBinaryHealthCheck>("orca_binary")
+            .AddCheck<RedisHealthCheck>("redis");
 
         var app = builder.Build();
 
-        // Log degraded mode if stub is detected
-        var detector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
-        if (!detector.IsRealBinaryPresent())
+        if (app.Environment.IsDevelopment())
         {
-            app.Logger.LogWarning("OrcaSlicer binary not present (stub in use) - worker running in degraded mode. Slicing operations will fail until image rebuilt with real binary.");
+            app.UseDeveloperExceptionPage();
         }
 
-        // Root endpoint returns structured info (aligned with Prusa worker style)
-        app.MapGet("/", () =>
+        app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
-            return Results.Ok(new
+            Predicate = c => c.Name == "liveness",
+            ResponseWriter = async (context, report) =>
             {
-                service = "orcaslicer-worker",
-                version = "1.0.0",
-                status = "running",
-                realBinary = detector.IsRealBinaryPresent(),
-                capabilities = WorkerConstants.Capabilities
-            });
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    status = report.Status == HealthStatus.Healthy ? "ok" : "unhealthy",
+                    timestamp = DateTime.UtcNow
+                }));
+            }
         });
 
-        // Environment flag to relax readiness (omit orca_binary from readiness predicate)
-        var relaxed = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
-        var relaxedReadiness = !string.IsNullOrEmpty(relaxed) && relaxed.Equals("true", StringComparison.OrdinalIgnoreCase);
+        var relaxedEnv = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
+        var relaxedReadiness = !string.IsNullOrEmpty(relaxedEnv) && relaxedEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
         if (relaxedReadiness)
         {
             app.Logger.LogWarning("WORKER_RELAXED_READINESS=true -> orca_binary will be excluded from readiness evaluation.");
         }
 
-        // Liveness should ONLY reflect core process vitality, exclude binary readiness.
-        app.MapHealthChecks("/healthz", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+        app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = r => r.Tags.Contains("liveness")
-        });
-        app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
-        {
-            Predicate = r => r.Tags.Contains("liveness")
-        });
-
-        app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
-        {
-            Predicate = r => r.Tags.Contains("readiness") && (!relaxedReadiness || r.Name != "orca_binary"),
-            ResponseWriter = async (ctx, report) =>
+            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
+            ResponseWriter = async (context, report) =>
             {
-                ctx.Response.ContentType = "application/json";
-                var payload = new
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
                     relaxed = relaxedReadiness,
@@ -92,10 +104,29 @@ public static class Program
                         e => e.Key,
                         e => new { status = e.Value.Status.ToString(), description = e.Value.Description }
                     )
-                };
-                await ctx.Response.WriteAsJsonAsync(payload);
+                }));
             }
         });
+
+        app.MapHealthChecks("/ready", new HealthCheckOptions
+        {
+            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
+        });
+
+        app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
+        {
+            service = "orcaslicer-worker",
+            version = "1.0.0",
+            status = "running",
+            realBinary = detector.IsRealBinaryPresent(),
+            capabilities = WorkerConstants.Capabilities
+        }));
+
+        var orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
+        if (!orcaDetector.IsRealBinaryPresent())
+        {
+            app.Logger.LogWarning("OrcaSlicer binary not present (stub in use) - readiness will be unhealthy for orca_binary.");
+        }
 
         app.Run();
     }

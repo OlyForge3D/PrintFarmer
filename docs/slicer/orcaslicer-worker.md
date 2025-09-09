@@ -7,7 +7,7 @@ This service provides distributed slicing using OrcaSlicer, built as a dedicated
 Layers:
 
 1. `slicer-base` (Dockerfile.slicer-base): Common runtime deps, non-root user, health infra.
-2. `Dockerfile.orcaslicer`: Adds OrcaSlicer AppImage + published .NET worker (current implementation uses `src/slicer-worker`).
+2. `Dockerfile.orcaslicer`: Adds OrcaSlicer AppImage + published dedicated Orca worker project.
 
 ## Key Files
 
@@ -15,7 +15,7 @@ Layers:
 | ------------------------ | ---------------------------------------------------- |
 | `Dockerfile.slicer-base` | Reusable base (no slicer binaries)                   |
 | `Dockerfile.orcaslicer`  | Orca worker image (installs OrcaSlicer + worker app) |
-| `src/slicer-worker/`     | Worker implementation (Orca pipeline)                |
+| `src/orcaslicer-worker/` | Worker implementation (Orca pipeline)                |
 | `docker-compose.yml`     | Service definition `orcaslicer-worker`               |
 
 ## Environment Variables
@@ -58,6 +58,8 @@ docker run --rm -p 8081:8080 \
 
 ## Migration Notes
 
-Older configuration used `Dockerfile.base` directly for OrcaSlicer. That file is now replaced functionally by the base + specialized layering. Update any CI pipelines referencing `Dockerfile.base` for Orca to `Dockerfile.orcaslicer`.
+Older configurations (pre-Sept 2025) used a generic `Dockerfile.base` and a shared `slicer-worker` project. Both have been removed. Update any CI pipelines still referencing `Dockerfile.base` or `src/slicer-worker` to use:
+ - `Dockerfile.orcaslicer`
+ - `src/orcaslicer-worker/`
 
-> Migration Note (Sept 2025): The legacy `slicer-worker/Services/OrcaSlicingPipelineService.cs` has been removed. Any references should target the dedicated project under `src/orcaslicer-worker/`.
+> Migration Note (Sept 2025): The legacy generic worker has been retired in favor of per-engine isolation. Avoid reintroducing a monolithic worker pattern.

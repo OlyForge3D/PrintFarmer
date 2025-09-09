@@ -151,7 +151,7 @@ public record SlicingJobContent
 {
     public Guid UserId { get; init; }
     public Guid PrinterId { get; init; }
-    public string ModelFileUrl { get; init; } = string.Empty;
+    public string ModelFileUrl { get; init; } = string.Empty; // remains string for stable checksum across versions
     public string ModelFileName { get; init; } = string.Empty;
     public SlicerEngineType SlicerEngine { get; init; }
     public SlicerProfileDto SlicerProfile { get; init; } = new();
@@ -171,7 +171,7 @@ public record SlicingJobContent
         {
             UserId = request.UserId,
             PrinterId = request.PrinterId,
-            ModelFileUrl = request.ModelFileUrl,
+            ModelFileUrl = request.ModelFileUrl.ToString(),
             ModelFileName = request.ModelFileName,
             SlicerEngine = request.SlicerEngine,
             SlicerProfile = request.SlicerProfile,

@@ -5,9 +5,9 @@
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS slicer-base
 
 LABEL maintainer="PrintFarmer Team" \
-    description="Base runtime for slicer workers (no slicer binaries)" \
+    description="Neutral base runtime for engine-specific slicer workers (no slicer binaries)" \
     version="1.0.0" \
-    component="slicer-worker-base"
+    component="slicer-base"
 
 ENV DOTNET_RUNNING_IN_CONTAINER=true \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true \

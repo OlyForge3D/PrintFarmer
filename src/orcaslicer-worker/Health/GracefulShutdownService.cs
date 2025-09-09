@@ -1,29 +1,46 @@
-using System.Runtime.InteropServices;
-using System.Runtime.Loader; // Needed for AssemblyLoadContext
-
 namespace Farm.OrcaSlicer.Worker.Health;
 
-public class GracefulShutdownService : BackgroundService
+public class GracefulShutdownService(IWorkerStateService workerStateService, ILogger<GracefulShutdownService> logger, IHostApplicationLifetime applicationLifetime) : BackgroundService
 {
-    private readonly ILogger<GracefulShutdownService> _logger;
-    private readonly IHostApplicationLifetime _lifetime;
-
-    public GracefulShutdownService(ILogger<GracefulShutdownService> logger, IHostApplicationLifetime lifetime)
+    private readonly CancellationTokenSource _shutdownTokenSource = new();
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger = logger;
-        _lifetime = lifetime;
+        applicationLifetime.ApplicationStopping.Register(OnShutdownRequested);
+        logger.LogInformation("Graceful shutdown service started.");
+        try { await Task.Delay(Timeout.Infinite, stoppingToken); }
+        catch (OperationCanceledException) { logger.LogInformation("Graceful shutdown service stopping."); }
     }
-
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    private void OnShutdownRequested()
     {
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => _logger.LogInformation("ProcessExit received, shutting down gracefully");
-        AssemblyLoadContext.Default.Unloading += _ => _logger.LogInformation("Unloading triggered, shutting down gracefully");
-        Console.CancelKeyPress += (_, e) =>
+        logger.LogInformation("SIGTERM received. Initiating graceful shutdown...");
+        workerStateService.SetShuttingDown();
+        _ = Task.Run(async () =>
         {
-            _logger.LogInformation("CancelKeyPress received, initiating shutdown");
-            e.Cancel = true;
-            _lifetime.StopApplication();
-        };
-        return Task.CompletedTask;
+            try { await PerformGracefulShutdownAsync(); }
+            catch (Exception ex) { logger.LogError(ex, "Error during graceful shutdown"); }
+            finally { await _shutdownTokenSource.CancelAsync(); }
+        });
+    }
+    private async Task PerformGracefulShutdownAsync()
+    {
+        var maxWait = TimeSpan.FromSeconds(30);
+        var start = DateTime.UtcNow;
+        while (DateTime.UtcNow - start < maxWait)
+        {
+            var state = workerStateService.GetWorkerState();
+            if (state.ActiveJobs == 0)
+            {
+                logger.LogInformation("All jobs completed. Proceeding with shutdown.");
+                break;
+            }
+            logger.LogInformation("Waiting for {ActiveJobs} active jobs...", state.ActiveJobs);
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+        logger.LogInformation("Graceful shutdown completed.");
+    }
+    public override void Dispose()
+    {
+        _shutdownTokenSource.Dispose();
+        base.Dispose();
     }
 }

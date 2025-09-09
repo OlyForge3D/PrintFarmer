@@ -68,12 +68,12 @@ public class SlicingJobRequest
 {
     public Guid UserId { get; set; }
     public Guid PrinterId { get; set; }
-    public string ModelFileUrl { get; set; } = string.Empty;
+    public Uri ModelFileUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
     public string ModelFileName { get; set; } = string.Empty;
     public SlicerEngineType SlicerEngine { get; set; } = SlicerEngineType.OrcaSlicer;
     public SlicerProfileDto SlicerProfile { get; set; } = new();
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
-    public Dictionary<string, object> Metadata { get; set; } = [];
+    public Dictionary<string, object> Metadata { get; } = [];
 
     /// <summary>
     /// Message envelope for idempotency and tracking
@@ -105,10 +105,9 @@ public class SlicingJobResponse
     public SlicingJobStatus Status { get; set; }
     public DateTime EstimatedCompletionTime { get; set; }
     public int QueuePosition { get; set; }
-    public string SlicerWorkerUrl { get; set; } = string.Empty;
+    public Uri SlicerWorkerUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
 }
 
-/// <summary>
 /// Extended slicing job for distributed processing 
 /// Builds on existing SlicingJobDto with additional distributed processing fields and envelope support
 /// </summary>
@@ -116,7 +115,7 @@ public class DistributedSlicingJob : SlicingJobDto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
-    public string ModelFileUrl { get; set; } = string.Empty;
+    public Uri ModelFileUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
     public string ModelFileName { get; set; } = string.Empty;
     public SlicerEngineType EngineType { get; set; }
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
@@ -125,13 +124,13 @@ public class DistributedSlicingJob : SlicingJobDto
     public DateTime? StartedAt { get; set; }
     public string? WorkerId { get; set; }
     public string? ErrorMessage { get; set; }
-    public string? ResultFileUrl { get; set; }
+    public Uri? ResultFileUrl { get; set; }
     public long? InputFileSizeBytes { get; set; }
     public long? OutputFileSizeBytes { get; set; }
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = [];
-    public int RetryCount { get; set; } = 0; // explicit for clarity (analyzer suggestion acceptable to ignore)
+    public Dictionary<string, object> Metadata { get; } = [];
+    public int RetryCount { get; set; } // default 0
     public DateTime? LastRetryAt { get; set; }
 
     // Message envelope fields for idempotency
@@ -152,7 +151,7 @@ public class DistributedSlicingJob : SlicingJobDto
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(envelope);
 
-        return new DistributedSlicingJob
+        var job = new DistributedSlicingJob
         {
             Id = envelope.JobId,
             UserId = request.UserId,
@@ -160,24 +159,34 @@ public class DistributedSlicingJob : SlicingJobDto
             ModelFileUrl = request.ModelFileUrl,
             ModelFileName = request.ModelFileName,
             EngineType = request.SlicerEngine,
+            SlicerEngine = request.SlicerEngine.ToString(),
             Profile = request.SlicerProfile,
             Priority = request.Priority,
             Status = SlicingJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
-            Metadata = request.Metadata,
             CorrelationId = envelope.CorrelationId,
             Checksum = envelope.Checksum,
             Attempt = envelope.Attempt,
             SubmittedAt = envelope.SubmittedAt,
             EnvelopeVersion = envelope.Version
         };
+
+        if (request.Metadata?.Count > 0)
+        {
+            foreach (var kv in request.Metadata)
+            {
+                job.Metadata[kv.Key] = kv.Value;
+            }
+        }
+
+        return job;
     }
 
     /// <summary>
     /// Get message envelope from job fields
     /// </summary>
     /// <returns>Message envelope</returns>
-    public Slicer.Messaging.MessageEnvelope GetEnvelope()
+    public Slicer.Messaging.MessageEnvelope CreateEnvelope()
     {
         return new Slicer.Messaging.MessageEnvelope
         {
@@ -222,8 +231,8 @@ public class DistributedSlicingJob : SlicingJobDto
             Message = ErrorMessage,
             SlicerEngine = EngineType.ToString(),
             PrinterId = PrinterId,
-            ModelFilePath = ModelFileUrl, // Legacy field mapping
-            GcodeFilePath = ResultFileUrl,
+            ModelFilePath = ModelFileUrl.ToString(), // Legacy field mapping expects string
+            GcodeFilePath = ResultFileUrl?.ToString(),
             Profile = Profile,
             CreatedAt = CreatedAt,
             CompletedAt = CompletedAt,
@@ -247,11 +256,11 @@ public class SlicingJobStatusResponse
     public DateTime? CompletedAt { get; set; }
     public string? WorkerId { get; set; }
     public string? ErrorMessage { get; set; }
-    public string? ResultFileUrl { get; set; }
+    public Uri? ResultFileUrl { get; set; }
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = [];
+    public Dictionary<string, object> Metadata { get; } = [];
 }
 
 /// <summary>
@@ -260,7 +269,7 @@ public class SlicingJobStatusResponse
 public class SlicingResult
 {
     public bool Success { get; set; }
-    public string? ResultFileUrl { get; set; }
+    public Uri? ResultFileUrl { get; set; }
     public string? Output { get; set; }
     public string? Error { get; set; }
     public double ProcessingTimeSeconds { get; set; }
@@ -268,7 +277,7 @@ public class SlicingResult
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
-    public Dictionary<string, string> Metadata { get; set; } = [];
+    public Dictionary<string, string> Metadata { get; } = [];
 }
 
 /// <summary>
@@ -284,7 +293,7 @@ public class SlicerHealthCheckResponse
     public long AvailableMemoryMB { get; set; }
     public DateTime? LastJobCompletedAt { get; set; }
     public bool IsHealthy { get; set; }
-    public Dictionary<string, object> Details { get; set; } = [];
+    public Dictionary<string, object> Details { get; } = [];
 }
 
 /// <summary>
@@ -302,7 +311,7 @@ public class SlicerWorkerConfiguration
     // Default falls back to current working directory /temp to avoid system global temp (macOS TCC prompts).
     public string TempDirectory { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "temp");
     public long MaxFileSizeBytes { get; set; } = 100_000_000; // 100MB
-    public Dictionary<string, object> SlicerSpecificSettings { get; set; } = [];
+    public Dictionary<string, object> SlicerSpecificSettings { get; } = [];
 
     public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)
     {
@@ -322,7 +331,7 @@ public class SlicingProgressUpdate
     public SlicingJobStatus Status { get; set; }
     public string? CurrentStep { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public Dictionary<string, object> AdditionalData { get; set; } = [];
+    public Dictionary<string, object> AdditionalData { get; } = [];
 }
 
 /// <summary>

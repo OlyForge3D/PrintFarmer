@@ -101,7 +101,7 @@ public class SignalRSlicerProgressNotifierTests
         var result = new SlicingResult
         {
             Success = true,
-            ResultFileUrl = "https://storage.example.com/results/result.gcode",
+            ResultFileUrl = new Uri("https://storage.example.com/results/result.gcode"),
             ProcessingTimeSeconds = 120.5,
             EstimatedPrintTimeSeconds = 3600,
             EstimatedFilamentUsageGrams = 25.5,
@@ -124,7 +124,7 @@ public class SignalRSlicerProgressNotifierTests
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 ((SlicingCompletionNotification)args[0]).Success &&
                 ((SlicingCompletionNotification)args[0]).ResultFileUrl != null &&
-                ((SlicingCompletionNotification)args[0]).ResultFileUrl!.ToString() == result.ResultFileUrl
+                ((SlicingCompletionNotification)args[0]).ResultFileUrl!.ToString() == result.ResultFileUrl!.ToString()
             ),
             It.IsAny<CancellationToken>()
         ), Times.AtLeast(2)); // Once for user group, once for monitors
@@ -171,7 +171,7 @@ public class SignalRSlicerProgressNotifierTests
         var connectionId1 = "connection-1";
         var connectionId2 = "connection-2";
 
-        var result = new SlicingResult { Success = true };
+    var result = new SlicingResult { Success = true };
 
         // Subscribe connections to job
         await _notifier.SubscribeToJobAsync(job.Id, connectionId1);
@@ -425,14 +425,14 @@ public class SignalRSlicerProgressNotifierTests
             Id = Guid.NewGuid(),
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/models/test.stl",
+            ModelFileUrl = new Uri("https://storage.example.com/models/test.stl"),
             ModelFileName = "test.stl",
-            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            EngineType = SlicerEngineType.OrcaSlicer,
             Profile = new SlicerProfileDto(),
             Priority = SlicingJobPriority.Normal,
             Status = SlicingJobStatus.Slicing,
             CreatedAt = DateTime.UtcNow,
-            Metadata = new Dictionary<string, object>()
+            // Metadata is read-only; will remain empty for test
         };
     }
 }

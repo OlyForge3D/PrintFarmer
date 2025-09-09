@@ -78,6 +78,34 @@ src/
   farm-web.sln      # .NET solution file
 ```
 
+### Engine Slicing Workers
+
+PrintFarmer now uses dedicated engine-specific worker services for G-code generation instead of a generic combined slicer service:
+
+| Worker | Purpose | Dockerfile | Default Queue |
+|--------|---------|------------|---------------|
+| OrcaSlicer Worker | Slicing via OrcaSlicer engine | `Dockerfile.orcaslicer` | `orcaslicer-jobs` |
+| PrusaSlicer Worker | Slicing via PrusaSlicer engine | `Dockerfile.prusaslicer` | `prusaslicer-jobs` |
+
+Base runtime image layering:
+1. `Dockerfile.slicer-base` – Neutral hardened runtime (GTK/offscreen deps, non-root user, health infra)
+2. Engine Dockerfile – Adds engine binary + worker application (entrypoint provided by project)
+
+Removed legacy components:
+- Generic `slicer-worker` project (superseded by per-engine workers)
+- Historical `Dockerfile.base` (replaced by `Dockerfile.slicer-base`)
+
+To add a new engine worker:
+1. Create a new project `Farm.<EngineName>Slicer.Worker` modeled after existing workers.
+2. Add a Dockerfile similar to `Dockerfile.orcaslicer` layering on `Dockerfile.slicer-base`.
+3. Register it in `docker-compose.microservices.yml` and add its URL under `SlicerOrchestrator__Workers__<EngineName>` in the API service environment.
+4. Define a distinct Redis queue name (e.g., `<engine>-jobs`).
+
+Health & readiness endpoints: each worker exposes `/healthz` (liveness) and readiness via the same endpoint (engine initialization performs binary detection early and fails fast if missing).
+
+Graceful shutdown: workers finish active jobs then exit (shutdown timeout managed by host/container orchestrator; future enhancement could add configurable timeout via `WORKER_SHUTDOWN_TIMEOUT`).
+
+
 ## Detailed Documentation
 
 **� [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  

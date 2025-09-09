@@ -12,7 +12,6 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
     private readonly ILogger<PrusaSlicingPipelineService> _logger;
-    private readonly IConfiguration _configuration;
     private readonly string _workingDirectory;
     private readonly string _storageEndpoint;
     private readonly string _prusaSlicerBinaryPath;
@@ -23,10 +22,10 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
         ILogger<PrusaSlicingPipelineService> logger,
         IConfiguration configuration)
     {
-        _httpClient = httpClient;
-        _progressReporter = progressReporter;
-        _logger = logger;
-        _configuration = configuration;
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _progressReporter = progressReporter ?? throw new ArgumentNullException(nameof(progressReporter));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(configuration);
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/slicer-work";
         _storageEndpoint = configuration["Worker:StorageEndpoint"] ?? "http://api:5245";
         _prusaSlicerBinaryPath = configuration["Worker:PrusaSlicerPath"] ?? "/usr/local/bin/prusa-slicer";
@@ -38,8 +37,9 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    public async Task<SlicingPipelineResult> ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
+    public async Task<SlicingResult> ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
         var jobWorkDir = Path.Combine(_workingDirectory, job.Id.ToString());
         Directory.CreateDirectory(jobWorkDir);
 
@@ -69,20 +69,18 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
 
             await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
 
-            var result = new SlicingPipelineResult
+            var result = new SlicingResult
             {
-                GcodeFileUrl = gcodeUrl,
+                ResultFileUrl = new Uri(gcodeUrl, UriKind.RelativeOrAbsolute),
                 EstimatedPrintTimeSeconds = metadata.PrintTimeSeconds,
                 EstimatedFilamentUsageGrams = metadata.FilamentUsageGrams,
-                FileSizeBytes = new FileInfo(gcodeFilePath).Length,
+                OutputFileSizeBytes = new FileInfo(gcodeFilePath).Length,
                 LayerCount = metadata.LayerCount,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["SlicerVersion"] = "PrusaSlicer 2.8.0",
-                    ["ProcessedAt"] = DateTime.UtcNow.ToString("O"),
-                    ["WorkerId"] = job.WorkerId ?? "unknown"
-                }
+                Success = true
             };
+            result.Metadata["SlicerVersion"] = "PrusaSlicer 2.8.0";
+            result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
+            result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
 
             _logger.LogInformation("Slicing pipeline completed for job {JobId}, output: {GcodeUrl}", job.Id, gcodeUrl);
             return result;
@@ -328,14 +326,15 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
         }
 
         // Fallback estimates if no metadata found in G-code
-        if (metadata.PrintTimeSeconds == 0)
+        const double epsilon = 0.0001;
+        if (Math.Abs(metadata.PrintTimeSeconds) < epsilon)
         {
             // Estimate based on layer count and file size
             var estimatedSeconds = metadata.LayerCount * 120; // 2 minutes per layer estimate
             metadata.PrintTimeSeconds = estimatedSeconds > 0 ? estimatedSeconds : 1800; // Default 30 minutes
         }
 
-        if (metadata.FilamentUsageGrams == 0)
+        if (Math.Abs(metadata.FilamentUsageGrams) < epsilon)
         {
             // Estimate based on file size (rough approximation)
             metadata.FilamentUsageGrams = Math.Max(5.0, fileInfo.Length / 50000.0); // Rough estimate
@@ -374,7 +373,7 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
         return mockUrl;
     }
 
-    private string GeneratePrusaSlicerConfig(SlicerProfileDto? profile)
+    private static string GeneratePrusaSlicerConfig(SlicerProfileDto? profile)
     {
         // Generate PrusaSlicer configuration in INI format
         // Based on PrusaSlicer configuration structure

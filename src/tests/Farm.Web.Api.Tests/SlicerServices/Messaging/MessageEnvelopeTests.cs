@@ -67,13 +67,13 @@ public class MessageEnvelopeTests
         var jobContent1 = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model1.stl"
+            ModelFileUrl = "https://storage.example.com/model1.stl",
         };
 
         var jobContent2 = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model2.stl"
+            ModelFileUrl = "https://storage.example.com/model2.stl",
         };
 
         // Act
@@ -91,7 +91,7 @@ public class MessageEnvelopeTests
         var jobContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl"
+            ModelFileUrl = "https://storage.example.com/model.stl",
         };
 
         var envelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
@@ -110,13 +110,13 @@ public class MessageEnvelopeTests
         var originalContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl"
+            ModelFileUrl = "https://storage.example.com/model.stl",
         };
 
         var modifiedContent = new SlicingJobContent
         {
             UserId = originalContent.UserId,
-            ModelFileUrl = "https://storage.example.com/different-model.stl" // Changed
+            ModelFileUrl = "https://storage.example.com/different-model.stl", // Changed
         };
 
         var envelope = MessageEnvelope.Create(originalContent, SlicerEngineType.OrcaSlicer);
@@ -136,7 +136,7 @@ public class MessageEnvelopeTests
         var jobContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl"
+            ModelFileUrl = "https://storage.example.com/model.stl",
         };
 
         var envelope1 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
@@ -153,11 +153,7 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_IsDuplicateOf_ShouldReturnFalseForDifferentCorrelation()
     {
         // Arrange
-        var jobContent = new SlicingJobContent
-        {
-            UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl"
-        };
+        var jobContent = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model.stl" };
 
         var envelope1 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
         var envelope2 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
@@ -174,16 +170,8 @@ public class MessageEnvelopeTests
     {
         // Arrange
         var correlationId = Guid.NewGuid();
-        var jobContent1 = new SlicingJobContent
-        {
-            UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model1.stl"
-        };
-        var jobContent2 = new SlicingJobContent
-        {
-            UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model2.stl"
-        };
+        var jobContent1 = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model1.stl" };
+        var jobContent2 = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model2.stl" };
 
         var envelope1 = MessageEnvelope.Create(jobContent1, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
         var envelope2 = MessageEnvelope.Create(jobContent2, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
@@ -199,11 +187,7 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_CreateRetry_ShouldIncrementAttempt()
     {
         // Arrange
-        var jobContent = new SlicingJobContent
-        {
-            UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl"
-        };
+        var jobContent = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model.stl" };
         var originalEnvelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
 
         // Act
@@ -225,13 +209,13 @@ public class MessageEnvelopeTests
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl",
+            ModelFileUrl = new Uri("https://storage.example.com/model.stl"),
             ModelFileName = "test-model.stl",
             SlicerEngine = SlicerEngineType.PrusaSlicer,
             Priority = SlicingJobPriority.High,
-            SlicerProfile = new SlicerProfileDto { LayerHeight = 0.2 },
-            Metadata = new Dictionary<string, object> { { "test", "value" } }
+            SlicerProfile = new SlicerProfileDto { LayerHeight = 0.2 }
         };
+        request.Metadata["test"] = "value";
 
         // Act
         var content = SlicingJobContent.FromRequest(request);
@@ -239,7 +223,7 @@ public class MessageEnvelopeTests
         // Assert
         content.UserId.Should().Be(request.UserId);
         content.PrinterId.Should().Be(request.PrinterId);
-        content.ModelFileUrl.Should().Be(request.ModelFileUrl);
+    content.ModelFileUrl.Should().Be(request.ModelFileUrl.ToString());
         content.ModelFileName.Should().Be(request.ModelFileName);
         content.SlicerEngine.Should().Be(request.SlicerEngine);
         content.Priority.Should().Be(request.Priority);
@@ -254,7 +238,7 @@ public class MessageEnvelopeTests
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl",
+            ModelFileUrl = new Uri("https://storage.example.com/model.stl"),
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             Priority = SlicingJobPriority.Normal
         };
@@ -282,7 +266,7 @@ public class MessageEnvelopeTests
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/model.stl",
+            ModelFileUrl = new Uri("https://storage.example.com/model.stl"),
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             Envelope = existingEnvelope
         };

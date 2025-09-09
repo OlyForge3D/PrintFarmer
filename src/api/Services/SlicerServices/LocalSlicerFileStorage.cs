@@ -191,13 +191,10 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 ContentType = storedContentType ?? GetContentType(fileInfo.Extension),
                 CreatedAt = fileInfo.CreationTimeUtc,
                 LastModified = fileInfo.LastWriteTimeUtc,
-                ETag = GenerateETag(fileInfo),
-                CustomMetadata = new Dictionary<string, string>
-                {
-                    ["FilePath"] = filePath,
-                    ["Extension"] = fileInfo.Extension
-                }
+                ETag = GenerateETag(fileInfo)
             };
+            meta.CustomMetadata["FilePath"] = filePath;
+            meta.CustomMetadata["Extension"] = fileInfo.Extension;
             return Task.FromResult<SlicerFileMetadata?>(meta);
         }
         catch (Exception ex)

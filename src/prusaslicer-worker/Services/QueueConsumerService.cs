@@ -13,7 +13,6 @@ public class QueueConsumerService : BackgroundService
     private readonly ISlicingPipelineService _pipeline;
     private readonly IProgressReporter _progressReporter;
     private readonly ILogger<QueueConsumerService> _logger;
-    private readonly IConfiguration _configuration;
     private readonly string _queueKey;
     private readonly string _processingKey;
     private readonly string _workerId;
@@ -25,13 +24,13 @@ public class QueueConsumerService : BackgroundService
         ILogger<QueueConsumerService> logger,
         IConfiguration configuration)
     {
-        _redis = redis;
-        _pipeline = pipeline;
-        _progressReporter = progressReporter;
-        _logger = logger;
-        _configuration = configuration;
-        _queueKey = "slicer:queue:orcaslicer";
-        _processingKey = "slicer:processing";
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
+        _pipeline = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
+        _progressReporter = progressReporter ?? throw new ArgumentNullException(nameof(progressReporter));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(configuration);
+        _queueKey = configuration["Worker:QueueKey"] ?? "slicer:queue:orcaslicer";
+        _processingKey = configuration["Worker:ProcessingKey"] ?? "slicer:processing";
         _workerId = Environment.MachineName + "-" + Environment.ProcessId;
     }
 
@@ -96,6 +95,7 @@ public class QueueConsumerService : BackgroundService
 
     private async Task ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(job);
         var startTime = DateTime.UtcNow;
         _logger.LogInformation("Starting processing job {JobId} at {StartTime}", job.Id, startTime);
 
@@ -110,10 +110,10 @@ public class QueueConsumerService : BackgroundService
             // Update job with results
             job.Status = SlicingJobStatus.Completed;
             job.CompletedAt = DateTime.UtcNow;
-            job.ResultFileUrl = result.GcodeFileUrl;
+            job.ResultFileUrl = result.ResultFileUrl;
             job.EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds;
             job.EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams;
-            job.OutputFileSizeBytes = result.FileSizeBytes;
+            job.OutputFileSizeBytes = result.OutputFileSizeBytes;
 
             var duration = DateTime.UtcNow - startTime;
             _logger.LogInformation("Completed job {JobId} in {Duration}ms", job.Id, duration.TotalMilliseconds);

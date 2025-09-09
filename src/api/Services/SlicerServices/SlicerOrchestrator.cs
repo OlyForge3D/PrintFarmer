@@ -55,7 +55,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                     Status = existingJob.Status,
                     EstimatedCompletionTime = existingJob.CompletedAt ?? DateTime.UtcNow.Add(queueStats.EstimatedWaitTime ?? TimeSpan.Zero),
                     QueuePosition = existingJob.Status == SlicingJobStatus.Queued ? (int)queueStats.QueuedJobs : 0,
-                    SlicerWorkerUrl = GetSlicerWorkerUrl(request.SlicerEngine)
+                    SlicerWorkerUrl = new Uri(GetSlicerWorkerUrl(request.SlicerEngine), UriKind.RelativeOrAbsolute)
                 };
             }
 
@@ -76,7 +76,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             // Get file size for tracking
             try
             {
-                var fileMetadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl, cancellationToken);
+                var fileMetadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl.ToString(), cancellationToken);
                 if (fileMetadata != null)
                 {
                     job.InputFileSizeBytes = fileMetadata.SizeBytes;
@@ -103,7 +103,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 Status = SlicingJobStatus.Queued,
                 EstimatedCompletionTime = estimatedCompletion,
                 QueuePosition = (int)queueStatsForNew.QueuedJobs, // Approximate
-                SlicerWorkerUrl = GetSlicerWorkerUrl(request.SlicerEngine)
+                SlicerWorkerUrl = new Uri(GetSlicerWorkerUrl(request.SlicerEngine), UriKind.RelativeOrAbsolute)
             };
         }
         catch (Exception ex)
@@ -123,7 +123,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 return null;
             }
 
-            return new SlicingJobStatusResponse
+            var response = new SlicingJobStatusResponse
             {
                 JobId = job.Id,
                 Status = job.Status,
@@ -136,9 +136,15 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ResultFileUrl = job.ResultFileUrl,
                 EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
-                LayerCount = job.LayerCount ?? 0,
-                Metadata = job.Metadata
+                LayerCount = job.LayerCount ?? 0
             };
+
+                foreach (var kv in job.Metadata)
+                {
+                    response.Metadata[kv.Key] = kv.Value;
+                }
+
+            return response;
         }
         catch (Exception ex)
         {
@@ -257,22 +263,31 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         {
             var jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
 
-            return [.. jobs.Select(job => new SlicingJobStatusResponse
+            var responses = new List<SlicingJobStatusResponse>(jobs.Count);
+            foreach (var job in jobs)
             {
-                JobId = job.Id,
-                Status = job.Status,
-                Progress = job.Progress,
-                CreatedAt = job.CreatedAt,
-                StartedAt = job.StartedAt,
-                CompletedAt = job.CompletedAt,
-                WorkerId = job.WorkerId,
-                ErrorMessage = job.ErrorMessage,
-                ResultFileUrl = job.ResultFileUrl,
-                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-                EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
-                LayerCount = job.LayerCount ?? 0,
-                Metadata = job.Metadata
-            })];
+                var r = new SlicingJobStatusResponse
+                {
+                    JobId = job.Id,
+                    Status = job.Status,
+                    Progress = job.Progress,
+                    CreatedAt = job.CreatedAt,
+                    StartedAt = job.StartedAt,
+                    CompletedAt = job.CompletedAt,
+                    WorkerId = job.WorkerId,
+                    ErrorMessage = job.ErrorMessage,
+                    ResultFileUrl = job.ResultFileUrl,
+                    EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+                    EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
+                    LayerCount = job.LayerCount ?? 0
+                };
+                foreach (var kv in job.Metadata)
+                {
+                    r.Metadata[kv.Key] = kv.Value;
+                }
+                responses.Add(r);
+            }
+            return responses;
         }
         catch (Exception ex)
         {
@@ -374,7 +389,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         {
             throw new ArgumentException("PrinterId is required", nameof(request));
         }
-        if (string.IsNullOrWhiteSpace(request.ModelFileUrl))
+        if (request.ModelFileUrl == null)
         {
             throw new ArgumentException("ModelFileUrl is required", nameof(request));
         }
@@ -386,21 +401,21 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
 
         // Validate file exists and is supported
-        var fileExists = await _fileStorage.FileExistsAsync(request.ModelFileUrl, cancellationToken);
+    var fileExists = await _fileStorage.FileExistsAsync(request.ModelFileUrl.ToString(), cancellationToken);
         if (!fileExists)
         {
             throw new FileNotFoundException($"Model file not found: {request.ModelFileUrl}");
         }
 
         // Check file extension
-        var extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl).ToLowerInvariant();
+    var extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl.ToString()).ToLowerInvariant();
         if (!engineMeta.SupportedExtensions.Contains(extension))
         {
             throw new ArgumentException($"File extension {extension} is not supported by {request.SlicerEngine}");
         }
 
         // Validate file size
-        var metadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl, cancellationToken);
+    var metadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl.ToString(), cancellationToken);
         if (metadata != null && metadata.SizeBytes > 100_000_000)
         {
             throw new ArgumentException("File size exceeds maximum limit of 100MB");

@@ -59,7 +59,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
                 UserId = job.UserId,
                 Status = job.Status,
                 Success = result.Success,
-                ResultFileUrl = string.IsNullOrWhiteSpace(result.ResultFileUrl) ? null : new Uri(result.ResultFileUrl, UriKind.RelativeOrAbsolute),
+                ResultFileUrl = result.ResultFileUrl,
                 ProcessingTimeSeconds = result.ProcessingTimeSeconds,
                 EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams,

@@ -65,7 +65,8 @@ public class SlicerServicesIntegrationTests : IDisposable
 
         // Upload a test model file
         var modelContent = CreateTestStlContent();
-        var modelFileUrl = await fileStorage.UploadFileAsync("test-models/cube.stl", modelContent, "application/octet-stream");
+    var modelFileUrlString = await fileStorage.UploadFileAsync("test-models/cube.stl", modelContent, "application/octet-stream");
+    var modelFileUrl = new Uri(modelFileUrlString, UriKind.RelativeOrAbsolute);
 
         var request = new SlicingJobRequest
         {
@@ -84,13 +85,10 @@ public class SlicerServicesIntegrationTests : IDisposable
                 Material = "PLA",
                 Quality = "Standard"
             },
-            Priority = SlicingJobPriority.Normal,
-            Metadata = new Dictionary<string, object>
-            {
-                ["TestRun"] = true,
-                ["ClientVersion"] = "1.0.0"
-            }
+            Priority = SlicingJobPriority.Normal
         };
+        request.Metadata["TestRun"] = true;
+        request.Metadata["ClientVersion"] = "1.0.0";
 
         // Setup mock queue to return the job when dequeued
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(It.IsAny<SlicerEngineType>(), It.IsAny<CancellationToken>()))
@@ -108,24 +106,24 @@ public class SlicerServicesIntegrationTests : IDisposable
         jobResponse.Should().NotBeNull();
         jobResponse.JobId.Should().NotBeEmpty();
         jobResponse.Status.Should().Be(SlicingJobStatus.Queued);
-        jobResponse.SlicerWorkerUrl.Should().Contain("orcaslicer-service");
+    jobResponse.SlicerWorkerUrl.ToString().Should().Contain("orcaslicer-service");
 
         // Verify job was enqueued
         _mockJobQueue.Verify(q => q.EnqueueAsync(
             It.Is<DistributedSlicingJob>(job =>
                 job.UserId == request.UserId &&
                 job.ModelFileUrl == modelFileUrl &&
-                job.SlicerEngine == SlicerEngineType.OrcaSlicer &&
+                job.EngineType == SlicerEngineType.OrcaSlicer &&
                 job.Priority == SlicingJobPriority.Normal
             ),
             It.IsAny<CancellationToken>()
         ), Times.Once);
 
         // Verify file storage integration
-        var fileExists = await fileStorage.FileExistsAsync(modelFileUrl);
+    var fileExists = await fileStorage.FileExistsAsync(modelFileUrl.ToString());
         fileExists.Should().BeTrue();
 
-        var downloadedContent = await fileStorage.DownloadFileBytesAsync(modelFileUrl);
+    var downloadedContent = await fileStorage.DownloadFileBytesAsync(modelFileUrl.ToString());
         downloadedContent.Should().BeEquivalentTo(modelContent);
     }
 
@@ -140,7 +138,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         // Act - Upload model file
         var modelKey = "integration-test/model.stl";
         var modelContent = CreateTestStlContent();
-        var modelUrl = await fileStorage.UploadFileAsync(modelKey, modelContent, "application/octet-stream");
+    var modelUrlString = await fileStorage.UploadFileAsync(modelKey, modelContent, "application/octet-stream");
+    var modelUrl = new Uri(modelUrlString, UriKind.RelativeOrAbsolute);
 
         // Verify upload
         var modelExists = await fileStorage.FileExistsAsync(modelKey);
@@ -151,7 +150,7 @@ public class SlicerServicesIntegrationTests : IDisposable
 
         // Upload G-code result
         var gcodeKey = "integration-test/result.gcode";
-        var gcodeUrl = await fileStorage.UploadFileAsync(gcodeKey, gcodeContent, "text/plain");
+    var gcodeUrlString = await fileStorage.UploadFileAsync(gcodeKey, gcodeContent, "text/plain");
 
         // Removed direct engine processing test (in-process engines deprecated). External workers handle slicing now.
         var orchestrator = _serviceProvider.GetRequiredService<ISlicerOrchestrator>();
@@ -162,7 +161,7 @@ public class SlicerServicesIntegrationTests : IDisposable
 
         // Test empty model file URL
         var emptyModelRequest = CreateValidSlicingJobRequest();
-        emptyModelRequest.ModelFileUrl = "";
+    emptyModelRequest.ModelFileUrl = new Uri("about:blank", UriKind.RelativeOrAbsolute);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(invalidUserRequest));
@@ -222,7 +221,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
 
         var modelBytes = CreateTestStlContent();
-        var modelUrl = await fileStorage.UploadFileAsync("dup-idem/cube.stl", modelBytes, "application/octet-stream");
+    var modelUrlStringDup = await fileStorage.UploadFileAsync("dup-idem/cube.stl", modelBytes, "application/octet-stream");
+    var modelUrl = new Uri(modelUrlStringDup, UriKind.RelativeOrAbsolute);
 
         var originalRequest = new SlicingJobRequest
         {
@@ -268,7 +268,7 @@ public class SlicerServicesIntegrationTests : IDisposable
                 PrinterId = dupRequest.PrinterId,
                 ModelFileUrl = dupRequest.ModelFileUrl,
                 ModelFileName = dupRequest.ModelFileName,
-                SlicerEngine = dupRequest.SlicerEngine,
+                EngineType = dupRequest.SlicerEngine,
                 Priority = dupRequest.Priority,
                 Status = SlicingJobStatus.Slicing,
                 Progress = 42,
@@ -397,7 +397,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         var orchestrator = _serviceProvider.GetRequiredService<ISlicerOrchestrator>();
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
         var bytes = CreateTestStlContent();
-        var url = await fileStorage.UploadFileAsync("checksum/cube.stl", bytes, "application/octet-stream");
+    var urlStringChecksum = await fileStorage.UploadFileAsync("checksum/cube.stl", bytes, "application/octet-stream");
+    var url = new Uri(urlStringChecksum, UriKind.RelativeOrAbsolute);
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
@@ -434,7 +435,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
         // Upload model first, then build request referencing actual stored file so validation succeeds
         var modelBytes = CreateTestStlContent();
-        var uploadedModelUrl = await fileStorage.UploadFileAsync($"materials/{material.ToLowerInvariant()}.stl", modelBytes, "application/octet-stream");
+    var uploadedModelUrlString = await fileStorage.UploadFileAsync($"materials/{material.ToLowerInvariant()}.stl", modelBytes, "application/octet-stream");
+    var uploadedModelUrl = new Uri(uploadedModelUrlString, UriKind.RelativeOrAbsolute);
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
@@ -451,8 +453,7 @@ public class SlicerServicesIntegrationTests : IDisposable
                 BedTemperature = bedTemp,
                 Quality = "Standard"
             },
-            Priority = SlicingJobPriority.Normal,
-            Metadata = new Dictionary<string, object>()
+            Priority = SlicingJobPriority.Normal
         };
         _mockJobQueue.Setup(q => q.GetQueueStatsAsync(SlicerEngineType.OrcaSlicer, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SlicerQueueStats { Engine = SlicerEngineType.OrcaSlicer, QueuedJobs = 1, EstimatedWaitTime = TimeSpan.FromMinutes(2) });
@@ -470,7 +471,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/models/test.stl",
+            ModelFileUrl = new Uri("https://storage.example.com/models/test.stl"),
             ModelFileName = "test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer, // still selecting engine for routing metadata
             SlicerProfile = new SlicerProfileDto
@@ -480,8 +481,7 @@ public class SlicerServicesIntegrationTests : IDisposable
                 Material = "PLA",
                 Quality = "Standard"
             },
-            Priority = SlicingJobPriority.Normal,
-            Metadata = new Dictionary<string, object>()
+            Priority = SlicingJobPriority.Normal
         };
     }
 

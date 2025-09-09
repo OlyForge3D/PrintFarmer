@@ -139,7 +139,7 @@ public class RedisSlicerJobQueueTests
     {
         // Arrange
         var orcaJob = CreateDistributedSlicingJob();
-        orcaJob.SlicerEngine = SlicerEngineType.OrcaSlicer;
+        orcaJob.EngineType = SlicerEngineType.OrcaSlicer;
 
         var jobJson = JsonSerializer.Serialize(orcaJob);
         var workerId = "prusa-worker";
@@ -170,7 +170,7 @@ public class RedisSlicerJobQueueTests
         var result = new SlicingResult
         {
             Success = true,
-            ResultFileUrl = "https://storage.example.com/result.gcode",
+            ResultFileUrl = new Uri("https://storage.example.com/result.gcode"),
             ProcessingTimeSeconds = 120.5,
             EstimatedPrintTimeSeconds = 3600,
             EstimatedFilamentUsageGrams = 25.0,
@@ -184,7 +184,7 @@ public class RedisSlicerJobQueueTests
         // Assert
         job.Status.Should().Be(SlicingJobStatus.Completed);
         job.CompletedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
-        job.ResultFileUrl.Should().Be(result.ResultFileUrl);
+    job.ResultFileUrl.Should().Be(result.ResultFileUrl);
         job.EstimatedPrintTimeSeconds.Should().Be(result.EstimatedPrintTimeSeconds);
         job.EstimatedFilamentUsageGrams.Should().Be(result.EstimatedFilamentUsageGrams);
         job.LayerCount.Should().Be(result.LayerCount);
@@ -553,14 +553,14 @@ public class RedisSlicerJobQueueTests
 
     private static DistributedSlicingJob CreateDistributedSlicingJob(Guid? jobId = null)
     {
-        return new DistributedSlicingJob
+        var job = new DistributedSlicingJob
         {
             Id = jobId ?? Guid.NewGuid(),
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://storage.example.com/models/test.stl",
+            ModelFileUrl = new Uri("https://storage.example.com/models/test.stl"),
             ModelFileName = "test.stl",
-            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            EngineType = SlicerEngineType.OrcaSlicer,
             Profile = new SlicerProfileDto
             {
                 LayerHeight = 0.2,
@@ -571,7 +571,8 @@ public class RedisSlicerJobQueueTests
             Status = SlicingJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
             Progress = 0,
-            Metadata = new Dictionary<string, object>()
         };
+        job.Metadata["key1"] = "value1";
+        return job;
     }
 }

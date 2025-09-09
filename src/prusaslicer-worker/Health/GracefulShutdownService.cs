@@ -49,7 +49,7 @@ public class GracefulShutdownService(
             }
             finally
             {
-                _shutdownTokenSource.Cancel();
+                await _shutdownTokenSource.CancelAsync();
             }
         });
     }

@@ -33,7 +33,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://example.com/test.stl",
+            ModelFileUrl = new Uri("https://example.com/test.stl"),
             ModelFileName = "test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfile = new SlicerProfileDto
@@ -54,12 +54,13 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         // Assert
         Assert.NotEqual(Guid.Empty, response.JobId);
         Assert.Equal(SlicingJobStatus.Queued, response.Status);
-        Assert.NotEmpty(response.SlicerWorkerUrl);
+    Assert.NotNull(response.SlicerWorkerUrl);
+    Assert.NotEqual("about:blank", response.SlicerWorkerUrl.ToString());
 
         _output.WriteLine($"Job submitted: {response.JobId}");
         _output.WriteLine($"Status: {response.Status}");
         _output.WriteLine($"Queue position: {response.QueuePosition}");
-        _output.WriteLine($"Worker URL: {response.SlicerWorkerUrl}");
+    _output.WriteLine($"Worker URL: {response.SlicerWorkerUrl}");
 
         // Verify job can be retrieved
         var jobStatus = await orchestrator.GetJobStatusAsync(response.JobId);
@@ -79,7 +80,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://example.com/small-test.stl",
+            ModelFileUrl = new Uri("https://example.com/small-test.stl"),
             ModelFileName = "small-test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfile = new SlicerProfileDto { LayerHeight = 0.3 },
@@ -145,7 +146,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
-            ModelFileUrl = "https://example.com/test.stl",
+            ModelFileUrl = new Uri("https://example.com/test.stl"),
             ModelFileName = "test.stl",
             SlicerEngine = (SlicerEngineType)999, // Invalid engine type
             SlicerProfile = new SlicerProfileDto(),

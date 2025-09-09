@@ -16,8 +16,9 @@ public class HttpProgressReporter : IProgressReporter
 
     public HttpProgressReporter(HttpClient httpClient, ILogger<HttpProgressReporter> logger, IConfiguration configuration)
     {
-        _httpClient = httpClient;
-        _logger = logger;
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(configuration);
         _apiBaseUrl = configuration["Worker:ApiBaseUrl"] ?? "http://api:5245";
         _workerId = Environment.MachineName + "-" + Environment.ProcessId;
     }
@@ -55,8 +56,10 @@ public class HttpProgressReporter : IProgressReporter
         }
     }
 
-    public async Task ReportCompletionAsync(DistributedSlicingJob job, SlicingPipelineResult result, CancellationToken cancellationToken = default)
+    public async Task ReportCompletionAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(result);
         try
         {
             var completion = new
@@ -64,10 +67,10 @@ public class HttpProgressReporter : IProgressReporter
                 JobId = job.Id,
                 WorkerId = _workerId,
                 Status = SlicingJobStatus.Completed,
-                ResultFileUrl = result.GcodeFileUrl,
+                ResultFileUrl = result.ResultFileUrl,
                 EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams,
-                OutputFileSizeBytes = result.FileSizeBytes,
+                OutputFileSizeBytes = result.OutputFileSizeBytes,
                 LayerCount = result.LayerCount,
                 CompletedAt = DateTime.UtcNow,
                 Metadata = result.Metadata

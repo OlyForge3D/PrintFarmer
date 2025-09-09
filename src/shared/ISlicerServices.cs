@@ -216,11 +216,27 @@ public class SlicerQueueStats
 public class SlicerValidationResult
 {
     public bool IsValid { get; set; }
-    public List<string> Issues { get; set; } = [];
-    public List<string> Warnings { get; set; } = [];
+    private readonly List<string> _issues = [];
+    private readonly List<string> _warnings = [];
+    public IReadOnlyList<string> Issues => _issues;
+    public IReadOnlyList<string> Warnings => _warnings;
     public long FileSizeBytes { get; set; }
     public string? FileType { get; set; }
-    public Dictionary<string, object> Metadata { get; set; } = [];
+    public Dictionary<string, object> Metadata { get; } = [];
+    public void AddIssue(string issue)
+    {
+        if (!string.IsNullOrWhiteSpace(issue))
+        {
+            _issues.Add(issue);
+        }
+    }
+    public void AddWarning(string warning)
+    {
+        if (!string.IsNullOrWhiteSpace(warning))
+        {
+            _warnings.Add(warning);
+        }
+    }
 }
 
 public class SlicerFileMetadata
@@ -231,7 +247,7 @@ public class SlicerFileMetadata
     public DateTime CreatedAt { get; set; }
     public DateTime LastModified { get; set; }
     public string? ETag { get; set; }
-    public Dictionary<string, string> CustomMetadata { get; set; } = [];
+    public Dictionary<string, string> CustomMetadata { get; } = [];
 }
 
 public class SlicerEngineInfo
@@ -248,7 +264,7 @@ public class SlicerEngineInfo
 public class SlicerOrchestratorHealth
 {
     public bool IsHealthy { get; set; }
-    public Dictionary<SlicerEngineType, SlicerEngineInfo> Engines { get; set; } = [];
+    public Dictionary<SlicerEngineType, SlicerEngineInfo> Engines { get; } = [];
     public bool JobQueueHealthy { get; set; }
     public bool FileStorageHealthy { get; set; }
     public int TotalActiveJobs { get; set; }
