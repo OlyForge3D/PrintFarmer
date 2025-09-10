@@ -2,7 +2,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+// @ts-expect-error: alias module resolution handled by Vite test environment
 import { PrinterDashboard } from '@/components/PrinterDashboard';
+// @ts-expect-error: alias module resolution handled by Vite test environment
+import type { Printer } from '@/types/api';
 
 // Mock the API hooks
 vi.mock('@/hooks/useApi', async () => ({
@@ -30,6 +33,7 @@ vi.mock('@/hooks/useSignalR', () => ({
 }));
 
 // dynamic import after mocks
+// @ts-expect-error: dynamic alias import resolved by Vite
 const { usePrinters } = await import('@/hooks/useApi');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
@@ -61,7 +65,7 @@ describe('PrinterDashboard', () => {
       isLoading: true,
       error: null,
       refetch: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -75,11 +79,11 @@ describe('PrinterDashboard', () => {
 
   it('should render empty state when no printers', () => {
     vi.mocked(usePrinters).mockReturnValue({
-      data: [],
+      data: [] as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -102,7 +106,7 @@ describe('PrinterDashboard', () => {
       isLoading: false,
       error: mockError,
       refetch: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -139,11 +143,11 @@ describe('PrinterDashboard', () => {
     ];
 
     vi.mocked(usePrinters).mockReturnValue({
-      data: mockPrinters,
+      data: mockPrinters as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>

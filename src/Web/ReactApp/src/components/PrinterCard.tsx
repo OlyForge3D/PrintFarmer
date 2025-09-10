@@ -1,15 +1,9 @@
 import { PrinterBackend } from '@/types/api';
 import type { Printer } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
-import { 
-  Cog,
-  Play,
-  Pause,
-  Square as StopIcon 
-} from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { Cog, Play, Pause, Square as StopIcon } from 'lucide-react';
 
 interface PrinterCardProps {
   printer: Printer;
@@ -163,23 +157,23 @@ export function PrinterCard({
             {hasPermission('printers', 'execute') && currentStatus.isOnline && (
               <>
                 {currentStatus.state === 'printing' && (
-                  <button className="p-2 text-pf-text-secondary hover:text-pf-warning bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <button aria-label="Pause print" title="Pause print" className="p-2 text-pf-text-secondary hover:text-pf-warning bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                     <Pause className="h-4 w-4" />
                   </button>
                 )}
                 {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                  <button className="p-2 text-pf-text-secondary hover:text-pf-success bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <button aria-label="Resume print" title="Resume print" className="p-2 text-pf-text-secondary hover:text-pf-success bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                     <Play className="h-4 w-4" />
                   </button>
                 )}
-                <button className="p-2 text-pf-text-secondary hover:text-pf-error bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                <button aria-label="Stop print" title="Stop print" className="p-2 text-pf-text-secondary hover:text-pf-error bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                   <StopIcon className="h-4 w-4" />
                 </button>
               </>
             )}
             
             {hasPermission('printers', 'update') && (
-              <button className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+              <button aria-label="Manage printer" title="Manage printer" className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                 <Cog className="h-4 w-4" />
               </button>
             )}
@@ -194,10 +188,17 @@ export function PrinterCard({
               <span>{Math.round(currentStatus.progress)}%</span>
             </div>
             <div className="w-full bg-pf-border-dark rounded-full h-2">
-              <div
-                className="bg-pf-success h-2 rounded-full transition-all duration-300"
-                style={{ width: `${currentStatus.progress}%` }}
-              />
+              <div className="bg-pf-border-dark h-2 rounded-full overflow-hidden">
+                {(() => {
+                  const pct = Math.max(0, Math.min(100, Math.round(currentStatus.progress)));
+                  const step = Math.round(pct / 5) * 5;
+                  const widthClass = `w-[${step}%]` as const;
+                  return <>
+                    <span className="sr-only">Progress {pct}%</span>
+                    <div className={`h-2 bg-pf-success transition-all duration-300 ${widthClass}`} data-progress-bar aria-hidden="true" />
+                  </>;
+                })()}
+              </div>
             </div>
           </div>
         )}
@@ -248,10 +249,17 @@ export function PrinterCard({
               <span>{Math.round(currentStatus.progress)}%</span>
             </div>
             <div className="w-full bg-pf-border-dark rounded-full h-2">
-              <div
-                className="bg-pf-success h-2 rounded-full transition-all duration-300"
-                style={{ width: `${currentStatus.progress}%` }}
-              />
+              <div className="bg-pf-border-dark h-2 rounded-full overflow-hidden">
+                {(() => {
+                  const pct = Math.max(0, Math.min(100, Math.round(currentStatus.progress)));
+                  const step = Math.round(pct / 5) * 5;
+                  const widthClass = `w-[${step}%]` as const;
+                  return <>
+                    <span className="sr-only">Progress {pct}%</span>
+                    <div className={`h-2 bg-pf-success transition-all duration-300 ${widthClass}`} data-progress-bar aria-hidden="true" />
+                  </>;
+                })()}
+              </div>
             </div>
           </div>
         )}

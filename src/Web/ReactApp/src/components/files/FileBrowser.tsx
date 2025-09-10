@@ -3,12 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronRightIcon } from '@heroicons/react/24/outline';
 
-import { 
-  GcodeFile,
-  GetGcodeFilesRequest,
-  GetGcodeFilesResponse
-} from '@/types/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { GcodeFile } from '@/types/api';
+import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { FileRow } from './FileRow';
 
@@ -153,16 +149,22 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
       {/* Search and filters */}
       <div className="flex items-center space-x-4">
         <div className="flex-1 max-w-md">
+          <label htmlFor="file-search" className="sr-only">Search files</label>
           <input
+            id="file-search"
             type="text"
             placeholder="Search files..."
+            aria-label="Search files"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         
+        <label htmlFor="sort-by" className="sr-only">Sort by</label>
         <select
+          id="sort-by"
+          aria-label="Sort files by"
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as 'name' | 'size' | 'date')}
           className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -193,6 +195,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           <div className="px-4 py-3 border-b border-gray-200 flex items-center">
             <input
               type="checkbox"
+              title="Select all files"
+              aria-label="Select all files"
               checked={selectedFiles.length === files.files.length && files.files.length > 0}
               onChange={handleSelectAll}
               className="mr-4"

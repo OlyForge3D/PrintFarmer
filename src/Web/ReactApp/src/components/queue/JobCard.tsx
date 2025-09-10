@@ -7,8 +7,6 @@ import {
   ArrowDown, 
   Trash2, 
   MoreHorizontal, 
-  Play,
-  Pause,
   AlertCircle 
 } from 'lucide-react';
 import { PrintJob, queueService } from '@/services/queueService';
@@ -124,6 +122,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                 onClick={() => setShowActions(!showActions)}
                 className="p-1 hover:bg-gray-100 rounded"
                 disabled={removeMutation.isPending || priorityMutation.isPending}
+                aria-label="Toggle job actions menu"
+                title="Job actions"
               >
                 <MoreHorizontal className="w-4 h-4 text-gray-400" />
               </button>
@@ -134,6 +134,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     onClick={() => handleChangePriority(3)}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
                     disabled={job.priority === 3}
+                    aria-label="Set priority to Urgent"
+                    title="Set priority to Urgent"
                   >
                     <ArrowUp className="w-4 h-4 mr-2 text-red-500" />
                     Urgent
@@ -142,6 +144,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     onClick={() => handleChangePriority(2)}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
                     disabled={job.priority === 2}
+                    aria-label="Set priority to High"
+                    title="Set priority to High"
                   >
                     <ArrowUp className="w-4 h-4 mr-2 text-orange-500" />
                     High
@@ -150,6 +154,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     onClick={() => handleChangePriority(1)}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
                     disabled={job.priority === 1}
+                    aria-label="Set priority to Normal"
+                    title="Set priority to Normal"
                   >
                     Normal
                   </button>
@@ -157,6 +163,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     onClick={() => handleChangePriority(0)}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
                     disabled={job.priority === 0}
+                    aria-label="Set priority to Low"
+                    title="Set priority to Low"
                   >
                     <ArrowDown className="w-4 h-4 mr-2 text-gray-500" />
                     Low
@@ -165,6 +173,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                   <button
                     onClick={handleRemoveJob}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-red-600 flex items-center"
+                    aria-label="Remove job from queue"
+                    title="Remove job"
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
                     Remove

@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
-import type { Printer, TempTargets, MoveRequest, FilamentPresets } from '@/types/api';
+import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { 
   ChevronDown, 
-  ChevronUp, 
   ExternalLink,
   Edit,
   History,
@@ -20,11 +19,12 @@ import {
 interface ExpandablePrinterCardProps {
   printer: Printer;
   onEdit?: (printer: Printer) => void;
+  // Optional callbacks not currently used by this component's internal UI; prefixed to silence unused var lint
   onDelete?: (printer: Printer) => void;
   onManage?: (printer: Printer) => void;
 }
-
-export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: ExpandablePrinterCardProps) {
+// We intentionally accept onDelete/onManage in props interface for future actions but do not destructure them to avoid unused vars
+export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [step, setStep] = useState(10);
@@ -112,12 +112,6 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
       setLastKnownZ(status.z);
     }
   }, [status, printer.id, printer.name, printer.hotendTemp, printer.bedTemp, printer.hotendTarget, printer.bedTarget, printer.x, printer.y, printer.z, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ]);
-
-  const formatTemp = (temp: number | null | undefined, lastKnown: number | null): string => {
-    const value = temp ?? lastKnown;
-    if (value === null || value === undefined) return '--°C';
-    return Math.round(value).toString() + '°C';
-  };
 
   const formatTempWithTarget = (currentTemp: number | null | undefined, targetTemp: number | null | undefined, lastKnownCurrent: number | null): string => {
     const current = currentTemp ?? lastKnownCurrent;
@@ -382,6 +376,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-pf-text-secondary hover:text-pf-text-primary"
+                  aria-label={`Open printer ${printer.name} in new tab`}
+                  title={`Open printer ${printer.name}`}
                 >
                   <ExternalLink className="h-4 w-4" />
                 </a>
@@ -389,6 +385,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                   <button
                     onClick={() => setShowCamera(!showCamera)}
                     className="text-pf-text-secondary hover:text-pf-text-primary"
+                    aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
+                    title={showCamera ? 'Hide camera' : 'Show camera'}
                   >
                     <Camera className="h-4 w-4" />
                   </button>
@@ -486,6 +484,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="text-pf-text-secondary hover:text-pf-text-primary"
+                aria-label={`Open printer ${printer.name} in new tab`}
+                title={`Open printer ${printer.name}`}
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
@@ -493,6 +493,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                 <button
                   onClick={() => setShowCamera(!showCamera)}
                   className="text-pf-text-secondary hover:text-pf-text-primary"
+                  aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
+                  title={showCamera ? 'Hide camera' : 'Show camera'}
                 >
                   <Camera className="h-4 w-4" />
                 </button>
@@ -527,6 +529,7 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
           <button
             onClick={handleViewHistory}
             className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+              aria-label="Expand printer card"
             title="View print history"
           >
             <History className="h-4 w-4" />
@@ -559,6 +562,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
               </span>
               <div className="relative inline-block">
                 <input 
+                  aria-label="Hotend temperature target"
+                  placeholder="Temp"
                   type="number" 
                   className="w-28 h-9 pl-14 pr-8 border border-pf-border rounded-md text-sm bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   value={hotendTemp}
@@ -583,6 +588,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
               </span>
               <div className="relative inline-block">
                 <input 
+                  aria-label="Bed temperature target"
+                  placeholder="Temp"
                   type="number" 
                   className="w-28 h-9 pl-10 pr-8 border border-pf-border rounded-md text-sm bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   value={bedTemp}
@@ -789,6 +796,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                   X
                 </span>
                 <input 
+                  aria-label="X movement amount"
+                  placeholder="ΔX"
                   type="number" 
                   className="w-24 h-8 pl-6 pr-2 border border-pf-border rounded text-xs bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   disabled={isPrinting}
@@ -807,6 +816,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                   Y
                 </span>
                 <input 
+                  aria-label="Y movement amount"
+                  placeholder="ΔY"
                   type="number" 
                   className="w-24 h-8 pl-6 pr-2 border border-pf-border rounded text-xs bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   disabled={isPrinting}
@@ -825,6 +836,8 @@ export function ExpandablePrinterCard({ printer, onEdit, onDelete, onManage }: E
                   Z
                 </span>
                 <input 
+                  aria-label="Z movement amount"
+                  placeholder="ΔZ"
                   type="number" 
                   className="w-24 h-8 pl-6 pr-2 border border-pf-border rounded text-xs bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   disabled={isPrinting}

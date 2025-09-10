@@ -37,6 +37,14 @@ export interface SlicingProgress {
   message?: string;
 }
 
+export interface SlicedModelSummary {
+  id: string;
+  name: string;
+  sizeBytes?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 class SlicerService {
   private baseUrl = '/api';
 
@@ -136,7 +144,7 @@ class SlicerService {
     return response.json();
   }
 
-  async listModels(): Promise<any[]> {
+  async listModels(): Promise<SlicedModelSummary[]> {
     const response = await fetch(`${this.baseUrl}/models`);
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.statusText}`);

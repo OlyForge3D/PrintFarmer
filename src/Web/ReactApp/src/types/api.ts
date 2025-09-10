@@ -349,6 +349,35 @@ export interface HarvestProgress {
   phase: 'discovering' | 'processing' | 'completing';
 }
 
+// SignalR real-time harvest update envelope
+export interface HarvestUpdateDto {
+  operationId: string;
+  status: GcodeHarvestStatus; // mapped enum status
+  filesFound: number;
+  filesProcessed: number;
+  filesAdded: number;
+  filesSkipped: number;
+  filesErrored: number;
+  duplicatesSkipped?: number;
+  progressPercent?: number; // convenience precomputed value (0-100)
+  currentFile?: string;
+  phase?: 'discovering' | 'processing' | 'completing';
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+}
+
+// SignalR job queue event payloads
+export interface JobQueueUpdateDto {
+  jobs: JobQueuePrintJob[];
+  total: number;
+  updatedAt: string; // ISO timestamp of snapshot
+  // Optional granular delta info (future extension)
+  addedIds?: string[];
+  updatedIds?: string[];
+  removedIds?: string[];
+}
+
 export interface StartBulkHarvestRequest {
   printerIds: string[];
   options: HarvestOptions;

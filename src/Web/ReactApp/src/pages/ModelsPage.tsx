@@ -13,18 +13,18 @@ const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>
 );
 import { SlicerConfigModal } from '@/components/slicer/SlicerConfigModal';
 import { slicerService } from '@/services/slicerService';
+import type { SlicedModelSummary } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 
-interface Model {
-  id: string;
-  name: string;
-  fileName: string;
-  fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
-  uploadedAt: string;
-  url: string;
+// Backend currently returns a SlicedModelSummary; we extend with optional UI enrichment fields.
+type Model = SlicedModelSummary & {
+  fileName?: string;
+  fileSize?: number;
+  fileType?: 'stl' | '3mf' | 'obj' | 'ply';
+  uploadedAt?: string; // alias of createdAt
+  url?: string;
   thumbnailUrl?: string;
-}
+};
 
 interface GCodeFile {
   id: string;
@@ -49,7 +49,7 @@ export const ModelsPage: React.FC = () => {
   const queryClient = useQueryClient();
 
   // Fetch models
-  const { data: models = [], isLoading } = useQuery({
+  const { data: models = [], isLoading } = useQuery<Model[]>({
     queryKey: ['models'],
     queryFn: slicerService.listModels
   });
@@ -296,9 +296,9 @@ export const ModelsPage: React.FC = () => {
             <div className="p-4">
               <h3 className="font-medium text-lg mb-1">{model.name}</h3>
               <div className="text-sm text-gray-500 space-y-1">
-                <div>Type: {model.fileType.toUpperCase()}</div>
-                <div>Size: {formatFileSize(model.fileSize)}</div>
-                <div>Uploaded: {new Date(model.uploadedAt).toLocaleDateString()}</div>
+                {model.fileType && <div>Type: {model.fileType.toUpperCase()}</div>}
+                {typeof model.fileSize === 'number' && <div>Size: {formatFileSize(model.fileSize)}</div>}
+                <div>Uploaded: {new Date(model.uploadedAt || (model as { createdAt?: string; updatedAt?: string }).createdAt || (model as { updatedAt?: string }).updatedAt || Date.now()).toLocaleDateString()}</div>
               </div>
 
               {/* Actions */}
@@ -306,7 +306,7 @@ export const ModelsPage: React.FC = () => {
                 <button
                   onClick={() => setSlicerModal({ 
                     isOpen: true, 
-                    model: new File([], model.fileName) // Simplified for demo
+                    model: new File([], model.fileName || `${model.name}.stl`) // Simplified placeholder
                   })}
                   className="flex-1 px-3 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-sm font-medium"
                 >
@@ -342,11 +342,13 @@ export const ModelsPage: React.FC = () => {
             </div>
             <div className="p-4">
               <Suspense fallback={<ViewerSkeleton variant="model" />}> 
-                <ModelViewer
-                  modelUrl={viewerModel.url}
-                  fileType={viewerModel.fileType}
-                  className="h-96 w-full"
-                />
+                {viewerModel.url && viewerModel.fileType && (
+                  <ModelViewer
+                    modelUrl={viewerModel.url}
+                    fileType={viewerModel.fileType}
+                    className="h-96 w-full"
+                  />
+                )}
               </Suspense>
             </div>
           </div>

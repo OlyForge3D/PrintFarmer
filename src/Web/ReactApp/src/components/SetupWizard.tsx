@@ -29,6 +29,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     checkSetupStatus();
   }, []);
 
+  // If setup not required, immediately signal completion (must be a hook, not conditional call inside render)
+  useEffect(() => {
+    if (!loading && !needsSetup) {
+      onComplete();
+    }
+  }, [loading, needsSetup, onComplete]);
+
   const checkSetupStatus = async () => {
     try {
       const response = await fetch('/api/setup/status');
@@ -144,8 +151,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   }
 
   if (!needsSetup) {
-    // Setup not needed, complete immediately
-    useEffect(() => onComplete(), [onComplete]);
     return null;
   }
 

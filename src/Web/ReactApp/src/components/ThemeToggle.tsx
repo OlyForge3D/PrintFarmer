@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
-import { useTheme, type ThemeName } from '@/contexts/ThemeContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import type { ThemeName } from '@/contexts/ThemeContext';
 
 interface ThemeToggleProps {
   /** Show theme labels (defaults to false for compact mode) */
@@ -88,7 +89,7 @@ export function ThemeToggle({
               }
             `}
             role="radio"
-            aria-checked={theme === value}
+            aria-checked={theme === value ? true : false}
             aria-label={`Switch to ${label.toLowerCase()} theme`}
           >
             <Icon className={iconSizes[size]} />
@@ -120,6 +121,7 @@ export function ThemeToggle({
       `}
       aria-label={`Current theme: ${currentTheme.label}. Click to cycle themes.`}
       title={`Current: ${currentTheme.label} (${computedTheme}). Click to change.`}
+  aria-pressed={(theme === 'dark') ? 'true' : 'false'}
     >
       <Icon className={iconSizes[size]} />
       {showLabels && (
@@ -139,16 +141,4 @@ export function ThemeToggle({
 /**
  * Simple theme toggle hook for custom implementations
  */
-export function useThemeToggle() {
-  const { theme, setTheme, toggleTheme, computedTheme } = useTheme();
-  
-  return {
-    theme,
-    computedTheme,
-    setTheme,
-    toggleTheme,
-    isLight: computedTheme === 'light',
-    isDark: computedTheme === 'dark',
-    isSystem: theme === 'system'
-  };
-}
+// NOTE: Hook moved to separate file to satisfy react-refresh rule

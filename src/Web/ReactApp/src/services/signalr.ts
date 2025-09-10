@@ -4,11 +4,11 @@ import {
   HubConnectionState,
   LogLevel 
 } from '@microsoft/signalr';
-import { PrinterStatusUpdate, DiscoveryProgressDto, DiscoveryPrinterFoundDto, DiscoveryCompletedDto } from '@/types/api';
+import { PrinterStatusUpdate, DiscoveryProgressDto, DiscoveryPrinterFoundDto, DiscoveryCompletedDto, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
-type HarvestUpdateCallback = (operationId: string, status: any) => void;
-type JobQueueUpdateCallback = (update: any) => void;
+type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
+type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
 type ConnectionStateCallback = (connected: boolean) => void;
 type DiscoveryProgressCallback = (progress: DiscoveryProgressDto) => void;
 type DiscoveryPrinterFoundCallback = (found: DiscoveryPrinterFoundDto) => void;
@@ -91,7 +91,7 @@ export class SignalRService {
       });
     });
 
-    this.connection.on('HarvestUpdate', (operationId: string, status: any) => {
+  this.connection.on('HarvestUpdate', (operationId: string, status: HarvestUpdateDto) => {
       this.harvestUpdateCallbacks.forEach(callback => {
         try {
           callback(operationId, status);
@@ -101,7 +101,7 @@ export class SignalRService {
       });
     });
 
-    this.connection.on('JobQueueUpdate', (update: any) => {
+  this.connection.on('JobQueueUpdate', (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach(callback => {
         try {
           callback(update);

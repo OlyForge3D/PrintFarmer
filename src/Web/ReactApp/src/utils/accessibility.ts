@@ -232,8 +232,7 @@ export function generateAccessiblePalette(baseColor: string, backgroundColor: st
   ratio: number;
 }[] {
   const suggestions = [];
-  const baseLum = getLuminance(baseColor);
-  const bgLum = getLuminance(backgroundColor);
+  // (Lum values calculated on demand in contrast attempts; removed unused pre-calculations.)
   
   // Try different brightness levels to achieve WCAG AA compliance
   for (let adjustment = -0.8; adjustment <= 0.8; adjustment += 0.1) {

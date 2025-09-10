@@ -39,8 +39,14 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ['react', 'react-dom'],
+          routing: ['react-router-dom'],
           vendor_misc: ['axios', '@tanstack/react-query'],
-          three: ['three'],
+          three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib'],
+          viewers: [
+            // Heavy 3D viewer components (ensure paths resolved at build time)
+            '@/components/3d/ModelViewer',
+            '@/components/3d/GCodeViewer'
+          ]
         }
       }
     }

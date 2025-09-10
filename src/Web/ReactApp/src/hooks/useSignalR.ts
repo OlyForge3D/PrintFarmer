@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { HubConnectionState } from '@microsoft/signalr';
 import { signalRService } from '@/services/signalr';
-import { PrinterStatusUpdate } from '@/types/api';
+import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
 
 // ============ Connection Hook ============
 
@@ -18,7 +18,7 @@ export function useSignalRConnection() {
     signalRService.connect();
 
     // Subscribe to connection state changes
-    const unsubscribe = signalRService.onConnectionStateChange((connected) => {
+    const unsubscribe = signalRService.onConnectionStateChange(() => {
       setConnectionState(signalRService.connectionState);
       setConnectionId(signalRService.connectionId);
     });
@@ -111,11 +111,11 @@ export function usePrinterStatusUpdates(
 // ============ Harvest Updates Hook ============
 
 export function useHarvestUpdates(
-  onUpdate?: (operationId: string, status: any) => void,
+  onUpdate?: (operationId: string, status: HarvestUpdateDto) => void,
   operationIds?: string[]
 ) {
-  const [latestUpdate, setLatestUpdate] = useState<{ operationId: string; status: any } | null>(null);
-  const [harvestStatuses, setHarvestStatuses] = useState<Map<string, any>>(new Map());
+  const [latestUpdate, setLatestUpdate] = useState<{ operationId: string; status: HarvestUpdateDto } | null>(null);
+  const [harvestStatuses, setHarvestStatuses] = useState<Map<string, HarvestUpdateDto>>(new Map());
 
   const onUpdateRef = useRef(onUpdate);
   const operationIdsRef = useRef(operationIds);
@@ -129,7 +129,7 @@ export function useHarvestUpdates(
   }, [operationIds]);
 
   useEffect(() => {
-    const handleHarvestUpdate = (operationId: string, status: any) => {
+  const handleHarvestUpdate = (operationId: string, status: HarvestUpdateDto) => {
       if (operationIdsRef.current && !operationIdsRef.current.includes(operationId)) {
         return;
       }
@@ -157,8 +157,8 @@ export function useHarvestUpdates(
 
 // ============ Job Queue Updates Hook ============
 
-export function useJobQueueUpdates(onUpdate?: (update: any) => void) {
-  const [latestUpdate, setLatestUpdate] = useState<any>(null);
+export function useJobQueueUpdates(onUpdate?: (update: JobQueueUpdateDto) => void) {
+  const [latestUpdate, setLatestUpdate] = useState<JobQueueUpdateDto | null>(null);
 
   const onUpdateRef = useRef(onUpdate);
 
@@ -167,7 +167,7 @@ export function useJobQueueUpdates(onUpdate?: (update: any) => void) {
   }, [onUpdate]);
 
   useEffect(() => {
-    const handleJobQueueUpdate = (update: any) => {
+  const handleJobQueueUpdate = (update: JobQueueUpdateDto) => {
       setLatestUpdate(update);
       onUpdateRef.current?.(update);
     };
@@ -262,13 +262,13 @@ export function useSignalR(options: {
   harvestOperationIds?: string[];
   autoConnect?: boolean;
   onPrinterUpdate?: (status: PrinterStatusUpdate) => void;
-  onHarvestUpdate?: (operationId: string, status: any) => void;
-  onJobQueueUpdate?: (update: any) => void;
+  onHarvestUpdate?: (operationId: string, status: HarvestUpdateDto) => void;
+  onJobQueueUpdate?: (update: JobQueueUpdateDto) => void;
 } = {}) {
   const {
     printerIds,
     harvestOperationIds,
-    autoConnect = true,
+    // autoConnect intentionally unused currently; reserved for future manual connect toggle
     onPrinterUpdate,
     onHarvestUpdate,
     onJobQueueUpdate,

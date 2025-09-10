@@ -1,13 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Printer } from '@/types/api';
-import { 
-  MoreVertical, 
-  Edit, 
-  Trash2, 
-  Settings,
-  X,
-  Wrench
-} from 'lucide-react';
+import { MoreVertical, Edit, Trash2, Wrench } from 'lucide-react';
 
 interface PrinterActionsDropdownProps {
   printer: Printer;

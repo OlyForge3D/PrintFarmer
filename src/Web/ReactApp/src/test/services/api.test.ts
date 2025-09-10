@@ -1,5 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+// @ts-expect-error: alias resolved by Vite during tests
 import { ApiClient } from '@/services/api';
+// @ts-expect-error: alias resolved by Vite during tests
 import { PrinterBackend } from '@/types/api';
 
 // Mock axios
@@ -51,8 +53,9 @@ describe('ApiClient', () => {
       };
 
       // Mock the get method
-      const mockGet = vi.fn().mockResolvedValue(mockResponse);
-      (apiClient as any).client.get = mockGet;
+  const mockGet = vi.fn().mockResolvedValue(mockResponse);
+  // access internal axios client for mocking; cast to index signature
+  (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
 
       const result = await apiClient.getPrinters();
 
@@ -68,8 +71,8 @@ describe('ApiClient', () => {
         data: { status: 'ok' },
       };
 
-      const mockGet = vi.fn().mockResolvedValue(mockResponse);
-      (apiClient as any).client.get = mockGet;
+  const mockGet = vi.fn().mockResolvedValue(mockResponse);
+  (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
 
       const result = await apiClient.getBasicHealth();
 
@@ -95,8 +98,8 @@ describe('ApiClient', () => {
         },
       };
 
-      const mockPost = vi.fn().mockResolvedValue(mockResponse);
-      (apiClient as any).client.post = mockPost;
+  const mockPost = vi.fn().mockResolvedValue(mockResponse);
+  (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
 
       const result = await apiClient.createPrinter(printerDto);
 

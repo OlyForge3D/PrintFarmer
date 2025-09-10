@@ -1,20 +1,12 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import React, { createContext, useEffect, useState, ReactNode, useContext } from 'react';
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
+import type { AuthContextType } from './AuthContextValue';
 
-interface AuthContextType {
-  user: UserDto | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  login: (credentials: LoginRequest) => Promise<boolean>;
-  register: (userData: RegisterRequest) => Promise<boolean>;
-  logout: () => Promise<void>;
-  hasRole: (role: string) => boolean;
-  hasPermission: (resource: string, action: string) => boolean;
-  error: string | null;
-}
+// AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -71,8 +63,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setError(result.error || 'Login failed');
         return false;
       }
-    } catch (err: any) {
-      const errorMessage = err.message || 'Login failed';
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Login failed';
       setError(errorMessage);
       return false;
     } finally {
@@ -95,8 +87,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setError(result.error || 'Registration failed');
         return false;
       }
-    } catch (err: any) {
-      const errorMessage = err.message || 'Registration failed';
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Registration failed';
       setError(errorMessage);
       return false;
     } finally {
@@ -147,17 +139,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     error,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-export function useAuth(): AuthContextType {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+// Hook moved to separate file (AuthHooks.ts) to satisfy react-refresh rule
+export function useAuthInternal(): AuthContextType {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  return ctx;
 }

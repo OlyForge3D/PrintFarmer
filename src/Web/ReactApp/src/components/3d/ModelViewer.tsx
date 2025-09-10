@@ -112,12 +112,20 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         camera={{ position: [50, 50, 50], fov: 45 }}
         shadows
         onError={(error: unknown) => {
-          if (error && typeof error === 'object' && 'message' in error) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            setError((error as any).message ?? 'Failed to load model');
-          } else {
-            setError('Failed to load model');
-          }
+          const message = ((): string => {
+            if (typeof error === 'string') return error;
+            if (error && typeof error === 'object') {
+              if ('message' in error) {
+                const maybeMsg = (error as { message?: unknown }).message;
+                if (typeof maybeMsg === 'string') return maybeMsg;
+              }
+              try {
+                return JSON.stringify(error);
+              } catch { /* ignore */ }
+            }
+            return 'Failed to load model';
+          })();
+          setError(message);
         }}
       >
         {/* Lighting */}

@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { X, CheckCircle, AlertCircle } from 'lucide-react';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
+
+interface AvailablePrinter {
+  id: string;
+  name: string;
+  backend: string;
+  isReachable: boolean;
+}
+
+interface SliceCompleteResult {
+  jobId: string;
+  gcodeUrl: string;
+  printTime: number;
+  filamentUsed: number;
+}
 
 interface SlicerConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
   modelFile: File;
-  availablePrinters: any[];
-  onSliceComplete?: (result: any) => void;
+  availablePrinters: AvailablePrinter[];
+  onSliceComplete?: (result: SliceCompleteResult) => void;
 }
 
 const DEFAULT_PROFILES: Record<string, SlicerProfile> = {
@@ -51,18 +64,19 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
   availablePrinters,
   onSliceComplete
 }) => {
-  const [selectedPrinter, setSelectedPrinter] = useState<any | null>(null);
+  const [selectedPrinter, setSelectedPrinter] = useState<AvailablePrinter | null>(null);
   const [selectedSlicer, setSelectedSlicer] = useState<'prusaslicer' | 'orcaslicer'>('prusaslicer');
   const [profile, setProfile] = useState<SlicerProfile>(DEFAULT_PROFILES.standard);
   const [isSlicing, setIsSlicing] = useState(false);
   const [slicingProgress, setSlicingProgress] = useState<SlicingProgress | null>(null);
   const [validationResult, setValidationResult] = useState<{ valid: boolean; issues?: string[] } | null>(null);
 
-  const { data: availableProfiles } = useQuery({
-    queryKey: ['slicer-profiles', selectedPrinter?.id],
-    queryFn: () => selectedPrinter ? slicerService.getAvailableProfiles(selectedPrinter.id) : [],
-    enabled: !!selectedPrinter
-  });
+  // Future: load available profiles when UI exposes profile selection beyond defaults
+  // const { data: availableProfiles } = useQuery({
+  //   queryKey: ['slicer-profiles', selectedPrinter?.id],
+  //   queryFn: () => selectedPrinter ? slicerService.getAvailableProfiles(selectedPrinter.id) : [],
+  //   enabled: !!selectedPrinter
+  // });
 
   // Validate model when modal opens
   React.useEffect(() => {
@@ -137,6 +151,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             onClick={onClose}
             disabled={isSlicing}
             className="p-1 hover:bg-gray-100 rounded"
+            aria-label="Close slicing configuration"
+            title="Close"
           >
             <X className="w-5 h-5" />
           </button>
@@ -264,6 +280,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 Quality
               </label>
               <select
+                aria-label="Print quality preset"
+                title="Quality"
                 value={profile.quality}
                 onChange={(e) => {
                   const quality = e.target.value as 'draft' | 'standard' | 'fine';
@@ -282,6 +300,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 Material
               </label>
               <select
+                aria-label="Material type"
+                title="Material"
                 value={profile.material}
                 onChange={(e) => updateProfile({
                   material: e.target.value,
@@ -302,6 +322,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 Infill ({profile.infillPercentage}%)
               </label>
               <input
+                aria-label="Infill percentage"
+                title="Infill percentage"
                 type="range"
                 min="0"
                 max="100"
@@ -317,6 +339,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 Print Speed ({profile.printSpeed}mm/s)
               </label>
               <input
+                aria-label="Print speed"
+                title="Print speed"
                 type="range"
                 min="20"
                 max="100"
@@ -332,6 +356,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 Nozzle Temperature (°C)
               </label>
               <input
+                aria-label="Nozzle temperature"
+                title="Nozzle temperature"
                 type="number"
                 min="180"
                 max="300"
@@ -346,6 +372,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 Bed Temperature (°C)
               </label>
               <input
+                aria-label="Bed temperature"
+                title="Bed temperature"
                 type="number"
                 min="0"
                 max="120"
@@ -360,6 +388,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
           <div>
             <label className="flex items-center">
               <input
+                aria-label="Enable support structures"
+                title="Generate support structures"
                 type="checkbox"
                 checked={profile.supports}
                 onChange={(e) => updateProfile({ supports: e.target.checked })}
@@ -381,11 +411,16 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 </span>
                 <span className="text-sm text-blue-700">{Math.round(slicingProgress.progress)}%</span>
               </div>
-              <div className="w-full bg-blue-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${slicingProgress.progress}%` }}
-                />
+              <div className="w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+                {(() => {
+                  const pct = Math.max(0, Math.min(100, Math.round(slicingProgress.progress)));
+                  const step = Math.round(pct / 5) * 5;
+                  const widthClass = `w-[${step}%]` as const;
+                  return <>
+                    <span className="sr-only">Slicing progress {pct}%</span>
+                    <div className={`h-2 bg-blue-600 transition-all duration-300 ${widthClass}`} aria-hidden="true" />
+                  </>;
+                })()}
               </div>
               {slicingProgress.message && (
                 <div className="mt-2 text-sm text-blue-700">{slicingProgress.message}</div>

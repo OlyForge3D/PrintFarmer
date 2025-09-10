@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import React, { createContext, useEffect, useState, ReactNode, useContext } from 'react';
 
 export type ThemeName = 'dark' | 'light' | 'system';
 
@@ -17,7 +18,7 @@ export interface ThemeContextType {
   prefersHighContrast: boolean;
 }
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+export const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 interface ThemeProviderProps {
   children: ReactNode;
@@ -145,38 +146,16 @@ export function ThemeProvider({
     prefersHighContrast,
   };
 
-  return (
-    <ThemeContext.Provider value={value}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 /**
  * Hook to use the theme context
  * @throws Error if used outside of ThemeProvider
  */
-export function useTheme(): ThemeContextType {
-  const context = useContext(ThemeContext);
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
-}
-
-/**
- * Hook to get the current computed theme value
- * @returns 'dark' | 'light'
- */
-export function useComputedTheme(): 'dark' | 'light' {
-  const { computedTheme } = useTheme();
-  return computedTheme;
-}
-
-/**
- * Hook to get accessibility preferences
- */
-export function useAccessibilityPreferences() {
-  const { prefersReducedMotion, prefersHighContrast } = useTheme();
-  return { prefersReducedMotion, prefersHighContrast };
+// Hooks moved to ThemeHooks.ts
+export function useThemeInternal(): ThemeContextType {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useTheme must be used within a ThemeProvider');
+  return ctx;
 }

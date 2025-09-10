@@ -1,19 +1,8 @@
 import { useState, useCallback } from 'react';
 import { Printer, PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { useAuth } from '@/contexts/AuthContext';
-import { formatDistanceToNow } from 'date-fns';
-import { 
-  Trash2,
-  Edit,
-  Settings,
-  CheckCircle2,
-  Circle,
-  AlertTriangle,
-  Wrench,
-  Check,
-  X
-} from 'lucide-react';
+import { useAuth } from '@/contexts/AuthHooks';
+import { Trash2, Edit, CheckCircle2, Circle, AlertTriangle, Wrench, Check, X } from 'lucide-react';
 
 interface PrinterTableViewProps {
   printers: Printer[];
@@ -125,8 +114,9 @@ export function PrinterTableView({
             
             <select
               value={bulkAction}
-              onChange={(e) => setBulkAction(e.target.value as any)}
+              onChange={(e) => setBulkAction(e.target.value as typeof bulkAction)}
               className="text-sm bg-pf-panel border border-pf-border rounded px-2 py-1 text-pf-text-primary"
+              aria-label="Bulk action selector"
             >
               <option value="none">Choose action...</option>
               {hasPermission('printers', 'delete') && (
