@@ -69,7 +69,7 @@ alias pf-api='cd "$WORKSPACE_DIR"/src && dotnet watch --project api/Farm.Web.Api
 alias pf-react='cd "$WORKSPACE_DIR"/src/Web/ReactApp && npm run dev'
 alias pf-build='cd "$WORKSPACE_DIR" && cd ./src && dotnet build ./farm-web.sln -c Debug && cd ./Web/ReactApp && npm ci && npm run build'
 alias pf-deploy='cd "$WORKSPACE_DIR" && ./scripts/deploy-docker.sh'
-alias pf-dev='cd "$WORKSPACE_DIR" && ./scripts/dev-monolithic.sh'
+alias pf-dev='cd "$WORKSPACE_DIR" && ./scripts/pf-dev.sh start'
 alias pf-logs='docker-compose logs -f'
 alias pf-ps='docker-compose ps'
 EOF

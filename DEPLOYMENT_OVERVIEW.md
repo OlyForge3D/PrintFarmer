@@ -23,9 +23,10 @@ This document provides a complete overview of PrintFarmer deployment options and
 git clone https://github.com/jpapiez/PrintFarmer.git
 cd PrintFarmer
 
-# Automated setup
-chmod +x scripts/setup-local.sh
-./scripts/setup-local.sh
+# Unified helper script (bootstrap + start)
+chmod +x scripts/pf-dev.sh
+./scripts/pf-dev.sh bootstrap
+./scripts/pf-dev.sh start
 ```
 
 ### Manual Setup
@@ -307,7 +308,7 @@ dotnet clean && dotnet build ./farm-web.sln
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines
 
 ### Scripts
-- **`scripts/setup-local.sh`** - Automated local development setup
+- **`scripts/pf-dev.sh`** - Unified local dev helper (bootstrap/start/stop/status/logs/test)
 - **`scripts/deploy-docker.sh`** - Automated Docker deployment
 - **`test-providers.sh`** - Test database providers
 
@@ -324,7 +325,7 @@ dotnet clean && dotnet build ./farm-web.sln
 ```bash
 git clone https://github.com/jpapiez/PrintFarmer.git
 cd PrintFarmer
-./scripts/setup-local.sh
+./scripts/pf-dev.sh bootstrap && ./scripts/pf-dev.sh start
 ```
 
 ### For Production

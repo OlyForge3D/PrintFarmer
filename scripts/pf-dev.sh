@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Unified local development helper for PrintFarmer
+#
+# Commands:
+#   bootstrap   - Install/restore dependencies (dotnet + npm), create .env if missing
+#   start       - Start API + React (background by default)
+#   stop        - Stop running dev processes
+#   status      - Show status of dev processes and ports
+#   logs        - Show tail locations (or follow with --follow)
+#   test        - Run API + React tests (non-blocking start not required)
+#   clean       - Remove pid/log artifacts and optionally build artifacts (--deep)
+#   help        - Show usage
+#
+# Options:
+#   --foreground / -f  Run services in foreground (blocks)
+#   --no-port-free     Do not forcibly free ports 5245/3000
+#   --follow           (logs) Tail -f both logs
+#
+# Environment overrides:
+#   API_URL (default http://localhost:5245)
+#   SPA_DEV_URL (default http://localhost:3000)
+#   LOG_DIR (default /tmp)
+#   PID_DIR (default /tmp)
+#
+# Unified replacement for prior ad-hoc local dev scripts.
+
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SRC_DIR="$ROOT_DIR/src"
+API_DIR="$SRC_DIR/api"
+REACT_DIR="$SRC_DIR/Web/ReactApp"
+
+API_URL=${API_URL:-http://localhost:5245}
+SPA_DEV_URL=${SPA_DEV_URL:-http://localhost:3000}
+LOG_DIR=${LOG_DIR:-/tmp}
+PID_DIR=${PID_DIR:-/tmp}
+API_LOG="$LOG_DIR/printfarmer-api.log"
+VITE_LOG="$LOG_DIR/printfarmer-react.log"
+META_PID_FILE="$PID_DIR/printfarmer-monolith.pids"
+
+COLOR_BLUE='\033[0;34m'; COLOR_GREEN='\033[0;32m'; COLOR_YELLOW='\033[1;33m'; COLOR_RED='\033[0;31m'; COLOR_RESET='\033[0m'
+info(){ echo -e "${COLOR_BLUE}ℹ️  $*${COLOR_RESET}"; }
+success(){ echo -e "${COLOR_GREEN}✅ $*${COLOR_RESET}"; }
+warn(){ echo -e "${COLOR_YELLOW}⚠️  $*${COLOR_RESET}"; }
+err(){ echo -e "${COLOR_RED}❌ $*${COLOR_RESET}"; }
+
+require_cmd(){ command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }; }
+
+free_port(){ local port="$1"; local pids; pids=$(lsof -ti:"$port" -sTCP:LISTEN 2>/dev/null || true); if [[ -n "$pids" ]]; then warn "Reclaiming port $port (PIDs: $pids)"; kill -9 $pids 2>/dev/null || true; sleep 0.4; fi; }
+
+write_meta(){
+  echo "API_PID=${API_PID:-}" > "$META_PID_FILE"
+  echo "VITE_PID=${VITE_PID:-}" >> "$META_PID_FILE"
+  echo "API_URL=$API_URL" >> "$META_PID_FILE"
+  echo "SPA_DEV_URL=$SPA_DEV_URL" >> "$META_PID_FILE"
+}
+
+read_meta(){ [[ -f "$META_PID_FILE" ]] || return 1; source "$META_PID_FILE" || true; }
+
+bootstrap(){
+  info "Bootstrapping dependencies (.NET + React)"
+  require_cmd dotnet; require_cmd npm; require_cmd git
+  pushd "$SRC_DIR" >/dev/null
+  info "Restoring .NET solution"; dotnet restore ./farm-web.sln
+  if [[ -d "$REACT_DIR" ]]; then pushd "$REACT_DIR" >/dev/null; info "Installing npm deps"; npm install; popd >/dev/null; fi
+  popd >/dev/null
+  if [[ ! -f "$ROOT_DIR/.env" && -f "$ROOT_DIR/.env.template" ]]; then cp "$ROOT_DIR/.env.template" "$ROOT_DIR/.env"; success "Created .env from template"; fi
+  success "Bootstrap complete"
+}
+
+start_services(){
+  local foreground=${FOREGROUND:-0} free_ports=${FREE_PORTS:-1}
+  mkdir -p "$LOG_DIR" "$PID_DIR"
+  rm -f "$API_LOG" "$VITE_LOG" "$META_PID_FILE"
+  export ASPNETCORE_ENVIRONMENT=Development
+  export ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-"$SPA_DEV_URL"}
+  export ASPNETCORE_URLS="$API_URL"
+  export DEPLOYMENT_MODE=monolithic
+  if [[ $free_ports -eq 1 ]]; then
+    info "Freeing API port ${API_URL##*:} & React port ${SPA_DEV_URL##*:}"; free_port "${API_URL##*:}"; free_port "${SPA_DEV_URL##*:}";
+  fi
+  info "Starting React dev server (logs: $VITE_LOG)"
+  (
+    cd "$REACT_DIR"
+    npm install >/dev/null 2>&1 || true
+    npm run dev >>"$VITE_LOG" 2>&1 & echo $! > "$PID_DIR/printfarmer-vite.pid"
+  ) &
+  info "Starting API server (logs: $API_LOG)"
+  (
+    cd "$SRC_DIR"
+    dotnet run --project api/Farm.Web.Api.csproj >>"$API_LOG" 2>&1 & echo $! > "$PID_DIR/printfarmer-api.pid"
+  ) &
+  sleep 2
+  API_PID=$(cat "$PID_DIR/printfarmer-api.pid" 2>/dev/null || true)
+  VITE_PID=$(cat "$PID_DIR/printfarmer-vite.pid" 2>/dev/null || true)
+  write_meta
+  success "Started API($API_PID) + React($VITE_PID)"
+  echo "API:  $API_URL"; echo "React dev: $SPA_DEV_URL"; echo "API health: $API_URL/healthz"; echo "Logs: $API_LOG | $VITE_LOG"
+  if [[ $foreground -eq 1 ]]; then
+    trap stop_services INT TERM
+    info "Foreground mode active (Ctrl+C to stop)"
+    wait $API_PID $VITE_PID || true
+  else
+    info "Background mode: use '$0 status' or '$0 stop'"
+  fi
+}
+
+stop_services(){ read_meta || { warn "No meta file -> nothing to stop"; return 0; }; [[ -n "${API_PID:-}" ]] && kill "$API_PID" 2>/dev/null || true; [[ -n "${VITE_PID:-}" ]] && kill "$VITE_PID" 2>/dev/null || true; rm -f "$META_PID_FILE" "$PID_DIR/printfarmer-"*.pid 2>/dev/null || true; success "Stopped services"; }
+
+status(){ if read_meta; then
+    local api_alive vite_alive
+    api_alive=dead; vite_alive=dead
+    [[ -n "${API_PID:-}" && -d "/proc/$API_PID" ]] && api_alive=alive || ps -p "$API_PID" >/dev/null 2>&1 && api_alive=alive
+    [[ -n "${VITE_PID:-}" && -d "/proc/$VITE_PID" ]] && vite_alive=alive || ps -p "$VITE_PID" >/dev/null 2>&1 && vite_alive=alive
+    echo "API PID: ${API_PID:-?} ($api_alive) -> $API_URL"; echo "React PID: ${VITE_PID:-?} ($vite_alive) -> $SPA_DEV_URL"; [[ $api_alive == alive ]] || return 1; else warn "Not running"; return 1; fi }
+
+logs(){ if [[ "$FOLLOW" == 1 ]]; then tail -f "$API_LOG" "$VITE_LOG"; else echo "API log:  $API_LOG"; echo "React log: $VITE_LOG"; tail -n 25 "$API_LOG" 2>/dev/null || true; echo "---"; tail -n 25 "$VITE_LOG" 2>/dev/null || true; fi }
+
+run_tests(){ pushd "$SRC_DIR" >/dev/null; info "Running API tests"; dotnet test ./farm-web.sln -c Debug || warn "API tests failed"; pushd "$REACT_DIR" >/dev/null; info "Running React tests"; npm test -- --run || warn "React tests failed"; popd >/dev/null; popd >/dev/null; }
+
+clean(){ info "Cleaning pid/log artifacts"; rm -f "$META_PID_FILE" "$PID_DIR/printfarmer-"*.pid "$API_LOG" "$VITE_LOG" 2>/dev/null || true; if [[ ${DEEP:-0} -eq 1 ]]; then info "Deep clean bin/obj"; find "$SRC_DIR" -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +; fi; success "Clean complete"; }
+
+usage(){ cat <<EOF
+Usage: $(basename "$0") <command> [options]
+
+Commands:
+  bootstrap        Restore and install dependencies
+  start            Start API + React (background by default)
+  stop             Stop running services
+  status           Show running status
+  logs [--follow]  Show (or follow) logs
+  test             Run API + React tests
+  clean [--deep]   Remove artifacts (and build outputs with --deep)
+  help             Show this help
+
+Options (for start):
+  -f, --foreground     Run in foreground (Ctrl+C to stop)
+      --no-port-free   Do not forcibly free ports first
+
+Environment:
+  API_URL, SPA_DEV_URL, LOG_DIR, PID_DIR
+EOF
+}
+
+COMMAND=${1:-help}; shift || true
+
+FOREIGN_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--foreground) FOREGROUND=1; shift;;
+    --no-port-free) FREE_PORTS=0; shift;;
+    --follow) FOLLOW=1; shift;;
+    --deep) DEEP=1; shift;;
+    *) FOREIGN_ARGS+=("$1"); shift;;
+  esac
+done
+
+FREE_PORTS=${FREE_PORTS:-1}
+FOLLOW=${FOLLOW:-0}
+FOREGROUND=${FOREGROUND:-0}
+DEEP=${DEEP:-0}
+
+case "$COMMAND" in
+  bootstrap) bootstrap ;;
+  start) start_services ;;
+  stop) stop_services ;;
+  status) status ;;
+  logs) logs ;;
+  test) run_tests ;;
+  clean) clean ;;
+  help|--help|-h) usage ;;
+  *) err "Unknown command: $COMMAND"; usage; exit 1 ;;
+esac

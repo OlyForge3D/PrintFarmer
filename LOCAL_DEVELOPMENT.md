@@ -1,13 +1,41 @@
-### Quick Monolithic Start
+### Quick Monolithic Start (Unified Script)
 
-Use the helper script to start both Vite (React) and the API with the SPA proxy safeguard:
+Use the unified helper script to bootstrap, start, stop, and inspect the local environment.
 
+Initial bootstrap (first time only):
 ```bash
-chmod +x scripts/dev-monolithic.sh
-./scripts/dev-monolithic.sh
+chmod +x scripts/pf-dev.sh
+./scripts/pf-dev.sh bootstrap
 ```
 
-Environment variables you can override before running:
+Start services (background by default):
+```bash
+./scripts/pf-dev.sh start
+```
+
+Check status / show PIDs:
+```bash
+./scripts/pf-dev.sh status
+```
+
+Follow logs (Ctrl+C to exit):
+```bash
+./scripts/pf-dev.sh logs --follow
+```
+
+Stop services:
+```bash
+./scripts/pf-dev.sh stop
+```
+
+Run tests quickly:
+```bash
+./scripts/pf-dev.sh test
+```
+
+All legacy local helper scripts have been consolidated; use only `scripts/pf-dev.sh` going forward.
+
+Environment variables you can override before running (apply to `pf-dev.sh start`):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -15,9 +43,21 @@ Environment variables you can override before running:
 | SPA_DEV_URL | http://localhost:3000 | Vite dev server URL to probe/proxy |
 | SPA_PROXY_PROBE_TIMEOUT_MS | 500 | Probe timeout (ms) before skipping proxy |
 | ALLOWED_ORIGINS | http://localhost:3000 | CORS origin for React dev server |
-| ASPNETCORE_URLS | http://localhost:5245 | API listen address |
+| ASPNETCORE_URLS / API_URL | http://localhost:5245 | API listen address |
 
 If the dev server is not yet ready the backend logs `[SPA]` warning and you can just refresh once Vite finishes starting.
+
+#### Script Commands Summary
+| Command | Purpose |
+|---------|---------|
+| bootstrap | Restore dotnet + npm dependencies; create .env if missing |
+| start | Launch API + React (background) |
+| start -f / --foreground | Launch and block until Ctrl+C |
+| status | Show running PIDs and URLs |
+| logs [--follow] | Show (or follow) recent logs |
+| stop | Stop running processes |
+| test | Run API + React test suites |
+| clean [--deep] | Remove logs/PIDs (and bin/obj with --deep) |
 # PrintFarmer - Local Development Guide
 
 This guide covers running PrintFarmer locally on your development machine **without Docker containers**. This is the recommended approach for active development, especially on macOS where Docker networking limitations can prevent WiFi device discovery.

@@ -49,10 +49,16 @@ The script will guide you through configuration and deploy everything automatica
 ```bash
 git clone https://github.com/jpapiez/PrintFarmer.git
 cd PrintFarmer
-chmod +x scripts/setup-local.sh
-./scripts/setup-local.sh
+chmod +x scripts/pf-dev.sh
+./scripts/pf-dev.sh bootstrap   # one-time dependency restore
+./scripts/pf-dev.sh start       # starts API + React (background)
+./scripts/pf-dev.sh status      # verify running
 ```
-Direct development on your machine without containers.
+To stop later:
+```bash
+./scripts/pf-dev.sh stop
+```
+Direct development on your machine without containers (fastest inner loop & full WiFi device discovery).
 
 ### 📖 **Detailed Guidance**
 **Not sure which approach to use?** See our comprehensive [Deployment Overview](DEPLOYMENT_OVERVIEW.md) that helps you choose based on your specific needs.
@@ -234,9 +240,14 @@ Development note: Schema currently uses `EnsureCreated()` (no active EF migratio
 ## Development Workflow
 
 ### Local Development (Recommended)
-1. **API Backend**: `dotnet run --project api/Farm.Web.Api.csproj` 
-2. **React Frontend**: `cd Web/ReactApp && npm run dev`
-3. **Open**: http://localhost:3000 (auto-connects to API)
+Preferred (script):
+```bash
+./scripts/pf-dev.sh start
+```
+Manual alternative:
+1. API Backend: `dotnet run --project api/Farm.Web.Api.csproj`  
+2. React Frontend: `cd Web/ReactApp && npm run dev`
+3. Open: http://localhost:3000 (auto-connects to API)
 
 ### Docker Development
 1. **Automated**: `./scripts/deploy-docker.sh`
