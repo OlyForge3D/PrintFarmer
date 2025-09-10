@@ -15,6 +15,7 @@ PrintFarmer supports two Docker deployment architectures:
 - **Separate containers** for API, Frontend, Redis, Database
 - **Enhanced networking capabilities** for device discovery
 - **Better for large-scale or development team deployments**
+- **Supports distributed slicing workers** (OrcaSlicer / PrusaSlicer) with horizontal scaling
 
 ## Prerequisites
 
@@ -45,6 +46,14 @@ cd PrintFarmer
 # Run automated setup script
 chmod +x scripts/deploy-docker.sh
 ./scripts/deploy-docker.sh
+
+# Dry-run (plan only, no containers started)
+./scripts/deploy-docker.sh --dry-run
+
+# Non-interactive example (export env + run)
+DB_PROVIDER=postgres ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=2 \
+ENABLE_PRUSA_WORKER=no PRUSA_WORKER_COUNT=0 HTTP_PORT=8080 API_PORT=5245 \
+ ./scripts/deploy-docker.sh --non-interactive
 ```
 
 The script will:
@@ -53,6 +62,66 @@ The script will:
 3. Set up database and Redis if using microservices
 4. Build and start all containers
 5. Verify deployment health
+6. (Optional) Enable and scale distributed slicer workers (Orca / Prusa)
+7. (Optional) Perform a dry-run planning pass without launching containers
+
+## Deployment Script Modes
+
+The `scripts/deploy-docker.sh` launcher supports multiple execution modes to fit interactive use, CI pipelines, and planning workflows.
+
+| Mode | Invocation | Prompts | Builds Images | Starts Containers | Scaling / Profiles | Port Remap Suggestions | Env Generation | Typical Use Cases |
+|------|------------|---------|---------------|-------------------|--------------------|------------------------|----------------|------------------|
+| Interactive (default) | `./scripts/deploy-docker.sh` | Yes (guided) | Yes | Yes | Yes (if enabled) | Ask & confirm | Yes | First-time setup, exploratory deployment |
+| Dry-run | `./scripts/deploy-docker.sh --dry-run` | Yes | No | No | Simulated only | Suggestions printed (no confirm) | Yes | Preview changes, review planned config before running in prod |
+| Non-interactive | `NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive` | No (uses env/defaults) | Yes | Yes | Yes (based on env) | Auto-accept remaps | Yes | CI/CD automation, scripted infra updates |
+| Non-interactive Dry-run | `NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive --dry-run` | No | No | No | Simulated | Auto-remap silently | Yes | Pipeline validation / config drift detection |
+
+### Selecting a Mode
+
+- Use **Interactive** when you want guided prompts and safe defaults.
+- Use **Dry-run** to see exactly what would happen without modifying Docker state.
+- Use **Non-interactive** for reproducible automation (export or inject env vars beforehand).
+- Combine **Non-interactive + Dry-run** in CI to validate configuration, then run a second real step if unchanged.
+
+### Key Environment Variables for Non-Interactive Mode
+
+You can predefine any of the variables normally collected via prompts. Common examples:
+
+```bash
+export DB_PROVIDER=postgres
+export ENABLE_DISTRIBUTED_SLICING=true
+export ENABLE_ORCA_WORKER=yes
+export ORCA_WORKER_COUNT=2
+export ENABLE_PRUSA_WORKER=no
+export HTTP_PORT=8080
+export API_PORT=5245
+export ALLOW_LOCAL_NETWORK=true
+export ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
+NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive
+```
+
+### Port Remapping Behavior
+
+- In **interactive** mode, if a requested host port is busy you are prompted to accept a suggested alternative.
+- In **non-interactive** mode, the script automatically accepts the first free suggested port within +200 of the original.
+- In **monolithic** deployments, worker ports (8081/8082) cannot be remapped (host networking) — warnings are emitted instead.
+
+### Generated Artifacts
+
+All modes (including dry-run) still produce or overwrite the environment file (`.env.monolithic` or `.env.microservices`) so you can inspect the resolved configuration. Dry-run simply skips Docker build / up operations.
+
+### Exit Characteristics
+
+| Mode | Exit Code on Success | Skips Build | Skips Up | Writes .env | Displays Health Checks |
+|------|----------------------|-------------|---------|-------------|------------------------|
+| Interactive | 0 | No | No | Yes | Yes |
+| Dry-run | 0 | Yes | Yes | Yes | No |
+| Non-interactive | 0 | No | No | Yes | Yes |
+| Non-interactive Dry-run | 0 | Yes | Yes | Yes | No |
+
+Non-zero exit codes indicate validation, build, or Docker orchestration errors (unless dry-run, where only validation issues can fail).
+
+---
 
 ## Manual Setup
 
@@ -110,14 +179,21 @@ nano .env.microservices
 ```bash
 # Database settings
 DB_PROVIDER=postgres
-ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
+ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
 
 # Redis settings
 REDIS_CONNECTION=redis:6379
 
-# Network capabilities (for device discovery)
-ENABLE_NETWORK_DISCOVERY=true
-NETWORK_DISCOVERY_CAPABILITIES=NET_ADMIN,NET_RAW
+# Distributed slicing (workers & profiles)
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_PRUSA_WORKER=no
+PRUSA_WORKER_COUNT=0
+
+# Worker endpoint overrides (normally not required)
+# ORCA_WORKER_ENDPOINT=http://orcaslicer-worker:8080
+# PRUSA_WORKER_ENDPOINT=http://prusaslicer-worker:8080
 ```
 
 **Step 2: Deploy**
@@ -243,6 +319,35 @@ ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 - **Health Check:** HTTP GET to root
 
 ### Redis Container (Microservices only)
+### Distributed Slicer Workers (Optional)
+
+Two worker types can perform slicing jobs offloaded from the API orchestrator:
+
+| Worker | Profile | Default Port (Micro) | Purpose |
+|--------|---------|----------------------|---------|
+| OrcaSlicer | `orca` | 8081 (host mapped) | General-purpose slicing with OrcaSlicer |
+| PrusaSlicer | `prusa` | 8082 (host mapped) | Slicing with PrusaSlicer engine |
+
+Enable workers via environment flags or interactive script prompts:
+```bash
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=2   # scale horizontally
+ENABLE_PRUSA_WORKER=no
+PRUSA_WORKER_COUNT=0
+```
+
+Compose profiles ensure unused worker images aren't started unless explicitly requested. Scaling uses `docker compose up -d --scale orcaslicer-worker=NUM` under the hood.
+
+Override endpoints only if custom networking or external worker cluster:
+```bash
+ORCA_WORKER_ENDPOINT=http://orca-fleet.local:8080
+PRUSA_WORKER_ENDPOINT=http://prusa-fleet.local:8080
+MONO_API_ENDPOINT=http://localhost:5001   # Monolithic API endpoint (used by worker containers)
+```
+
+If distributed slicing is disabled (`ENABLE_DISTRIBUTED_SLICING=false`) workers are ignored even if counts are set.
+
 - **Base Image:** redis:7-alpine
 - **Port:** 6379
 - **Purpose:** SignalR backplane for real-time updates
@@ -306,6 +411,13 @@ docker compose restart api
 
 # Update and restart
 docker compose up -d --build
+
+# Run deployment script in dry-run (preview) mode
+./scripts/deploy-docker.sh --dry-run
+
+# Run non-interactive (environment-driven) deployment
+NON_INTERACTIVE=1 ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 \
+ ./scripts/deploy-docker.sh --non-interactive
 ```
 
 ### Database Management

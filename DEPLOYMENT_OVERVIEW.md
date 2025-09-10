@@ -72,6 +72,13 @@ cd PrintFarmer
 # Automated setup with prompts
 chmod +x scripts/deploy-docker.sh
 ./scripts/deploy-docker.sh
+
+# Preview only (no containers started)
+./scripts/deploy-docker.sh --dry-run
+
+# Non-interactive (supply config via environment)
+ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 \
+DB_PROVIDER=sqlite ./scripts/deploy-docker.sh --non-interactive
 ```
 
 The script will:
@@ -107,6 +114,7 @@ docker compose --env-file .env.microservices up -d --build
 - **Scalable**: Independent container scaling
 - **Robust**: Better fault isolation
 - **Monitoring**: Separate service health checks
+- **Optional distributed slicing workers** (OrcaSlicer / PrusaSlicer) with horizontal scaling
 
 ### Platform Considerations
 
@@ -150,6 +158,28 @@ Use `.env.template` as a starting point:
 ```bash
 cp .env.template .env.monolithic
 # Edit .env.monolithic with your settings
+```
+
+### Distributed Slicing Flags
+
+Add these to enable slicer workers (microservices or monolithic with profiles):
+```bash
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_PRUSA_WORKER=no
+PRUSA_WORKER_COUNT=0
+```
+
+Scale later:
+```bash
+docker compose up -d --scale orcaslicer-worker=3
+docker compose up -d --scale prusaslicer-worker=2
+```
+
+Disable entirely:
+```bash
+ENABLE_DISTRIBUTED_SLICING=false
 ```
 
 ---

@@ -50,16 +50,16 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - DB_PROVIDER=PostgreSQL
-      - ConnectionStrings__DefaultConnection=Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password
+      - DB_PROVIDER=Postgres
+      - ConnectionStrings__Default=Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password
       - ConnectionStrings__Redis=redis:6379
       - CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080
       - DEPLOYMENT_MODE=microservices
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
-      - SlicerOrchestrator__EnableDistributedSlicing=true
-      - SlicerOrchestrator__Workers__OrcaSlicer=http://orcaslicer-worker:8080
-      - SlicerOrchestrator__Workers__PrusaSlicer=http://prusaslicer-worker:8080
+      - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
+      - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://orcaslicer-worker:8080}
+      - SlicerOrchestrator__Workers__PrusaSlicer=${PRUSA_WORKER_ENDPOINT:-http://prusaslicer-worker:8080}
     volumes:
       - app_data:/data
       - model_uploads:/app/uploads
@@ -82,6 +82,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.orcaslicer
+    profiles:
+      - orca
     image: orcaslicer-worker
     ports:
       - "8081:8080"
@@ -117,6 +119,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prusaslicer
+    profiles:
+      - prusa
     image: prusaslicer-worker
     restart: unless-stopped
     ports:

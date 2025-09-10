@@ -5,6 +5,27 @@
 
 set -euo pipefail
 
+# Default flags
+DRY_RUN=false
+NON_INTERACTIVE=false
+
+# Parse simple flags early (only --dry-run / -n for now)
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|-n)
+            DRY_RUN=true
+            ;;
+        --non-interactive|--batch|-b)
+            NON_INTERACTIVE=true
+            ;;
+    esac
+done
+
+# Allow env override for automated pipelines
+if [ "${NON_INTERACTIVE:-}" = "1" ]; then
+    NON_INTERACTIVE=true
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -33,14 +54,21 @@ prompt_with_default() {
     local default="$2"
     local var_name="$3"
     
-    echo -e "${YELLOW}$prompt${NC}"
-    echo -e "${BLUE}Default: $default${NC}"
-    read -r input
-    
-    if [ -z "$input" ]; then
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        # If variable already exported, respect it; else use default
+        if [ -n "${!var_name:-}" ]; then
+            return 0
+        fi
         eval "$var_name=\"$default\""
     else
-        eval "$var_name=\"$input\""
+        echo -e "${YELLOW}$prompt${NC}"
+        echo -e "${BLUE}Default: $default${NC}"
+        read -r input || true
+        if [ -z "$input" ]; then
+            eval "$var_name=\"$default\""
+        else
+            eval "$var_name=\"$input\""
+        fi
     fi
 }
 
@@ -55,21 +83,33 @@ prompt_yes_no() {
         default_text="Y/n"
     fi
     
-    echo -e "${YELLOW}$prompt [$default_text]${NC}"
-    read -r input
-    
-    if [ -z "$input" ]; then
-        input="$default"
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        # If pre-set variable, respect truthy/falsey values
+        local current=${!var_name:-}
+        if [ -n "$current" ]; then
+            case "$current" in
+                [Yy]|[Yy]es|true|1) eval "$var_name=\"yes\"" ;;
+                *) eval "$var_name=\"no\"" ;;
+            esac
+        else
+            # fallback to default
+            if [ "$default" = "y" ] || [ "$default" = "yes" ]; then
+                eval "$var_name=\"yes\""
+            else
+                eval "$var_name=\"no\""
+            fi
+        fi
+    else
+        echo -e "${YELLOW}$prompt [$default_text]${NC}"
+        read -r input || true
+        if [ -z "$input" ]; then
+            input="$default"
+        fi
+        case "$input" in
+            [Yy]|[Yy]es) eval "$var_name=\"yes\"" ;;
+            *) eval "$var_name=\"no\"" ;;
+        esac
     fi
-    
-    case "$input" in
-        [Yy]|[Yy]es)
-            eval "$var_name=\"yes\""
-            ;;
-        *)
-            eval "$var_name=\"no\""
-            ;;
-    esac
 }
 
 # Detect OS and Docker environment
@@ -151,14 +191,158 @@ choose_architecture() {
         2|microservices|micro)
             ARCHITECTURE="microservices"
             ENV_FILE=".env.microservices"
-            COMPOSE_FILE="docker-compose.yml"
-            print_success "Selected: Microservices deployment"
+            COMPOSE_FILE="docker-compose.microservices.yml"
+            print_success "Selected: Microservices deployment (using docker-compose.microservices.yml)"
             ;;
         *)
             print_error "Invalid choice. Please run the script again."
             exit 1
             ;;
     esac
+}
+
+# Utility: check if a string is a positive integer
+is_positive_int() {
+    [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 0 ]
+}
+
+# Utility: check if TCP port is already in use on host
+port_in_use() {
+    local port=$1
+    # Try lsof first, fallback to netstat / ss
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -Pi :"$port" -sTCP:LISTEN -t >/dev/null 2>&1 && return 0 || return 1
+    elif command -v ss >/dev/null 2>&1; then
+        ss -ltn | awk '{print $4}' | grep -E "(:|\.)$port$" >/dev/null 2>&1 && return 0 || return 1
+    else
+        netstat -an 2>/dev/null | grep -E "LISTEN|TCP" | grep -E "[:\.]$port[[:space:]]" >/dev/null 2>&1 && return 0 || return 1
+    fi
+}
+
+# Find next free port starting from given number
+find_next_free_port() {
+    local start=$1
+    local p=$start
+    local limit=$((start+200)) # safeguard loop
+    while [ $p -le $limit ]; do
+        if ! port_in_use "$p"; then
+            echo "$p"
+            return 0
+        fi
+        p=$((p+1))
+    done
+    echo "$start" # fallback
+    return 1
+}
+
+# Validate configuration & enforce safe constraints (ports, scaling, numeric values)
+validate_configuration() {
+    print_header "🧪 Validating Configuration"
+
+    # Validate numeric worker counts
+    for var in ORCA_WORKER_COUNT PRUSA_WORKER_COUNT; do
+        val=${!var:-0}
+        if ! is_positive_int "$val"; then
+            print_warning "Invalid value '$val' for $var. Resetting to 1."
+            eval "$var=1"
+        fi
+    done
+
+    # If distributed slicing disabled, zero out counts
+    if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" != "true" ]; then
+        ORCA_WORKER_COUNT=0
+        PRUSA_WORKER_COUNT=0
+    fi
+
+    # Monolithic constraints: host networking -> only one instance per worker due to fixed ports 8081/8082
+    if [ "$ARCHITECTURE" = "monolithic" ]; then
+        if [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
+            print_warning "Monolithic mode: Cannot scale OrcaSlicer workers (host networking / fixed port 8081). For scaling, use microservices. Forcing count=1."
+            ORCA_WORKER_COUNT=1
+        fi
+        if [ "$PRUSA_WORKER_COUNT" -gt 1 ]; then
+            print_warning "Monolithic mode: Cannot scale PrusaSlicer workers (host networking / fixed port 8082). Forcing count=1."
+            PRUSA_WORKER_COUNT=1
+        fi
+    fi
+
+    # Automatic port suggestion helper
+    suggest_port_replacement() {
+        local var_name=$1
+        local current_val=$2
+        local description=$3
+        local new_port
+        new_port=$(find_next_free_port $((current_val+1)))
+        if [ "$new_port" != "$current_val" ]; then
+            print_warning "$description port $current_val is in use. Suggested free port: $new_port"
+            if [ "$NON_INTERACTIVE" = "true" ]; then
+                # Auto-accept suggestion in non-interactive mode
+                eval "$var_name=$new_port"
+                print_info "[non-interactive] $description port remapped $current_val -> $new_port"
+            else
+                prompt_yes_no "Use suggested port $new_port instead of $current_val?" "yes" USE_REPLACEMENT
+                if [ "$USE_REPLACEMENT" = "yes" ]; then
+                    eval "$var_name=$new_port"
+                    print_success "$description port changed to $new_port"
+                else
+                    print_warning "Keeping original $description port $current_val (may fail on startup)."
+                fi
+            fi
+        else
+            print_warning "$description port $current_val is in use and no alternative found within range."
+        fi
+    }
+
+    # Port availability checks with optional remapping
+    if [ -n "${HTTP_PORT:-}" ] && port_in_use "$HTTP_PORT"; then
+        suggest_port_replacement HTTP_PORT "$HTTP_PORT" "HTTP"
+    fi
+    if [ "$ARCHITECTURE" = "microservices" ] && [ -n "${API_PORT:-}" ] && port_in_use "$API_PORT"; then
+        suggest_port_replacement API_PORT "$API_PORT" "API"
+    fi
+
+    # Worker ports in monolithic (8081 / 8082). Only warn if corresponding worker enabled.
+    # Worker port handling
+    ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
+    PRUSA_HOST_PORT=${PRUSA_HOST_PORT:-8082}
+    if [ "$ARCHITECTURE" = "monolithic" ]; then
+        # Only warn; cannot remap easily due to fixed host network & static internal ports
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ] && port_in_use "$ORCA_HOST_PORT"; then
+            print_warning "Monolithic: Orca worker port $ORCA_HOST_PORT in use; startup may fail."
+        fi
+        if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && port_in_use "$PRUSA_HOST_PORT"; then
+            print_warning "Monolithic: Prusa worker port $PRUSA_HOST_PORT in use; startup may fail."
+        fi
+    else
+        # Allow remap for microservices (we will rely on variable interpolation in compose file)
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && port_in_use "$ORCA_HOST_PORT"; then
+            suggest_port_replacement ORCA_HOST_PORT "$ORCA_HOST_PORT" "Orca worker"
+        fi
+        if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 0 ] && port_in_use "$PRUSA_HOST_PORT"; then
+            suggest_port_replacement PRUSA_HOST_PORT "$PRUSA_HOST_PORT" "Prusa worker"
+        fi
+    fi
+
+    # Logical consistency: worker enabled but count 0 -> adjust to 1
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -eq 0 ]; then
+        print_warning "ENABLE_ORCA_WORKER=yes but ORCA_WORKER_COUNT=0. Setting count=1."
+        ORCA_WORKER_COUNT=1
+    fi
+    if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -eq 0 ]; then
+        print_warning "ENABLE_PRUSA_WORKER=yes but PRUSA_WORKER_COUNT=0. Setting count=1."
+        PRUSA_WORKER_COUNT=1
+    fi
+
+    # If distributed slicing disabled but workers were enabled by mistake
+    if [ "$ENABLE_DISTRIBUTED_SLICING" != "true" ] && { [ "$ENABLE_ORCA_WORKER" = "yes" ] || [ "$ENABLE_PRUSA_WORKER" = "yes" ]; }; then
+        print_warning "Workers enabled but distributed slicing disabled. Forcing workers off."
+        ENABLE_ORCA_WORKER=no
+        ENABLE_PRUSA_WORKER=no
+        ORCA_WORKER_COUNT=0
+        PRUSA_WORKER_COUNT=0
+    fi
+
+    print_success "Validation complete."
 }
 
 # Configure database settings
@@ -296,6 +480,52 @@ configure_additional() {
         echo -e "${BLUE}Redis is used for real-time SignalR communication between containers.${NC}"
         prompt_yes_no "Use persistent Redis storage?" "no" "REDIS_PERSIST"
     fi
+
+    echo
+    echo -e "${BLUE}Distributed Slicing Configuration${NC}"
+    prompt_yes_no "Enable distributed slicing (uses external slicer workers)?" "yes" "ENABLE_DIST_SLICING_CHOICE"
+    if [ "$ENABLE_DIST_SLICING_CHOICE" = "yes" ]; then
+        ENABLE_DISTRIBUTED_SLICING=true
+    else
+        ENABLE_DISTRIBUTED_SLICING=false
+    fi
+
+    # Worker enablement & scaling (only meaningful if distributed slicing enabled)
+    if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
+        echo
+        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer and/or PrusaSlicer workers and specify replica counts.${NC}"
+        prompt_yes_no "Enable OrcaSlicer worker(s)?" "yes" "ENABLE_ORCA_WORKER"
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+            prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
+        else
+            ORCA_WORKER_COUNT=0
+        fi
+
+        prompt_yes_no "Enable PrusaSlicer worker(s)?" "no" "ENABLE_PRUSA_WORKER"
+        if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
+            prompt_with_default "Number of PrusaSlicer worker replicas:" "1" "PRUSA_WORKER_COUNT"
+        else
+            PRUSA_WORKER_COUNT=0
+        fi
+
+        # Allow endpoint override (advanced) only if microservices; monolithic uses host networking and localhost
+        if [ "$ARCHITECTURE" = "microservices" ]; then
+            prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
+            if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
+                if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+                    prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
+                fi
+                if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
+                    prompt_with_default "PrusaSlicer worker endpoint (API reachable URL):" "http://prusaslicer-worker:8080" "PRUSA_WORKER_ENDPOINT"
+                fi
+            fi
+        fi
+    else
+        ENABLE_ORCA_WORKER=no
+        ENABLE_PRUSA_WORKER=no
+        ORCA_WORKER_COUNT=0
+        PRUSA_WORKER_COUNT=0
+    fi
 }
 
 # Generate environment file
@@ -319,20 +549,8 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 DB_PROVIDER=$DB_PROVIDER
 EOF
     
-    case "$DB_PROVIDER" in
-        sqlite)
-            echo "ConnectionStrings__Default=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-        postgres)
-            echo "ConnectionStrings__Postgres=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-        sqlserver)
-            echo "ConnectionStrings__SqlServer=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-        mysql)
-            echo "ConnectionStrings__MySql=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-    esac
+    # Always expose a unified default connection string key consumed by Program.cs
+    echo "ConnectionStrings__Default=$CONNECTION_STRING" >> "$ENV_FILE"
     
     cat >> "$ENV_FILE" << EOF
 
@@ -343,6 +561,13 @@ ALLOWED_NETWORK_RANGES=$NETWORK_RANGES
 # Feature Flags  
 ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
+ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
+ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
+PRUSA_WORKER_COUNT=$PRUSA_WORKER_COUNT
+ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
+ENABLE_PRUSA_WORKER=$ENABLE_PRUSA_WORKER
+ORCA_HOST_PORT=$ORCA_HOST_PORT
+PRUSA_HOST_PORT=$PRUSA_HOST_PORT
 
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
@@ -478,7 +703,16 @@ deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
     
     print_info "Building Docker images..."
-    if docker compose --env-file "$ENV_FILE" build --no-cache; then
+    # Always include selected compose file
+    local compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+
+    if [ -f docker-compose.override.yml ]; then
+        compose_cmd+=( -f docker-compose.override.yml )
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
+    elif "${compose_cmd[@]}" build --no-cache; then
         print_success "Docker images built successfully"
     else
         print_error "Failed to build Docker images"
@@ -486,20 +720,52 @@ deploy_containers() {
     fi
     
     print_info "Starting containers..."
-    if docker compose --env-file "$ENV_FILE" up -d; then
+
+    # Activate profiles for enabled workers (compose v2 profiles) in monolithic architecture
+    local profiles_to_enable=()
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
+        profiles_to_enable+=(--profile orca)
+    fi
+    if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 0 ]; then
+        profiles_to_enable+=(--profile prusa)
+    fi
+
+    # Bring up base services first
+    if [ "$DRY_RUN" = "true" ]; then
+        print_info "Dry-run mode: not starting containers. (Would run: docker compose up -d ${profiles_to_enable[*]})"
+    elif "${compose_cmd[@]}" up -d "${profiles_to_enable[@]}"; then
         print_success "Containers started successfully"
     else
         print_error "Failed to start containers"
         exit 1
     fi
+
+    # Scaling (only if counts >1). Use service names; if profiles not enabled skip scaling.
+    if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
+        print_info "Scaling OrcaSlicer workers to $ORCA_WORKER_COUNT replicas"
+        "${compose_cmd[@]}" up -d --scale orcaslicer-worker="$ORCA_WORKER_COUNT"
+    fi
+    if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 1 ]; then
+        print_info "Scaling PrusaSlicer workers to $PRUSA_WORKER_COUNT replicas"
+        "${compose_cmd[@]}" up -d --scale prusaslicer-worker="$PRUSA_WORKER_COUNT"
+    fi
     
-    print_info "Waiting for services to be ready..."
-    sleep 15
+    if [ "$DRY_RUN" = "true" ]; then
+        print_info "Dry-run complete. No containers launched."
+    else
+        print_info "Waiting for services to be ready..."
+        sleep 15
+    fi
 }
 
 # Verify deployment
 verify_deployment() {
     print_header "🔍 Verifying Deployment"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        print_info "Dry-run mode: skipping live deployment verification."
+        return 0
+    fi
     
     local api_url="http://localhost:$HTTP_PORT"
     if [ "$ARCHITECTURE" = "microservices" ]; then
@@ -542,7 +808,11 @@ verify_deployment() {
 display_final_info() {
     print_header "🎉 Deployment Complete"
     
-    print_success "PrintFarmer is now running!"
+    if [ "$DRY_RUN" = "true" ]; then
+        print_success "Dry-run summary (no containers started)"
+    else
+        print_success "PrintFarmer is now running!"
+    fi
     echo
     echo -e "${GREEN}Access URLs:${NC}"
     echo -e "${BLUE}  🌐 Web Interface: http://localhost:$HTTP_PORT${NC}"
@@ -556,9 +826,13 @@ display_final_info() {
     
     echo -e "${GREEN}Management Commands:${NC}"
     echo -e "${BLUE}  • View status:    docker compose --env-file $ENV_FILE ps${NC}"
-    echo -e "${BLUE}  • View logs:      docker compose --env-file $ENV_FILE logs -f${NC}"
-    echo -e "${BLUE}  • Stop services:  docker compose --env-file $ENV_FILE down${NC}"
-    echo -e "${BLUE}  • Update/restart: docker compose --env-file $ENV_FILE up -d --build${NC}"
+    if [ "$DRY_RUN" != "true" ]; then
+        echo -e "${BLUE}  • View logs:      docker compose --env-file $ENV_FILE logs -f${NC}"
+        echo -e "${BLUE}  • Stop services:  docker compose --env-file $ENV_FILE down${NC}"
+        echo -e "${BLUE}  • Update/restart: docker compose --env-file $ENV_FILE up -d --build${NC}"
+    else
+        echo -e "${BLUE}  • (Dry-run) To deploy: docker compose --env-file $ENV_FILE up -d --build${NC}"
+    fi
     echo
     
     if [ "$ENABLE_DISCOVERY" = "yes" ]; then
@@ -568,6 +842,13 @@ display_final_info() {
             print_warning "  Note: macOS Docker may have limited WiFi device access"
         fi
         echo
+    fi
+
+    echo -e "${GREEN}Distributed Slicing:${NC}"
+    echo -e "${BLUE}  • Enabled: $ENABLE_DISTRIBUTED_SLICING${NC}"
+    if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
+        echo -e "${BLUE}  • Orca Workers: $ORCA_WORKER_COUNT (enabled: $ENABLE_ORCA_WORKER)${NC}"
+        echo -e "${BLUE}  • Prusa Workers: $PRUSA_WORKER_COUNT (enabled: $ENABLE_PRUSA_WORKER)${NC}"
     fi
     
     echo -e "${GREEN}Configuration Files:${NC}"
@@ -603,6 +884,7 @@ main() {
     configure_database
     configure_networking
     configure_additional
+    validate_configuration
     generate_env_file
     generate_compose_override
     deploy_containers
