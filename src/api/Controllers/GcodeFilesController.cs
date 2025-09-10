@@ -171,7 +171,9 @@ public class GcodeFilesController(IWebHostEnvironment env, ILogger<GcodeFilesCon
     int deleted = 0;
     var deletedFiles = new List<string>();
     var skipped = new List<string>();
-        // Collect any directory deletion attempts to reject (we don't currently support directory deletion)
+    var failed = new List<string>();
+        var directoriesRequested = new List<string>();
+        // Pre-scan to identify directories (unsupported) but defer decision to allow partial success semantics.
         foreach (var virtualPath in request.FilePaths)
         {
             try
@@ -179,22 +181,30 @@ public class GcodeFilesController(IWebHostEnvironment env, ILogger<GcodeFilesCon
                 var (_, fullCandidatePath, _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
                 if (Directory.Exists(fullCandidatePath))
                 {
-                    return BadRequest($"Cannot delete directory '{virtualPath}' – directory deletion is not supported");
+                    directoriesRequested.Add(virtualPath);
                 }
             }
             catch (Exception ex)
             {
-                // Path validation failures will bubble as simple skipped deletions later; keep behavior lenient
                 logger.LogDebug(ex, "Validation failure while pre-scanning delete targets {Path}", virtualPath);
                 skipped.Add(virtualPath);
             }
+        }
+        if (directoriesRequested.Count == request.FilePaths.Count)
+        {
+            // Retain legacy behavior: if ONLY directories were requested treat as a hard failure.
+            return BadRequest($"Cannot delete directories ({string.Join(", ", directoriesRequested)}) – directory deletion is not supported");
         }
         foreach (var virtualPath in request.FilePaths)
         {
             try
             {
                 var (_, fullFilePath, _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
-                if (System.IO.File.Exists(fullFilePath))
+                if (Directory.Exists(fullFilePath))
+                {
+                    failed.Add(virtualPath); // directories not supported in mixed request
+                }
+                else if (System.IO.File.Exists(fullFilePath))
                 {
                     System.IO.File.Delete(fullFilePath);
                     deleted++;
@@ -208,10 +218,21 @@ public class GcodeFilesController(IWebHostEnvironment env, ILogger<GcodeFilesCon
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to delete file {Path}", virtualPath);
-                skipped.Add(virtualPath);
+                failed.Add(virtualPath);
             }
         }
-        return Ok(new { deleted, deletedFiles, skipped });
+        return Ok(new
+        {
+            requested = request.FilePaths,
+            deleted,
+            deletedFiles,
+            skipped,
+            failed = failed.Concat(directoriesRequested).Distinct().ToList(),
+            totalRequested = request.FilePaths.Count,
+            totalSucceeded = deleted,
+            totalSkipped = skipped.Count,
+            totalFailed = failed.Concat(directoriesRequested).Distinct().Count()
+        });
     }
 
     /// <summary>
@@ -234,7 +255,10 @@ public class GcodeFilesController(IWebHostEnvironment env, ILogger<GcodeFilesCon
 
             var info = new FileInfo(fullFilePath);
             var lastWriteUtc = info.LastWriteTimeUtc;
-            var etag = GenerateEtag(info); // weak uniqueness: mtime + size
+            // Allow opting into weak ETags via env var (set GCODE_WEAK_ETAGS=1) so upstream caches can do
+            // semantic equivalence while still letting us change representation details later.
+            var useWeak = Environment.GetEnvironmentVariable("GCODE_WEAK_ETAGS") == "1";
+            var etag = GenerateEtag(info, useWeak); // uniqueness: mtime + size (sufficient for local FS scenarios)
 
             // Conditional ETag handling
             var typedHeaders = Request.GetTypedHeaders();
@@ -265,7 +289,7 @@ public class GcodeFilesController(IWebHostEnvironment env, ILogger<GcodeFilesCon
 
             if (HttpContext.Request.Method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
             {
-                // Provide accurate Content-Length without sending body
+                // Provide accurate Content-Length without sending body (tests assert size now)
                 Response.ContentLength = info.Length;
                 return new StatusCodeResult(200);
             }
@@ -342,7 +366,11 @@ public class GcodeFilesController(IWebHostEnvironment env, ILogger<GcodeFilesCon
         }
         return baseVirtual.TrimEnd('/') + "/" + childName;
     }
-    private static string GenerateEtag(FileInfo info) => $"\"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}\"";
+    private static string GenerateEtag(FileInfo info, bool weak = false)
+    {
+        var core = $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}";
+        return weak ? $"W/\"{core}\"" : $"\"{core}\"";
+    }
 }
 
 /// <summary>DTO describing a single file or directory entry in the virtual G-code library listing.</summary>
@@ -355,7 +383,11 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null
 );
 
-/// <summary>Response envelope for a directory listing.</summary>
+/// <summary>
+/// Response envelope for a directory listing.
+/// totalFiles/totalSize refer ONLY to regular files in the (unpaginated) result set (not directories).
+/// totalItems counts both directories and files prior to pagination; it is used with page/pageSize to compute totalPages.
+/// </summary>
 public record GcodeFileListResponse(
     [property: JsonPropertyName("files")] IReadOnlyList<GcodeFileEntryDto> Files,
     [property: JsonPropertyName("totalFiles")] int TotalFiles,

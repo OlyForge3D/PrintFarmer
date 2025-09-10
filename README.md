@@ -383,6 +383,60 @@ Spoolman Management Endpoints:
 Admin Bootstrap Notes:
 If ADMIN_* vars are supplied and no admin exists, a bootstrap user is created (FirstName: Admin, LastName: Bootstrap). Future runs skip creation once any active farm_admin is present. For security in production, consider unsetting these after first start.
 
+### G-code Virtual File Browser (Filesystem-backed)
+
+The `/api/gcode-files` endpoints expose a non-recursive, filesystem-backed view of a configurable G-code library root used primarily by the React file browser. Key behaviors and related environment variables:
+
+Environment Variables:
+- `GCODE_LIBRARY_ROOT` – Optional absolute path overriding the default internal root. A `gcode-library/` subdirectory is created under this path. Safe path resolution prevents escaping this root.
+- `GCODE_WEAK_ETAGS=1` – When set (any non-empty value), download (and HEAD) responses emit weak ETags (`W/"<token>"`) instead of strong. Use this if future server-side post-processing (e.g., metadata injection) might leave on-disk bytes unchanged while representation semantics evolve.
+
+Endpoints (selected):
+- `GET /api/gcode-files` – List entries in a virtual directory (immediate children only). Supports: `page`, `pageSize` (clamped to 500), `search` (substring match), `sort` (`name|size|date`), `direction` (`asc|desc`). Returns: `files[], totalFiles, totalSize, page, pageSize, totalPages, totalItems`.
+- `DELETE /api/gcode-files` (JSON body `{ paths: string[] }`) – Deletes one or more `.gcode` files.
+- `GET /api/gcode-files/download?path=/relative.gcode` – Streams a file and emits `ETag` + `Last-Modified`; honors conditional caching (`If-None-Match`, `If-Modified-Since`) and supports `HEAD`.
+
+Delete Semantics & Response Contract:
+The delete endpoint now returns granular outcome telemetry even on partial success. Mixed file + directory requests no longer hard-fail the entire batch.
+
+Response shape:
+```
+{
+  requested: string[],        // All normalized requested virtual paths
+  deletedFiles: string[],     // Paths actually deleted this call
+  skipped: string[],          // Paths that did not exist (benign)
+  failed: string[],           // Paths that could not be deleted (e.g. directories, IO issues)
+  totalRequested: number,
+  totalSucceeded: number,     // == deletedFiles.length
+  totalSkipped: number,       // == skipped.length
+  totalFailed: number         // == failed.length
+}
+```
+
+Status codes:
+- `200 OK` – At least one file path was valid (even if some paths failed or were skipped). Any directories included in a mixed set appear under `failed`.
+- `400 Bad Request` – All provided paths resolve to directories (directory deletion is intentionally not supported) OR the client supplied an empty/invalid payload.
+
+ETag Behavior:
+- Strong ETag (default): Derived from file last-modified ticks + size; format: `"<hex-timestamp>-<size>"`.
+- Weak ETag (when `GCODE_WEAK_ETAGS` set): Prefixed with `W/` and otherwise same token generation; safe for clients that prefer tolerant cache revalidation when semantic representation may diverge.
+
+Conditional Requests:
+- `If-None-Match` has precedence over `If-Modified-Since` if both supplied.
+- A 1-second tolerance is applied to `If-Modified-Since` comparisons to accommodate filesystem timestamp precision differences across platforms.
+
+HEAD Requests:
+`HEAD /api/gcode-files/download?path=...` returns the same headers (`Content-Length`, `ETag`, `Last-Modified`) as `GET` without a body, enabling lightweight existence & cache probes.
+
+Security Notes:
+- Path normalization rejects attempts to traverse above the configured root (e.g. `..` segments after canonicalization).
+- Only `.gcode` files are currently listed/deletable; other extensions are ignored and treated as non-existent.
+
+Future Enhancements (tracked separately):
+- Optional recursive listing / lazy directory tree expansion.
+- Multi-extension allowlist enumeration.
+- Inline hashing (on-demand SHA256) with toggleable performance budget.
+
 
 ## Deployment Options
 

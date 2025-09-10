@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Api.Infrastructure.Temp;
+using Farm.Web.Api.Infrastructure.Normalization;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
@@ -15,6 +16,8 @@ using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Web.Api.Infrastructure.Caching;
+using Microsoft.Extensions.Caching.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,7 +33,14 @@ try
 catch { /* non-fatal */ }
 
 // Add API services
-builder.Services.AddControllers()
+builder.Services.AddControllers(options =>
+    {
+        options.Filters.Add<Farm.Web.Api.Infrastructure.Filters.DuplicateConflictExceptionFilter>();
+    })
+    .AddJsonOptions(o =>
+    {
+        o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    })
     .AddJsonOptions(options =>
     {
         // Configure JSON options for .NET 9 compatibility
@@ -59,47 +69,46 @@ builder.Services.AddCors(options =>
     options.AddPolicy("Default", policy =>
     {
         // Get allowed origins from environment variable or use defaults
-        var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
-                           ?? "http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
+    // Support both legacy CORS__AllowedOrigins and current ALLOWED_ORIGINS for backward compatibility
+    var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+               ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
+               ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001"; // include React dev server defaults
 
         // Check if wildcard network access is enabled
         var allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
         var networkRanges = Environment.GetEnvironmentVariable("ALLOWED_NETWORK_RANGES")
                            ?? "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12";
 
-        if (allowLocalNetwork)
+        // IMPORTANT: We previously used AllowAnyOrigin() when ALLOW_LOCAL_NETWORK=true, which resulted in
+        // Access-Control-Allow-Origin: * and broke requests with credentials (e.g., SignalR negotiation using
+        // cookies or Authorization headers) because browsers forbid wildcard with credentials. We now always
+        // emit the requesting origin explicitly when allowed so credentials are supported.
+
+        policy.SetIsOriginAllowed(origin =>
         {
-            // Allow any origin for local network development
-            policy.AllowAnyOrigin()
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        }
-        else
-        {
-            policy.SetIsOriginAllowed(origin =>
+            // Always allow when local network flag is on (broad dev convenience) – but return true so the
+            // middleware echoes the concrete origin (not '*') enabling credentialed requests.
+            if (allowLocalNetwork) return true;
+
+            var configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                                   .Select(o => o.Trim())
+                                                   .ToArray();
+
+            if (configuredOrigins.Contains(origin))
             {
-                // Always allow configured origins
-                var configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                                     .Select(o => o.Trim())
-                                                     .ToArray();
+                return true;
+            }
 
-                if (configuredOrigins.Contains(origin))
-                {
-                    return true;
-                }
-
-                // Check if origin matches allowed network ranges
-                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-                {
-                    return IsIpInAllowedRanges(uri.Host, networkRanges);
-                }
-
-                return false;
-            })
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-        }
+            // Check if origin matches allowed network ranges (ip-based origin like http://192.168.x.x:port)
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            {
+                return IsIpInAllowedRanges(uri.Host, networkRanges);
+            }
+            return false;
+        })
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
     });
 });
 
@@ -251,8 +260,15 @@ builder.Services.AddHttpClient<SdcpClient>(client =>
 
 builder.Services.AddScoped<ISdcpClient, SdcpClient>();
 builder.Services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
+builder.Services.AddSingleton<INormalizationEventLogger, NormalizationEventLogger>();
 builder.Services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
 builder.Services.AddScoped<GcodeHarvestService>();
+
+// Catalog caching (manufacturers/models lists + ETags)
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ICatalogCache, CatalogCache>();
+// Bind CatalogCacheOptions from configuration section CatalogCache (optional)
+builder.Services.Configure<CatalogCacheOptions>(builder.Configuration.GetSection("CatalogCache"));
 
 // Harvest queue services
 builder.Services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
@@ -301,8 +317,30 @@ if (isMonolithicDeployment)
     {
         // Use relative path from content root to unified shared web root so SPA static files (prod) resolve.
         var shared = builder.Environment.WebRootPath;
-        var relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
-        configuration.RootPath = relative; // e.g. ../../wwwroot
+        try
+        {
+            if (string.IsNullOrWhiteSpace(shared) || !Directory.Exists(shared))
+            {
+                // Fallback: look for a local wwwroot under content root (publish scenario)
+                var fallback = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
+                if (Directory.Exists(fallback))
+                {
+                    shared = fallback;
+                }
+                else
+                {
+                    // No static root available; skip configuring SPA static files.
+                    return; // leaves configuration.RootPath unset -> no static file serving attempt
+                }
+            }
+            var relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
+            configuration.RootPath = relative; // e.g. ../../wwwroot or wwwroot
+        }
+        catch
+        {
+            // Safety: if relative path resolution fails (null args, etc.), skip static file mapping to avoid container crash.
+            return;
+        }
     });
 }
 
@@ -785,29 +823,39 @@ app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 // Configure SPA only for monolithic deployments (not microservices)
 if (isMonolithicDeployment)
 {
-    app.UseStaticFiles();
-
-    if (app.Environment.IsDevelopment())
+    // Only enable static file / SPA pipeline if a web root actually exists (prebuilt assets). In container builds
+    // using DEPLOYMENT_MODE=monolithic we expect /wwwroot to be present; if it's missing we skip to avoid crashes.
+    var staticRoot = app.Environment.WebRootPath;
+    if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        // Dynamic proxy middleware will handle forwarding once dev server becomes available
-        app.UseMiddleware<SpaDynamicProxyMiddleware>();
+        app.UseStaticFiles();
+
+        if (app.Environment.IsDevelopment())
+        {
+            // Dynamic proxy middleware will handle forwarding once dev server becomes available
+            app.UseMiddleware<SpaDynamicProxyMiddleware>();
+        }
+        else
+        {
+            // Production: serve pre-built SPA assets (only if root present)
+            app.UseSpa(spa =>
+            {
+                spa.Options.SourcePath = "wwwroot";
+                spa.Options.DefaultPageStaticFileOptions = new StaticFileOptions
+                {
+                    OnPrepareResponse = ctx =>
+                    {
+                        ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+                        ctx.Context.Response.Headers.Append("Pragma", "no-cache");
+                        ctx.Context.Response.Headers.Append("Expires", "0");
+                    }
+                };
+            });
+        }
     }
     else
     {
-        // Production: serve pre-built SPA assets
-        app.UseSpa(spa =>
-        {
-            spa.Options.SourcePath = "wwwroot";
-            spa.Options.DefaultPageStaticFileOptions = new StaticFileOptions
-            {
-                OnPrepareResponse = ctx =>
-                {
-                    ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
-                    ctx.Context.Response.Headers.Append("Pragma", "no-cache");
-                    ctx.Context.Response.Headers.Append("Expires", "0");
-                }
-            };
-        });
+        app.Logger.LogWarning("[Startup][SPA] Skipping SPA static file pipeline: WebRootPath missing or directory not found: {WebRootPath}", staticRoot);
     }
 }
 

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
 
@@ -108,10 +109,49 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         };
         var deleteResp = await _client.SendAsync(deleteRequest);
         deleteResp.StatusCode.Should().Be(HttpStatusCode.OK);
+    var deletePayload = await deleteResp.Content.ReadFromJsonAsync<JsonElement>();
+    deletePayload.TryGetProperty("deleted", out var delCount).Should().BeTrue();
+    delCount.GetInt32().Should().Be(1);
+    deletePayload.TryGetProperty("deletedFiles", out var delFiles).Should().BeTrue();
+    delFiles.EnumerateArray().Select(e => e.GetString()).Should().ContainSingle(x => x == "/remove.gcode");
+    deletePayload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();
+    totalReq.GetInt32().Should().Be(1);
 
         var after = await _client.GetFromJsonAsync<GcodeListResponse>("/api/gcode-files");
         after!.TotalFiles.Should().Be(1);
         after.Files.Should().ContainSingle(f => f.Name == "keep.gcode");
+    }
+
+    [Fact]
+    public async Task Delete_ResponseIncludesSkippedAndFailed()
+    {
+        var libRoot = EnsureLibRoot();
+        await File.WriteAllTextAsync(Path.Combine(libRoot, "a.gcode"), ";a\n");
+        // Non-existent & directory to trigger skipped, plus a path outside root attempt
+        var subDir = Path.Combine(libRoot, "folder");
+        Directory.CreateDirectory(subDir);
+        var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, "/api/gcode-files")
+        {
+            Content = JsonContent.Create(new { filePaths = new[] { "/a.gcode", "/missing.gcode", "/folder/.." } })
+        };
+        var resp = await _client.SendAsync(deleteRequest);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var payload = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        payload.TryGetProperty("deleted", out var deleted).Should().BeTrue();
+        deleted.GetInt32().Should().Be(1);
+        payload.TryGetProperty("skipped", out var skipped).Should().BeTrue();
+        var skippedList = skipped.EnumerateArray().Select(e => e.GetString()).ToList();
+        skippedList.Should().Contain("/missing.gcode");
+        var failedList = new List<string>();
+        if (payload.TryGetProperty("failed", out var failedArr))
+        {
+            failedList = failedArr.EnumerateArray().Select(e => e.GetString()!).ToList();
+        }
+        (skippedList.Contains("/folder/..") || failedList.Contains("/folder/..")).Should().BeTrue();
+        payload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();
+        totalReq.GetInt32().Should().Be(3);
+        payload.TryGetProperty("totalSucceeded", out var totalSucc).Should().BeTrue();
+        totalSucc.GetInt32().Should().Be(1);
     }
 
     [Fact]

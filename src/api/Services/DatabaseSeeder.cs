@@ -2,6 +2,7 @@
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Farm.Web.Api.Infrastructure.Normalization;
 
 namespace Farm.Web.Api.Services;
 
@@ -18,7 +19,9 @@ public class DatabaseSeeder : IDatabaseSeeder
     {
         try
         {
-            // Desired manufacturers to ensure exist
+            // Desired manufacturers to ensure exist (display names)
+            // NOTE: "VoronDesign" was previously used; renamed to the friendlier "Voron" for UI display.
+            // We include a one-time rename below for existing databases.
             var manufacturerNames = new[]
             {
                 "Prusa",
@@ -27,21 +30,23 @@ public class DatabaseSeeder : IDatabaseSeeder
                 "FlashForge",
                 "Sovol",
                 "RatRig",
-                "VoronDesign",
+                "Voron",
                 "PrintersForAnts"
             };
+
 
             var manufacturers = new Dictionary<string, Manufacturer>(StringComparer.OrdinalIgnoreCase);
             foreach (var name in manufacturerNames.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                var existing = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == name);
+                var normalized = CatalogNameNormalizer.NormalizeManufacturer(name);
+                var existing = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == normalized);
                 if (existing == null)
                 {
-                    existing = new Manufacturer { Id = Guid.NewGuid(), Name = name };
+                    existing = new Manufacturer { Id = Guid.NewGuid(), Name = normalized };
                     _context.Manufacturers.Add(existing);
                     await _context.SaveChangesAsync();
                 }
-                manufacturers[name] = existing;
+                manufacturers[normalized] = existing;
             }
 
             // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend)
@@ -55,13 +60,13 @@ public class DatabaseSeeder : IDatabaseSeeder
                 ("Centauri Carbon", "Elegoo", 256, 256, 256, 2), // SDCP
                 ("Micron 120", "PrintersForAnts", 120, 120, 120, 0), // Moonraker (Klipper)
                 ("Micron 180", "PrintersForAnts", 180, 180, 165, 0), // Moonraker (Klipper)
-                ("Voron Trident 250", "VoronDesign", 250, 250, 250, 0), // Moonraker (Klipper)
-                ("Voron Trident 300", "VoronDesign", 300, 300, 250, 0), // Moonraker (Klipper)
-                ("Voron Trident 300 Cube", "VoronDesign", 300, 300, 300, 0), // Moonraker (Klipper)
-                ("Voron Trident 350", "VoronDesign", 350, 350, 250, 0), // Moonraker (Klipper)
-                ("Voron v0", "VoronDesign", 120, 120, 120, 0), // Moonraker (Klipper)
-                ("Voron v2.4 300", "VoronDesign", 300, 300, 300, 0), // Moonraker (Klipper)
-                ("Voron v2.4 350", "VoronDesign", 350, 350, 350, 0), // Moonraker (Klipper)
+                ("Voron Trident 250", "Voron", 250, 250, 250, 0), // Moonraker (Klipper)
+                ("Voron Trident 300", "Voron", 300, 300, 250, 0), // Moonraker (Klipper)
+                ("Voron Trident 300 Cube", "Voron", 300, 300, 300, 0), // Moonraker (Klipper)
+                ("Voron Trident 350", "Voron", 350, 350, 250, 0), // Moonraker (Klipper)
+                ("Voron v0", "Voron", 120, 120, 120, 0), // Moonraker (Klipper)
+                ("Voron v2.4 300", "Voron", 300, 300, 300, 0), // Moonraker (Klipper)
+                ("Voron v2.4 350", "Voron", 350, 350, 350, 0), // Moonraker (Klipper)
                 ("vCore4 400", "RatRig", 400, 400, 400, 0), // Moonraker (Klipper)
                 ("vCore4 500", "RatRig", 500, 500, 500, 0), // Moonraker (Klipper)
                 ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1), // PrusaLink

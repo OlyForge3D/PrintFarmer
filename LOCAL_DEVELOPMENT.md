@@ -77,12 +77,30 @@ Notes:
 * Only `.gcode` files are included today.
 * Setting this variable does not affect the database-stored G-code metadata paths already persisted.
 * `pageSize` is clamped to a maximum of **500** to prevent excessive payloads.
-* Directory deletion is intentionally not supported: `DELETE /api/gcode-files` will return `400` if any provided path resolves to a directory.
+* Directory deletion is intentionally not supported: if **all** provided paths resolve to directories the delete request returns `400`. Mixed file + directory batches now return `200` with directories reported under `failed`.
 * The download endpoint (`GET /api/gcode-files/download?path=/example.gcode`):
 	* Supports `HEAD` requests for lightweight existence checks and metadata (ETag/Last-Modified headers returned, no body).
 	* Returns `ETag` and `Last-Modified` headers for cache validation.
-	* Honors conditional headers `If-None-Match` and `If-Modified-Since`, responding with `304 Not Modified` when appropriate.
-	* ETag format combines last modified timestamp + file size for weak uniqueness (sufficient for typical G-code update detection).
+	* Honors conditional headers `If-None-Match` and `If-Modified-Since` (with a 1s tolerance), responding with `304 Not Modified` when appropriate.
+	* Strong ETag (default) combines last modified ticks + file size. Set `GCODE_WEAK_ETAGS=1` to emit a weak validator (`W/` prefix) for future scenario flexibility.
+
+Delete response contract (example):
+```
+{
+  "requested": ["/part1.gcode","/folder","/missing.gcode"],
+  "deletedFiles": ["/part1.gcode"],
+  "skipped": ["/missing.gcode"],
+  "failed": ["/folder"],
+  "totalRequested": 3,
+  "totalSucceeded": 1,
+  "totalSkipped": 1,
+  "totalFailed": 1
+}
+```
+
+Environment variable summary:
+* `GCODE_LIBRARY_ROOT` – Override physical storage root.
+* `GCODE_WEAK_ETAGS=1` – Enable weak ETag emission for download/HEAD responses.
 
 If the dev server is not yet ready the backend logs `[SPA]` warning and you can just refresh once Vite finishes starting.
 

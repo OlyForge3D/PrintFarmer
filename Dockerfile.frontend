@@ -1,6 +1,12 @@
 # Standalone React Frontend Dockerfile
 FROM node:18-alpine AS build
 
+# Build-time configuration (can be overridden with --build-arg)
+ARG VITE_API_BASE_URL=http://localhost:5001/api
+ARG VITE_SIGNALR_URL=http://localhost:5001/hubs/printers
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_SIGNALR_URL=${VITE_SIGNALR_URL}
+
 WORKDIR /app
 
 # Copy package files
@@ -9,7 +15,8 @@ RUN npm install --silent
 
 # Copy source and build
 COPY src/Web/ReactApp/ ./
-RUN npm run build
+# Vite reads VITE_* vars at build time; ensure they are present now.
+RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL VITE_SIGNALR_URL=$VITE_SIGNALR_URL" && npm run build
 
 # Production stage with Nginx
 FROM nginx:alpine
