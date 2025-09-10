@@ -427,7 +427,7 @@ public record NetworkDiscoverySettingsDto(
     int MaxConcurrentScans = 20,
     List<int> Ports = null!)
 {
-    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [80, 7125])
+    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [7125, 80])
     {
     }
 }

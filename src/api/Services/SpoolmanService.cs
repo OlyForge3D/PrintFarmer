@@ -62,6 +62,16 @@ public class SpoolmanService : ISpoolmanService
         db.SaveChanges();
     }
 
+    public void ClearConfig()
+    {
+        var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+        if (row is not null)
+        {
+            db.SpoolmanConfigs.Remove(row);
+            db.SaveChanges();
+        }
+    }
+
     private static string NormalizeBaseUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url))

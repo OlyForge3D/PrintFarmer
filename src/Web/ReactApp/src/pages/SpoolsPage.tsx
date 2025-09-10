@@ -60,6 +60,7 @@ export function SpoolsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [showColumnConfig, setShowColumnConfig] = useState(false);
+  const [health, setHealth] = useState<{configured: boolean; success: boolean; message?: string} | null>(null);
 
   interface TableColumn {
     id: string;
@@ -163,6 +164,19 @@ export function SpoolsPage() {
       };
     }));
   }, [spoolmanBaseUrl]);
+
+  // One-time health probe
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const r = await fetch('/api/spoolman/health');
+        if (!r.ok) return;
+        const data = await r.json();
+        setHealth(data);
+      } catch { /* ignore */ }
+    };
+    run();
+  }, []);
 
   // Persist visibility/order (order in array) excluding heavy render funcs (just id+visible)
   useEffect(() => {
@@ -421,6 +435,15 @@ export function SpoolsPage() {
 
   return (
     <div className="space-y-6">
+      {health && (!health.configured || !health.success) && (
+        <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded">
+          {!health.configured ? (
+            <span>Spoolman is not configured yet. Set a base URL in Settings to enable spool tracking.</span>
+          ) : (
+            <span>Spoolman connection failed{health.message ? `: ${health.message}` : ''}. You can reconfigure under Settings.</span>
+          )}
+        </div>
+      )}
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Spools</h1>
   <div className="flex gap-2 items-center">

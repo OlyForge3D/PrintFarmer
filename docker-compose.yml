@@ -20,7 +20,7 @@ services:
   # Redis for caching and SignalR backplane
   redis:
     image: redis:7-alpine
-    network_mode: host
+    # No external port mapping needed; accessed only by internal services (api, workers)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -34,26 +34,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    privileged: true  # Required for enhanced network access on macOS
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    ports:
+      - "5001:5001" # HTTP API / SignalR
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:5001
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
-      - Redis__ConnectionString=localhost:6379
+      - Redis__ConnectionString=redis:6379
       - CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080,http://localhost:5001
       - DEPLOYMENT_MODE=monolithic
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - ALLOW_LOCAL_NETWORK=true
       - ALLOWED_NETWORK_RANGES=10.0.0.0/24,172.16.0.0/12
-      - DOCKER_HOST_NETWORK=true
+      - DOCKER_HOST_NETWORK=false
       - ENABLE_LOCAL_NETWORK_ACCESS=true
+      - DISCOVERY_PORTS=7125,80
+      # Optional Spoolman integration (values may be overridden by .env file generated via deploy script)
+      - SPOOLMAN_ENABLED=${SPOOLMAN_ENABLED:-}
+      - SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
+      - SPOOLMAN_PORT=${SPOOLMAN_PORT:-}
       # Required JWT signing key (32+ chars) for auth configuration
       - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
     volumes:
@@ -98,12 +98,11 @@ services:
       dockerfile: Dockerfile.orcaslicer
     profiles:
       - orca
-    network_mode: host
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8081
-      - ConnectionStrings__Redis=localhost:6379
-      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://localhost:5001}
+      - ConnectionStrings__Redis=redis:6379
+      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5001}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
@@ -129,12 +128,11 @@ services:
       dockerfile: Dockerfile.prusaslicer
     profiles:
       - prusa
-    network_mode: host
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8082
-      - ConnectionStrings__Redis=localhost:6379
-      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://localhost:5001}
+      - ConnectionStrings__Redis=redis:6379
+      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5001}
       - Worker__WorkingDirectory=/app/temp
       - Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
       - Worker__WorkerId=prusaslicer-worker-1
@@ -156,11 +154,10 @@ services:
   # Optional: Load balancer for production
   nginx-proxy:
     image: nginx:alpine
-    network_mode: host
     profiles:
       - proxy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
     volumes:
       - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
     depends_on:

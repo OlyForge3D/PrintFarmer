@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
 import type { FilamentType } from '@/types/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface NetworkRange {
   cidr: string;
@@ -24,6 +26,8 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingDynamic, setLoadingDynamic] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { data: diagnostics } = useDiagnosticsSummary(45000);
+  const { hasRole, isAuthenticated } = useAuth();
   
   // Filament type editing
   const [editingFilamentType, setEditingFilamentType] = useState<FilamentType | null>(null);
@@ -46,11 +50,25 @@ export function SettingsPage() {
       const savedSpoolman = localStorage.getItem('spoolman-base-url') || '';
       setSpoolmanBase(savedSpoolman);
       
-      const savedRanges = localStorage.getItem('network-ranges');
-      if (savedRanges) {
-        setNetworkRanges(JSON.parse(savedRanges));
-      } else {
-        setNetworkRanges([]);
+      // Load network discovery settings from backend
+      try {
+        const nd = await apiClient.getNetworkDiscoverySettings();
+        setNetworkRanges(nd.networkRanges.map(r => ({ cidr: r })));
+        setDiscoveryTimeout(nd.timeoutMs);
+        setMaxConcurrentScans(nd.maxConcurrentScans);
+        setScanPorts(nd.ports);
+  } catch {
+        // Fallback to any legacy localStorage values (backwards compatibility)
+        const savedRanges = localStorage.getItem('network-ranges');
+        if (savedRanges) {
+          setNetworkRanges(JSON.parse(savedRanges));
+        }
+        const savedTimeout = localStorage.getItem('discovery-timeout');
+        if (savedTimeout) setDiscoveryTimeout(Number(savedTimeout));
+        const savedMax = localStorage.getItem('max-concurrent-scans');
+        if (savedMax) setMaxConcurrentScans(Number(savedMax));
+        const savedPorts = localStorage.getItem('scan-ports');
+        if (savedPorts) setScanPorts(JSON.parse(savedPorts));
       }
       
       setError(null);
@@ -72,14 +90,28 @@ export function SettingsPage() {
     setTestMessage('');
 
     try {
-      // Persist config server-side first so backend knows the URL
-      const saveResp = await fetch('/api/spoolman/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl: normalizedUrl })
-      });
-      if (!saveResp.ok && saveResp.status !== 204) {
-        throw new Error(`Failed to persist config (HTTP ${saveResp.status})`);
+      // If user is admin attempt to persist config first (required so backend knows URL)
+      if (isAuthenticated && hasRole('farm_admin')) {
+        const token = localStorage.getItem('auth-token');
+        const saveResp = await fetch('/api/spoolman/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({ baseUrl: normalizedUrl })
+        });
+        if (saveResp.status === 401 || saveResp.status === 403) {
+          setTestOk(false);
+            setTestMessage('Unauthorized: administrator privileges required to set configuration.');
+          return;
+        }
+        if (!saveResp.ok && saveResp.status !== 204) {
+          throw new Error(`Failed to persist config (HTTP ${saveResp.status})`);
+        }
+      } else {
+        // Non-admin: give user feedback up-front
+        setTestMessage('Note: Running readonly probe (config not persisted; admin rights required).');
       }
 
       // Use backend proxy endpoint instead of direct browser -> Spoolman (avoids CORS)
@@ -105,11 +137,19 @@ export function SettingsPage() {
     try {
       localStorage.setItem('spoolman-base-url', normalizedUrl);
       // Persist configuration to backend so all server-side features can use it
+      const token = localStorage.getItem('auth-token');
       const resp = await fetch('/api/spoolman/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ baseUrl: normalizedUrl })
       });
+      if (resp.status === 401 || resp.status === 403) {
+        toast.error('Unauthorized: administrator privileges required');
+        return;
+      }
       if (!resp.ok && resp.status !== 204) {
         throw new Error(`HTTP ${resp.status}`);
       }
@@ -121,6 +161,26 @@ export function SettingsPage() {
       setError('Failed to save Spoolman settings');
       console.error('Error saving Spoolman settings:', err);
   toast.error('Failed to save Spoolman settings');
+    }
+  };
+
+  const clearSpoolman = async () => {
+    if (!confirm('Clear Spoolman configuration?')) return;
+    try {
+      const token = localStorage.getItem('auth-token');
+      const resp = await fetch('/api/spoolman/config', { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (resp.status === 401 || resp.status === 403) {
+        toast.error('Unauthorized: administrator privileges required');
+        return;
+      }
+      if (!resp.ok && resp.status !== 204) throw new Error(`HTTP ${resp.status}`);
+      localStorage.removeItem('spoolman-base-url');
+      setSpoolmanBase('');
+      setTestOk(null);
+      setTestMessage('');
+      toast.success('Spoolman configuration cleared');
+  } catch {
+      toast.error('Failed to clear Spoolman configuration');
     }
   };
 
@@ -206,39 +266,36 @@ export function SettingsPage() {
     setScanPorts(updated);
   };
 
-  const saveNetworkSettings = () => {
+  const saveNetworkSettings = async () => {
     try {
-      localStorage.setItem('network-ranges', JSON.stringify(networkRanges));
-      localStorage.setItem('discovery-timeout', discoveryTimeout.toString());
-      localStorage.setItem('max-concurrent-scans', maxConcurrentScans.toString());
-      localStorage.setItem('scan-ports', JSON.stringify(scanPorts));
-      // TODO: Implement API endpoints to save these server-side
+      const payload = {
+        networkRanges: networkRanges.filter(r => r.cidr.trim()).map(r => r.cidr.trim()),
+        timeoutMs: discoveryTimeout,
+        maxConcurrentScans,
+        ports: scanPorts.filter(p => p > 0 && p < 65536)
+      };
+      await apiClient.saveNetworkDiscoverySettings(payload);
       setError(null);
-  toast.success('Network discovery settings saved');
+      toast.success('Network discovery settings saved');
     } catch (err) {
       setError('Failed to save network settings');
       console.error('Error saving network settings:', err);
-  toast.error('Failed to save network settings');
+      toast.error('Failed to save network settings');
     }
   };
 
   const autoDetectNetworks = async () => {
     setLoadingDynamic(true);
     try {
-      // TODO: Implement API endpoint to auto-detect network ranges
-      // For now, add some common default ranges
-      const defaultRanges = [
-        { cidr: '10.0.0.0/24' },
-        { cidr: '10.0.0.1/24' },
-        { cidr: '10.0.0.2/24' },
-        { cidr: '10.0.0.3/24' },
-        { cidr: '10.0.0.4/24' },
-        { cidr: '10.0.0.5/24' }
-      ];
-      setNetworkRanges(defaultRanges);
+      const detected = await apiClient.autoDetectNetworkRanges();
+      if (detected.length === 0) {
+        toast.info('No active network interfaces detected');
+      }
+      setNetworkRanges(detected.map(cidr => ({ cidr })));
     } catch (err) {
       setError('Failed to auto-detect networks');
       console.error('Error auto-detecting networks:', err);
+      toast.error('Failed to auto-detect networks');
     } finally {
       setLoadingDynamic(false);
     }
@@ -267,6 +324,14 @@ export function SettingsPage() {
       {/* Spoolman Configuration */}
       <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
         <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Spoolman Integration</h2>
+        {diagnostics && (
+          <div className="text-sm text-pf-text-secondary mb-2 flex gap-4 flex-wrap">
+            <span>Configured: {diagnostics.spoolman.configured ? 'Yes' : 'No'}</span>
+            {diagnostics.spoolman.baseUrl && <span>Base URL: {diagnostics.spoolman.baseUrl}</span>}
+            <span>Discovery Ranges: {diagnostics.discovery.ranges.length}</span>
+            <span>Scan Ports: {diagnostics.discovery.ports.join(', ')}</span>
+          </div>
+        )}
         
         <div className="space-y-4">
           <div>
@@ -325,6 +390,14 @@ export function SettingsPage() {
             >
               <Save className="h-4 w-4" />
               Save
+            </button>
+            <button
+              onClick={clearSpoolman}
+              type="button"
+              className="px-4 py-2 bg-red-700 text-white rounded hover:bg-red-800 flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              Clear
             </button>
             <a
               href="/spools"

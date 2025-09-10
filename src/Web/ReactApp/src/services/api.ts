@@ -208,6 +208,27 @@ export class ApiClient {
   }
 
   // ============ Settings API methods ============
+  // Network Discovery settings
+  async getNetworkDiscoverySettings(): Promise<{ networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] }> {
+    const resp = await this.client.get('/network-discovery/settings');
+    // Backend returns camelCase via JSON options; map to consistent shape
+    const data = resp.data as { networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] };
+    return data;
+  }
+
+  async saveNetworkDiscoverySettings(payload: { networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] }): Promise<void> {
+    await this.client.post('/network-discovery/settings', {
+      networkRanges: payload.networkRanges,
+      timeoutMs: payload.timeoutMs,
+      maxConcurrentScans: payload.maxConcurrentScans,
+      ports: payload.ports
+    });
+  }
+
+  async autoDetectNetworkRanges(): Promise<string[]> {
+    const resp = await this.client.post('/network-discovery/auto-detect', {});
+    return (resp.data as { ranges: string[] }).ranges;
+  }
 
   // ============ Filament Type API methods ============
 

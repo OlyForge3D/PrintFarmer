@@ -45,6 +45,45 @@ Environment variables you can override before running (apply to `pf-dev.sh start
 | ALLOWED_ORIGINS | http://localhost:3000 | CORS origin for React dev server |
 | ASPNETCORE_URLS / API_URL | http://localhost:5245 | API listen address |
 
+### GCODE_LIBRARY_ROOT (optional)
+
+When set, the backend overrides the physical root used by the `/api/gcode-files` virtual file browser. A `gcode-library` subfolder is created under this path. This allows:
+
+* Using an external or mounted volume for large G-code collections
+* Keeping bulky test fixtures out of the repo
+* Deterministic, isolated integration tests (the test suite sets this variable)
+
+Example usage:
+```bash
+export GCODE_LIBRARY_ROOT="$HOME/printfarmer-library"
+mkdir -p "$GCODE_LIBRARY_ROOT/gcode-library"
+dotnet run --project src/api/Farm.Web.Api.csproj
+```
+
+Directory layout:
+```
+$GCODE_LIBRARY_ROOT/
+	gcode-library/
+		example1.gcode
+		subdir/
+			example2.gcode
+```
+
+API pagination & metadata:
+`GET /api/gcode-files?page=1&pageSize=50` now returns: `files[], totalFiles, totalSize, page, pageSize, totalPages, totalItems`.
+
+Notes:
+* Only immediate children of the requested virtual path are listed (no recursion).
+* Only `.gcode` files are included today.
+* Setting this variable does not affect the database-stored G-code metadata paths already persisted.
+* `pageSize` is clamped to a maximum of **500** to prevent excessive payloads.
+* Directory deletion is intentionally not supported: `DELETE /api/gcode-files` will return `400` if any provided path resolves to a directory.
+* The download endpoint (`GET /api/gcode-files/download?path=/example.gcode`):
+	* Supports `HEAD` requests for lightweight existence checks and metadata (ETag/Last-Modified headers returned, no body).
+	* Returns `ETag` and `Last-Modified` headers for cache validation.
+	* Honors conditional headers `If-None-Match` and `If-Modified-Since`, responding with `304 Not Modified` when appropriate.
+	* ETag format combines last modified timestamp + file size for weak uniqueness (sufficient for typical G-code update detection).
+
 If the dev server is not yet ready the backend logs `[SPA]` warning and you can just refresh once Vite finishes starting.
 
 #### Script Commands Summary

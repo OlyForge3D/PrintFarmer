@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronRightIcon } from '@heroicons/react/24/outline';
 
-import { GcodeFile } from '@/types/api';
+import { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { FileRow } from './FileRow';
@@ -36,16 +36,20 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'date'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const { data: files, isLoading } = useQuery({
-    queryKey: ['gcode-files', currentPath, harvestId, printerId, sortBy, sortOrder, searchTerm],
+  const { data: files, isLoading } = useQuery<GetGcodeFilesResponse>({
+    queryKey: ['gcode-files', currentPath, harvestId, printerId, sortBy, sortOrder, searchTerm, page, pageSize],
     queryFn: () => apiClient.getGcodeFilesWithFilter({
       path: currentPath,
       harvestId,
       printerId,
       sortBy,
       sortOrder,
-      search: searchTerm
+      search: searchTerm,
+      page,
+      pageSize
     }),
   });
 
@@ -72,10 +76,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   });
 
   const handleSelectAll = () => {
-    if (selectedFiles.length === files?.files.length) {
+    if (selectedFiles.length === (files?.files?.length ?? 0)) {
       setSelectedFiles([]);
     } else {
-      setSelectedFiles(files?.files.map((f: GcodeFile) => f.path) || []);
+      setSelectedFiles(files?.files?.map((f: GcodeFile) => f.path) || []);
     }
   };
 
@@ -107,7 +111,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               <React.Fragment key={index}>
                 <ChevronRightIcon className="w-4 h-4 text-gray-400" />
                 <button
-                  onClick={() => setCurrentPath('/' + breadcrumbs.slice(0, index + 1).join('/'))}
+                  onClick={() => { setCurrentPath('/' + breadcrumbs.slice(0, index + 1).join('/')); setPage(1);} }
                   className="text-blue-600 hover:text-blue-800"
                 >
                   {segment}
@@ -156,7 +160,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             placeholder="Search files..."
             aria-label="Search files"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { setSearchTerm(e.target.value); setPage(1);} }
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -166,7 +170,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           id="sort-by"
           aria-label="Sort files by"
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as 'name' | 'size' | 'date')}
+          onChange={(e) => { setSortBy(e.target.value as 'name' | 'size' | 'date'); setPage(1);} }
           className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="name">Sort by Name</option>
@@ -175,7 +179,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         </select>
         
         <button
-          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+          onClick={() => { setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); setPage(1);} }
           className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
         >
           {sortOrder === 'asc' ? '↑' : '↓'}
@@ -189,7 +193,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             <div key={i} className="h-16 bg-gray-200 rounded animate-pulse" />
           ))}
         </div>
-      ) : files && files.files.length > 0 ? (
+  ) : files && files.files && files.files.length > 0 ? (
         <div className="bg-white rounded-lg shadow">
           {/* Table header */}
           <div className="px-4 py-3 border-b border-gray-200 flex items-center">
@@ -197,7 +201,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               type="checkbox"
               title="Select all files"
               aria-label="Select all files"
-              checked={selectedFiles.length === files.files.length && files.files.length > 0}
+              checked={selectedFiles.length === (files?.files?.length ?? 0) && (files?.files?.length ?? 0) > 0}
               onChange={handleSelectAll}
               className="mr-4"
             />
@@ -212,7 +216,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
 
           {/* File rows */}
           <div className="divide-y divide-gray-200">
-            {files.files.map((file: GcodeFile) => (
+            {files.files?.map((file: GcodeFile) => (
               <FileRow
                 key={file.path}
                 file={file}
@@ -230,7 +234,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     deleteMutation.mutate([file.path]);
                   }
                 }}
-                onNavigate={file.isDirectory ? () => setCurrentPath(file.path) : undefined}
+                onNavigate={file.isDirectory ? () => { setCurrentPath(file.path); setPage(1);} : undefined}
               />
             ))}
           </div>
@@ -243,8 +247,32 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
 
       {/* File count and size */}
       {files && (
-        <div className="text-sm text-gray-500">
-          {files.totalFiles} files • {formatBytes(files.totalSize)}
+        <div className="flex flex-col gap-2 text-sm text-gray-500">
+          <div>
+            {files.totalFiles} files • {formatBytes(files.totalSize)}
+          </div>
+          {/* Pagination controls */}
+          <div className="flex items-center gap-3">
+            <button
+              disabled={page === 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              className="px-2 py-1 border border-gray-300 rounded disabled:opacity-40"
+            >Prev</button>
+            <span>Page {(files.page ?? page)} of {(files.totalPages ?? '?')}</span>
+            <button
+              disabled={files.totalPages ? page >= (files.totalPages ?? 1) : ((files.files?.length ?? 0) < pageSize)}
+              onClick={() => setPage(p => p + 1)}
+              className="px-2 py-1 border border-gray-300 rounded disabled:opacity-40"
+            >Next</button>
+            <select
+              aria-label="Select page size"
+              value={pageSize}
+              onChange={e => { setPageSize(Number(e.target.value)); setPage(1);} }
+              className="px-2 py-1 border border-gray-300 rounded"
+            >
+              {[25,50,100,200,500].map(size => <option key={size} value={size}>{size}/page</option>)}
+            </select>
+          </div>
         </div>
       )}
     </div>

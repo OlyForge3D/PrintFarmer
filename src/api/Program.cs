@@ -18,6 +18,17 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
+try
+{
+    var potentialShared = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "wwwroot"));
+    if (Directory.Exists(potentialShared))
+    {
+        builder.Environment.WebRootPath = potentialShared;
+    }
+}
+catch { /* non-fatal */ }
+
 // Add API services
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -276,7 +287,8 @@ builder.Services.AddSignalR();
 // Health checks
 builder.Services.AddHealthChecks()
     .AddCheck<ComprehensiveHealthCheck>("comprehensive")
-    .AddCheck<SignalRHealthCheck>("signalr");
+    .AddCheck<SignalRHealthCheck>("signalr")
+    .AddCheck<SpoolmanHealthCheck>("spoolman");
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
@@ -287,7 +299,10 @@ if (isMonolithicDeployment)
 {
     builder.Services.AddSpaStaticFiles(configuration =>
     {
-        configuration.RootPath = "wwwroot";
+        // Use relative path from content root to unified shared web root so SPA static files (prod) resolve.
+        var shared = builder.Environment.WebRootPath;
+        var relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
+        configuration.RootPath = relative; // e.g. ../../wwwroot
     });
 }
 
@@ -395,6 +410,11 @@ builder.Services.AddAuthentication("Bearer")
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
+    options.AddPolicy("RequireAdmin", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireRole("farm_admin");
+    });
 });
 
 // Register authorization handlers
@@ -447,6 +467,87 @@ using (var scope = app.Services.CreateScope())
     {
         logger.LogCritical(ex, "Application startup failed due to configuration validation errors");
         throw;
+    }
+
+    // Optional: Seed Spoolman configuration from environment (one-time if user provided during deploy script)
+    try
+    {
+        var spoolmanBase = Environment.GetEnvironmentVariable("SPOOLMAN_BASE_URL");
+        var spoolmanEnabled = Environment.GetEnvironmentVariable("SPOOLMAN_ENABLED");
+        if (!string.IsNullOrWhiteSpace(spoolmanBase) && string.Equals(spoolmanEnabled, "yes", StringComparison.OrdinalIgnoreCase))
+        {
+            var spoolmanSvc = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
+            var existing = spoolmanSvc.GetConfig();
+            if (existing is null || string.IsNullOrWhiteSpace(existing.BaseUrl))
+            {
+                spoolmanSvc.SetConfig(new Farm.Web.Shared.SpoolmanConfigDto(spoolmanBase));
+                logger.LogInformation("[Startup] Seeded Spoolman configuration from SPOOLMAN_BASE_URL env var: {Url}", spoolmanBase);
+            }
+            else
+            {
+                logger.LogDebug("[Startup] Spoolman configuration already present; skipping env seed");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Failed to seed Spoolman configuration from environment");
+    }
+
+    // Optional unattended initial admin bootstrap from environment variables
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var hasAdmin = await db.Users.AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive));
+        if (!hasAdmin)
+        {
+            var adminUser = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
+            var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
+            var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+            if (!string.IsNullOrWhiteSpace(adminUser) && !string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword) && adminPassword.Length >= 8)
+            {
+                var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
+                // Previously retrieved auth service was unused here; removed to satisfy analyzer.
+                var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+                if (adminRole != null)
+                {
+                    var user = new Farm.Web.Api.Domain.User
+                    {
+                        Id = Guid.NewGuid(),
+                        Username = adminUser,
+                        Email = adminEmail,
+                        FirstName = "Admin",
+                        LastName = "Bootstrap",
+                        PasswordHash = hashing.HashPassword(adminPassword),
+                        IsActive = true,
+                        EmailConfirmed = true,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    db.Users.Add(user);
+                    db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = user.Id,
+                        RoleId = adminRole.Id,
+                        AssignedAt = DateTime.UtcNow,
+                        IsActive = true
+                    });
+                    await db.SaveChangesAsync();
+                    logger.LogInformation("[Startup] Created initial admin user from environment (USERNAME={Username}, EMAIL={Email})", adminUser, adminEmail);
+                }
+                else
+                {
+                    logger.LogWarning("[Startup] Cannot create admin user from environment because farm_admin role not found.");
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        // Don't fail startup for bootstrap issues
+        var logger2 = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger2.LogWarning(ex, "[Startup] Failed to perform environment admin bootstrap");
     }
 }
 
@@ -552,7 +653,103 @@ app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] Filam
 
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
-app.MapPost("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
+app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
+app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () =>
+{
+    // Enumerate local IPv4 addresses and suggest /24 CIDR blocks.
+    var suggestions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    try
+    {
+        foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up)
+            {
+                continue;
+            }
+            var props = ni.GetIPProperties();
+            foreach (var ua in props.UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    // If subnet mask available, derive CIDR; fallback to /24.
+                    int prefix = 24;
+                    if (ua.IPv4Mask is not null)
+                    {
+                        var maskBytes = ua.IPv4Mask.GetAddressBytes();
+                        var ones = 0;
+                        foreach (var b in maskBytes)
+                        {
+                            byte v = b;
+                            while (v != 0)
+                            {
+                                ones += v & 1;
+                                v >>= 1;
+                            }
+                        }
+                        if (ones > 0)
+                        {
+                            prefix = ones;
+                        }
+                    }
+                    var networkBytes = ua.Address.GetAddressBytes();
+                    if (prefix <= 32 && prefix >= 8)
+                    {
+                        // Zero remaining host bits for canonical network base
+                        int fullBytes = prefix / 8;
+                        int remBits = prefix % 8;
+                        if (remBits > 0 && fullBytes < networkBytes.Length)
+                        {
+                            byte mask = (byte)(0xFF << (8 - remBits));
+                            networkBytes[fullBytes] = (byte)(networkBytes[fullBytes] & mask);
+                            for (int i = fullBytes + 1; i < networkBytes.Length; i++)
+                            {
+                                networkBytes[i] = 0;
+                            }
+                        }
+                        else
+                        {
+                            for (int i = fullBytes; i < networkBytes.Length; i++)
+                            {
+                                networkBytes[i] = 0;
+                            }
+                        }
+                        var networkBase = new System.Net.IPAddress(networkBytes);
+                        suggestions.Add($"{networkBase}/{prefix}");
+                    }
+                }
+            }
+        }
+    }
+    catch { /* ignore */ }
+    return Results.Ok(new { ranges = suggestions.OrderBy(s => s).ToArray() });
+});
+app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc) =>
+{
+    // Allows re-applying environment driven defaults from DISCOVERY_RANGES / DISCOVERY_PORTS
+    var rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");
+    var portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
+    var current = svc.GetSettings();
+    List<string> ranges = current.NetworkRanges;
+    if (!string.IsNullOrWhiteSpace(rangesEnv))
+    {
+        ranges = [.. rangesEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct()];
+    }
+    List<int> ports = current.Ports;
+    if (!string.IsNullOrWhiteSpace(portsEnv))
+    {
+        ports = [.. portsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(p => int.TryParse(p, out var v) ? v : -1)
+            .Where(v => v > 0 && v < 65536)
+            .Distinct()];
+        if (ports.Count == 0)
+        {
+            ports = current.Ports;
+        }
+    }
+    var updated = new NetworkDiscoverySettingsDto(ranges, current.TimeoutMs, current.MaxConcurrentScans, ports);
+    svc.SaveSettings(updated);
+    return Results.Ok(updated);
+});
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
@@ -564,6 +761,23 @@ app.MapGet("/diagnostics/temp-root", (Microsoft.AspNetCore.Hosting.IWebHostEnvir
         return Results.StatusCode(StatusCodes.Status404NotFound);
     }
     return Results.Ok(new { tempRoot = provider.GetTempRoot() });
+});
+// Combined diagnostics (non-sensitive) for UI consumption
+app.MapGet("/api/diagnostics/summary", ([FromServices] SpoolmanService spoolmanSvc, [FromServices] INetworkDiscoverySettingsService discoverySvc) =>
+{
+    var spoolCfg = spoolmanSvc.GetConfig();
+    var discovery = discoverySvc.GetSettings();
+    return Results.Ok(new
+    {
+        spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
+        discovery = new
+        {
+            ranges = discovery.NetworkRanges,
+            ports = discovery.Ports,
+            timeoutMs = discovery.TimeoutMs,
+            maxConcurrentScans = discovery.MaxConcurrentScans
+        }
+    });
 });
 // Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));

@@ -21,6 +21,11 @@ public interface ISpoolmanService
     void SetConfig(SpoolmanConfigDto config);
 
     /// <summary>
+    /// Clears the current Spoolman configuration (removes stored base URL).
+    /// </summary>
+    void ClearConfig();
+
+    /// <summary>
     /// Gets a list of all filament spools from the configured Spoolman server.
     /// </summary>
     /// <param name="ct">Cancellation token to cancel the operation</param>

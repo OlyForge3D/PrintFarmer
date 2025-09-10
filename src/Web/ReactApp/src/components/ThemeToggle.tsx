@@ -4,21 +4,15 @@ import { useTheme } from '@/contexts/ThemeContext';
 import type { ThemeName } from '@/contexts/ThemeContext';
 
 interface ThemeToggleProps {
-  /** Show theme labels (defaults to false for compact mode) */
   showLabels?: boolean;
-  /** Size of the toggle buttons */
   size?: 'sm' | 'md' | 'lg';
-  /** Display variant */
   variant?: 'buttons' | 'dropdown' | 'compact';
-  /** Additional CSS classes */
   className?: string;
 }
 
-/**
- * Theme toggle component with accessibility support
- */
-export function ThemeToggle({ 
-  showLabels = false, 
+/** Accessible theme toggle with three variants */
+export function ThemeToggle({
+  showLabels = false,
   size = 'md',
   variant = 'compact',
   className = ''
@@ -35,13 +29,13 @@ export function ThemeToggle({
     sm: 'p-1.5 text-sm',
     md: 'p-2 text-base',
     lg: 'p-3 text-lg'
-  };
+  } as const;
 
   const iconSizes = {
     sm: 'h-3 w-3',
     md: 'h-4 w-4',
     lg: 'h-5 w-5'
-  };
+  } as const;
 
   if (variant === 'dropdown') {
     return (
@@ -49,12 +43,7 @@ export function ThemeToggle({
         <select
           value={theme}
           onChange={(e) => setTheme(e.target.value as ThemeName)}
-          className={`
-            appearance-none bg-pf-panel border border-pf-border rounded-lg 
-            ${sizeClasses[size]} pr-8 text-pf-text-primary
-            focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent
-            hover:bg-pf-bg-2 transition-colors duration-200
-          `}
+          className={`appearance-none bg-pf-panel border border-pf-border rounded-lg ${sizeClasses[size]} pr-8 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent hover:bg-pf-bg-2 transition-colors duration-200`}
           aria-label="Select theme"
         >
           {themes.map(({ value, label }) => (
@@ -73,72 +62,56 @@ export function ThemeToggle({
   }
 
   if (variant === 'buttons') {
+    const groupName = 'theme-toggle-group';
     return (
-      <div className={`flex bg-pf-panel border border-pf-border rounded-lg ${className}`} role="radiogroup" aria-label="Theme selection">
+      <fieldset className={`flex bg-pf-panel border border-pf-border rounded-lg ${className}`} aria-label="Theme selection">
+        <legend className="sr-only">Theme selection</legend>
         {themes.map(({ value, label, icon: Icon }) => (
-          <button
+          <label
             key={value}
-            onClick={() => setTheme(value)}
-            className={`
-              ${sizeClasses[size]} flex items-center space-x-2 transition-all duration-200
-              first:rounded-l-lg last:rounded-r-lg border-r border-pf-border last:border-r-0
-              focus:outline-none focus:ring-2 focus:ring-pf-accent focus:z-10
-              ${theme === value 
-                ? 'bg-pf-accent text-white' 
-                : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-              }
-            `}
-            role="radio"
-            aria-checked={theme === value ? true : false}
-            aria-label={`Switch to ${label.toLowerCase()} theme`}
+            className={`cursor-pointer first:rounded-l-lg last:rounded-r-lg border-r last:border-r-0 border-pf-border ${sizeClasses[size]} flex items-center space-x-2 transition-all duration-200 ${theme === value ? 'bg-pf-accent text-white' : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'}`}
           >
+            <input
+              type="radio"
+              name={groupName}
+              value={value}
+              checked={theme === value}
+              onChange={() => setTheme(value)}
+              className="sr-only"
+            />
             <Icon className={iconSizes[size]} />
             {showLabels && <span className="hidden sm:inline">{label}</span>}
-          </button>
+          </label>
         ))}
-      </div>
+      </fieldset>
     );
   }
 
-  // Compact variant (default) - single toggle button
+  // Compact variant - cycle through themes
   const currentTheme = themes.find(t => t.value === theme) || themes[0];
   const Icon = currentTheme.icon;
 
   return (
     <button
+      type="button"
       onClick={() => {
-        // Cycle through themes: light -> dark -> system -> light
         const currentIndex = themes.findIndex(t => t.value === theme);
         const nextIndex = (currentIndex + 1) % themes.length;
         setTheme(themes[nextIndex].value);
       }}
-      className={`
-        ${sizeClasses[size]} ${className}
-        inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg
-        text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2
-        focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent
-        transition-all duration-200
-      `}
+      className={`${sizeClasses[size]} ${className} inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200`}
       aria-label={`Current theme: ${currentTheme.label}. Click to cycle themes.`}
       title={`Current: ${currentTheme.label} (${computedTheme}). Click to change.`}
-  aria-pressed={(theme === 'dark') ? 'true' : 'false'}
     >
       <Icon className={iconSizes[size]} />
       {showLabels && (
         <span className="hidden sm:inline">
           {currentTheme.label}
           {theme === 'system' && (
-            <span className="text-xs opacity-75 ml-1">
-              ({computedTheme})
-            </span>
+            <span className="text-xs opacity-75 ml-1">({computedTheme})</span>
           )}
         </span>
       )}
     </button>
   );
 }
-
-/**
- * Simple theme toggle hook for custom implementations
- */
-// NOTE: Hook moved to separate file to satisfy react-refresh rule

@@ -406,6 +406,10 @@ export interface GetGcodeFilesResponse {
   files: GcodeFile[];
   totalFiles: number;
   totalSize: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  totalItems?: number;
 }
 
 // Job queue system

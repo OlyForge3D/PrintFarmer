@@ -334,6 +334,56 @@ ASPNETCORE_ENVIRONMENT=Development  # Enables Swagger, detailed logging
 ASPNETCORE_ENVIRONMENT=Production   # Optimized for performance
 ```
 
+### Environment Variables Reference
+
+Core application behavior is driven via environment variables (used in Docker Compose, Kubernetes manifests, or local shells). Below is a non‑exhaustive but curated list of the most relevant variables now supported:
+
+Authentication & Security:
+- Jwt__Key (required) – 32+ char symmetric signing key for JWT tokens.
+- ADMIN_USERNAME / ADMIN_EMAIL / ADMIN_PASSWORD – Optional unattended bootstrap of the first admin user (created only if no existing farm_admin). Password must be 8+ chars.
+
+Spoolman Integration:
+- SPOOLMAN_ENABLED=yes|no – When 'yes' and SPOOLMAN_BASE_URL is set, seeds config at startup if not already present.
+- SPOOLMAN_BASE_URL=http://spoolman:7912 – Base URL to the Spoolman instance.
+- SPOOLMAN_PORT=7912 (informational; discovery/diagnostics only – actual URL supersedes).
+
+Network Discovery:
+- DISCOVERY_PORTS=7125,80 – Comma/space/semicolon separated list of TCP ports to probe (Moonraker + generic HTTP by default).
+- DISCOVERY_RANGES=192.168.1.0/24,10.0.0.0/24 – Optional seed of network ranges; can be reapplied via POST /api/network-discovery/settings/apply-env.
+- ALLOW_LOCAL_NETWORK=true – If true, CORS opens to any origin (dev convenience). Otherwise origin filtering applies.
+- ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12 – CIDR ranges allowed for CORS dynamic origin evaluation when ALLOW_LOCAL_NETWORK=false.
+
+Database & Storage:
+- DB_PROVIDER=Sqlite|Postgres|SqlServer|MySql – Selects EF Core provider (Sqlite default).
+- ConnectionStrings__Default=Data Source=/data/farm.db – Sqlite path (mounted volume in container).
+
+Redis & Distributed Slicing:
+- Redis__ConnectionString=redis:6379 – API/queue connection (service DNS inside Docker network).
+- ConnectionStrings__Redis=redis:6379 – Worker connection string.
+- SlicerOrchestrator__EnableDistributedSlicing=true|false – Toggle external slicer worker orchestration.
+
+Deployment Mode & SPA:
+- DEPLOYMENT_MODE=monolithic|microservices – Monolithic will serve static React assets (or dev proxy in development).
+
+Diagnostics & Startup Tuning:
+- DB_CONNECTION_RETRY_COUNT / DB_CONNECTION_RETRY_DELAY – Control DB initialization resilience (defaults 3 / 2s).
+
+Deprecated / Removed:
+- DOCKER_HOST_NETWORK (previously used for host networking hints) – No longer required after explicit port mapping refactor.
+
+Auto-Detect & Settings Endpoints:
+- /api/network-discovery/auto-detect (admin) – Enumerates local interfaces to suggest CIDR ranges.
+- /api/network-discovery/settings – Persisted discovery configuration (ranges, timeoutMs, maxConcurrentScans, ports).
+
+Spoolman Management Endpoints:
+- POST /api/spoolman/config – Set (admin-protected).
+- DELETE /api/spoolman/config – Clear.
+- GET /api/spoolman/health – Lightweight connectivity probe.
+
+Admin Bootstrap Notes:
+If ADMIN_* vars are supplied and no admin exists, a bootstrap user is created (FirstName: Admin, LastName: Bootstrap). Future runs skip creation once any active farm_admin is present. For security in production, consider unsetting these after first start.
+
+
 ## Deployment Options
 
 ### 🏠 **Single Machine** 

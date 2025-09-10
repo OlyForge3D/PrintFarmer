@@ -16,7 +16,7 @@ import { UserManagementPage } from '@/pages/UserManagementPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
-import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { Navigate, BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
 
 // Create a query client for React Query
@@ -102,30 +102,31 @@ function App() {
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
             <Router>
-              <Layout>
-                <Routes>
-                  <Route path="/" element={<PrinterDashboard />} />
-                  <Route path="/dashboard" element={<PrinterDashboard />} />
-                  <Route path="/printers" element={<Navigate to="/printers/dashboard" replace />} />
-                  <Route path="/printers/dashboard" element={<PrinterDashboard />} />
-                  <Route path="/printers/table" element={<PrinterTableViewPage />} />
-                  <Route path="/models" element={<ModelsPage />} />
-                  <Route path="/harvest" element={<HarvestPage />} />
-                  <Route path="/files" element={<FilesPage />} />
-                  <Route path="/catalog" element={<CatalogPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/spools" element={<SpoolsPage />} />
+              <Routes>
+                <Route path="/" element={<Layout />}> 
+                  <Route index element={<PrinterDashboard />} />
+                  <Route path="dashboard" element={<PrinterDashboard />} />
+                  <Route path="printers">
+                  <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route path="dashboard" element={<PrinterDashboard />} />
+                    <Route path="table" element={<PrinterTableViewPage />} />
+                  </Route>
+                  <Route path="models" element={<ModelsPage />} />
+                  <Route path="harvest" element={<HarvestPage />} />
+                  <Route path="files" element={<FilesPage />} />
+                  <Route path="catalog" element={<CatalogPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="spools" element={<SpoolsPage />} />
                   <Route
-                    path="/admin/users"
+                    path="admin/users"
                     element={
                       <ProtectedRoute requiredRole="farm_admin">
                         <UserManagementPage />
                       </ProtectedRoute>
                     }
                   />
-                  {/* Add more routes as needed */}
-                </Routes>
-              </Layout>
+                </Route>
+              </Routes>
             </Router>
             <ReactQueryDevtools initialIsOpen={false} />
           </QueryClientProvider>

@@ -23,13 +23,9 @@ import {
   Users,
   X
 } from 'lucide-react';
-import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-
-interface LayoutProps {
-  children: ReactNode;
-}
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, useLocation, Outlet } from 'react-router-dom';
+// Layout now uses <Outlet /> for nested routes
 
 interface NavigationItem {
   name: string;
@@ -78,21 +74,20 @@ const navigation: NavigationItem[] = [
     children: [
       { name: 'Catalog', href: '/catalog', icon: Layers },
       { name: 'Settings', href: '/settings', icon: Settings },
-      { name: 'Spools', href: '/spools', icon: Box }
+      { name: 'Spools', href: '/spools', icon: Box },
+      { name: 'User Management', href: '/admin/users', icon: Users }
     ]
   },
-  {
-    name: 'User Management',
-    href: '/admin/users',
-    icon: Users,
-    requiredRole: 'farm_admin'
-  }
 ];
 
-export function Layout({ children }: LayoutProps) {
+export function Layout() {
   const { isConnected } = useSignalRConnection();
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const location = useLocation();
+  // Debug: log current pathname to ensure re-render on navigation
+  useEffect(() => {
+    // location change effect (debug removed)
+  }, [location.pathname]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -100,12 +95,8 @@ export function Layout({ children }: LayoutProps) {
 
   // Filter navigation based on user permissions
   const filteredNavigation = navigation.filter(item => {
-    if (item.requiredRole && !hasRole(item.requiredRole)) {
-      return false;
-    }
-    if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) {
-      return false;
-    }
+    if (item.requiredRole && !hasRole(item.requiredRole)) return false;
+    if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
     return true;
   });
 
@@ -153,11 +144,7 @@ export function Layout({ children }: LayoutProps) {
     setShowLoginModal(true);
   };
 
-  // Motion preference
-  const prefersReducedMotion = useMemo(() => {
-    if (typeof window === 'undefined' || !('matchMedia' in window)) return false;
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  }, []);
+  // (Removed unused prefersReducedMotion calculation to satisfy lint)
 
   // Hydrate expanded state
   useEffect(() => {
@@ -308,7 +295,6 @@ export function Layout({ children }: LayoutProps) {
                           }}
                           className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
                         >
-                          <User className="h-4 w-4 mr-2" />
                           Register
                         </button>
                       </>
@@ -343,41 +329,24 @@ export function Layout({ children }: LayoutProps) {
                 {filteredNavigation.map(item => {
                   const Icon = item.icon;
                   const isExpanded = !!expanded[item.name];
+                  const hasChildren = !!item.children?.length;
                   return (
                     <div key={item.name} className="flex flex-col">
-                      {/* Hidden hint description for screen readers */}
-                      {item.children && (
-                        <span id={`desc-mobile-${item.name.replace(/\s+/g, '-').toLowerCase()}`} className="sr-only">
-                          Press Enter or Space to toggle this section.
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => item.children ? toggleExpand(item.name) : (setSidebarOpen(false))}
-                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
-                        aria-expanded={item.children ? (isExpanded ? true : false) : undefined}
-                        aria-controls={item.children ? `submenu-${item.name}` : undefined}
-                        aria-describedby={item.children ? `desc-mobile-${item.name.replace(/\s+/g, '-').toLowerCase()}` : undefined}
-                      >
-                        <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                        <span className="flex-1 text-left">{item.name}</span>
-                        {item.children && (
-                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
-                        )}
-                      </button>
-                      {item.children && (
-                        <div
-                          id={`submenu-${item.name}`}
-                          className={`overflow-hidden ${prefersReducedMotion ? '' : 'transition-all duration-300 ease-in-out'} ${isExpanded ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
-                        >
-                          <div className="ml-8 space-y-1">
-                            {item.children.map(child => {
+                      {hasChildren ? (
+                        <details open={isExpanded} onToggle={() => toggleExpand(item.name)} className="group">
+                          <summary className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}>
+                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                            <span className="flex-1 text-left">{item.name}</span>
+                            <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+                          </summary>
+                          <div className="ml-8 space-y-1 mt-1">
+                            {item.children!.map(child => {
                               const ChildIcon = child.icon;
                               return (
                                 <NavLink
                                   key={child.name}
                                   to={child.href}
-                                  onClick={() => setSidebarOpen(false)}
+                                  onClick={() => { setSidebarOpen(false); }}
                                   className={({ isActive }) =>
                                     `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                                       ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
@@ -391,7 +360,21 @@ export function Layout({ children }: LayoutProps) {
                               );
                             })}
                           </div>
-                        </div>
+                        </details>
+                      ) : (
+                        <NavLink
+                          to={item.href}
+                          onClick={() => { setSidebarOpen(false); }}
+                          className={({ isActive }) =>
+                            `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                              ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                              : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
+                            }`
+                          }
+                        >
+                          <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                          <span className="flex-1 text-left">{item.name}</span>
+                        </NavLink>
                       )}
                     </div>
                   );
@@ -401,63 +384,59 @@ export function Layout({ children }: LayoutProps) {
           </div>
         )}
 
-        {/* Desktop sidebar */}
-        <aside className="hidden lg:flex lg:flex-shrink-0">
+  {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
+  <aside className="hidden lg:flex lg:flex-shrink-0 z-40">
           <div className="flex flex-col w-64 bg-pf-bg-1 border-r border-pf-border">
             <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
-              {filteredNavigation.map((item) => {
+              {filteredNavigation.map(item => {
                 const Icon = item.icon;
+                const hasChildren = !!item.children?.length;
                 return (
-                  <div key={item.name}>
-                    <div className="flex flex-col">
-                      {item.children && (
-                        <span id={`desc-desktop-${item.name.replace(/\s+/g, '-').toLowerCase()}`} className="sr-only">
-                          Press Enter or Space to toggle this section.
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => item.children ? toggleExpand(item.name) : undefined}
-                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                          }`}
-                        aria-expanded={item.children ? (expanded[item.name] ? true : false) : undefined}
-                        aria-controls={item.children ? `submenu-desktop-${item.name}` : undefined}
-                        aria-describedby={item.children ? `desc-desktop-${item.name.replace(/\s+/g, '-').toLowerCase()}` : undefined}
+                  <div key={item.name} className="flex flex-col">
+                    {hasChildren ? (
+                      <details open={!!expanded[item.name]} onToggle={() => toggleExpand(item.name)} className="group">
+                        <summary className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}>
+                          <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                          <span className="flex-1 text-left">{item.name}</span>
+                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${expanded[item.name] ? 'rotate-90' : ''}`} aria-hidden="true" />
+                        </summary>
+                        <div className="ml-8 space-y-1 mt-1">
+                          {item.children!.map(child => {
+                            const ChildIcon = child.icon;
+                            return (
+                              <NavLink
+                                key={child.name}
+                                to={child.href}
+                                onClick={() => { /* child nav */ }}
+                                className={({ isActive }) =>
+                                  `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+                                  }`
+                                }
+                              >
+                                <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                {child.name}
+                              </NavLink>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ) : (
+                      <NavLink
+                        to={item.href}
+                        onClick={() => { /* top-level nav */ }}
+                        className={({ isActive }) =>
+                          `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                            : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
+                          }`
+                        }
                       >
                         <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
                         <span className="flex-1 text-left">{item.name}</span>
-                        {item.children && (
-                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${expanded[item.name] ? 'rotate-90' : ''}`} aria-hidden="true" />
-                        )}
-                      </button>
-                      {item.children && (
-                        <div
-                          id={`submenu-desktop-${item.name}`}
-                          className={`overflow-hidden ${prefersReducedMotion ? '' : 'transition-all duration-300 ease-in-out'} ${expanded[item.name] ? 'max-h-64 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}
-                        >
-                          <div className="ml-8 space-y-1">
-                            {item.children.map((child) => {
-                              const ChildIcon = child.icon;
-                              return (
-                                <NavLink
-                                  key={child.name}
-                                  to={child.href}
-                                  className={({ isActive }) =>
-                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                      : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                    }`
-                                  }
-                                >
-                                  <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                                  {child.name}
-                                </NavLink>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                      </NavLink>
+                    )}
                   </div>
                 );
               })}
@@ -468,7 +447,7 @@ export function Layout({ children }: LayoutProps) {
         {/* Main content area */}
         <main className="flex-1 overflow-y-auto">
           <div className="p-6">
-            {children}
+            <Outlet />
           </div>
         </main>
       </div>
@@ -476,8 +455,9 @@ export function Layout({ children }: LayoutProps) {
       {/* Click outside handler for user menu */}
       {userMenuOpen && (
         <div
-          className="fixed inset-0 z-30"
+          className="fixed inset-0 z-30 pointer-events-auto"
           onClick={() => setUserMenuOpen(false)}
+          aria-hidden="true"
         />
       )}
 

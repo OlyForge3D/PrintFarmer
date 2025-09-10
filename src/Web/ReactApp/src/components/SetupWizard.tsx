@@ -197,6 +197,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
                 placeholder="Your first name"
                 required
+                autoComplete="given-name"
                 disabled={creating}
               />
             </div>
@@ -212,6 +213,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
                 placeholder="Your last name"
                 required
+                autoComplete="family-name"
                 disabled={creating}
               />
             </div>
@@ -231,6 +233,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="Choose a username"
               required
+                autoComplete="username"
               disabled={creating}
             />
           </div>
@@ -249,6 +252,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="your.email@example.com"
               required
+                autoComplete="email"
               disabled={creating}
             />
           </div>
@@ -268,6 +272,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
                 placeholder="Create a secure password"
                 required
+                autoComplete="new-password"
                 disabled={creating}
               />
               <button
@@ -298,6 +303,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="Confirm your password"
               required
+              autoComplete="new-password"
               disabled={creating}
             />
           </div>

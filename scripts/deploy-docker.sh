@@ -526,6 +526,26 @@ configure_additional() {
         ORCA_WORKER_COUNT=0
         PRUSA_WORKER_COUNT=0
     fi
+
+    echo
+    echo -e "${BLUE}Spoolman Integration${NC}"
+    echo "Spoolman provides centralized filament spool tracking. If you already run Spoolman you can point PrintFarmer at its base URL now (you can also configure later in the UI)."
+    prompt_yes_no "Enable Spoolman integration?" "no" "ENABLE_SPOOLMAN"
+    if [ "$ENABLE_SPOOLMAN" = "yes" ]; then
+        prompt_with_default "Spoolman base URL (protocol + host[:port], no trailing slash):" "http://spoolman:7912" "SPOOLMAN_BASE_URL"
+        # Derive port from URL (default 80 if none specified)
+        _tmp=${SPOOLMAN_BASE_URL#*://}
+        _hostport=${_tmp%%/*}
+        if [[ "$_hostport" == *:* ]]; then
+            SPOOLMAN_PORT=${_hostport##*:}
+        else
+            # Infer by scheme
+            if [[ $SPOOLMAN_BASE_URL == https://* ]]; then SPOOLMAN_PORT=443; else SPOOLMAN_PORT=80; fi
+        fi
+    else
+        SPOOLMAN_BASE_URL=""
+        SPOOLMAN_PORT=""
+    fi
 }
 
 # Generate environment file
@@ -568,6 +588,11 @@ ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ENABLE_PRUSA_WORKER=$ENABLE_PRUSA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
 PRUSA_HOST_PORT=$PRUSA_HOST_PORT
+
+# Spoolman
+SPOOLMAN_ENABLED=$ENABLE_SPOOLMAN
+SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
+SPOOLMAN_PORT=$SPOOLMAN_PORT
 
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
