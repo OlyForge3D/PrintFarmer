@@ -159,3 +159,11 @@ export function useThemeInternal(): ThemeContextType {
   if (!ctx) throw new Error('useTheme must be used within a ThemeProvider');
   return ctx;
 }
+
+// Public hook exports (to support direct imports from ThemeContext as guided by lint rules)
+export function useTheme() { return useThemeInternal(); }
+export function useComputedTheme(): 'dark' | 'light' { return useThemeInternal().computedTheme; }
+export function useAccessibilityPreferences() {
+  const { prefersReducedMotion, prefersHighContrast } = useThemeInternal();
+  return { prefersReducedMotion, prefersHighContrast };
+}

@@ -48,3 +48,6 @@ lcov.info
 coverage-final.json
 *.coverage
 *.coveragexml
+
+# Prevent accidental duplicate copies of the dotnet installer script
+dotnet-install.sh.*

@@ -148,3 +148,8 @@ export function useAuthInternal(): AuthContextType {
   if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
   return ctx;
 }
+
+// Public hook export (kept here to align with existing import paths and lint guidance)
+export function useAuth() {
+  return useAuthInternal();
+}

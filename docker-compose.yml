@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  # Base image builder for slicer workers (not actually run)
+  slicer-base:
+    build:
+      context: .
+      dockerfile: Dockerfile.slicer-base
+    image: slicer-base
+    profiles:
+      - orca
+      - prusa
+    entrypoint: ["/bin/true"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 1m
+      timeout: 5s
+      retries: 1
+      start_period: 5s
   # Redis for caching and SignalR backplane
   redis:
     image: redis:7-alpine
@@ -38,6 +54,8 @@ services:
       - ALLOWED_NETWORK_RANGES=10.0.0.0/24,172.16.0.0/12
       - DOCKER_HOST_NETWORK=true
       - ENABLE_LOCAL_NETWORK_ACCESS=true
+      # Required JWT signing key (32+ chars) for auth configuration
+      - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
     volumes:
       - app_data:/data
       - model_uploads:/app/uploads
@@ -61,7 +79,8 @@ services:
     ports:
       - "3000:80"
     environment:
-      - VITE_API_BASE_URL=http://localhost:8080/api
+      # Point directly at API (no nginx proxy needed in local dev stack script)
+      - VITE_API_BASE_URL=http://localhost:5001/api
       - VITE_SIGNALR_URL=http://localhost:5001/hubs/printers
     depends_on:
       api:
@@ -138,6 +157,8 @@ services:
   nginx-proxy:
     image: nginx:alpine
     network_mode: host
+    profiles:
+      - proxy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -146,7 +167,6 @@ services:
       - frontend
       - api
       - orcaslicer-worker
-      - prusaslicer-worker
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
