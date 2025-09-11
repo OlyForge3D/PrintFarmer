@@ -37,7 +37,10 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 # Create necessary directories
-RUN mkdir -p /app/uploads /app/gcode /app/slicers /data
+RUN mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library
+
+# Explicitly set web root so GcodeFilesController base resolution works without env override
+ENV ASPNETCORE_WEBROOT=/app/wwwroot
 
 # Set environment
 ENV ASPNETCORE_URLS=http://+:5000

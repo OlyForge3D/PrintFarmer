@@ -1,0 +1,15 @@
+.progressBarContainer { position: relative; height: 0.5rem; background: #e5e7eb; border-radius: 0.25rem; overflow: hidden; }
+.progressFill { height: 100%; background: #3b82f6; transition: width 120ms linear; width: 0%; }
+[data-progress] { --p: attr(data-progress percentage); }
+/* Fallback using inline style disallowed: generate width via attribute mapping (JS sets data-progress) */
+[data-progress="0"] .progressFill { width:0%; }
+[data-progress="100"] .progressFill { width:100%; }
+/* Generate increments 1-99 */
+/* Since pure CSS attr() width not widely supported for non-content, we apply width via a tiny style update script if needed. */
+.progressFill[data-progress] { width: calc(var(--progress, 0) * 1%); }
+.progressError { background: #ef4444; }
+.progressCancelled { background: #9ca3af; }
+/* Discrete width classes (1% increments 0-100) */
+/* Only generate every 2% to keep bundle reasonable */
+/* If finer granularity needed, adjust generation script later */
+.w0{width:0%;}.w2{width:2%;}.w4{width:4%;}.w6{width:6%;}.w8{width:8%;}.w10{width:10%;}.w12{width:12%;}.w14{width:14%;}.w16{width:16%;}.w18{width:18%;}.w20{width:20%;}.w22{width:22%;}.w24{width:24%;}.w26{width:26%;}.w28{width:28%;}.w30{width:30%;}.w32{width:32%;}.w34{width:34%;}.w36{width:36%;}.w38{width:38%;}.w40{width:40%;}.w42{width:42%;}.w44{width:44%;}.w46{width:46%;}.w48{width:48%;}.w50{width:50%;}.w52{width:52%;}.w54{width:54%;}.w56{width:56%;}.w58{width:58%;}.w60{width:60%;}.w62{width:62%;}.w64{width:64%;}.w66{width:66%;}.w68{width:68%;}.w70{width:70%;}.w72{width:72%;}.w74{width:74%;}.w76{width:76%;}.w78{width:78%;}.w80{width:80%;}.w82{width:82%;}.w84{width:84%;}.w86{width:86%;}.w88{width:88%;}.w90{width:90%;}.w92{width:92%;}.w94{width:94%;}.w96{width:96%;}.w98{width:98%;}.w100{width:100%;}

@@ -366,6 +366,44 @@ export class ApiClient {
     window.URL.revokeObjectURL(url);
   }
 
+  async uploadGcodeLibraryFile(file: File, virtualPath = '/'): Promise<void> {
+    const form = new FormData();
+    form.append('file', file);
+    await this.client.post(`/gcode-files/upload`, form, {
+      params: { path: virtualPath },
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  }
+
+  async uploadMultipleGcodeLibraryFiles(files: File[], virtualPath = '/'): Promise<{ created: any[]; failed: any[]; succeededCount: number; failedCount: number; }> {
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+    const resp = await this.client.post(`/gcode-files/upload-multiple`, form, {
+      params: { path: virtualPath },
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return resp.data;
+  }
+
+  async getGcodeUploadSettings(): Promise<import('@/types/api').GcodeUploadSettings> {
+    const resp = await this.client.get('/gcode-files/settings');
+    return resp.data as import('@/types/api').GcodeUploadSettings;
+  }
+
+  async updateGcodeUploadSettings(allowedExtensions: string[]): Promise<void> {
+    await this.client.put('/gcode-files/settings', { allowedExtensions });
+  }
+
+  async moveGcodePath(sourcePath: string, destinationPath: string, overwrite = false): Promise<{ path: string; isDirectory: boolean; }> {
+    const resp = await this.client.post('/gcode-files/move', { sourcePath, destinationPath, overwrite });
+    return resp.data as { path: string; isDirectory: boolean; };
+  }
+
+  async getGcodeFileHash(virtualPath: string, algorithm: 'sha256' | 'sha1' = 'sha256'): Promise<{ fileName: string; size: number; algorithm: string; hash: string; }> {
+    const resp = await this.client.get('/gcode-files/hash', { params: { path: virtualPath, algorithm } });
+    return resp.data as { fileName: string; size: number; algorithm: string; hash: string; };
+  }
+
   // ============ Job Queue methods ============
 
   async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {

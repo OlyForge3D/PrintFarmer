@@ -412,6 +412,13 @@ export interface GetGcodeFilesResponse {
   totalItems?: number;
 }
 
+// G-code library runtime settings
+export interface GcodeUploadSettings {
+  allowedExtensions: string[];
+  dailyUploadLimitBytes: number;
+  userUsedBytes: number;
+}
+
 // Job queue system
 export enum JobQueueStatus {
   Pending = 0,

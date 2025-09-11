@@ -50,6 +50,9 @@ services:
       - DOCKER_HOST_NETWORK=false
       - ENABLE_LOCAL_NETWORK_ACCESS=true
       - DISCOVERY_PORTS=7125,80
+      # Persist model storage & gcode library (map to host)
+      - ModelStorage__Path=/app/models
+      - GCODE_LIBRARY_ROOT=/app/wwwroot/gcode-library
       # Optional Spoolman integration (values may be overridden by .env file generated via deploy script)
       - SPOOLMAN_ENABLED=${SPOOLMAN_ENABLED:-}
       - SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
@@ -61,6 +64,8 @@ services:
       - model_uploads:/app/uploads
       - gcode_storage:/app/gcode
       - slicer_profiles:/app/profiles
+      - ./wwwroot/gcode-library:/app/wwwroot/gcode-library
+      - ./models:/app/models
     depends_on:
       redis:
         condition: service_healthy

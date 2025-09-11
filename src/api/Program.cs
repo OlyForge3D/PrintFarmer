@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Infrastructure.Normalization;
 using System.Text.Json;
@@ -17,7 +18,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Farm.Web.Api.Infrastructure.Caching;
-using Microsoft.Extensions.Caching.Memory;
+// using Microsoft.Extensions.Caching.Memory; // removed unused
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -88,7 +89,10 @@ builder.Services.AddCors(options =>
         {
             // Always allow when local network flag is on (broad dev convenience) – but return true so the
             // middleware echoes the concrete origin (not '*') enabling credentialed requests.
-            if (allowLocalNetwork) return true;
+            if (allowLocalNetwork)
+            {
+                return true;
+            }
 
             var configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
                                                    .Select(o => o.Trim())
@@ -263,6 +267,17 @@ builder.Services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
 builder.Services.AddSingleton<INormalizationEventLogger, NormalizationEventLogger>();
 builder.Services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
 builder.Services.AddScoped<GcodeHarvestService>();
+// G-code upload runtime settings & quota services
+builder.Services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
+builder.Services.AddSingleton<IGcodeUploadQuotaService>(sp =>
+{
+    var limitEnv = Environment.GetEnvironmentVariable("GCODE_DAILY_UPLOAD_LIMIT_BYTES");
+    if (long.TryParse(limitEnv, out var limit) && limit > 0)
+    {
+        return new InMemoryGcodeUploadQuotaService(limit);
+    }
+    return new InMemoryGcodeUploadQuotaService();
+});
 
 // Catalog caching (manufacturers/models lists + ETags)
 builder.Services.AddMemoryCache();
@@ -296,6 +311,7 @@ builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
 builder.Services.AddHostedService<HarvestCompletionService>();
 builder.Services.AddHostedService<GracefulShutdownService>();
+builder.Services.AddHostedService<Farm.Web.Api.Infrastructure.ChunkUploadCleanupService>();
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
