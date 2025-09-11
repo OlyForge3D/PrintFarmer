@@ -140,6 +140,18 @@ docker compose --env-file .env.microservices up -d --build
 | **SQL Server** | Enterprise environments | `Server=sqlserver;Database=printfarmer;...` |
 | **MySQL** | Popular open-source option | `Server=mysql;Database=printfarmer;...` |
 
+#### Validation Status (Sept 2025)
+All four providers are actively validated via integration tests for the catalog subsystem (manufacturer/model CRUD, normalization, duplicate conflict handling, weak ETag conditional GET). Behavior parity matrix:
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| SQLite | ✅ | Baseline & default |
+| PostgreSQL | ✅ | Full catalog tests pass |
+| MySQL | ✅ | Full catalog tests pass |
+| SQL Server | ✅ | Full catalog tests pass (health probe may report unhealthy under amd64 emulation on arm64 hosts) |
+
+During the current soft-freeze the schema is created with `EnsureCreated()` (no migrations). Case-insensitive uniqueness relies on shadow lowercase columns (`NameLowered`) + unique indexes automatically defined per provider. Migrations will be introduced post-freeze.
+
 ### Network Discovery
 
 Configure IP ranges to scan for printers:
@@ -182,6 +194,22 @@ Disable entirely:
 ```bash
 ENABLE_DISTRIBUTED_SLICING=false
 ```
+
+---
+## 📚 Catalog Normalization & Duplicate Handling (Deployment Notes)
+
+The API enforces canonical normalization for Manufacturer and Printer Model names. Each create/update response includes `X-Normalized-Name` so external systems (or the React frontend) can reconcile user-entered values with the server’s canonical form.
+
+Deployment operators should be aware:
+* Duplicate submissions differing only by case or whitespace return `409 Conflict` with ProblemDetails; the header still supplies the canonical name.
+* Case-insensitive uniqueness is enforced at two layers: in-memory pre-check (human friendly error) and DB unique index on a shadow lowered column for durability.
+* List endpoints (`/api/catalog/manufacturers`, `/api/catalog/models`) emit weak ETags and honor `If-None-Match`—reverse proxies/CDNs can leverage this to reduce chatter.
+* No migrations are used during soft-freeze; indexes + shadow columns are created dynamically. Ensure your deployment platform does not attempt to run `dotnet ef database update` (unnecessary until migrations ship).
+
+Operational Tips:
+* Scale-out: Because normalization + duplicate detection are pure application + DB uniqueness operations, horizontal API scaling is safe (no in-memory global locks required). The rare race between concurrent identical inserts falls back cleanly to DB unique constraint handling.
+* Monitoring: A spike in 409 responses on catalog endpoints may indicate a UI or integration repeatedly retrying with unnormalized values.
+* Future Migration Phase: When migrations are introduced, a no-op transition script will preserve existing `NameLowered` columns and indexes—no manual action expected.
 
 ---
 

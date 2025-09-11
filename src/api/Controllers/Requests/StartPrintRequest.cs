@@ -2,4 +2,4 @@
 
 using System.ComponentModel.DataAnnotations;
 
-public sealed record StartPrintRequest([property: Required, MinLength(1)] string Filename);
+public sealed record StartPrintRequest([Required, MinLength(1)] string Filename);

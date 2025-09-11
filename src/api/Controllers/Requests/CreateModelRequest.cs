@@ -5,9 +5,9 @@ using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 public record CreateModelRequest(
-    [property: Required, BindRequired] // NOSONAR S6964: Binding is explicit; value type required with [BindRequired]
+    [BindRequired] // NOSONAR S6964: Binding is explicit; Guid must be supplied
     Guid ManufacturerId,
-    [property: Required, MinLength(1)]
+    [Required, MinLength(1)]
     string Name,
     double? MaxX,
     double? MaxY,

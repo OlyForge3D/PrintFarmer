@@ -299,6 +299,57 @@ PrintFarmer uses **SQLite** by default for local development:
 - No manual setup required
 - Database is seeded with default data on first run
 
+### Multi-Database Providers & Validation
+While SQLite is the default for speed, the codebase supports **PostgreSQL**, **SQL Server**, and **MySQL** with identical catalog behavior (manufacturers & models) validated via integration tests (Sept 2025):
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| SQLite   | ✅ | Default & fastest for local dev |
+| PostgreSQL | ✅ | Full catalog test pass |
+| MySQL    | ✅ | Full catalog test pass |
+| SQL Server | ✅ | Full catalog test pass (health probe may show "unhealthy" under emulation but connections succeed) |
+
+Schema creation currently relies on `EnsureCreated()` (no migrations yet during soft-freeze). Shadow lowercase columns (`NameLowered`) + unique indexes are created automatically to enforce case-insensitive uniqueness across providers. Once the freeze lifts, formal EF Core migrations will replace this bootstrap approach.
+
+To temporarily switch providers for local testing (example PostgreSQL running on localhost or Docker network):
+```bash
+export DB_PROVIDER=Postgres
+export ConnectionStrings__Postgres="Host=localhost;Database=printfarmer;Username=dev;Password=devpass"
+dotnet run --project api/Farm.Web.Api.csproj
+```
+Fallback: if `DB_PROVIDER` is unset or unsupported, the application silently uses SQLite.
+
+### Catalog Normalization & Duplicate Handling (Local Dev)
+The catalog layer normalizes names on create/update and returns the canonical value via the `X-Normalized-Name` response header. Duplicate submissions (including case-only differences or extra whitespace) return `409 Conflict` with ProblemDetails and still include the header so you can auto-correct client state.
+
+Key points for developers:
+* Normalization trims, squashes interior excess whitespace, and applies canonical casing rules (see `CatalogNameNormalizer`).
+* Case-insensitive uniqueness: enforced both in-memory (for friendly 409) and at the DB layer (shadow `NameLowered` unique indexes).
+* List endpoints emit weak ETags (`W/"hash"`); include `If-None-Match` to receive `304 Not Modified` and avoid redundant payloads.
+* GET-by-id endpoints are available for manufacturers and models; prefer them after a create to re-fetch server state if needed.
+
+Quick manual test (using httpie or curl):
+```bash
+# Create (untrimmed, odd spacing)
+curl -s -D - -X POST http://localhost:5245/api/catalog/manufacturers \
+	-H 'Content-Type: application/json' \
+	-d '{"name":"  prUsA  "}' | jq '.'
+
+# Repeat (case/spacing difference) should 409
+curl -s -D - -o /dev/null -X POST http://localhost:5245/api/catalog/manufacturers \
+	-H 'Content-Type: application/json' \
+	-d '{"name":"PRUSA"}' | grep -i '^http\|^x-normalized-name\|^content-type'
+
+# List with ETag then conditional GET
+etag=$(curl -s -D - http://localhost:5245/api/catalog/manufacturers | awk '/^etag:/ {print $2}')
+curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: $etag" http://localhost:5245/api/catalog/manufacturers
+```
+
+Client guidance during development:
+1. Always check `X-Normalized-Name` after create/update; update UI if different.
+2. Treat 409 as “duplicate after normalization” and surface the canonical form to the user.
+3. Use caching headers in the React app to reduce network chatter when refetching catalog lists.
+
 ## Network Discovery (Local Development Benefits)
 
 **WiFi Device Access:** Unlike Docker containers, local development can directly access WiFi-connected devices:

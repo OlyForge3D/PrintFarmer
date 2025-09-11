@@ -28,11 +28,12 @@ A React TypeScript dashboard for managing multiple 3D printers.
 - **Distributed Slicing**: Microservices architecture for scalable G-code generation
 - **Network Discovery**: Automatic detection of printers on your network
 - **Modern UI**: React TypeScript frontend with responsive design
-- **Flexible Database**: SQLite, PostgreSQL, SQL Server, MySQL support
+- **Flexible Database**: SQLite, PostgreSQL, SQL Server, MySQL (all validated; uniform behavior confirmed across providers)
 - **Docker Ready**: Production deployment with containers
 - **WiFi Friendly**: Works with WiFi-connected printers (local development)
 - **Signed Images**: Cosign-signed container images (keyless OIDC or key-based)
 - **Provenance Attestations**: SLSA provenance tying digests to build workflow
+ - **Robust Catalog Layer**: Canonical name normalization, case‑insensitive uniqueness, duplicate conflict (409) handling, weak ETag caching
 
 ## Quick Start - Choose Your Path
 
@@ -236,6 +237,59 @@ Development note: Schema currently uses `EnsureCreated()` (no active EF migratio
 - **PostgreSQL** (recommended for production) - Advanced features
 - **SQL Server** - Enterprise database support
 - **MySQL** - Popular open-source option
+
+#### Validation Status (Sept 2025)
+All four providers have been integration-tested for the catalog subsystem (manufacturer & model CRUD, normalization, duplicate detection, weak ETag conditional GET). Behavior is identical across:
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| SQLite   | ✅ | Baseline local & tests |
+| PostgreSQL | ✅ | Passed full catalog integration tests |
+| MySQL    | ✅ | Passed full catalog integration tests |
+| SQL Server | ✅ | Tests green (container health probe occasionally reports unhealthy due to emulation timing, but connections succeed) |
+
+Schema creation currently uses `EnsureCreated()` (no migrations yet) to keep iteration speed high during soft-freeze; shadow lowercase columns (`NameLowered`) and unique indexes are created for each provider automatically. Migrations will be introduced post-freeze.
+
+#### Selecting a Provider
+Set `DB_PROVIDER` and the matching connection string environment variable (examples):
+```
+DB_PROVIDER=Sqlite
+ConnectionStrings__Default=Data Source=farm.db
+
+DB_PROVIDER=Postgres
+ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=...;Password=...
+
+DB_PROVIDER=SqlServer
+ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=printfarmer;User Id=sa;Password=Your_password123;TrustServerCertificate=True
+
+DB_PROVIDER=MySql
+ConnectionStrings__MySql=Server=mysql;Port=3306;Database=printfarmer;User=...;Password=...;TreatTinyAsBoolean=false
+```
+If an unsupported value is supplied, the application falls back to SQLite.
+
+### Catalog Normalization & Duplicate Handling
+The catalog layer (Manufacturers & Printer Models) applies a canonical name normalization pass on create/update. The normalized (canonical) value is returned via the `X-Normalized-Name` response header for idempotent client reconciliation. Duplicate submissions (including case-only differences) trigger a `409 Conflict` with a RFC 7807 ProblemDetails payload and the header still emitted to aid automatic client-side correction.
+
+Key behaviors:
+* Case-insensitive uniqueness is enforced by shadow `NameLowered` columns + database unique indexes AND pre-save in-memory checks for clearer 409 responses.
+* Normalization trims, collapses interior excessive whitespace, and standardizes casing rules (implementation in `CatalogNameNormalizer`).
+* Weak ETags (format `W/"<hash>"`) are emitted for list endpoints (`/api/catalog/manufacturers`, `/api/catalog/models?manufacturerId=...`). Clients using `If-None-Match` receive `304 Not Modified` when content hasn’t changed.
+* GET-by-id endpoints are available for both manufacturers and models.
+
+Why this matters:
+* Prevents “ghost” duplicates differing only by case/spacing across heterogeneous databases.
+* Provides deterministic client reconciliation (clients can update their local display name using the header).
+* Reduces bandwidth & improves perceived latency via conditional GET + in-memory cache.
+
+Client Guidance:
+1. Always read `X-Normalized-Name` after a create/update and update local state if it differs from the submitted value.
+2. On 409, surface the ProblemDetails message and optionally retry with the canonical value if appropriate.
+3. Use `If-None-Match` with the ETag from the previous list response to avoid unnecessary refresh traffic.
+
+Future Enhancements (planned):
+* Introduce migrations to persist normalization metadata changes safely.
+* Stronger hash diversification (e.g., include count + incremental version) for catalog ETags if/when partial-list filtering is added.
+* Optional locale-aware normalization customization via configuration.
 
 ## Development Workflow
 

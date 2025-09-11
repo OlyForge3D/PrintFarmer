@@ -51,7 +51,7 @@ public class CatalogController : ControllerBase
         return Ok(list);
     }
 
-    [HttpGet("manufacturers/{id:guid}")]
+    [HttpGet("manufacturers/{id:guid}", Name = "GetManufacturerById")]
     [ProducesResponseType(typeof(ManufacturerDto), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ManufacturerDto>> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
@@ -119,45 +119,14 @@ public class CatalogController : ControllerBase
             throw new DuplicateEntityException("Manufacturer", new ManufacturerDto(existingNow.Id, existingNow.Name), null,
                 $"A manufacturer with the normalized name '{existingNow.Name}' already exists.");
         }
-        if (!string.Equals(original.Trim(), mfg.Name, StringComparison.Ordinal))
+        // Emit normalization header if canonical name differs in ANY way from raw input (including whitespace)
+        if (!string.Equals(original, mfg.Name, StringComparison.Ordinal))
         {
             Response.Headers["X-Normalized-Name"] = mfg.Name;
         }
-    _catalogCache.InvalidateManufacturers();
-    _catalogCache.InvalidateModels();
-        return CreatedAtAction(nameof(GetManufacturerByIdAsync), new { id = mfg.Id }, new ManufacturerDto(mfg.Id, mfg.Name));
-
-        static bool IsUniqueConstraint(DbUpdateException ex)
-        {
-            if (ex.InnerException is Microsoft.Data.Sqlite.SqliteException se && se.SqliteErrorCode == 19)
-            {
-                return true; // constraint failed
-            }
-#if NET8_0_OR_GREATER
-            if (ex.InnerException is System.Data.Common.DbException dbx)
-            {
-                var typeName = dbx.GetType().FullName ?? string.Empty;
-                // SQL Server
-                if (typeName.Contains("SqlException", StringComparison.OrdinalIgnoreCase) && dbx.ErrorCode is 2601 or 2627)
-                {
-                    return true;
-                }
-            }
-#endif
-            // PostgreSQL
-            if (ex.InnerException?.GetType().FullName?.Contains("PostgresException", StringComparison.OrdinalIgnoreCase) == true &&
-                ex.InnerException?.GetType().GetProperty("SqlState")?.GetValue(ex.InnerException)?.ToString() == "23505")
-            {
-                return true;
-            }
-            // MySQL
-            if (ex.InnerException?.GetType().FullName?.Contains("MySqlException", StringComparison.OrdinalIgnoreCase) == true &&
-                ex.InnerException?.GetType().GetProperty("Number")?.GetValue(ex.InnerException) is int num && num == 1062)
-            {
-                return true;
-            }
-            return false;
-        }
+        _catalogCache.InvalidateManufacturers();
+        _catalogCache.InvalidateModels();
+        return CreatedAtRoute("GetManufacturerById", new { id = mfg.Id }, new ManufacturerDto(mfg.Id, mfg.Name));
     }
 
     [HttpGet("models")]
@@ -179,7 +148,7 @@ public class CatalogController : ControllerBase
         return Ok(list);
     }
 
-    [HttpGet("models/{id:guid}")]
+    [HttpGet("models/{id:guid}", Name = "GetModelById")]
     [ProducesResponseType(typeof(ModelDto), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ModelDto>> GetModelByIdAsync(Guid id, CancellationToken ct)
@@ -221,9 +190,17 @@ public class CatalogController : ControllerBase
         {
             return NotFound("Manufacturer not found");
         }
-        // Case-insensitive uniqueness within the same manufacturer
-        var existing = await _db.Models.AsNoTracking()
-            .FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase), ct);
+        // Case-insensitive uniqueness within the same manufacturer.
+        // Translation constraints: EF Core (SQLite) cannot translate string.Equals with StringComparison nor
+        // ToUpperInvariant()/ToLowerInvariant(). Rather than rely on ToUpper()/ToLower() (which triggers analyzers
+        // for culture concerns), we pull the small candidate set (models for this manufacturer) and compare in-memory.
+        // Manufacturer-level model counts are expected to be small; if this becomes hot, consider a computed
+        // normalized column or a case-insensitive unique index at the database layer.
+        var candidateNames = await _db.Models.AsNoTracking()
+            .Where(m => m.ManufacturerId == req.ManufacturerId)
+            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
+            .ToListAsync(ct);
+        var existing = candidateNames.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
             string? headerName = null;
@@ -283,10 +260,14 @@ public class CatalogController : ControllerBase
         var createdModel = await _db.Models.AsNoTracking()
             .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
             .FirstOrDefaultAsync(m => m.Id == model.Id, ct);
-    _catalogCache.InvalidateModels(model.ManufacturerId);
-        return CreatedAtAction(nameof(GetModelByIdAsync), new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
-                model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-                createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
+        if (!string.Equals(originalModelName, model.Name, StringComparison.Ordinal))
+        {
+            Response.Headers["X-Normalized-Name"] = model.Name;
+        }
+        _catalogCache.InvalidateModels(model.ManufacturerId);
+        return CreatedAtRoute("GetModelById", new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+                    model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
+                    createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
     }
 
     [HttpPut("models/{id:guid}")]
@@ -352,9 +333,10 @@ public class CatalogController : ControllerBase
 
     private static bool IsUniqueConstraint(DbUpdateException ex)
     {
+        // SQLite constraint
         if (ex.InnerException is Microsoft.Data.Sqlite.SqliteException se && se.SqliteErrorCode == 19)
         {
-            return true; // constraint failed
+            return true; // generic constraint failed (unique / FK). Specific name not exposed here.
         }
 #if NET8_0_OR_GREATER
         if (ex.InnerException is System.Data.Common.DbException dbx)
@@ -362,7 +344,7 @@ public class CatalogController : ControllerBase
             var typeName = dbx.GetType().FullName ?? string.Empty;
             if (typeName.Contains("SqlException", StringComparison.OrdinalIgnoreCase) && dbx.ErrorCode is 2601 or 2627)
             {
-                return true;
+                return true; // SQL Server duplicate key (unique index or constraint)
             }
         }
 #endif
@@ -373,6 +355,14 @@ public class CatalogController : ControllerBase
         }
         if (ex.InnerException?.GetType().FullName?.Contains("MySqlException", StringComparison.OrdinalIgnoreCase) == true &&
             ex.InnerException?.GetType().GetProperty("Number")?.GetValue(ex.InnerException) is int num && num == 1062)
+        {
+            return true;
+        }
+        // Fallback: inspect message text for our known index names
+        var msg = ex.InnerException?.Message ?? ex.Message;
+        if (!string.IsNullOrEmpty(msg) && (msg.Contains("NameLowered", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("IX_Manufacturers_NameLowered", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("IX_Models_ManufacturerId_NameLowered", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }

@@ -64,7 +64,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 nameProp.UseCollation("NOCASE");
             }
-            b.HasIndex(m => m.Name).IsUnique();
+            // Persisted shadow column for cross-provider case-insensitive uniqueness.
+            // We populate this in SaveChanges overrides (lower-invariant) to avoid provider-specific computed syntax.
+            b.Property<string>("NameLowered")
+                .HasColumnName("NameLowered")
+                .HasMaxLength(128)
+                .IsRequired();
+            b.HasIndex("NameLowered").IsUnique();
         });
 
         modelBuilder.Entity<PrinterModel>(b =>
@@ -80,7 +86,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany(x => x.Models)
              .HasForeignKey(m => m.ManufacturerId)
              .OnDelete(DeleteBehavior.NoAction); // Changed from Cascade to NoAction to prevent multiple cascade paths
-            b.HasIndex(m => new { m.ManufacturerId, m.Name }).IsUnique();
+            // Persisted shadow column for cross-provider case-insensitive uniqueness inside a manufacturer.
+            b.Property<string>("NameLowered")
+                .HasColumnName("NameLowered")
+                .HasMaxLength(128)
+                .IsRequired();
+            b.HasIndex(nameof(PrinterModel.ManufacturerId), "NameLowered").IsUnique();
             b.Property(m => m.MaxX);
             b.Property(m => m.MaxY);
             b.Property(m => m.MaxZ);
@@ -457,5 +468,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.IsPublic);
             b.HasIndex(p => p.CreatedByUserId);
         });
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        PopulateCaseInsensitiveShadowColumns();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        PopulateCaseInsensitiveShadowColumns();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void PopulateCaseInsensitiveShadowColumns()
+    {
+        foreach (var entry in ChangeTracker.Entries<Manufacturer>())
+        {
+            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            {
+                var name = entry.Entity.Name ?? string.Empty;
+                entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
+            }
+        }
+        foreach (var entry in ChangeTracker.Entries<PrinterModel>())
+        {
+            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            {
+                var name = entry.Entity.Name ?? string.Empty;
+                entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
+            }
+        }
     }
 }
