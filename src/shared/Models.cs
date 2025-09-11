@@ -1,5 +1,5 @@
 ﻿using System.Diagnostics.CodeAnalysis;
-using System.Text.Json.Serialization;
+// using System.Text.Json.Serialization; // already imported earlier in file
 
 namespace Farm.Web.Shared;
 
@@ -7,6 +7,9 @@ namespace Farm.Web.Shared;
 // URL-like values are represented as strings by design for transport compatibility.
 #pragma warning disable CA1056 // URI-like properties should not be strings
 
+using System.Text.Json.Serialization;
+
+// Preserve original enum (converter handled globally); attribute removed to avoid redundancy.
 public enum PrinterBackend
 {
     Moonraker = 0,
@@ -603,6 +606,7 @@ public record UpdateGcodeFileDto(
 /// <summary>
 /// Lifecycle status of a print job.
 /// </summary>
+// Converter handled via System.Text.Json options in Program.cs
 public enum PrintJobStatusDto
 {
     Queued = 0,
