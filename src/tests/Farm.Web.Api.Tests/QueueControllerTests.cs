@@ -9,6 +9,8 @@ namespace Farm.Web.Api.Tests;
 /// <summary>
 /// Integration tests for QueueController (job queue management)
 /// </summary>
+// Mark as slow due to repeated queue/job lifecycle operations.
+[Trait("Category", "Slow")]
 public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

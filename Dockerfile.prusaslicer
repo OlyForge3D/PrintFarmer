@@ -19,11 +19,13 @@ WORKDIR /src
 
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
+COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/prusaslicer-worker/*.csproj ./prusaslicer-worker/
 
 RUN dotnet restore ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj
 
 COPY src/shared/ ./shared/
+COPY src/worker-shared/ ./worker-shared/
 COPY src/prusaslicer-worker/ ./prusaslicer-worker/
 
 RUN dotnet publish ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj \

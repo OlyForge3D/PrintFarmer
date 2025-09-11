@@ -11,6 +11,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Docker deployment integration tests for PrusaSlicer worker
 /// Tests binary installation, container health, and end-to-end slicing
 /// </summary>
+[Trait("Category", "Docker")]
 public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;

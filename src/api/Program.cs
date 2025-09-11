@@ -40,7 +40,11 @@ builder.Services.AddControllers(options =>
     })
     .AddJsonOptions(o =>
     {
+        // Keep default string enum converter for most enums
         o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        // Add permissive converters for enums that have been causing deserialization failures in tests
+        o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrinterBackendJsonConverter());
+        o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrintJobStatusDtoJsonConverter());
     })
     .AddJsonOptions(options =>
     {
@@ -69,11 +73,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("Default", policy =>
     {
-        // Get allowed origins from environment variable or use defaults
-    // Support both legacy CORS__AllowedOrigins and current ALLOWED_ORIGINS for backward compatibility
-    var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
-               ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
-               ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001"; // include React dev server defaults
+        // Get allowed origins from environment variable or use defaults.
+        // Support both legacy CORS__AllowedOrigins and current ALLOWED_ORIGINS for backward compatibility.
+        var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+            ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
+            ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001"; // include React dev server defaults
 
         // Check if wildcard network access is enabled
         var allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
@@ -257,6 +261,9 @@ builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
+// Migration status provider (lightweight introspection without forcing migrations strategy changes)
+// NOTE: Was singleton; changed to Scoped because it directly depends on AppDbContext (scoped) to avoid scoped->singleton injection violation in tests.
+builder.Services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
 builder.Services.AddHttpClient<SdcpClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
@@ -281,7 +288,8 @@ builder.Services.AddSingleton<IGcodeUploadQuotaService>(sp =>
 
 // Catalog caching (manufacturers/models lists + ETags)
 builder.Services.AddMemoryCache();
-builder.Services.AddSingleton<ICatalogCache, CatalogCache>();
+// CatalogCache uses AppDbContext; make it scoped to avoid consuming scoped context from singleton. Internal IMemoryCache still handles cross-request caching.
+builder.Services.AddScoped<ICatalogCache, CatalogCache>();
 // Bind CatalogCacheOptions from configuration section CatalogCache (optional)
 builder.Services.Configure<CatalogCacheOptions>(builder.Configuration.GetSection("CatalogCache"));
 
@@ -835,6 +843,91 @@ app.MapGet("/api/diagnostics/summary", ([FromServices] SpoolmanService spoolmanS
 });
 // Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
+
+// Database info endpoint (dev or DEBUG_DB_INFO=true) with migration status integration.
+app.MapGet("/api/debug/db-info", async (AppDbContext db,
+    IWebHostEnvironment env,
+    IConfiguration config,
+    [Microsoft.AspNetCore.Mvc.FromServices] Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider migrationStatusProvider,
+    CancellationToken ct) =>
+{
+    var toggle = (Environment.GetEnvironmentVariable("DEBUG_DB_INFO") ?? config["DEBUG_DB_INFO"])?.Trim();
+    var allow = env.IsDevelopment() || (toggle != null && toggle.Equals("true", StringComparison.OrdinalIgnoreCase));
+    if (!allow)
+    {
+        return Results.NotFound();
+    }
+
+    var provider = db.Database.ProviderName ?? "unknown";
+    string databaseName;
+    try
+    {
+        databaseName = db.Database.GetDbConnection().Database;
+    }
+    catch
+    {
+        databaseName = "unknown";
+    }
+
+    var entities = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+    {
+        [nameof(db.Printers)] = await db.Printers.CountAsync(ct),
+        [nameof(db.Spools)] = await db.Spools.CountAsync(ct),
+        [nameof(db.Manufacturers)] = await db.Manufacturers.CountAsync(ct),
+        [nameof(db.Models)] = await db.Models.CountAsync(ct),
+        [nameof(db.FilamentTypes)] = await db.FilamentTypes.CountAsync(ct),
+        [nameof(db.PrinterModelFilamentTypes)] = await db.PrinterModelFilamentTypes.CountAsync(ct),
+        [nameof(db.SpoolmanConfigs)] = await db.SpoolmanConfigs.CountAsync(ct),
+        [nameof(db.GcodeFiles)] = await db.GcodeFiles.CountAsync(ct),
+        [nameof(db.PrintJobs)] = await db.PrintJobs.CountAsync(ct),
+        [nameof(db.PrinterCapabilities)] = await db.PrinterCapabilities.CountAsync(ct),
+        [nameof(db.GcodeHarvestOperations)] = await db.GcodeHarvestOperations.CountAsync(ct),
+        [nameof(db.DiscoveredGcodeFiles)] = await db.DiscoveredGcodeFiles.CountAsync(ct),
+        [nameof(db.Models3D)] = await db.Models3D.CountAsync(ct),
+        [nameof(db.SlicerProfiles)] = await db.SlicerProfiles.CountAsync(ct),
+        [nameof(db.Users)] = await db.Users.CountAsync(ct),
+        [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
+        [nameof(db.Resources)] = await db.Resources.CountAsync(ct),
+        [nameof(db.Actions)] = await db.Actions.CountAsync(ct),
+        [nameof(db.RolePermissions)] = await db.RolePermissions.CountAsync(ct),
+        [nameof(db.UserRoles)] = await db.UserRoles.CountAsync(ct)
+    };
+
+    long? fileSizeBytes = null;
+    if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+    {
+        try
+        {
+            var cs = db.Database.GetConnectionString() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(cs))
+            {
+                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(cs);
+                var dataSource = builder.DataSource;
+                if (!Path.IsPathRooted(dataSource))
+                {
+                    dataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dataSource));
+                }
+                if (File.Exists(dataSource))
+                {
+                    fileSizeBytes = new System.IO.FileInfo(dataSource).Length;
+                }
+            }
+        }
+        catch { }
+    }
+
+    var migration = migrationStatusProvider.GetStatus();
+
+    return Results.Ok(new
+    {
+        provider,
+        database = databaseName,
+        timestampUtc = DateTime.UtcNow,
+        fileSizeBytes,
+        migration = new { migration.Mode, migration.HasMigrations, migration.AppliedAny },
+        entities
+    });
+});
 
 // Configure SPA only for monolithic deployments (not microservices)
 if (isMonolithicDeployment)

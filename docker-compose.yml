@@ -59,6 +59,10 @@ services:
       - SPOOLMAN_PORT=${SPOOLMAN_PORT:-}
       # Required JWT signing key (32+ chars) for auth configuration
       - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
+      # Auto-bootstrap initial admin (temporary for dev)
+      - ADMIN_USERNAME=admin
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_PASSWORD=AdminPass123!
     volumes:
       - app_data:/data
       - model_uploads:/app/uploads

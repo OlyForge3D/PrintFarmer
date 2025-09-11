@@ -3,6 +3,8 @@ using Moq;
 
 namespace Farm.Web.Api.Tests;
 
+// Mark as long-running because these tests perform real create/delete cycles and external host resolution.
+[Trait("Category", "Slow")]
 public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

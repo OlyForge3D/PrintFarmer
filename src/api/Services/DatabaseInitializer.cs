@@ -1,4 +1,5 @@
 ﻿using Farm.Web.Api.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
@@ -40,12 +41,34 @@ public class DatabaseInitializer
                 try
                 {
                     await _context.Database.EnsureCreatedAsync();
-                    _logger.LogInformation("[DB] Database schema ensured successfully");
+                    _logger.LogInformation("[DB] Database schema ensured successfully (EnsureCreated)");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[DB] Database schema creation failed: {Message}", ex.Message);
-                    throw; // Re-throw to trigger retry mechanism
+                    _logger.LogWarning(ex, "[DB] EnsureCreated failed: {Message}. Attempting manual schema initialization for SQLite.", ex.Message);
+                    // Fallback: very early containers (or volume permission issues) sometimes cause EnsureCreated to throw
+                    // For SQLite only, attempt a minimal manual schema verification/creation of the Users table presence heuristic.
+                    try
+                    {
+                        if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Issue a pragma to force open / create file, then check a sentinel table.
+                            await _context.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+                            // If no tables exist, this query will fail; wrap & create a tiny bootstrap table then re-run seed later.
+                            // We won't create full schema manually (that belongs to EF model); just let a second EnsureCreated attempt run.
+                            await _context.Database.EnsureCreatedAsync();
+                            _logger.LogInformation("[DB] Fallback EnsureCreated second attempt succeeded");
+                        }
+                        else
+                        {
+                            throw; // Non-SQLite providers should just retry via outer loop
+                        }
+                    }
+                    catch (Exception inner)
+                    {
+                        _logger.LogError(inner, "[DB] Manual fallback schema initialization failed. Will retry (attempt {Attempt})", retryCount + 1);
+                        throw; // Bubble to retry loop
+                    }
                 }
 
                 // Seed catalog data

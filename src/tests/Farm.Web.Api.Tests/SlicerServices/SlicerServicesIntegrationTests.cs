@@ -12,6 +12,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Integration tests for the distributed slicer microservices system
 /// Tests the interaction between orchestrator, engines, storage, and notifications
 /// </summary>
+[Trait("Category", "Docker")]
 public class SlicerServicesIntegrationTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
