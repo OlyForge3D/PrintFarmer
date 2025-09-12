@@ -1,6 +1,7 @@
 ﻿using Farm.Web.Api.Services;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -12,6 +13,113 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Spoolman Integration")]
 public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory httpClientFactory) : ControllerBase
 {
+    /// <summary>
+    /// Tests connectivity to an arbitrary Spoolman base URL without persisting configuration.
+    /// Used by the setup wizard before saving settings. Always returns 200 with success flag.
+    /// </summary>
+    /// <param name="request">Request containing the candidate BaseUrl.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>JSON object { success, normalizedUrl?, endpointTried?, statusCode?, version?, message? }</returns>
+    /// <response code="200">Returns probe result (success may be true/false)</response>
+    [HttpPost("test")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [AllowAnonymous]
+    public async Task<IActionResult> TestAsync([FromBody] SpoolmanConfigDto? request, CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.BaseUrl))
+        {
+            return Ok(new { success = false, message = "BaseUrl is required" });
+        }
+
+        var raw = request.BaseUrl.Trim();
+        // Prepend scheme if user omitted (assume http)
+        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            raw = "http://" + raw; // safer default inside container networks
+        }
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var baseUri))
+        {
+            return Ok(new { success = false, message = "Invalid URL" });
+        }
+        var normalized = baseUri.ToString().TrimEnd('/');
+
+        string[] probePaths = ["/api/v1/health", "/api/v1/info"]; // order matters
+        foreach (var path in probePaths)
+        {
+            try
+            {
+                var client = httpClientFactory.CreateClient("SpoolmanTestProbe");
+                client.Timeout = TimeSpan.FromSeconds(5);
+                using var resp = await client.GetAsync(normalized + path, ct);
+                if (resp.IsSuccessStatusCode)
+                {
+                    string? version = null;
+                    try
+                    {
+                        using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                        using var doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                        var root = doc.RootElement;
+                        // Try common version property names
+                        if (root.TryGetProperty("version", out var vProp) && vProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            version = vProp.GetString();
+                        }
+                        else if (root.TryGetProperty("spoolman_version", out var svProp) && svProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            version = svProp.GetString();
+                        }
+                    }
+                    catch { /* ignore JSON parse failures */ }
+
+                    return Ok(new
+                    {
+                        success = true,
+                        normalizedUrl = normalized,
+                        endpointTried = path,
+                        statusCode = (int)resp.StatusCode,
+                        version
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                if (path == probePaths[^1])
+                {
+                    var (category, message) = CategorizeException(ex);
+                    return Ok(new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
+                }
+            }
+        }
+
+        return Ok(new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
+    }
+    
+    private static (string category, string message) CategorizeException(Exception ex)
+    {
+        if (ex is TaskCanceledException or OperationCanceledException)
+        {
+            return ("timeout", "Connection timed out");
+        }
+        if (ex is HttpRequestException hre)
+        {
+            if (hre.InnerException is System.Net.Sockets.SocketException se)
+            {
+                return se.SocketErrorCode switch
+                {
+                    System.Net.Sockets.SocketError.HostNotFound => ("dns_failure", "Host could not be resolved"),
+                    System.Net.Sockets.SocketError.ConnectionRefused => ("connection_refused", "Connection refused"),
+                    System.Net.Sockets.SocketError.TimedOut => ("timeout", "Connection timed out"),
+                    _ => ("network_error", hre.Message)
+                };
+            }
+            return ("http_error", hre.Message);
+        }
+        if (ex is System.Security.Authentication.AuthenticationException)
+        {
+            return ("tls_error", "TLS/SSL negotiation failed");
+        }
+        return ("unknown", ex.Message);
+    }
     /// <summary>
     /// Gets the current Spoolman integration configuration.
     /// </summary>

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { SpoolmanProvider } from './contexts/SpoolmanContext'
 
 // Service worker control: allow disabling & forced unregister via build-time flag
 // Set VITE_DISABLE_SW=true to completely unregister and clear caches.
@@ -31,6 +32,8 @@ if ('serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <SpoolmanProvider>
+      <App />
+    </SpoolmanProvider>
   </StrictMode>,
 )
