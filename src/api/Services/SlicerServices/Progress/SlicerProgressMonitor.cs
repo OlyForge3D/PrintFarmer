@@ -56,6 +56,7 @@ public static class SlicerProgressMonitor
                                 // Ask the underlying process to terminate as an early stop
                                 try { processHandle.Kill(); } catch { }
                             }
+
                             continue;
                         }
                     }

@@ -27,6 +27,7 @@ public class PrusaProgressParser : IProgressParser
     {
         if (string.IsNullOrWhiteSpace(line))
             return null;
+
         var lower = line.ToLowerInvariant();
 
         if (lower.Contains('%'))
