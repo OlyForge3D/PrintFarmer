@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
@@ -86,8 +87,8 @@ public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFact
         await hubConnection.InvokeAsync("JoinDiscoveryGroupAsync", sessionId!);
 
         // 3. Wait (with generous timeout) for first progress message corresponding to the session
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var completed = await Task.WhenAny(tcs.Task, Task.Delay(-1, cts.Token));
+        // Bounded wait to avoid potential hang if cancellation token not triggered
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(10)));
         completed.Should().Be(tcs.Task, "a DiscoveryProgress event for the session should arrive");
 
         var progressDto = await tcs.Task;
@@ -148,8 +149,7 @@ public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFact
 
         await hubConnection.InvokeAsync("JoinDiscoveryGroupAsync", sessionId!);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-        var completed = await Task.WhenAny(tcs.Task, Task.Delay(-1, cts.Token));
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(12)));
         completed.Should().Be(tcs.Task, "a DiscoveryProgress event for the session should arrive");
 
         var progressDto = await tcs.Task;

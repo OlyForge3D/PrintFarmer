@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics.CodeAnalysis;
-// using System.Text.Json.Serialization; // already imported earlier in file
 
 namespace Farm.Web.Shared;
 
@@ -9,7 +8,15 @@ namespace Farm.Web.Shared;
 
 using System.Text.Json.Serialization;
 
-// Preserve original enum (converter handled globally); attribute removed to avoid redundancy.
+// Enum Serialization Policy:
+//  - Global Program.cs registers JsonStringEnumConverter (string names in API payloads).
+//  - Per-enum [JsonConverter] attributes are ONLY used when:
+//      * A custom tolerant converter is required (numeric + string input) OR
+//      * The enum is exchanged with external worker processes that may not share the global options.
+//  - Simple API-only enums rely on global options (no attribute clutter).
+//
+// Custom tolerant converter (numeric OR string) for backward compatibility in tests and workers.
+[JsonConverter(typeof(Farm.Web.Shared.Json.PrinterBackendJsonConverter))]
 public enum PrinterBackend
 {
     Moonraker = 0,
@@ -606,7 +613,8 @@ public record UpdateGcodeFileDto(
 /// <summary>
 /// Lifecycle status of a print job.
 /// </summary>
-// Converter handled via System.Text.Json options in Program.cs
+// Custom permissive converter so tests / workers can deserialize numeric or string forms ("Queued", 0, "0").
+[JsonConverter(typeof(Farm.Web.Shared.Json.PrintJobStatusDtoJsonConverter))]
 public enum PrintJobStatusDto
 {
     Queued = 0,
@@ -1093,6 +1101,8 @@ public class UpdateJobPriorityDto
 /// <summary>
 /// Internal tracking DTO for active / completed slicing jobs.
 /// </summary>
+// Slicing job status (shared with worker processes) – keep explicit attribute to decouple from Program options.
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SlicingJobStatus
 {
     Queued,

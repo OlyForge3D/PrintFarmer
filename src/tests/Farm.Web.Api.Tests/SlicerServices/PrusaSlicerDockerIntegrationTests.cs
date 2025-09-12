@@ -71,12 +71,11 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // Arrange
         _output.WriteLine("Starting PrusaSlicer worker with Docker Compose...");
 
-        // Act - Start only the PrusaSlicer worker and its dependencies
-        var startResult = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "prusaslicer-worker");
+    // Act - Start only the PrusaSlicer worker and its dependencies
+    var startResult = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "prusaslicer-worker");
         Assert.True(startResult.Success, $"Docker Compose start failed: {startResult.ErrorOutput}");
-
-        // Wait for services to be ready
-        await Task.Delay(TimeSpan.FromSeconds(30));
+    // Adaptive wait: poll health instead of fixed 30s sleep
+    await WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(60));
 
         // Check health status
         var healthResult = await CheckServiceHealthAsync("prusaslicer-worker", 8082);
@@ -91,7 +90,8 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         // Arrange
         await RunDockerComposeCommandAsync("up", "-d", "prusaslicer-worker");
-        await Task.Delay(TimeSpan.FromSeconds(45)); // Allow time for binary installation
+        // Poll for binary existence instead of fixed 45s
+        await WaitForExecSuccessAsync("prusaslicer-worker", ["test", "-f", "/usr/local/bin/prusa-slicer"], TimeSpan.FromSeconds(90));
 
         // Act - Check if PrusaSlicer binary is installed
         var execResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "ls", "-la", "/usr/local/bin/prusa-slicer");
@@ -115,9 +115,12 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         var result = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "api", "orcaslicer-worker", "prusaslicer-worker");
 
         Assert.True(result.Success, $"Failed to start microservices: {result.ErrorOutput}");
-
-        // Wait for services to initialize
-        await Task.Delay(TimeSpan.FromSeconds(60));
+        // Adaptive parallel health polling (max 90s)
+        await Task.WhenAll(
+            WaitForServiceAsync("api", 5001, timeout: TimeSpan.FromSeconds(90)),
+            WaitForServiceAsync("orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(90)),
+            WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(90))
+        );
 
         // Assert - Check health of all services
         var redisHealth = await CheckServiceHealthAsync("redis", 6379, "/healthcheck");
@@ -143,7 +146,11 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         // Arrange
         await RunDockerComposeCommandAsync("up", "-d", "orcaslicer-worker", "prusaslicer-worker");
-        await Task.Delay(TimeSpan.FromSeconds(30));
+        // Wait for both workers to become healthy (max 60s)
+        await Task.WhenAll(
+            WaitForServiceAsync("orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(60)),
+            WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(60))
+        );
 
         // Act & Assert - Check OrcaSlicer worker environment
         var orcaEnvResult = await RunDockerComposeCommandAsync("exec", "-T", "orcaslicer-worker", "printenv", "Worker__OrcaSlicerPath");
@@ -168,7 +175,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         // Arrange
         await RunDockerComposeCommandAsync("up", "-d", "prusaslicer-worker");
-        await Task.Delay(TimeSpan.FromSeconds(45));
+        await WaitForExecSuccessAsync("prusaslicer-worker", ["test", "-f", "/usr/local/bin/prusa-slicer"], TimeSpan.FromSeconds(90));
 
         // Act - Check PrusaSlicer version
         var versionResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker",
@@ -201,7 +208,11 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 
         // Arrange
         await RunDockerComposeCommandAsync("up", "-d");
-        await Task.Delay(TimeSpan.FromMinutes(2)); // Allow full startup
+        await Task.WhenAll(
+            WaitForServiceAsync("api", 5001, timeout: TimeSpan.FromSeconds(120)),
+            WaitForServiceAsync("orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(120)),
+            WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(120))
+        );
 
         // This would require an actual API client and test STL file
         // Implementation would depend on the API design
@@ -297,5 +308,50 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         using var loggerFactory = LoggerFactory.Create(builder =>
             builder.AddConsole().SetMinimumLevel(LogLevel.Information));
         return loggerFactory.CreateLogger<PrusaSlicerDockerIntegrationTests>();
+    }
+
+    // ---- Adaptive Polling Helpers -------------------------------------------------
+    private async Task WaitForServiceAsync(string serviceName, int port, string endpoint = "/healthz", TimeSpan? timeout = null, TimeSpan? pollInterval = null)
+    {
+        timeout ??= TimeSpan.FromSeconds(60);
+        pollInterval ??= TimeSpan.FromSeconds(2);
+        var sw = Stopwatch.StartNew();
+        string? lastMessage = null;
+        while (sw.Elapsed < timeout)
+        {
+            var health = await CheckServiceHealthAsync(serviceName, port, endpoint);
+            if (health.IsHealthy)
+            {
+                _output.WriteLine($"{serviceName} healthy after {sw.Elapsed.TotalSeconds:F1}s");
+                return;
+            }
+            // Capture most recent non-healthy message for diagnostics
+            lastMessage = health.Message;
+            await Task.Delay(pollInterval.Value);
+        }
+        throw new TimeoutException($"Service '{serviceName}' not healthy after {timeout.Value.TotalSeconds}s. Last status: {lastMessage ?? "(no message)"}");
+    }
+
+    private async Task WaitForExecSuccessAsync(string serviceName, string[] execArgs, TimeSpan timeout, TimeSpan? pollInterval = null)
+    {
+        pollInterval ??= TimeSpan.FromSeconds(3);
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            // docker compose exec -T <serviceName> <execArgs>
+            var combined = new string[3 + execArgs.Length];
+            combined[0] = "exec";
+            combined[1] = "-T";
+            combined[2] = serviceName;
+            Array.Copy(execArgs, 0, combined, 3, execArgs.Length);
+            var res = await RunDockerComposeCommandAsync(combined);
+            if (res.Success)
+            {
+                _output.WriteLine($"Exec success for {serviceName} after {sw.Elapsed.TotalSeconds:F1}s -> {string.Join(' ', execArgs)}");
+                return;
+            }
+            await Task.Delay(pollInterval.Value);
+        }
+        throw new TimeoutException($"Exec command '{string.Join(' ', execArgs)}' for service '{serviceName}' did not succeed within {timeout.TotalSeconds}s");
     }
 }

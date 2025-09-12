@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.GcodeFiles;
 
+[Trait("Category", "DbHeavy")]
 public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;

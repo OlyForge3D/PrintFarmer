@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
@@ -116,8 +117,7 @@ public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFa
 
         await hubConnection.InvokeAsync("JoinDiscoveryGroupAsync", sessionId!);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var completed = await Task.WhenAny(completedTcs.Task, Task.Delay(-1, cts.Token));
+        var completed = await Task.WhenAny(completedTcs.Task, Task.Delay(TimeSpan.FromSeconds(10)));
         completed.Should().Be(completedTcs.Task, "discovery should complete");
 
         // Ensure no found printer event happened

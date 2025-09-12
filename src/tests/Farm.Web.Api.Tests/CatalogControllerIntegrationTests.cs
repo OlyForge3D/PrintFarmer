@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -15,6 +16,7 @@ public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicat
 
     public CatalogControllerIntegrationTests(CustomWebApplicationFactory factory)
     {
+        ArgumentNullException.ThrowIfNull(factory);
         _factory = factory;
         _client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
@@ -80,7 +82,7 @@ public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicat
     [Fact]
     public async Task CreateManufacturer_CaseOnlyDifference_WithHeaderValidation_Yields409()
     {
-        var baseName = "Maker" + Guid.NewGuid().ToString("N").Substring(0,6);
+        var baseName = "Maker" + Guid.NewGuid().ToString("N").Substring(0, 6);
         var nameUpper = baseName.ToUpperInvariant();
         var nameLower = baseName.ToLowerInvariant();
 
@@ -103,13 +105,13 @@ public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicat
     public async Task CreateModel_DuplicateWithinManufacturer_Yields409()
     {
         // Create manufacturer first
-        var mfgName = "Maker" + Guid.NewGuid().ToString("N").Substring(0,6);
+        var mfgName = "Maker" + Guid.NewGuid().ToString("N").Substring(0, 6);
         var mfgResp = await _client.PostAsJsonAsync("/api/catalog/manufacturers", new { name = mfgName });
         mfgResp.StatusCode.Should().Be(HttpStatusCode.Created);
         var mfgDto = await mfgResp.Content.ReadFromJsonAsync<ManufacturerDto>();
         mfgDto.Should().NotBeNull();
 
-        var modelName = "Model" + Guid.NewGuid().ToString("N").Substring(0,6);
+        var modelName = "Model" + Guid.NewGuid().ToString("N").Substring(0, 6);
         var createModelResp = await _client.PostAsJsonAsync("/api/catalog/models", new { name = modelName, manufacturerId = mfgDto!.Id, maxX = 100, maxY = 100, maxZ = 100 });
         createModelResp.StatusCode.Should().Be(HttpStatusCode.Created);
 

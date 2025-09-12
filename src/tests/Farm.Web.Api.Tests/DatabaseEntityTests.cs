@@ -8,6 +8,7 @@ namespace Farm.Web.Api.Tests;
 /// <summary>
 /// Tests for new database entities and their EF Core configuration
 /// </summary>
+[Trait("Category", "DbHeavy")]
 public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
