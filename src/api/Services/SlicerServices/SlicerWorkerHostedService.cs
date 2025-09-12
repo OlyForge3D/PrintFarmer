@@ -8,6 +8,7 @@ using Farm.Web.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Services.SlicerServices.Progress;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -124,7 +125,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     engineConfigPath = Path.Combine(jobDir, "config.ini");
                     try
                     {
-                        var ini = GeneratePrusaSlicerConfig(job.Profile);
+                        var ini = SlicerArgTemplateBuilder.GeneratePrusaSlicerConfig(job.Profile);
                         await File.WriteAllTextAsync(engineConfigPath, ini, cancellationToken);
                         // Prefer explicit args template from admin settings if present
                         if (string.IsNullOrWhiteSpace(argsTemplate))
@@ -188,14 +189,16 @@ public class SlicerWorkerHostedService : BackgroundService
                     throw new InvalidOperationException("Failed to start slicer process");
                 }
 
-                // After starting the process, choose a tailored progress monitor when available
+                // After starting the process, choose a tailored progress parser when available
                 if (job.EngineType == SlicerEngineType.PrusaSlicer)
                 {
-                    _ = Task.Run(async () => await MonitorPrusaProgressAsync(job.Id, proc, notifier, cancellationToken), cancellationToken);
+                    var parser = new PrusaProgressParser();
+                    _ = Task.Run(async () => await MonitorWithParserAsync(job.Id, proc, notifier, parser, cancellationToken), cancellationToken);
                 }
                 else if (job.EngineType == SlicerEngineType.OrcaSlicer)
                 {
-                    _ = Task.Run(async () => await MonitorOrcaProgressAsync(job.Id, proc, notifier, cancellationToken), cancellationToken);
+                    var parser = new OrcaProgressParser();
+                    _ = Task.Run(async () => await MonitorWithParserAsync(job.Id, proc, notifier, parser, cancellationToken), cancellationToken);
                 }
                 else
                 {
@@ -323,91 +326,11 @@ public class SlicerWorkerHostedService : BackgroundService
         }
     }
 
-    private async Task MonitorPrusaProgressAsync(Guid jobId, Process process, ISlicerProgressNotifier notifier, CancellationToken ct)
+    private async Task MonitorWithParserAsync(Guid jobId, Process process, ISlicerProgressNotifier notifier, Progress.IProgressParser parser, CancellationToken ct)
     {
         try
         {
-            // Use phase-based progress estimates tied to common PrusaSlicer stages
-            var phases = new (int Start, int End, string Message)[]
-            {
-                (Start: 0, End: 20, Message: "Initializing slicer"),
-                (Start: 20, End: 45, Message: "Loading model"),
-                (Start: 45, End: 70, Message: "Generating toolpaths"),
-                (Start: 70, End: 90, Message: "Calculating time & writes"),
-                (Start: 90, End: 100, Message: "Finalizing G-code")
-            };
-            var phaseIdx = 0;
             var start = DateTime.UtcNow;
-
-            using var stdout = process.StandardOutput;
-            while (!process.HasExited && !ct.IsCancellationRequested)
-            {
-                // Read any available line without blocking indefinitely
-                if (!stdout.EndOfStream)
-                {
-                    var line = await stdout.ReadLineAsync();
-                    if (!string.IsNullOrEmpty(line))
-                    {
-                        // Move forward in phases when recognized keywords appear
-                        var lower = line.ToLowerInvariant();
-                        if (lower.Contains("loading") || lower.Contains("load"))
-                        {
-                            phaseIdx = Math.Max(phaseIdx, 1);
-                        }
-
-                        if (lower.Contains("analyzing") || lower.Contains("toolpath") || lower.Contains("toolpaths"))
-                        {
-                            phaseIdx = Math.Max(phaseIdx, 2);
-                        }
-
-                        if (lower.Contains("writing") || lower.Contains("writing g-code") || lower.Contains("exporting"))
-                        {
-                            phaseIdx = Math.Max(phaseIdx, 3);
-                        }
-
-                        if (lower.Contains("done") || lower.Contains("finished"))
-                        {
-                            phaseIdx = Math.Max(phaseIdx, 4);
-                        }
-
-                        var phase = phases[Math.Min(phaseIdx, phases.Length - 1)];
-                        var progress = phase.Start + (phase.End - phase.Start) / 2;
-                        await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = progress, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
-                    }
-                }
-
-                // Periodic heartbeat progress based on elapsed time as fallback
-                var elapsed = DateTime.UtcNow - start;
-                var estimated = Math.Min(95, 20 + (int)Math.Min(70, elapsed.TotalSeconds / 2));
-                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "Slicing in progress..." }, ct);
-
-                await Task.Delay(TimeSpan.FromSeconds(3), ct);
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error monitoring PrusaSlicer process for job {JobId}", jobId);
-        }
-    }
-
-    private async Task MonitorOrcaProgressAsync(Guid jobId, Process process, ISlicerProgressNotifier notifier, CancellationToken ct)
-    {
-        try
-        {
-            // Phase-based progress estimates tuned for OrcaSlicer's common stdout markers
-            var phases = new (int Start, int End, string Message)[]
-            {
-                (Start: 0, End: 20, Message: "Initializing OrcaSlicer"),
-                (Start: 20, End: 50, Message: "Preparing geometry"),
-                (Start: 50, End: 80, Message: "Generating toolpaths"),
-                (Start: 80, End: 95, Message: "Exporting G-code"),
-                (Start: 95, End: 100, Message: "Finalizing")
-            };
-
-            var phaseIdx = 0;
-            var start = DateTime.UtcNow;
-
             using var stdout = process.StandardOutput;
             while (!process.HasExited && !ct.IsCancellationRequested)
             {
@@ -416,44 +339,34 @@ public class SlicerWorkerHostedService : BackgroundService
                     var line = await stdout.ReadLineAsync();
                     if (!string.IsNullOrEmpty(line))
                     {
-                        var lower = line.ToLowerInvariant();
-                        if (lower.Contains("mesh") || lower.Contains("geometry") || lower.Contains("load"))
+                        ProgressUpdate? parsed = null;
+                        try
                         {
-                            phaseIdx = Math.Max(phaseIdx, 1);
+                            parsed = parser.Parse(line);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Progress parser threw while handling a line for job {JobId}", jobId);
                         }
 
-                        if (lower.Contains("slic") || lower.Contains("toolpath") || lower.Contains("path"))
+                        if (parsed != null)
                         {
-                            phaseIdx = Math.Max(phaseIdx, 2);
-                        }
-
-                        if (lower.Contains("export") || lower.Contains("writing") || lower.Contains("gcode"))
-                        {
-                            phaseIdx = Math.Max(phaseIdx, 3);
-                        }
-
-                        // If the line contains a numeric percent like '42%' try to parse and use it directly
-                        if (lower.Contains('%'))
-                        {
-                            var digits = string.Concat(line.Where(char.IsDigit));
-                            if (!string.IsNullOrEmpty(digits) && int.TryParse(digits, out var p))
+                            var pct = (int)Math.Max(0, Math.Min(100, Math.Round(parsed.Percentage)));
+                            await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = pct, Status = SlicingJobStatus.Slicing, CurrentStep = parsed.Message }, ct);
+                            // If parser reports completion, send a final heartbeat progress (actual completion will be handled when process exits)
+                            if (parsed.State == SlicerProgressState.Completed)
                             {
-                                var clamped = Math.Max(0, Math.Min(100, p));
-                                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = clamped, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
-                                continue;
+                                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = 100, Status = SlicingJobStatus.Slicing, CurrentStep = parsed.Message }, ct);
                             }
+                            continue;
                         }
-
-                        var phase = phases[Math.Min(phaseIdx, phases.Length - 1)];
-                        var progress = phase.Start + (phase.End - phase.Start) / 2;
-                        await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = progress, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
                     }
                 }
 
-                // Heartbeat fallback progress based on elapsed time
+                // Heartbeat fallback progress estimation based on elapsed time (generic fallback)
                 var elapsed = DateTime.UtcNow - start;
                 var estimated = Math.Min(95, 10 + (int)Math.Min(85, elapsed.TotalSeconds / 1.5));
-                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "OrcaSlicer processing..." }, ct);
+                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "Slicing in progress..." }, ct);
 
                 await Task.Delay(TimeSpan.FromSeconds(2), ct);
             }
@@ -461,26 +374,7 @@ public class SlicerWorkerHostedService : BackgroundService
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error monitoring OrcaSlicer process for job {JobId}", jobId);
+            _logger.LogWarning(ex, "Error monitoring slicer process for job {JobId}", jobId);
         }
-    }
-
-    private static string GeneratePrusaSlicerConfig(Farm.Web.Shared.SlicerProfileDto? profile)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("# Generated by PrintFarmer");
-        sb.AppendLine($"# Generated at {DateTime.UtcNow:O}");
-        sb.AppendLine();
-        sb.AppendLine("[print]");
-        sb.AppendLine($"layer_height = {profile?.LayerHeight ?? 0.2}");
-        sb.AppendLine($"fill_density = {profile?.InfillPercentage ?? 20}");
-        sb.AppendLine($"perimeter_speed = {profile?.PrintSpeed ?? 50}");
-        sb.AppendLine($"nozzle_temperature = {profile?.NozzleTemperature ?? 210}");
-        sb.AppendLine($"bed_temperature = {profile?.BedTemperature ?? 60}");
-        sb.AppendLine($"support_material = {(profile?.Supports ?? false ? "1" : "0")}");
-        sb.AppendLine();
-        sb.AppendLine("[filament]");
-        sb.AppendLine($"filament_type = {profile?.Material ?? "PLA"}");
-        return sb.ToString();
     }
 }
