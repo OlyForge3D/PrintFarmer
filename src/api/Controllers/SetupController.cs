@@ -120,29 +120,30 @@ public class SetupController : ControllerBase
 
         // Load password policy (default values if none present)
         var policy = await _db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
-        var minLength = policy?.MinLength ?? 12;
+        var minLength = policy?.MinLength ?? 8;
         if (request.Password.Length < minLength)
         {
-            return BadRequest(new AuthenticationResult(false, Error: $"Password must be at least {minLength} characters long for admin accounts"));
+            // Return field-level problem style error for better client UX
+            return BadRequest(new AuthenticationResult(false, Error: $"Password must be at least {minLength} characters long"));
         }
         // Optional complexity checks
         if (policy != null)
         {
             if (policy.RequireUppercase && !request.Password.Any(char.IsUpper))
             {
-                return BadRequest(new AuthenticationResult(false, Error: "Password must contain an uppercase letter"));
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain at least one uppercase letter"));
             }
             if (policy.RequireLowercase && !request.Password.Any(char.IsLower))
             {
-                return BadRequest(new AuthenticationResult(false, Error: "Password must contain a lowercase letter"));
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain at least one lowercase letter"));
             }
             if (policy.RequireDigit && !request.Password.Any(char.IsDigit))
             {
-                return BadRequest(new AuthenticationResult(false, Error: "Password must contain a digit"));
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain at least one digit"));
             }
             if (policy.RequireSymbol && request.Password.All(c => char.IsLetterOrDigit(c)))
             {
-                return BadRequest(new AuthenticationResult(false, Error: "Password must contain a symbol"));
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain at least one symbol"));
             }
         }
 
