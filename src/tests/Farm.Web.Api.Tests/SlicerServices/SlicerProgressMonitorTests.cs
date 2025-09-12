@@ -26,6 +26,7 @@ public class SlicerProgressMonitorTests
         private readonly System.IO.StreamReader _sr;
         private readonly int _exitDelayMs;
         private bool _exited;
+        public bool Killed { get; private set; }
 
         public TestProcessHandle(IEnumerable<string> lines, int exitDelayMs = 100)
         {
@@ -58,6 +59,13 @@ public class SlicerProgressMonitorTests
             }
             return ExitCode;
         }
+
+        public void Kill()
+        {
+            Killed = true;
+            _exited = true;
+            ExitCode = -1;
+        }
     }
 
     [Fact]
@@ -89,5 +97,25 @@ public class SlicerProgressMonitorTests
         notifier.Updates.Should().NotBeEmpty();
         notifier.Updates.Any(u => u.Progress == 30).Should().BeTrue();
         notifier.Updates.Any(u => u.Progress == 100).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MonitorAsync_ParserFailure_InvokesCallbackAndKillsProcess()
+    {
+        var lines = new[] { "ERROR: export failed due to permission" };
+        var handle = new TestProcessHandle(lines, exitDelayMs: 50);
+        var notifier = new TestNotifier();
+        var called = false;
+        Func<Guid, string, CancellationToken, Task> onFailure = (jobId, msg, ct) =>
+        {
+            called = true;
+            return Task.CompletedTask;
+        };
+
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token, onFailure);
+
+        called.Should().BeTrue();
+        handle.Killed.Should().BeTrue();
     }
 }

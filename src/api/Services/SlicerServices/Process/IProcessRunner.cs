@@ -12,6 +12,10 @@ public interface IProcessHandle
     bool HasExited { get; }
     int ExitCode { get; }
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);
+    /// <summary>
+    /// Attempt to terminate the underlying process.
+    /// </summary>
+    void Kill();
 }
 
 public interface IProcessRunner
