@@ -17,9 +17,7 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// </summary>
 public class SlicerWorkerHostedService : BackgroundService
 {
-    private readonly ISlicerJobQueue _jobQueue;
-    private readonly ISlicerFileStorage _fileStorage;
-    private readonly ISlicerProgressNotifier _notifier;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ISlicerExecutableManager _exeManager;
     private readonly ITempPathProvider _tempProvider;
     private readonly ILogger<SlicerWorkerHostedService> _logger;
@@ -27,18 +25,14 @@ public class SlicerWorkerHostedService : BackgroundService
     private readonly ISlicerSettingsService _settingsService;
 
     public SlicerWorkerHostedService(
-        ISlicerJobQueue jobQueue,
-        ISlicerFileStorage fileStorage,
-        ISlicerProgressNotifier notifier,
+        IServiceScopeFactory scopeFactory,
         ISlicerExecutableManager exeManager,
         ITempPathProvider tempProvider,
         ILogger<SlicerWorkerHostedService> logger,
         IConfiguration cfg,
         ISlicerSettingsService settingsService)
     {
-        _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
-        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
-        _notifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _exeManager = exeManager ?? throw new ArgumentNullException(nameof(exeManager));
         _tempProvider = tempProvider ?? throw new ArgumentNullException(nameof(tempProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -55,7 +49,6 @@ public class SlicerWorkerHostedService : BackgroundService
         {
             try
             {
-                // Check runtime settings and idle if disabled
                 var runtimeSettings = _settingsService.GetSettings();
                 if (!runtimeSettings.Enabled)
                 {
@@ -65,14 +58,18 @@ public class SlicerWorkerHostedService : BackgroundService
                 }
 
                 // Attempt to dequeue a job (non-blocking)
-                var job = await _jobQueue.DequeueAsync(_config.WorkerId, null, stoppingToken);
-                if (job == null)
+                using (var scope = _scopeFactory.CreateScope())
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-                    continue;
-                }
+                    var jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
+                    var job = await jobQueue.DequeueAsync(_config.WorkerId, null, stoppingToken);
+                    if (job == null)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                        continue;
+                    }
 
-                _ = Task.Run(() => ProcessJobAsync(job, stoppingToken), stoppingToken);
+                    _ = Task.Run(() => ProcessJobAsync(job, stoppingToken), stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -90,19 +87,25 @@ public class SlicerWorkerHostedService : BackgroundService
 
     private async Task ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken)
     {
+        // Create a scope for all scoped services used while processing this job
+        using var scope = _scopeFactory.CreateScope();
+        var jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
+        var fileStorage = scope.ServiceProvider.GetRequiredService<ISlicerFileStorage>();
+        var notifier = scope.ServiceProvider.GetRequiredService<ISlicerProgressNotifier>();
+
         var started = DateTime.UtcNow;
         job.WorkerId = _config.WorkerId;
         try
         {
             _logger.LogInformation("Processing slicing job {JobId} (engine {Engine})", job.Id, job.EngineType);
-            await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 5, Status = SlicingJobStatus.Slicing, CurrentStep = "Queued to worker" }, cancellationToken);
+            await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 5, Status = SlicingJobStatus.Slicing, CurrentStep = "Queued to worker" }, cancellationToken);
 
             // Download model to temp
             var tempRoot = Path.GetFullPath(_tempProvider.GetTempRoot());
             var jobDir = Path.Combine(tempRoot, "slicer", job.Id.ToString());
             Directory.CreateDirectory(jobDir);
 
-            var fileBytes = await _fileStorage.DownloadFileBytesAsync(job.ModelFileUrl.ToString(), cancellationToken);
+            var fileBytes = await fileStorage.DownloadFileBytesAsync(job.ModelFileUrl.ToString(), cancellationToken);
             var inputFileName = string.IsNullOrWhiteSpace(job.ModelFileName) ? $"{job.Id}.stl" : job.ModelFileName;
             var inputPath = Path.Combine(jobDir, inputFileName);
             await File.WriteAllBytesAsync(inputPath, fileBytes, cancellationToken);
@@ -112,7 +115,7 @@ public class SlicerWorkerHostedService : BackgroundService
             // Decide execution path
             if (_exeManager.TryGetExecutable(job.EngineType, out var exe, out var argsTemplate) && !string.IsNullOrWhiteSpace(exe) && File.Exists(exe))
             {
-                await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 10, Status = SlicingJobStatus.Slicing, CurrentStep = "Initializing slicer" }, cancellationToken);
+                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 10, Status = SlicingJobStatus.Slicing, CurrentStep = "Initializing slicer" }, cancellationToken);
 
                 // Engine-specific preparation
                 if (job.EngineType == SlicerEngineType.PrusaSlicer)
@@ -188,11 +191,11 @@ public class SlicerWorkerHostedService : BackgroundService
                 // After starting the process, choose a tailored progress monitor when available
                 if (job.EngineType == SlicerEngineType.PrusaSlicer)
                 {
-                    _ = Task.Run(async () => await MonitorPrusaProgressAsync(job.Id, proc, cancellationToken), cancellationToken);
+                    _ = Task.Run(async () => await MonitorPrusaProgressAsync(job.Id, proc, notifier, cancellationToken), cancellationToken);
                 }
                 else if (job.EngineType == SlicerEngineType.OrcaSlicer)
                 {
-                    _ = Task.Run(async () => await MonitorOrcaProgressAsync(job.Id, proc, cancellationToken), cancellationToken);
+                    _ = Task.Run(async () => await MonitorOrcaProgressAsync(job.Id, proc, notifier, cancellationToken), cancellationToken);
                 }
                 else
                 {
@@ -215,7 +218,7 @@ public class SlicerWorkerHostedService : BackgroundService
                                     if (!string.IsNullOrEmpty(digits) && int.TryParse(digits, out var p))
                                     {
                                         var clamped = Math.Max(0, Math.Min(100, p));
-                                        await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 10 + (int)(clamped * 0.8), Status = SlicingJobStatus.Slicing, CurrentStep = line }, cancellationToken);
+                                        await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 10 + (int)(clamped * 0.8), Status = SlicingJobStatus.Slicing, CurrentStep = line }, cancellationToken);
                                     }
                                 }
                             }
@@ -250,7 +253,7 @@ public class SlicerWorkerHostedService : BackgroundService
 
                 var gcodeStream = File.OpenRead(outputGcode);
                 var key = $"gcode/{job.Id}/{Path.GetFileName(outputGcode)}";
-                var url = await _fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", cancellationToken);
+                var url = await fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", cancellationToken);
                 await gcodeStream.DisposeAsync();
 
                 var result = new SlicingResult
@@ -264,20 +267,20 @@ public class SlicerWorkerHostedService : BackgroundService
                     LayerCount = job.LayerCount ?? 0
                 };
 
-                await _jobQueue.CompleteJobAsync(job, result, cancellationToken: cancellationToken);
-                await _notifier.NotifyCompletionAsync(job, result, cancellationToken);
+                await jobQueue.CompleteJobAsync(job, result, cancellationToken: cancellationToken);
+                await notifier.NotifyCompletionAsync(job, result, cancellationToken);
             }
             else
             {
                 // No executable available - fallback to lightweight mock slicing (for dev/test)
-                await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 20, Status = SlicingJobStatus.Slicing, CurrentStep = "Mock slicing (no executable configured)" }, cancellationToken);
+                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 20, Status = SlicingJobStatus.Slicing, CurrentStep = "Mock slicing (no executable configured)" }, cancellationToken);
                 var outputGcode = Path.Combine(jobDir, Path.GetFileNameWithoutExtension(inputPath) + ".gcode");
                 await File.WriteAllTextAsync(outputGcode, $"; Mock G-code for job {job.Id}\nG28\n; Generated at {DateTime.UtcNow:O}", cancellationToken);
                 await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
 
                 var gcodeStream = File.OpenRead(outputGcode);
                 var key = $"gcode/{job.Id}/{Path.GetFileName(outputGcode)}";
-                var url = await _fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", cancellationToken);
+                var url = await fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", cancellationToken);
                 await gcodeStream.DisposeAsync();
 
                 var result = new SlicingResult
@@ -291,15 +294,15 @@ public class SlicerWorkerHostedService : BackgroundService
                     LayerCount = 150
                 };
 
-                await _jobQueue.CompleteJobAsync(job, result, cancellationToken: cancellationToken);
-                await _notifier.NotifyCompletionAsync(job, result, cancellationToken);
+                await jobQueue.CompleteJobAsync(job, result, cancellationToken: cancellationToken);
+                await notifier.NotifyCompletionAsync(job, result, cancellationToken);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Slicing job {JobId} failed", job.Id);
-            await _jobQueue.FailJobAsync(job.Id, ex.Message, cancellationToken);
-            await _notifier.NotifyFailureAsync(job, ex.Message, cancellationToken);
+            await jobQueue.FailJobAsync(job.Id, ex.Message, cancellationToken);
+            await notifier.NotifyFailureAsync(job, ex.Message, cancellationToken);
         }
         finally
         {
@@ -320,7 +323,7 @@ public class SlicerWorkerHostedService : BackgroundService
         }
     }
 
-    private async Task MonitorPrusaProgressAsync(Guid jobId, Process process, CancellationToken ct)
+    private async Task MonitorPrusaProgressAsync(Guid jobId, Process process, ISlicerProgressNotifier notifier, CancellationToken ct)
     {
         try
         {
@@ -369,14 +372,14 @@ public class SlicerWorkerHostedService : BackgroundService
 
                         var phase = phases[Math.Min(phaseIdx, phases.Length - 1)];
                         var progress = phase.Start + (phase.End - phase.Start) / 2;
-                        await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = progress, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
+                        await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = progress, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
                     }
                 }
 
                 // Periodic heartbeat progress based on elapsed time as fallback
                 var elapsed = DateTime.UtcNow - start;
                 var estimated = Math.Min(95, 20 + (int)Math.Min(70, elapsed.TotalSeconds / 2));
-                await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "Slicing in progress..." }, ct);
+                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "Slicing in progress..." }, ct);
 
                 await Task.Delay(TimeSpan.FromSeconds(3), ct);
             }
@@ -388,7 +391,7 @@ public class SlicerWorkerHostedService : BackgroundService
         }
     }
 
-    private async Task MonitorOrcaProgressAsync(Guid jobId, Process process, CancellationToken ct)
+    private async Task MonitorOrcaProgressAsync(Guid jobId, Process process, ISlicerProgressNotifier notifier, CancellationToken ct)
     {
         try
         {
@@ -436,21 +439,21 @@ public class SlicerWorkerHostedService : BackgroundService
                             if (!string.IsNullOrEmpty(digits) && int.TryParse(digits, out var p))
                             {
                                 var clamped = Math.Max(0, Math.Min(100, p));
-                                await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = clamped, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
+                                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = clamped, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
                                 continue;
                             }
                         }
 
                         var phase = phases[Math.Min(phaseIdx, phases.Length - 1)];
                         var progress = phase.Start + (phase.End - phase.Start) / 2;
-                        await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = progress, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
+                        await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = progress, Status = SlicingJobStatus.Slicing, CurrentStep = line }, ct);
                     }
                 }
 
                 // Heartbeat fallback progress based on elapsed time
                 var elapsed = DateTime.UtcNow - start;
                 var estimated = Math.Min(95, 10 + (int)Math.Min(85, elapsed.TotalSeconds / 1.5));
-                await _notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "OrcaSlicer processing..." }, ct);
+                await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "OrcaSlicer processing..." }, ct);
 
                 await Task.Delay(TimeSpan.FromSeconds(2), ct);
             }
