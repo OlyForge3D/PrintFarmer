@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
+import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
 import type { FilamentType } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,6 +20,10 @@ export function SettingsPage() {
   const [maxConcurrentScans, setMaxConcurrentScans] = useState(20);
   const [scanPorts, setScanPorts] = useState<number[]>([80, 7125]);
   const [filamentTypes, setFilamentTypes] = useState<FilamentType[]>([]);
+  // Password policy via React Query
+  const { data: passwordPolicy, savePolicy, saving, reset: resetPolicy } = usePasswordPolicy();
+  const [draftPolicy, setDraftPolicy] = useState({ minLength: 12, requireUppercase: false, requireLowercase: false, requireDigit: false, requireSymbol: false });
+  const [policyDirty, setPolicyDirty] = useState(false);
   
   const [testing, setTesting] = useState(false);
   const [testOk, setTestOk] = useState<boolean | null>(null);
@@ -38,12 +43,20 @@ export function SettingsPage() {
     loadSettings();
   }, []);
 
+  // Sync draft when policy loads
+  useEffect(() => {
+    if (passwordPolicy && !policyDirty) {
+      setDraftPolicy(passwordPolicy);
+    }
+  }, [passwordPolicy, policyDirty]);
+
   const loadSettings = async () => {
     try {
       setLoading(true);
       // Load filament types
       const types = await apiClient.getFilamentTypes();
       setFilamentTypes(types);
+      // password policy handled by usePasswordPolicy
       
       // For other settings, we might need to implement API endpoints
       // For now, use default values or localStorage
@@ -57,7 +70,7 @@ export function SettingsPage() {
         setDiscoveryTimeout(nd.timeoutMs);
         setMaxConcurrentScans(nd.maxConcurrentScans);
         setScanPorts(nd.ports);
-  } catch {
+      } catch {
         // Fallback to any legacy localStorage values (backwards compatibility)
         const savedRanges = localStorage.getItem('network-ranges');
         if (savedRanges) {
@@ -77,6 +90,28 @@ export function SettingsPage() {
       console.error('Error loading settings:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const authHeader = (): Record<string, string> => {
+    const token = localStorage.getItem('auth-token');
+    return token ? { Authorization: `Bearer ${token}` } : {} as Record<string, string>;
+  };
+
+  const updatePolicyField = (field: string, value: unknown) => {
+    setDraftPolicy(prev => ({ ...prev, [field]: value }));
+    setPolicyDirty(true);
+  };
+
+  const savePasswordPolicy = async () => {
+    if (!hasRole('farm_admin') || !draftPolicy) return;
+    try {
+      await savePolicy(draftPolicy);
+      setPolicyDirty(false);
+      toast.success('Password policy saved');
+    } catch (err) {
+      console.error('Failed to save password policy', err);
+      toast.error('Failed to save password policy');
     }
   };
 
@@ -208,28 +243,19 @@ export function SettingsPage() {
 
   const updateFilamentType = async (id: string, name: string, hotend: number, bed: number) => {
     try {
-      await apiClient.updateFilamentType(id, {
-        name,
-        defaultTemperatures: { hotend, bed }
-      });
-      setFilamentTypes(prev => prev.map(ft => 
-        ft.id === id 
-          ? { ...ft, name, defaultTemperatures: { hotend, bed } }
-          : ft
-      ).sort((a, b) => a.name.localeCompare(b.name)));
-      setEditingFilamentType(null);
+      await apiClient.updateFilamentType(id, { name, defaultTemperatures: { hotend, bed } });
+      setFilamentTypes(prev => prev.map(ft => ft.id === id ? { ...ft, name, defaultTemperatures: { hotend, bed } } : ft).sort((a, b) => a.name.localeCompare(b.name)));
       setError(null);
-  toast.success('Filament type updated');
+      toast.success('Filament type updated');
     } catch (err) {
       setError('Failed to update filament type');
       console.error('Error updating filament type:', err);
-  toast.error('Failed to update filament type');
+      toast.error('Failed to update filament type');
     }
   };
 
   const deleteFilamentType = async (id: string) => {
     if (!confirm('Are you sure you want to delete this filament type?')) return;
-    
     try {
       await apiClient.deleteFilamentType(id);
       setFilamentTypes(prev => prev.filter(ft => ft.id !== id));
@@ -260,7 +286,6 @@ export function SettingsPage() {
   const removeScanPort = (index: number) => {
     setScanPorts(scanPorts.filter((_, i) => i !== index));
   };
-
   const updateScanPort = (index: number, port: number) => {
     const updated = scanPorts.map((p, i) => i === index ? port : p);
     setScanPorts(updated);
@@ -709,6 +734,90 @@ export function SettingsPage() {
           </button>
         </div>
       </div>
+
+      {hasRole('farm_admin') && passwordPolicy && (
+        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+          <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Password Policy</h2>
+          <p className="text-sm text-pf-text-secondary mb-4">Configure global password requirements for new accounts and admin creation.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-pf-text-primary mb-2">Minimum Length</label>
+              <input
+                id="pp-minlength"
+                type="number"
+                min={6}
+                max={256}
+                aria-label="Minimum password length"
+                value={draftPolicy.minLength}
+                onChange={(e) => updatePolicyField('minLength', Number(e.target.value))}
+                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
+              />
+              <p className="text-xs text-pf-text-secondary mt-1">Applies to all new passwords. Existing passwords unaffected.</p>
+            </div>
+            <div className="space-y-2 col-span-2">
+              <div className="flex items-center gap-2">
+                <input
+                  id="pp-upper"
+                  type="checkbox"
+                  checked={draftPolicy.requireUppercase}
+                  onChange={(e) => updatePolicyField('requireUppercase', e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="pp-upper" className="text-sm text-pf-text-primary">Require Uppercase Letter</label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pp-lower"
+                  type="checkbox"
+                  checked={draftPolicy.requireLowercase}
+                  onChange={(e) => updatePolicyField('requireLowercase', e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="pp-lower" className="text-sm text-pf-text-primary">Require Lowercase Letter</label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pp-digit"
+                  type="checkbox"
+                  checked={draftPolicy.requireDigit}
+                  onChange={(e) => updatePolicyField('requireDigit', e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="pp-digit" className="text-sm text-pf-text-primary">Require Digit</label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pp-symbol"
+                  type="checkbox"
+                  checked={draftPolicy.requireSymbol}
+                  onChange={(e) => updatePolicyField('requireSymbol', e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="pp-symbol" className="text-sm text-pf-text-primary">Require Symbol</label>
+              </div>
+            </div>
+          </div>
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={savePasswordPolicy}
+              disabled={!policyDirty || saving || draftPolicy.minLength < 6 || draftPolicy.minLength > 256}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save className="h-4 w-4" />
+              {saving ? 'Saving...' : 'Save Policy'}
+            </button>
+            {policyDirty && !saving && (
+              <button
+                type="button"
+                onClick={() => { setPolicyDirty(false); resetPolicy(); }}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

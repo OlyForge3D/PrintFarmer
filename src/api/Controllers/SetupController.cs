@@ -118,10 +118,32 @@ public class SetupController : ControllerBase
             return BadRequest(new AuthenticationResult(false, Error: "Username, email, and password are required"));
         }
 
-        // Validate password strength
-        if (request.Password.Length < 8)
+        // Load password policy (default values if none present)
+        var policy = await _db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
+        var minLength = policy?.MinLength ?? 12;
+        if (request.Password.Length < minLength)
         {
-            return BadRequest(new AuthenticationResult(false, Error: "Password must be at least 8 characters long for admin accounts"));
+            return BadRequest(new AuthenticationResult(false, Error: $"Password must be at least {minLength} characters long for admin accounts"));
+        }
+        // Optional complexity checks
+        if (policy != null)
+        {
+            if (policy.RequireUppercase && !request.Password.Any(char.IsUpper))
+            {
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain an uppercase letter"));
+            }
+            if (policy.RequireLowercase && !request.Password.Any(char.IsLower))
+            {
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain a lowercase letter"));
+            }
+            if (policy.RequireDigit && !request.Password.Any(char.IsDigit))
+            {
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain a digit"));
+            }
+            if (policy.RequireSymbol && request.Password.All(c => char.IsLetterOrDigit(c)))
+            {
+                return BadRequest(new AuthenticationResult(false, Error: "Password must contain a symbol"));
+            }
         }
 
         // Check if username or email already exists

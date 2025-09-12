@@ -32,6 +32,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Domain.Action> Actions => Set<Domain.Action>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

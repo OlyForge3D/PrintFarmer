@@ -285,7 +285,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </button>
             </div>
             <p className="text-xs text-pf-text-tertiary mt-1">
-              Must be at least 8 characters long
+              Must be at least 8 characters and ideally include upper, lower, number & symbol.
             </p>
           </div>
 

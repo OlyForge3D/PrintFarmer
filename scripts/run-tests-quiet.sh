@@ -47,9 +47,13 @@ fi
 FILTER_ARG=""
 if $skip_docker; then
   echo "[INFO] --skip-docker specified -> filtering out Category=Docker and Category=Slow tests";
-  # Exclude multiple categories: (TestCategory!=Docker)&(TestCategory!=Slow)
-  FILTER_ARG='--filter (TestCategory!=Docker)&(TestCategory!=Slow)'
+  # xUnit traits: first argument of [Trait] => key 'Category'
+  # Exclude tests where Category is Docker OR Slow
+  FILTER_ARG='--filter (Category!=Docker)&(Category!=Slow)'
 fi
+  # For xUnit, trait key is the first parameter (e.g. [Trait("Category","Docker")]) so filter by 'Category'
+  # Exclude multiple categories: (TestCategory!=Docker)&(TestCategory!=Slow)
+  
 
 INTERRUPTED=false
 trap 'INTERRUPTED=true' INT TERM

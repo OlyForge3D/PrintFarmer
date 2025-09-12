@@ -1039,11 +1039,11 @@ public class CreateSlicerProfileDto
     public double PrintSpeed { get; set; } = 50;
     public int NozzleTemperature { get; set; } = 210;
     public int BedTemperature { get; set; } = 60;
-    public bool EnableSupports { get; set; } = false;
+    public bool EnableSupports { get; set; }
     public string Material { get; set; } = "PLA";
     public string Quality { get; set; } = "Standard"; // Draft, Standard, Fine
     public string? AdvancedSettings { get; set; }
-    public bool IsDefault { get; set; } = false;
+    public bool IsDefault { get; set; }
     public bool IsPublic { get; set; } = true;
 }
 
@@ -1355,6 +1355,12 @@ public class UpdateUserRequest
     public bool? IsActive { get; set; }
     public Guid[]? RoleIds { get; set; }
 }
+
+/// <summary>
+/// Result of a lightweight availability check for prospective username/email.
+/// null indicates the value was not requested / provided.
+/// </summary>
+public record UserAvailabilityDto(bool? UsernameExists, bool? EmailExists);
 
 /// <summary>
 /// Payload for creating a new role and its permission set.
