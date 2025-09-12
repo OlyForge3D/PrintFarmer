@@ -4,6 +4,7 @@ using Farm.Web.Api.Tests;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class DebugDbInfoEndpointTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -11,6 +12,7 @@ public class DebugDbInfoEndpointTests : IClassFixture<CustomWebApplicationFactor
 
     public DebugDbInfoEndpointTests(CustomWebApplicationFactory factory)
     {
+        ArgumentNullException.ThrowIfNull(factory);
         _factory = factory;
         _client = factory.CreateClient();
     }

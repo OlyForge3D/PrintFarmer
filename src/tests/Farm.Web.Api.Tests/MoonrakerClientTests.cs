@@ -239,12 +239,10 @@ public class MoonrakerClientTests
     [InlineData("M112", nameof(IMoonrakerClient.EmergencyStopAsync))]
     public async Task GcodeCommandEndpoints_SendExpectedScriptAsync(string expectedScript, string methodName)
     {
-        string? body = null;
-        var (client, _, _) = CreateClient(req =>
+        var (client, _, recorded) = CreateClient(req =>
         {
             req.Method.Should().Be(HttpMethod.Post);
             req.RequestUri!.AbsolutePath.Should().Be("/printer/gcode/script");
-            body = req.Content!.ReadAsStringAsync().Result;
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
@@ -254,21 +252,18 @@ public class MoonrakerClientTests
         var task = (Task<bool>)mi!.Invoke(client, [Base, CancellationToken.None])!;
         var ok = await task;
         ok.Should().BeTrue();
+        var body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain(expectedScript);
     }
 
     [Fact]
     public async Task SetTempsAsync_PostsM104AndM140Async()
     {
-        string? body = null;
-        var (client, _, _) = CreateClient(req =>
-        {
-            body = req.Content!.ReadAsStringAsync().Result;
-            return new HttpResponseMessage(HttpStatusCode.OK);
-        });
+        var (client, _, recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
         var ok = await client.SetTempsAsync(Base, hotend: 210, bed: 60);
         ok.Should().BeTrue();
+        var body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("M104 S210");
         body.Should().Contain("M140 S60");
     }
@@ -276,15 +271,11 @@ public class MoonrakerClientTests
     [Fact]
     public async Task MoveAsync_UsesRelativeModeAndResetsAbsoluteAsync()
     {
-        string? body = null;
-        var (client, _, _) = CreateClient(req =>
-        {
-            body = req.Content!.ReadAsStringAsync().Result;
-            return new HttpResponseMessage(HttpStatusCode.OK);
-        });
+        var (client, _, recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
         var ok = await client.MoveAsync(Base, x: 1.5, y: -2.25, f: 1200);
         ok.Should().BeTrue();
+        var body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("G91 G0");
         body.Should().Contain("X1.5 Y-2.25 F1200");
         body.Should().Contain("G90");
@@ -293,31 +284,26 @@ public class MoonrakerClientTests
     [Fact]
     public async Task MoveToAsync_UsesAbsoluteMoveAsync()
     {
-        string? body = null;
-        var (client, _, _) = CreateClient(req =>
-        {
-            body = req.Content!.ReadAsStringAsync().Result;
-            return new HttpResponseMessage(HttpStatusCode.OK);
-        });
+        var (client, _, recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
         var ok = await client.MoveToAsync(Base, x: 100, z: 0.2, f: 3000);
         ok.Should().BeTrue();
+        var body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("G90 G0 X100 Z0.2 F3000");
     }
 
     [Fact]
     public async Task StartPrintAsync_PostsFilenameAsync()
     {
-        string? body = null;
-        var (client, _, _) = CreateClient(req =>
+        var (client, _, recorded) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/printer/print/start");
-            body = req.Content!.ReadAsStringAsync().Result;
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
         var ok = await client.StartPrintAsync(Base, "benchy.gcode");
         ok.Should().BeTrue();
+        var body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("benchy.gcode");
     }
 
@@ -376,18 +362,17 @@ public class MoonrakerClientTests
     [Fact]
     public async Task CreateDirectoryAsync_PostsAndParsesResponseAsync()
     {
-        string? body = null;
-        var (client, _, _) = CreateClient(req =>
+        var (client, _, recorded) = CreateClient(req =>
         {
             req.Method.Should().Be(HttpMethod.Post);
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
-            body = req.Content!.ReadAsStringAsync().Result;
             return Json(new { result = new { item = new { path = "gcodes/new", modified = 0, size = 0, permissions = "rw" }, action = "create_dir" } });
         });
 
         var res = await client.CreateDirectoryAsync(Base, "gcodes/new");
         res.Should().NotBeNull();
         res!.Item.Path.Should().Be("gcodes/new");
+        var body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("gcodes/new");
     }
 
@@ -410,18 +395,14 @@ public class MoonrakerClientTests
     [Fact]
     public async Task MoveAndCopyFileAsync_PostsSourceAndDestAsync()
     {
-        string? moveBody = null;
-        string? copyBody = null;
-        var (client, _, _) = CreateClient(req =>
+        var (client, _, recorded) = CreateClient(req =>
         {
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/move"))
             {
-                moveBody = req.Content!.ReadAsStringAsync().Result;
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/copy"))
             {
-                copyBody = req.Content!.ReadAsStringAsync().Result;
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -429,6 +410,10 @@ public class MoonrakerClientTests
 
         (await client.MoveFileAsync(Base, "src.gcode", "dst.gcode")).Should().BeTrue();
         (await client.CopyFileAsync(Base, "a.gcode", "b.gcode")).Should().BeTrue();
+        var moveReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/move"));
+        var copyReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/copy"));
+        var moveBody = await moveReq.Content!.ReadAsStringAsync();
+        var copyBody = await copyReq.Content!.ReadAsStringAsync();
         moveBody.Should().Contain("src.gcode");
         moveBody.Should().Contain("dst.gcode");
         copyBody.Should().Contain("a.gcode");

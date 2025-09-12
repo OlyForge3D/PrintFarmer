@@ -6,6 +6,7 @@ using System.Net;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class SpoolmanControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

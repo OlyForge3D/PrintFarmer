@@ -3,6 +3,7 @@ using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public sealed class SetupWizardIntegrationTests : IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;

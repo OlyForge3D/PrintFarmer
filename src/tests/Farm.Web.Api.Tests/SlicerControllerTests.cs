@@ -12,6 +12,7 @@ namespace Farm.Web.Api.Tests;
 /// <summary>
 /// Integration tests for SlicerController (slicer integration and profile management)
 /// </summary>
+[Trait("Category", "DbHeavy")]
 public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

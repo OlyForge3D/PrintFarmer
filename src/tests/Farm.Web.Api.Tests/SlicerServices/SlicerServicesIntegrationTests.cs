@@ -13,6 +13,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Tests the interaction between orchestrator, engines, storage, and notifications
 /// </summary>
 [Trait("Category", "Docker")]
+[Trait("Category", "DbHeavy")]
 public class SlicerServicesIntegrationTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;

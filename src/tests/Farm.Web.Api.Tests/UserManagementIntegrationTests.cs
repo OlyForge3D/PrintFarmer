@@ -3,6 +3,7 @@ using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class UserManagementIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -10,8 +11,9 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
 
     public UserManagementIntegrationTests(CustomWebApplicationFactory factory)
     {
+        ArgumentNullException.ThrowIfNull(factory);
         _factory = factory;
-        _client = _factory.CreateClient();
+        _client = factory.CreateClient();
     }
 
     private async Task<string> CreateAdminAndGetTokenAsync()

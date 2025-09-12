@@ -40,6 +40,7 @@ public static class SlicingJobStatusExtensions
 /// <summary>
 /// Priority level for slicing jobs
 /// </summary>
+// Single JsonConverter attribute (duplicate removed)
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SlicingJobPriority
 {
@@ -52,6 +53,7 @@ public enum SlicingJobPriority
 /// <summary>
 /// Supported slicer engine types
 /// </summary>
+// Single JsonConverter attribute (duplicate removed)
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SlicerEngineType
 {

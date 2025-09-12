@@ -1,10 +1,12 @@
 using System.Text.Json.Serialization;
+// Serialization constructors removed (legacy binary serialization not required)
 
 namespace Farm.Web.Shared;
 
 /// <summary>
 /// Formal job lifecycle states following the pattern: queued → dispatched → processing → (succeeded | failed | cancelled | dead-letter)
 /// </summary>
+// Single JsonConverter attribute (duplicate removed)
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum JobState
 {
@@ -47,6 +49,9 @@ public enum JobState
 /// <summary>
 /// Exception thrown when an invalid job state transition is attempted
 /// </summary>
+/// <summary>
+/// Exception thrown when an invalid job state transition is attempted
+/// </summary>
 public class InvalidJobStateTransitionException : InvalidOperationException
 {
     public JobState FromState { get; }
@@ -58,6 +63,11 @@ public class InvalidJobStateTransitionException : InvalidOperationException
         FromState = fromState;
         ToState = toState;
     }
+
+    // Standard optional exception constructors (for completeness)
+    public InvalidJobStateTransitionException() { }
+    public InvalidJobStateTransitionException(string message) : base(message) { }
+    public InvalidJobStateTransitionException(string message, Exception inner) : base(message, inner) { }
 }
 
 /// <summary>

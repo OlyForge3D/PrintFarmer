@@ -11,6 +11,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Unit tests for RedisSlicerJobQueue - Redis-based distributed job queue
 /// Note: These tests use mocked Redis interfaces to avoid requiring a real Redis instance
 /// </summary>
+[Trait("Category", "DbHeavy")]
 public class RedisSlicerJobQueueTests
 {
     private readonly Mock<IConnectionMultiplexer> _mockRedis;

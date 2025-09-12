@@ -3,6 +3,7 @@ using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
+[Trait("Category", "DbHeavy")]
 public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -10,6 +11,7 @@ public class AuthenticationIntegrationTests : IClassFixture<CustomWebApplication
 
     public AuthenticationIntegrationTests(CustomWebApplicationFactory factory)
     {
+        ArgumentNullException.ThrowIfNull(factory);
         _factory = factory;
         _client = _factory.CreateClient();
     }

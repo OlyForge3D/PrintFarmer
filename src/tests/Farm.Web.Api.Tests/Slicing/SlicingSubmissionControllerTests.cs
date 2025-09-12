@@ -1,4 +1,3 @@
-// ReSharper disable RedundantUsingDirective
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +6,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
+[Trait("Category", "DbHeavy")]
 public class SlicingSubmissionControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
