@@ -486,7 +486,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             modelBuilder.Entity<PasswordPolicy>().HasData(new PasswordPolicy
             {
                 Id = 1,
-                MinLength = 12,
+                MinLength = 8,
                 RequireUppercase = false,
                 RequireLowercase = false,
                 RequireDigit = false,
