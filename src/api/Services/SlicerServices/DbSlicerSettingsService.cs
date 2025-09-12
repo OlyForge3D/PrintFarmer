@@ -55,7 +55,7 @@ public class DbSlicerSettingsService : ISlicerSettingsService
             _logger.LogWarning(ex, "Failed to deserialize per-engine slicer settings from DB; falling back to empty map");
         }
 
-        return new SlicerSettingsDto(entity.Enabled, perEngine ?? new());
+        return new SlicerSettingsDto(entity.Enabled, perEngine ?? new(), entity.JitterPercent);
     }
 
     public void SaveSettings(SlicerSettingsDto settings)
@@ -73,6 +73,7 @@ public class DbSlicerSettingsService : ISlicerSettingsService
 
         entity.Enabled = settings.Enabled;
         entity.PerEngineJson = JsonSerializer.Serialize(settings.PerEngine, _serializerOptions);
+        entity.JitterPercent = settings.JitterPercent;
         entity.UpdatedAt = DateTime.UtcNow;
 
         db.SaveChanges();

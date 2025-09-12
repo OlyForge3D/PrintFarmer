@@ -23,7 +23,7 @@ import {
   Users,
   X
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 // Layout now uses <Outlet /> for nested routes
 
@@ -95,14 +95,12 @@ export function Layout() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
 
-  // Filter navigation based on user permissions (memoized to prevent infinite re-renders)
-  const filteredNavigation = useMemo(() => {
-    return navigation.filter(item => {
-      if (item.requiredRole && !hasRole(item.requiredRole)) return false;
-      if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
-      return true;
-    });
-  }, [hasRole, hasPermission]);
+  // Filter navigation based on user permissions
+  const filteredNavigation = navigation.filter(item => {
+    if (item.requiredRole && !hasRole(item.requiredRole)) return false;
+    if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+    return true;
+  });
 
   const handleLogout = async () => {
     await logout();

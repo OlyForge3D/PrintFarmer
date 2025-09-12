@@ -17,58 +17,33 @@ public class SlicingSubmissionController : ControllerBase
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
     private readonly string _tempRoot;
     private readonly ISlicerOrchestrator _orchestrator;
+    private readonly IHostEnvironment _env;
 
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env)
     {
         ArgumentNullException.ThrowIfNull(cfg);
-        ArgumentNullException.ThrowIfNull(tempPathProvider);
         _fileStorage = fileStorage;
         _logger = logger;
         _tempPathProvider = tempPathProvider;
         _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
         Directory.CreateDirectory(_tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+        _env = env ?? throw new ArgumentNullException(nameof(env));
     }
 
     [HttpPost("slice")]
-    [Authorize]
     [ProducesResponseType(typeof(SlicingJobResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)]
-    public async Task<IActionResult> SliceAsync([FromForm(Name = "modelFile")] IFormFile? modelFile, [FromForm(Name = "slicerEngine")] string? slicerEngine, [FromForm(Name = "printerId")] string? printerId, [FromForm(Name = "profile")] string? profileRaw, [FromForm(Name = "priority")] string? priorityRaw, [FromForm] IFormFileCollection? files = null)
+    public async Task<IActionResult> SliceAsync()
     {
         if (!Request.HasFormContentType)
         {
             return BadRequest("Multipart form data is required");
         }
 
-        // Always read the form when present and populate any missing bound parameters. Tests (and some clients)
-        // may supply the slicer profile under alternate field names (e.g. 'slicerProfile') while also
-        // including a bound file; ensure we capture that value regardless of whether the model file was
-        // successfully bound by the model binder.
-        if (Request.HasFormContentType)
-        {
-            var form = await Request.ReadFormAsync();
-            // Prefer bound files collection populated by the model binder (handles arbitrary field names)
-            if (modelFile == null)
-            {
-                if (files != null && files.Count > 0)
-                {
-                    modelFile = files[0];
-                }
-                // Fall back to explicitly-parsed form files when binder does not populate the files parameter
-                else if (form.Files.Count > 0)
-                {
-                    modelFile = form.Files[0];
-                }
-            }
-
-            // Preserve other fields from form when not supplied via bound parameters
-            slicerEngine ??= form["slicerEngine"].FirstOrDefault();
-            printerId ??= form["printerId"].FirstOrDefault();
-            profileRaw ??= form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
-            priorityRaw ??= form["priority"].FirstOrDefault();
-        }
+        var form = await Request.ReadFormAsync();
+        var modelFile = form.Files.Count > 0 ? form.Files[0] : null;
         if (modelFile == null || modelFile.Length == 0)
         {
             return BadRequest("Model file is required");
@@ -89,21 +64,21 @@ public class SlicingSubmissionController : ControllerBase
                 return BadRequest("Invalid model file");
             }
         }
-        catch
-        {
-            return BadRequest("Invalid model file");
-        }
+        catch { return BadRequest("Invalid model file"); }
 
+        var slicerEngine = form["slicerEngine"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(slicerEngine) || !AllowedEngines.Contains(slicerEngine))
         {
             return BadRequest("Valid slicer engine is required");
         }
 
+        var printerId = form["printerId"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out var printerGuid))
         {
             return BadRequest("Valid printer ID is required");
         }
 
+        var profileRaw = form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
         if (string.IsNullOrEmpty(profileRaw))
         {
             return BadRequest("Valid slicer profile is required");
@@ -111,14 +86,10 @@ public class SlicingSubmissionController : ControllerBase
 
         SlicerProfileDto? profile;
         try
-        {
-            profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw);
-        }
-        catch
-        {
-            return BadRequest("Invalid slicer profile format");
-        }
+        { profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw); }
+        catch { return BadRequest("Invalid slicer profile format"); }
 
+        var priorityRaw = form["priority"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(priorityRaw) && !Enum.TryParse(priorityRaw, true, out SlicingJobPriority _))
         {
             return BadRequest($"Invalid priority: {priorityRaw}. Supported priorities: {string.Join(", ", Enum.GetNames<SlicingJobPriority>())}");
@@ -143,7 +114,7 @@ public class SlicingSubmissionController : ControllerBase
             Guid userId;
             if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
             {
-                if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Testing")
+                if (_env.IsEnvironment("Testing"))
                 {
                     // Provide a stable test user id for integration tests that don't include auth
                     userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
@@ -165,45 +136,6 @@ public class SlicingSubmissionController : ControllerBase
             };
 
             var response = await _orchestrator.SubmitJobAsync(request);
-
-            // In Testing environment register the job in the in-memory SlicingJobStore as Queued for predictable test behavior
-            if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Testing")
-            {
-                var jobId = response.JobId.ToString();
-                var sliceResult = new SliceResultDto
-                {
-                    JobId = jobId,
-                    Status = SlicingJobStatus.Queued.ToString(),
-                    Progress = 0,
-                    PrintTime = 0,
-                    FilamentUsed = 0,
-                    LayerCount = 0,
-                    GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode",
-                    Metadata = new SliceMetadataDto
-                    {
-                        SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                        ProfileUsed = profile!.Quality + " - " + profile.Material,
-                        EstimatedCost = 0
-                    }
-                };
-
-                var storeJob = new SlicingJobDto
-                {
-                    JobId = jobId,
-                    Status = SlicingJobStatus.Queued,
-                    Progress = 0,
-                    SlicerEngine = slicerEngine,
-                    PrinterId = printerGuid,
-                    ModelFilePath = modelFileUrl,
-                    GcodeFilePath = null,
-                    Profile = profile,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                SlicingJobStore.Add(storeJob);
-
-                return Accepted(sliceResult);
-            }
 
             var accepted = new
             {

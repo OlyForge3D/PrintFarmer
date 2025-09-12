@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared;
 
@@ -40,7 +40,6 @@ public static class SlicingJobStatusExtensions
 /// <summary>
 /// Priority level for slicing jobs
 /// </summary>
-// Single JsonConverter attribute (duplicate removed)
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SlicingJobPriority
 {
@@ -53,7 +52,6 @@ public enum SlicingJobPriority
 /// <summary>
 /// Supported slicer engine types
 /// </summary>
-// Single JsonConverter attribute (duplicate removed)
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SlicerEngineType
 {
@@ -75,7 +73,7 @@ public class SlicingJobRequest
     public SlicerEngineType SlicerEngine { get; set; } = SlicerEngineType.OrcaSlicer;
     public SlicerProfileDto SlicerProfile { get; set; } = new();
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
-    public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
+    public Dictionary<string, object> Metadata { get; } = [];
 
     /// <summary>
     /// Message envelope for idempotency and tracking
@@ -131,7 +129,7 @@ public class DistributedSlicingJob : SlicingJobDto
     public long? OutputFileSizeBytes { get; set; }
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
-    public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
+    public Dictionary<string, object> Metadata { get; } = [];
     public int RetryCount { get; set; } // default 0
     public DateTime? LastRetryAt { get; set; }
     public DateTime? ScheduledAt { get; set; } // Optional: when job becomes available for processing (for delayed retries)
@@ -263,7 +261,7 @@ public class SlicingJobStatusResponse
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
-    public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
+    public Dictionary<string, object> Metadata { get; } = [];
     // Retry & scheduling metadata
     public int RetryCount { get; set; }
     public DateTime? ScheduledAt { get; set; }
@@ -283,7 +281,7 @@ public class SlicingResult
     public double EstimatedPrintTimeSeconds { get; set; }
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
-    public Dictionary<string, string> Metadata { get; } = new Dictionary<string, string>();
+    public Dictionary<string, string> Metadata { get; } = [];
 }
 
 /// <summary>
@@ -299,7 +297,7 @@ public class SlicerHealthCheckResponse
     public long AvailableMemoryMB { get; set; }
     public DateTime? LastJobCompletedAt { get; set; }
     public bool IsHealthy { get; set; }
-    public Dictionary<string, object> Details { get; } = new Dictionary<string, object>();
+    public Dictionary<string, object> Details { get; } = [];
 }
 
 /// <summary>
@@ -307,7 +305,7 @@ public class SlicerHealthCheckResponse
 /// </summary>
 public class SlicerWorkerConfiguration
 {
-    public string WorkerId { get; set; } = string.Concat(Environment.MachineName, "-", Guid.NewGuid().ToString("N").AsSpan(0, 8).ToString());
+    public string WorkerId { get; set; } = Environment.MachineName + "-" + Guid.NewGuid().ToString("N")[..8];
     public SlicerEngineType SlicerEngine { get; set; }
     public int MaxConcurrentJobs { get; set; } = Environment.ProcessorCount;
     public int MaxRetryCount { get; set; } = 3;
@@ -318,7 +316,7 @@ public class SlicerWorkerConfiguration
     public string TempDirectory { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "temp");
     public long MaxFileSizeBytes { get; set; } = 100_000_000; // 100MB
     public double JitterPercent { get; set; } = 15.0; // Percent (+/-) applied to retry backoff range (e.g., 15 = +/-15%)
-    public Dictionary<string, object> SlicerSpecificSettings { get; } = new Dictionary<string, object>();
+    public Dictionary<string, object> SlicerSpecificSettings { get; } = [];
 
     public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)
     {
@@ -338,7 +336,7 @@ public class SlicingProgressUpdate
     public SlicingJobStatus Status { get; set; }
     public string? CurrentStep { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public Dictionary<string, object> AdditionalData { get; } = new Dictionary<string, object>();
+    public Dictionary<string, object> AdditionalData { get; } = [];
 }
 
 /// <summary>

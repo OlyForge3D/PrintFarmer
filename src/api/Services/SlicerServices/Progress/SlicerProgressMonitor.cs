@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
 public static class SlicerProgressMonitor
 {
-    public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, ILogger? logger, CancellationToken ct, Func<Guid, string, CancellationToken, Task>? onParserFailure = null)
+    public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, ILogger? logger, CancellationToken ct, Func<Guid, CancellationToken, Task>? onParserCompleted = null, Func<Guid, string, CancellationToken, Task>? onParserFailure = null)
     {
         try
         {
@@ -37,6 +37,17 @@ public static class SlicerProgressMonitor
                             if (parsed.State == SlicerProgressState.Completed)
                             {
                                 await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = 100, Status = SlicingJobStatus.Slicing, CurrentStep = parsed.Message }, ct);
+                                try
+                                {
+                                    if (onParserCompleted != null)
+                                    {
+                                        await onParserCompleted(jobId, ct);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger?.LogDebug(ex, "onParserCompleted callback threw for job {JobId}", jobId);
+                                }
                             }
                             else if (parsed.State == SlicerProgressState.Failed)
                             {
@@ -54,7 +65,9 @@ public static class SlicerProgressMonitor
                                 }
 
                                 // Ask the underlying process to terminate as an early stop
-                                try { processHandle.Kill(); } catch { }
+                                try
+                                { processHandle.Kill(); }
+                                catch { }
                             }
                             continue;
                         }

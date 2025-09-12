@@ -14,7 +14,7 @@ import {
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
-  PrinterModelDto,
+  ModelDto,
   MoveRequest,
   MultiUploadResponse,
   Printer,
@@ -38,44 +38,35 @@ export class ApiClient {
     // Use environment variable for API base URL, fallback to relative path for monolithic deployment
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
 
-    // Limit maximum response/body sizes to mitigate DoS via extremely large responses
-    const MAX_RESPONSE_BYTES = 50 * 1024 * 1024; // 50 MB
-
     this.client = axios.create({
       baseURL: apiBaseUrl,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
-      // Node-specific: limit body length
-      maxContentLength: MAX_RESPONSE_BYTES,
-      maxBodyLength: MAX_RESPONSE_BYTES,
     });
 
-    // Response size guard: if server advertises Content-Length larger than allowed, reject early
-    this.client.interceptors.response.use((response) => {
-      try {
-        const cl = response.headers && (response.headers['content-length'] || response.headers['Content-Length']);
-        if (cl) {
-          const size = Number(cl);
-          if (!Number.isNaN(size) && size > MAX_RESPONSE_BYTES) {
-            class ResponseTooLargeError extends Error { code = 'ERR_RESPONSE_TOO_LARGE'; }
-            throw new ResponseTooLargeError('Response payload too large');
-          }
-        }
+    // Request interceptor for authentication
+    this.client.interceptors.request.use((config) => {
+      const token = localStorage.getItem('auth-token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
-      catch (e) {
-        return Promise.reject(e);
-      }
-      return response;
-    }, (error: AxiosError) => {
-      const apiError: ApiError = {
-        message: error.message,
-        statusCode: error.response?.status || 500,
-        details: error.response?.data as string || undefined,
-      };
-      return Promise.reject(apiError);
+      return config;
     });
+
+    // Response interceptor for error handling
+    this.client.interceptors.response.use(
+      (response) => response,
+      (error: AxiosError) => {
+        const apiError: ApiError = {
+          message: error.message,
+          statusCode: error.response?.status || 500,
+          details: error.response?.data as string || undefined,
+        };
+        return Promise.reject(apiError);
+      }
+    );
   }
 
   // ============ Printer API methods ============
@@ -192,29 +183,29 @@ export class ApiClient {
     await this.client.delete(`/catalog/manufacturers/${id}`);
   }
 
-  async getModels(manufacturerId?: string): Promise<PrinterModelDto[]> {
+  async getModels(manufacturerId?: string): Promise<ModelDto[]> {
     const params = manufacturerId ? { manufacturerId } : {};
-    const response = await this.client.get<PrinterModelDto[]>('/catalog/printer-models', { params });
+    const response = await this.client.get<ModelDto[]>('/catalog/models', { params });
     return response.data;
   }
 
-  async createModel(model: Omit<PrinterModelDto, 'id'>): Promise<PrinterModelDto> {
-    const response = await this.client.post<PrinterModelDto>('/catalog/printer-models', model);
+  async createModel(model: Omit<ModelDto, 'id'>): Promise<ModelDto> {
+    const response = await this.client.post<ModelDto>('/catalog/models', model);
     return response.data;
   }
 
-  async updateModel(id: string, request: UpdateModelRequest): Promise<PrinterModelDto> {
-    const response = await this.client.put<PrinterModelDto>(`/catalog/printer-models/${id}`, request);
+  async updateModel(id: string, request: UpdateModelRequest): Promise<ModelDto> {
+    const response = await this.client.put<ModelDto>(`/catalog/models/${id}`, request);
     return response.data;
   }
 
   // Legacy method for simple name updates
-  async updateModelName(id: string, name: string): Promise<PrinterModelDto> {
+  async updateModelName(id: string, name: string): Promise<ModelDto> {
     return this.updateModel(id, { name });
   }
 
   async deleteModel(id: string): Promise<void> {
-    await this.client.delete(`/catalog/printer-models/${id}`);
+    await this.client.delete(`/catalog/models/${id}`);
   }
 
   // ============ Settings API methods ============
@@ -235,21 +226,10 @@ export class ApiClient {
     });
   }
 
-  // SignalR settings
-  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
-    const resp = await this.client.get('/signalr/settings');
-    const data = resp.data as { logLevel: string; consoleLoggingEnabled: boolean };
-    return data;
+  async autoDetectNetworkRanges(): Promise<string[]> {
+    const resp = await this.client.post('/network-discovery/auto-detect', {});
+    return (resp.data as { ranges: string[] }).ranges;
   }
-
-  async saveSignalRSettings(payload: { logLevel: string; consoleLoggingEnabled: boolean }): Promise<void> {
-    await this.client.post('/signalr/settings', {
-      logLevel: payload.logLevel,
-      consoleLoggingEnabled: payload.consoleLoggingEnabled
-    });
-  }
-
-  // autoDetectNetworkRanges removed (unreliable in containerized environments)
 
   // ============ Filament Type API methods ============
 

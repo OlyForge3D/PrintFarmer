@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -25,9 +26,7 @@ public class SlicerSettingsController : ControllerBase
     public IActionResult Save([FromBody] SlicerSettingsDto dto)
     {
         if (dto is null)
-        {
             return BadRequest("Settings payload required");
-        }
 
         // Server-side validation: jitter percent must be within 0..100
         if (dto.JitterPercent < 0.0 || dto.JitterPercent > 100.0)

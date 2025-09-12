@@ -188,21 +188,63 @@ public class SlicerWorkerHostedService : BackgroundService
 
                 var procHandle = _processRunner.Start(psi);
 
+                // Track whether parser-driven completion already finalized the job to avoid double-completion
+                int parserCompletedFlag = 0; // 0 = not completed, 1 = completed
+
                 // After starting the process, choose a tailored progress parser when available
                 if (job.EngineType == SlicerEngineType.PrusaSlicer)
                 {
                     var parser = new PrusaProgressParser();
                     _ = Task.Run(async () =>
                     {
-                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken, async (jid, msg, ct) =>
-                        {
-                            try
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken,
+                            // onParserCompleted
+                            async (jid, ct) =>
                             {
-                                await jobQueue.FailJobAsync(job.Id, msg, cancellationToken);
-                                await notifier.NotifyFailureAsync(job, msg, cancellationToken);
-                            }
-                            catch { /* best-effort */ }
-                        });
+                                try
+                                {
+                                    // Ensure only a single completion path wins
+                                    if (System.Threading.Interlocked.Exchange(ref parserCompletedFlag, 1) == 0)
+                                    {
+                                        // Try to find produced gcode
+                                        var found = Directory.GetFiles(jobDir, "*.gcode", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                                        if (found != null)
+                                        {
+                                            await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 95, Status = SlicingJobStatus.Slicing, CurrentStep = "Parser detected completion, uploading gcode" }, ct);
+                                            using var gcodeStream = File.OpenRead(found);
+                                            var key = $"gcode/{job.Id}/{Path.GetFileName(found)}";
+                                            var url = await fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", ct);
+                                            var result = new SlicingResult
+                                            {
+                                                Success = true,
+                                                ResultFileUrl = new Uri(url, UriKind.RelativeOrAbsolute),
+                                                OutputFileSizeBytes = new System.IO.FileInfo(found).Length,
+                                                ProcessingTimeSeconds = (DateTime.UtcNow - started).TotalSeconds,
+                                                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+                                                EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
+                                                LayerCount = job.LayerCount ?? 0
+                                            };
+                                            await jobQueue.CompleteJobAsync(job, result, cancellationToken: ct);
+                                            await notifier.NotifyCompletionAsync(job, result, ct);
+                                        }
+                                        // Ask process to terminate now that we're done
+                                        try
+                                        { procHandle.Kill(); }
+                                        catch { }
+                                    }
+                                }
+                                catch { /* best-effort */ }
+                            },
+                            // onParserFailure
+                            async (jid, msg, ct) =>
+                            {
+                                try
+                                {
+                                    await jobQueue.FailJobAsync(job.Id, msg, cancellationToken);
+                                    await notifier.NotifyFailureAsync(job, msg, cancellationToken);
+                                }
+                                catch { /* best-effort */ }
+                            });
                     }, cancellationToken);
                 }
                 else if (job.EngineType == SlicerEngineType.OrcaSlicer)
@@ -210,15 +252,49 @@ public class SlicerWorkerHostedService : BackgroundService
                     var parser = new OrcaProgressParser();
                     _ = Task.Run(async () =>
                     {
-                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken, async (jid, msg, ct) =>
-                        {
-                            try
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken,
+                            async (jid, ct) =>
                             {
-                                await jobQueue.FailJobAsync(job.Id, msg, cancellationToken);
-                                await notifier.NotifyFailureAsync(job, msg, cancellationToken);
-                            }
-                            catch { /* best-effort */ }
-                        });
+                                try
+                                {
+                                    if (System.Threading.Interlocked.Exchange(ref parserCompletedFlag, 1) == 0)
+                                    {
+                                        var found = Directory.GetFiles(jobDir, "*.gcode", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                                        if (found != null)
+                                        {
+                                            await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 95, Status = SlicingJobStatus.Slicing, CurrentStep = "Parser detected completion, uploading gcode" }, ct);
+                                            using var gcodeStream = File.OpenRead(found);
+                                            var key = $"gcode/{job.Id}/{Path.GetFileName(found)}";
+                                            var url = await fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", ct);
+                                            var result = new SlicingResult
+                                            {
+                                                Success = true,
+                                                ResultFileUrl = new Uri(url, UriKind.RelativeOrAbsolute),
+                                                OutputFileSizeBytes = new System.IO.FileInfo(found).Length,
+                                                ProcessingTimeSeconds = (DateTime.UtcNow - started).TotalSeconds,
+                                                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+                                                EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
+                                                LayerCount = job.LayerCount ?? 0
+                                            };
+                                            await jobQueue.CompleteJobAsync(job, result, cancellationToken: ct);
+                                            await notifier.NotifyCompletionAsync(job, result, ct);
+                                        }
+                                        try
+                                        { procHandle.Kill(); }
+                                        catch { }
+                                    }
+                                }
+                                catch { /* best-effort */ }
+                            },
+                            async (jid, msg, ct) =>
+                            {
+                                try
+                                {
+                                    await jobQueue.FailJobAsync(job.Id, msg, cancellationToken);
+                                    await notifier.NotifyFailureAsync(job, msg, cancellationToken);
+                                }
+                                catch { /* best-effort */ }
+                            });
                     }, cancellationToken);
                 }
                 else
@@ -253,10 +329,14 @@ public class SlicerWorkerHostedService : BackgroundService
 
                 await procHandle.WaitForExitAsync(cancellationToken);
 
-                if (procHandle.ExitCode != 0)
+                // If parser already completed and finalized the job, skip additional exit code checks and completion logic
+                if (System.Threading.Volatile.Read(ref parserCompletedFlag) != 1)
                 {
-                    var err = await procHandle.StandardError.ReadToEndAsync();
-                    throw new InvalidOperationException($"Slicer process failed (exit {procHandle.ExitCode}): {err}");
+                    if (procHandle.ExitCode != 0)
+                    {
+                        var err = await procHandle.StandardError.ReadToEndAsync();
+                        throw new InvalidOperationException($"Slicer process failed (exit {procHandle.ExitCode}): {err}");
+                    }
                 }
 
                 // Upload gcode
@@ -325,8 +405,41 @@ public class SlicerWorkerHostedService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Slicing job {JobId} failed", job.Id);
-            await jobQueue.FailJobAsync(job.Id, ex.Message, cancellationToken);
-            await notifier.NotifyFailureAsync(job, ex.Message, cancellationToken);
+
+            try
+            {
+                // Decide whether to retry or fail permanently
+                var maxRetries = _config.MaxRetryCount;
+                // Treat IO/timeout related exceptions as transient; also treat process exit (InvalidOperationException) as transient
+                var isTransient = ex is System.IO.IOException || ex is TimeoutException || ex is System.Net.Http.HttpRequestException || ex is InvalidOperationException && !(ex.Message?.Contains("No gcode") ?? false);
+
+                if (isTransient && job.RetryCount < maxRetries)
+                {
+                    // Exponential backoff: base 10s
+                    var delaySeconds = Math.Min(3600, (int)(Math.Pow(2, job.RetryCount) * 10));
+                    var delay = TimeSpan.FromSeconds(delaySeconds);
+
+                    // Prefer runtime-configured jitter (admin-tunable) but fall back to static worker config
+                    var runtimeSettings = _settingsService.GetSettings();
+                    var jitterToUse = runtimeSettings.JitterPercent > 0 ? runtimeSettings.JitterPercent : _config.JitterPercent;
+
+                    await jobQueue.RequeueJobAsync(job, delay, jitterToUse, cancellationToken);
+
+                    var message = $"Transient error occurred: {ex.Message}. Scheduled retry #{job.RetryCount} in {delaySeconds} seconds.";
+                    await notifier.NotifyFailureAsync(job, message, cancellationToken);
+                    _logger.LogInformation("Job {JobId} scheduled for retry #{RetryCount} in {Delay}s", job.Id, job.RetryCount, delaySeconds);
+                }
+                else
+                {
+                    var errMsg = ex.Message ?? ex.ToString();
+                    await jobQueue.FailJobAsync(job.Id, errMsg, cancellationToken);
+                    await notifier.NotifyFailureAsync(job, errMsg, cancellationToken);
+                }
+            }
+            catch (Exception notifyEx)
+            {
+                _logger.LogError(notifyEx, "Failed to requeue/fail job {JobId} after exception", job.Id);
+            }
         }
         finally
         {

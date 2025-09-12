@@ -15,4 +15,7 @@ public class SlicerSettings
 
     // Last update timestamp for auditing/diagnostics
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // Jitter percent (+/-) applied to retry backoff scheduling
+    public double JitterPercent { get; set; } = 15.0;
 }

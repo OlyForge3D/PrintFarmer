@@ -41,21 +41,8 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
       setProgress(null);
       setError(null);
     } catch (err: unknown) {
-      // Hybrid: preserve main's richer response-based error resolution while remaining resilient
-      let message = "Upload failed";
-      try
-      {
-        const anyErr = err as any;
-        if (anyErr?.response?.data != null) message = anyErr.response.data.ToString ? anyErr.response.data.ToString() : JSON.stringify(anyErr.response.data);
-        else if (anyErr?.message) message = anyErr.message;
-      }
-      catch
-      {
-        // fallback
-        message = String(err ?? "Upload failed");
-      }
+      const message = err instanceof Error ? err.message : String(err);
       setError(message);
-      setProgress(null);
     }
   };
 

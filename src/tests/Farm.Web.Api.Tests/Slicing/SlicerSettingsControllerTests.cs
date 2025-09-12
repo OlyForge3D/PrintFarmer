@@ -1,13 +1,14 @@
-﻿using Farm.Web.Api.Controllers.Slicing;
+using Farm.Web.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
+using Xunit;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
 public class SlicerSettingsControllerTests
 {
-    private sealed class FakeSettingsService : ISlicerSettingsService
+    private class FakeSettingsService : ISlicerSettingsService
     {
         public SlicerSettingsDto? Saved;
         public SlicerSettingsDto GetSettings() => new SlicerSettingsDto(true, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(), 15.0);

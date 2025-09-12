@@ -1,4 +1,4 @@
-﻿using Farm.Web.Shared;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;
@@ -70,7 +70,7 @@ public partial class SlicerAdminController : ControllerBase
         });
 
         // Safety checks on rendered args
-        if (rendered.Contains("..") || rendered.Contains('~'))
+        if (rendered.Contains("..") || rendered.Contains("~"))
         {
             result.Warnings.Add("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
         }
