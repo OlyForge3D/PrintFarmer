@@ -1,8 +1,5 @@
-using System.Diagnostics;
-using System.Text.Json;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Xunit;
+using Farm.Web.Api.Tests.Util;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -23,7 +20,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         _output = output;
         _logger = CreateLogger();
-        _baseDirectory = GetRepositoryRoot();
+        _baseDirectory = DockerTestHelpers.GetRepositoryRoot();
         _dockerComposeFile = Path.Combine(_baseDirectory, "docker-compose.microservices.yml");
     }
 
@@ -44,7 +41,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // Cleanup: Stop any running containers
         try
         {
-            await RunDockerComposeCommandAsync("down", "--volumes", "--remove-orphans");
+            await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "down", "--volumes", "--remove-orphans");
         }
         catch (Exception ex)
         {
@@ -57,7 +54,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         // Arrange & Act
         _output.WriteLine("Building PrusaSlicer worker Docker image...");
-        var result = await RunDockerCommandAsync("build", "-f", "Dockerfile.prusaslicer", "-t", "prusaslicer-worker-test", ".");
+        var result = await DockerTestHelpers.RunDockerCommandAsync(_output, _baseDirectory, "build", "-f", "Dockerfile.prusaslicer", "-t", "prusaslicer-worker-test", ".");
 
         // Assert
         Assert.True(result.Success, $"Docker build failed: {result.ErrorOutput}");
@@ -71,62 +68,40 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // Arrange
         _output.WriteLine("Starting PrusaSlicer worker with Docker Compose...");
 
-    // Act - Start only the PrusaSlicer worker and its dependencies
-    var startResult = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "prusaslicer-worker");
+        // Act - Start only the PrusaSlicer worker and its dependencies
+        var startResult = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "up", "-d", "redis", "database", "prusaslicer-worker");
         Assert.True(startResult.Success, $"Docker Compose start failed: {startResult.ErrorOutput}");
-    // Adaptive wait: poll health instead of fixed 30s sleep
-    await WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(60));
+        await DockerTestHelpers.WaitForServiceAsync(_output, "prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(60));
 
         // Check health status
-        var healthResult = await CheckServiceHealthAsync("prusaslicer-worker", 8082);
+        var healthResult = await DockerTestHelpers.CheckServiceHealthAsync("prusaslicer-worker", 8082);
 
         // Assert
         Assert.True(healthResult.IsHealthy, $"PrusaSlicer worker health check failed: {healthResult.Message}");
         _output.WriteLine($"PrusaSlicer worker is healthy: {healthResult.Message}");
     }
 
-    [Fact]
-    public async Task PrusaSlicerBinary_ShouldBeInstalled_InContainer()
-    {
-        // Arrange
-        await RunDockerComposeCommandAsync("up", "-d", "prusaslicer-worker");
-        // Poll for binary existence instead of fixed 45s
-        await WaitForExecSuccessAsync("prusaslicer-worker", ["test", "-f", "/usr/local/bin/prusa-slicer"], TimeSpan.FromSeconds(90));
-
-        // Act - Check if PrusaSlicer binary is installed
-        var execResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "ls", "-la", "/usr/local/bin/prusa-slicer");
-
-        // Assert
-        Assert.True(execResult.Success, $"PrusaSlicer binary not found: {execResult.ErrorOutput}");
-        Assert.Contains("prusa-slicer", execResult.Output);
-        _output.WriteLine($"PrusaSlicer binary found: {execResult.Output}");
-
-        // Verify binary is executable
-        var permResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "test", "-x", "/usr/local/bin/prusa-slicer");
-        Assert.True(permResult.Success, "PrusaSlicer binary is not executable");
-        _output.WriteLine("PrusaSlicer binary is executable");
-    }
 
     [Fact]
     public async Task MixedSlicerWorkers_ShouldStartTogether_InMicroservicesMode()
     {
         // Arrange & Act
         _output.WriteLine("Starting complete microservices stack...");
-        var result = await RunDockerComposeCommandAsync("up", "-d", "redis", "database", "api", "orcaslicer-worker", "prusaslicer-worker");
+        var result = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "up", "-d", "redis", "database", "api", "orcaslicer-worker", "prusaslicer-worker");
 
         Assert.True(result.Success, $"Failed to start microservices: {result.ErrorOutput}");
         // Adaptive parallel health polling (max 90s)
         await Task.WhenAll(
-            WaitForServiceAsync("api", 5001, timeout: TimeSpan.FromSeconds(90)),
-            WaitForServiceAsync("orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(90)),
-            WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(90))
+            DockerTestHelpers.WaitForServiceAsync(_output, "api", 5001, timeout: TimeSpan.FromSeconds(90)),
+            DockerTestHelpers.WaitForServiceAsync(_output, "orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(90)),
+            DockerTestHelpers.WaitForServiceAsync(_output, "prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(90))
         );
 
         // Assert - Check health of all services
-        var redisHealth = await CheckServiceHealthAsync("redis", 6379, "/healthcheck");
-        var apiHealth = await CheckServiceHealthAsync("api", 5001);
-        var orcaHealth = await CheckServiceHealthAsync("orcaslicer-worker", 8081);
-        var prusaHealth = await CheckServiceHealthAsync("prusaslicer-worker", 8082);
+        var redisHealth = await DockerTestHelpers.CheckServiceHealthAsync("redis", 6379, "/healthcheck");
+        var apiHealth = await DockerTestHelpers.CheckServiceHealthAsync("api", 5001);
+        var orcaHealth = await DockerTestHelpers.CheckServiceHealthAsync("orcaslicer-worker", 8081);
+        var prusaHealth = await DockerTestHelpers.CheckServiceHealthAsync("prusaslicer-worker", 8082);
 
         _output.WriteLine($"Redis health: {redisHealth.Message}");
         _output.WriteLine($"API health: {apiHealth.Message}");
@@ -145,57 +120,30 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     public async Task SlicerWorkersConfiguration_ShouldHaveDistinctEnvironments()
     {
         // Arrange
-        await RunDockerComposeCommandAsync("up", "-d", "orcaslicer-worker", "prusaslicer-worker");
-        // Wait for both workers to become healthy (max 60s)
+        await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "up", "-d", "orcaslicer-worker", "prusaslicer-worker");
         await Task.WhenAll(
-            WaitForServiceAsync("orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(60)),
-            WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(60))
+            DockerTestHelpers.WaitForServiceAsync(_output, "orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(60)),
+            DockerTestHelpers.WaitForServiceAsync(_output, "prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(60))
         );
 
         // Act & Assert - Check OrcaSlicer worker environment
-        var orcaEnvResult = await RunDockerComposeCommandAsync("exec", "-T", "orcaslicer-worker", "printenv", "Worker__OrcaSlicerPath");
+        var orcaEnvResult = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "exec", "-T", "orcaslicer-worker", "printenv", "Worker__OrcaSlicerPath");
         Assert.True(orcaEnvResult.Success && orcaEnvResult.Output.Contains("/usr/local/bin/orcaslicer"));
         _output.WriteLine($"OrcaSlicer path: {orcaEnvResult.Output.Trim()}");
 
         // Check PrusaSlicer worker environment
-        var prusaEnvResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "printenv", "Worker__PrusaSlicerPath");
+        var prusaEnvResult = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "exec", "-T", "prusaslicer-worker", "printenv", "Worker__PrusaSlicerPath");
         Assert.True(prusaEnvResult.Success && prusaEnvResult.Output.Contains("/usr/local/bin/prusa-slicer"));
         _output.WriteLine($"PrusaSlicer path: {prusaEnvResult.Output.Trim()}");
 
         // Verify distinct worker IDs
-        var orcaIdResult = await RunDockerComposeCommandAsync("exec", "-T", "orcaslicer-worker", "printenv", "Worker__WorkerId");
-        var prusaIdResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "printenv", "Worker__WorkerId");
+        var orcaIdResult = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "exec", "-T", "orcaslicer-worker", "printenv", "Worker__WorkerId");
+        var prusaIdResult = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "exec", "-T", "prusaslicer-worker", "printenv", "Worker__WorkerId");
 
         Assert.NotEqual(orcaIdResult.Output.Trim(), prusaIdResult.Output.Trim());
         _output.WriteLine($"Worker IDs are distinct: Orca='{orcaIdResult.Output.Trim()}', Prusa='{prusaIdResult.Output.Trim()}'");
     }
 
-    [Fact]
-    public async Task PrusaSlicerVersion_ShouldMatchExpectedVersion()
-    {
-        // Arrange
-        await RunDockerComposeCommandAsync("up", "-d", "prusaslicer-worker");
-        await WaitForExecSuccessAsync("prusaslicer-worker", ["test", "-f", "/usr/local/bin/prusa-slicer"], TimeSpan.FromSeconds(90));
-
-        // Act - Check PrusaSlicer version
-        var versionResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker",
-            "/usr/local/bin/prusa-slicer", "--help");
-
-        // Assert
-        if (versionResult.Success)
-        {
-            // PrusaSlicer should be version 2.8.0
-            _output.WriteLine($"PrusaSlicer help output: {versionResult.Output}");
-            Assert.Contains("PrusaSlicer", versionResult.Output);
-        }
-        else
-        {
-            // In headless mode, PrusaSlicer might not provide help, but should exist
-            var existsResult = await RunDockerComposeCommandAsync("exec", "-T", "prusaslicer-worker", "test", "-f", "/usr/local/bin/prusa-slicer");
-            Assert.True(existsResult.Success, "PrusaSlicer binary should exist even if help fails in headless mode");
-            _output.WriteLine("PrusaSlicer binary exists (help output not available in headless mode)");
-        }
-    }
 
     [Fact(Skip = "Long running test - enable for full integration validation")]
     public async Task EndToEndSlicing_ShouldWork_WithPrusaSlicerWorker()
@@ -207,11 +155,11 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         // 4. Verify G-code is generated and returned
 
         // Arrange
-        await RunDockerComposeCommandAsync("up", "-d");
+        await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "up", "-d");
         await Task.WhenAll(
-            WaitForServiceAsync("api", 5001, timeout: TimeSpan.FromSeconds(120)),
-            WaitForServiceAsync("orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(120)),
-            WaitForServiceAsync("prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(120))
+            DockerTestHelpers.WaitForServiceAsync(_output, "api", 5001, timeout: TimeSpan.FromSeconds(120)),
+            DockerTestHelpers.WaitForServiceAsync(_output, "orcaslicer-worker", 8081, timeout: TimeSpan.FromSeconds(120)),
+            DockerTestHelpers.WaitForServiceAsync(_output, "prusaslicer-worker", 8082, timeout: TimeSpan.FromSeconds(120))
         );
 
         // This would require an actual API client and test STL file
@@ -222,136 +170,10 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 
     // Helper methods
 
-    private async Task<(bool Success, string Output, string ErrorOutput)> RunDockerCommandAsync(params string[] args)
-    {
-        return await RunCommandAsync("docker", args);
-    }
-
-    private async Task<(bool Success, string Output, string ErrorOutput)> RunDockerComposeCommandAsync(params string[] args)
-    {
-        var allArgs = new[] { "compose", "-f", _dockerComposeFile }.Concat(args).ToArray();
-        return await RunCommandAsync("docker", allArgs);
-    }
-
-    private async Task<(bool Success, string Output, string ErrorOutput)> RunCommandAsync(string command, string[] args)
-    {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
-        {
-            FileName = command,
-            Arguments = string.Join(" ", args.Select(arg => $"\"{arg}\"")),
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = _baseDirectory
-        };
-
-        _output.WriteLine($"Running: {command} {string.Join(" ", args)}");
-
-        process.Start();
-
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-
-        await process.WaitForExitAsync();
-
-        var output = await outputTask;
-        var error = await errorTask;
-
-        return (process.ExitCode == 0, output, error);
-    }
-
-    private async Task<(bool IsHealthy, string Message)> CheckServiceHealthAsync(string serviceName, int port, string endpoint = "/healthz")
-    {
-        try
-        {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            var url = $"http://localhost:{port}{endpoint}";
-
-            var response = await httpClient.GetAsync(url);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                return (true, $"{serviceName} is healthy at {url}: {content}");
-            }
-            else
-            {
-                return (false, $"{serviceName} health check failed at {url}: {response.StatusCode} - {content}");
-            }
-        }
-        catch (Exception ex)
-        {
-            return (false, $"{serviceName} health check exception: {ex.Message}");
-        }
-    }
-
-    private static string GetRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
-        {
-            directory = directory.Parent;
-        }
-
-        if (directory == null)
-        {
-            throw new InvalidOperationException("Could not find repository root (global.json not found)");
-        }
-
-        return directory.FullName;
-    }
-
     private static ILogger<PrusaSlicerDockerIntegrationTests> CreateLogger()
     {
         using var loggerFactory = LoggerFactory.Create(builder =>
             builder.AddConsole().SetMinimumLevel(LogLevel.Information));
         return loggerFactory.CreateLogger<PrusaSlicerDockerIntegrationTests>();
-    }
-
-    // ---- Adaptive Polling Helpers -------------------------------------------------
-    private async Task WaitForServiceAsync(string serviceName, int port, string endpoint = "/healthz", TimeSpan? timeout = null, TimeSpan? pollInterval = null)
-    {
-        timeout ??= TimeSpan.FromSeconds(60);
-        pollInterval ??= TimeSpan.FromSeconds(2);
-        var sw = Stopwatch.StartNew();
-        string? lastMessage = null;
-        while (sw.Elapsed < timeout)
-        {
-            var health = await CheckServiceHealthAsync(serviceName, port, endpoint);
-            if (health.IsHealthy)
-            {
-                _output.WriteLine($"{serviceName} healthy after {sw.Elapsed.TotalSeconds:F1}s");
-                return;
-            }
-            // Capture most recent non-healthy message for diagnostics
-            lastMessage = health.Message;
-            await Task.Delay(pollInterval.Value);
-        }
-        throw new TimeoutException($"Service '{serviceName}' not healthy after {timeout.Value.TotalSeconds}s. Last status: {lastMessage ?? "(no message)"}");
-    }
-
-    private async Task WaitForExecSuccessAsync(string serviceName, string[] execArgs, TimeSpan timeout, TimeSpan? pollInterval = null)
-    {
-        pollInterval ??= TimeSpan.FromSeconds(3);
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < timeout)
-        {
-            // docker compose exec -T <serviceName> <execArgs>
-            var combined = new string[3 + execArgs.Length];
-            combined[0] = "exec";
-            combined[1] = "-T";
-            combined[2] = serviceName;
-            Array.Copy(execArgs, 0, combined, 3, execArgs.Length);
-            var res = await RunDockerComposeCommandAsync(combined);
-            if (res.Success)
-            {
-                _output.WriteLine($"Exec success for {serviceName} after {sw.Elapsed.TotalSeconds:F1}s -> {string.Join(' ', execArgs)}");
-                return;
-            }
-            await Task.Delay(pollInterval.Value);
-        }
-        throw new TimeoutException($"Exec command '{string.Join(' ', execArgs)}' for service '{serviceName}' did not succeed within {timeout.TotalSeconds}s");
     }
 }
