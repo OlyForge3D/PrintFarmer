@@ -41,6 +41,7 @@ A React TypeScript dashboard for managing multiple 3D printers.
 ```bash
 git clone https://github.com/jpapiez/PrintFarmer.git
 cd PrintFarmer
+cp .env.example .env   # Review & edit environment variables (JWT key, DB provider, optional Spoolman, admin bootstrap)
 chmod +x scripts/deploy-docker.sh
 ./scripts/deploy-docker.sh
 ```
@@ -50,6 +51,7 @@ The script will guide you through configuration and deploy everything automatica
 ```bash
 git clone https://github.com/jpapiez/PrintFarmer.git
 cd PrintFarmer
+cp .env.example .env   # Optional for overriding defaults
 chmod +x scripts/pf-dev.sh
 ./scripts/pf-dev.sh bootstrap   # one-time dependency restore
 ./scripts/pf-dev.sh start       # starts API + React (background)
@@ -158,11 +160,100 @@ Graceful shutdown: workers finish active jobs then exit (shutdown timeout manage
 
 - `GET /healthz` (alias: `/api/healthz`) — Basic health check
 - `GET /health` (alias: `/api/health`) — Comprehensive health status
+  - Health JSON reflects provider + background service status; SignalR fan-out indirectly validated via connection stats endpoint used in container health checks.
 - `GET /api/printers` — List all configured printers  
 - `POST /api/printers` — Add a new printer
 - `POST /api/printers/discover-streaming` — Real-time network discovery
 - `GET /api/network-discovery/settings` — Network discovery configuration
 - **SignalR Hub**: `/hubs/printers` — Real-time printer status updates
+
+### Environment & Secrets (.env)
+An `.env.example` file is provided. Copy it to `.env` and customize before production deployment. Key items:
+
+| Variable | Purpose | Notes |
+|----------|---------|-------|
+| `Jwt__Key` | JWT signing secret | Use a 64+ char random string in production |
+| `DB_PROVIDER` | Database provider | Sqlite (default), Postgres, SqlServer, MySql |
+| `ENABLE_ADMIN_BOOTSTRAP` | Opt-in first admin creation | Must be `true` AND ADMIN_* vars set; disable after first run |
+| `SPOOLMAN_ENABLED` / `SPOOLMAN_BASE_URL` | Filament inventory integration | Only seeds if `SPOOLMAN_ENABLED=yes` |
+| `SlicerOrchestrator__EnableDistributedSlicing` | Distributed slicer orchestration | true enables worker endpoints |
+
+Initial admin creation now uses either:
+
+1. React Setup Wizard (appears automatically if `needsSetup=true`).
+2. Admin CLI tool (headless environments).
+
+Env‑based automatic bootstrap has been removed for security. If you still prefer an environment driven one‑shot bootstrap during container initialization you can temporarily set:
+```
+ENABLE_ADMIN_BOOTSTRAP=true
+ADMIN_USERNAME=admin
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=ChangeMeSuperStrong123!
+```
+The application logs show success; remove these values immediately afterwards. Recommended approach is the CLI instead.
+
+#### Admin CLI (Headless / Automation)
+
+Create the first admin when no browser is available:
+```
+dotnet run --project src/tools/AdminCli -- --status
+dotnet run --project src/tools/AdminCli -- \
+  --username admin \
+  --email admin@example.com \
+  --password "ChangeMeSuperStrong123!" \
+  --first-name Admin \
+  --last-name User
+```
+Output includes a JWT token if creation/login succeeds. The command is idempotent: if the same credentials already created the admin it returns a fresh token.
+
+Additional users can be added via authenticated `POST /api/users` (requires `farm_admin`).
+
+#### /api/users Schemas
+
+`POST /api/users` (admin only) request body (password must be >=12 chars for admin accounts—enforced by server):
+```
+{
+  "username": "jdoe",
+  "email": "jdoe@example.com",
+  "password": "StrongPassw0rd!",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "roleIds": ["<role-guid>"]
+}
+```
+Response (201): Full `UserDto` object:
+```
+{
+  "id": "<guid>",
+  "username": "jdoe",
+  "email": "jdoe@example.com",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "isActive": true,
+  "emailConfirmed": false,
+  "lastLogin": null,
+  "createdAt": "2025-09-11T12:34:56Z",
+  "roles": ["farm_user"],
+  "permissions": []
+}
+```
+
+`GET /api/users` returns an array of `UserDto` objects.
+
+`PUT /api/users/{id}` update body (partial):
+```
+{
+  "firstName": "Jane",
+  "lastName": "Operator",
+  "isActive": true,
+  "roleIds": ["<updated-role-guid>"]
+}
+```
+`DELETE /api/users/{id}` removes the user (cannot self‑delete: returns 400).
+
+Role discovery: `GET /api/users/roles` returns `RoleDto[]` (each with `rolePermissions`).
+
+Authentication Tokens: For initial setup, use the Setup Wizard or the headless CLI. After login, store the `Authorization: Bearer <token>` header for subsequent user management calls.
 
 ### G-code Harvesting
 
@@ -292,6 +383,17 @@ Future Enhancements (planned):
 * Optional locale-aware normalization customization via configuration.
 
 ## Development Workflow
+
+### Tooling
+Additional developer & operational tools:
+* Admin CLI (`src/tools/AdminCli`) – headless initial admin creation and status check.
+  * Examples:
+    * `dotnet run --project src/tools/AdminCli -- --status`
+    * `dotnet run --project src/tools/AdminCli -- --username admin --email admin@example.com --password "ChangeMeSuperStrong123!" --first-name Admin --last-name User`
+* Quiet Test Runner (see `scripts/run-tests-quiet.sh`) – generates concise TRX summaries.
+* Network/SignalR health script `signalr-health-check.sh` – probes hub liveness.
+
+Planned additions: password policy editing UI (backed by new `/api/settings/security/password-policy` endpoints).
 
 ### Local Development (Recommended)
 Preferred (script):

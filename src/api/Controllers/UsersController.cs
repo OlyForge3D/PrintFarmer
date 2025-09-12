@@ -299,4 +299,36 @@ public class UsersController : ControllerBase
 
         return Ok(roles);
     }
+
+    /// <summary>
+    /// Lightweight availability check for username and/or email prior to user creation.
+    /// Any parameter omitted will not be checked (returns null for that field).
+    /// </summary>
+    /// <param name="username">Prospective username</param>
+    /// <param name="email">Prospective email</param>
+    /// <param name="ct">Cancellation token</param>
+    [HttpGet("availability")]
+    [AllowAnonymous] // Allows pre-registration checks (still low-risk data)
+    [ProducesResponseType(typeof(UserAvailabilityDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<UserAvailabilityDto>> CheckAvailabilityAsync(
+        [FromQuery] string? username,
+        [FromQuery] string? email,
+        CancellationToken ct)
+    {
+        bool? usernameExists = null;
+        bool? emailExists = null;
+
+        if (!string.IsNullOrWhiteSpace(username))
+        {
+            var u = username.Trim();
+            usernameExists = await _db.Users.AnyAsync(x => x.Username == u, ct);
+        }
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            var e = email.Trim();
+            emailExists = await _db.Users.AnyAsync(x => x.Email == e, ct);
+        }
+
+        return Ok(new UserAvailabilityDto(usernameExists, emailExists));
+    }
 }

@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
+import { toast } from 'sonner';
 import { 
   Users, 
   Plus, 
@@ -44,6 +46,191 @@ export function UserManagementPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const { data: passwordPolicy } = usePasswordPolicy();
+  const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
+  const [creating, setCreating] = useState(false);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [createErrors, setCreateErrors] = useState<{username?: string; email?: string; password?: string; general?: string; roles?: string}>({});
+  type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
+  const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
+  const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>('idle');
+  const [availabilityMessage, setAvailabilityMessage] = useState('');
+  const DEBOUNCE_MS = 450;
+
+  const passwordMeetsPolicy = () => {
+    if (!passwordPolicy) return true; // don't block while loading
+    const p = newUser.password;
+    if (p.length < passwordPolicy.minLength) return false;
+    if (passwordPolicy.requireUppercase && !/[A-Z]/.test(p)) return false;
+    if (passwordPolicy.requireLowercase && !/[a-z]/.test(p)) return false;
+    if (passwordPolicy.requireDigit && !/[0-9]/.test(p)) return false;
+    if (passwordPolicy.requireSymbol && !/[^A-Za-z0-9]/.test(p)) return false;
+    return true;
+  };
+
+  // Batched debounced availability checks (single request for username + email)
+  useEffect(() => {
+    if (!showCreateModal) return;
+
+    const username = newUser.username.trim();
+    const email = newUser.email.trim();
+
+    // If both empty, reset statuses
+    if (!username && !email) {
+      if (usernameStatus !== 'idle') setUsernameStatus('idle');
+      if (emailStatus !== 'idle') setEmailStatus('idle');
+      return;
+    }
+
+    // Mark only the fields that have a value as checking
+    if (username) setUsernameStatus('checking'); else setUsernameStatus('idle');
+    if (email) setEmailStatus('checking'); else setEmailStatus('idle');
+
+    const ctrl = new AbortController();
+    const handle = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams();
+        if (username) params.append('username', username);
+        if (email) params.append('email', email);
+        const res = await fetch(`/api/users/availability?${params.toString()}`, { signal: ctrl.signal });
+        if (!res.ok) throw new Error('availability failed');
+        const data: { usernameExists?: boolean; emailExists?: boolean } = await res.json();
+
+        if (username) {
+          const uTaken = data.usernameExists === true;
+            setUsernameStatus(uTaken ? 'taken' : 'available');
+          if (!uTaken && createErrors.username === 'Username already taken') {
+            setCreateErrors(errs => ({ ...errs, username: undefined }));
+          }
+          // Set message only if email absent (avoid overwriting with mixed)
+          if (!email) {
+            setAvailabilityMessage(uTaken ? 'Username is already taken' : 'Username is available');
+          }
+        }
+        if (email) {
+          const eTaken = data.emailExists === true;
+          setEmailStatus(eTaken ? 'taken' : 'available');
+          if (!eTaken && createErrors.email === 'Email already taken') {
+            setCreateErrors(errs => ({ ...errs, email: undefined }));
+          }
+          // If both present, prefer more specific combined message only when needed
+          if (username) {
+            if (data.usernameExists && data.emailExists) setAvailabilityMessage('Username and email are already taken');
+            else if (data.usernameExists) setAvailabilityMessage('Username is already taken');
+            else if (data.emailExists) setAvailabilityMessage('Email is already taken');
+            else setAvailabilityMessage('Username and email are available');
+          } else {
+            setAvailabilityMessage(eTaken ? 'Email is already taken' : 'Email is available');
+          }
+        }
+      } catch {
+        if (username) setUsernameStatus('error');
+        if (email) setEmailStatus('error');
+        setAvailabilityMessage('Could not verify availability');
+      }
+    }, DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(handle);
+      ctrl.abort();
+    };
+  }, [newUser.username, newUser.email, showCreateModal]);
+
+  const validateForm = () => {
+    const errs: typeof createErrors = {};
+    if (!newUser.username.trim()) errs.username = 'Username is required';
+    if (!newUser.email.trim()) errs.email = 'Email is required';
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newUser.email.trim())) errs.email = 'Invalid email format';
+    if (!newUser.password) errs.password = 'Password is required';
+    else if (!passwordMeetsPolicy()) errs.password = 'Password does not meet policy';
+    return errs;
+  };
+
+  const createUser = async () => {
+    if (creating) return;
+    const fieldErrs = validateForm();
+    if (Object.keys(fieldErrs).length > 0) {
+      setCreateErrors(fieldErrs);
+      return;
+    }
+
+    try {
+      setCreating(true);
+      setCreateErrors({});
+      const token = localStorage.getItem('auth-token');
+
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          username: newUser.username.trim(),
+          email: newUser.email.trim(),
+          password: newUser.password,
+          firstName: newUser.firstName.trim() || undefined,
+          lastName: newUser.lastName.trim() || undefined,
+          roleIds: selectedRoleIds
+        })
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to create user';
+        let json: any = null;
+        try {
+          // API may return JSON or plain text
+            const contentType = response.headers.get('Content-Type') || '';
+            if (contentType.includes('application/json')) {
+              json = await response.json();
+              errorMessage = json.error || json.message || json.title || errorMessage;
+            } else {
+              const text = await response.text();
+              if (text) errorMessage = text;
+            }
+        } catch {
+          // ignore parse errors
+        }
+        const fieldErrors: typeof createErrors = {};
+        // Structured ASP.NET Core validation (ProblemDetails with errors)
+        if (json && json.errors && typeof json.errors === 'object') {
+          for (const key of Object.keys(json.errors)) {
+            const mappedKey = key.toLowerCase();
+            const msgArray = json.errors[key];
+            const firstMsg = Array.isArray(msgArray) ? msgArray[0] : msgArray;
+            if (mappedKey.includes('username')) fieldErrors.username = firstMsg;
+            else if (mappedKey.includes('email')) fieldErrors.email = firstMsg;
+            else if (mappedKey.includes('password')) fieldErrors.password = firstMsg;
+            else if (mappedKey.includes('role')) fieldErrors.roles = firstMsg;
+            else fieldErrors.general = firstMsg;
+          }
+        } else {
+          // Fallback heuristic
+          const msgLower = errorMessage.toLowerCase();
+          if (msgLower.includes('username') && msgLower.includes('taken')) fieldErrors.username = 'Username already taken';
+          if (msgLower.includes('email') && msgLower.includes('taken')) fieldErrors.email = 'Email already taken';
+          if (msgLower.includes('password')) fieldErrors.password = errorMessage;
+          if (msgLower.includes('role')) fieldErrors.roles = errorMessage;
+          if (Object.keys(fieldErrors).length === 0) fieldErrors.general = errorMessage;
+        }
+        setCreateErrors(fieldErrors);
+        toast.error(errorMessage);
+        return;
+      }
+
+      // We could optimistically insert but reloading ensures roles & computed fields
+      await loadUsers();
+      toast.success('User created');
+      setShowCreateModal(false);
+      setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
+      setSelectedRoleIds([]);
+    } catch (err) {
+      console.error('Error creating user', err);
+      toast.error('Unexpected error creating user');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     loadUsers();
@@ -176,7 +363,13 @@ export function UserManagementPage() {
           />
         </div>
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => {
+            const farmUserRole = roles.find(r => r.name === 'farm_user');
+            setSelectedRoleIds(farmUserRole ? [farmUserRole.id] : []);
+            setCreateErrors({});
+            setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
+            setShowCreateModal(true);
+          }}
           className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-accent-dark focus:outline-none focus:ring-2 focus:ring-pf-accent flex items-center"
         >
           <Plus className="h-4 w-4 mr-2" />
@@ -296,15 +489,168 @@ export function UserManagementPage() {
       {/* TODO: Modals for create/edit users */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-pf-bg-1 rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-pf-bg-1 rounded-lg p-6 max-w-lg w-full mx-4">
             <h3 className="text-lg font-semibold mb-4">Create New User</h3>
-            <p className="text-pf-text-secondary">User creation modal coming soon...</p>
-            <button
-              onClick={() => setShowCreateModal(false)}
-              className="mt-4 px-4 py-2 bg-pf-accent text-white rounded-md"
-            >
-              Close
-            </button>
+            {createErrors.general && (
+              <div className="mb-4 p-2 rounded bg-red-50 text-red-600 text-sm" role="alert">
+                {createErrors.general}
+              </div>
+            )}
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="create-username" className="block text-sm font-medium mb-1">Username</label>
+                <input
+                  id="create-username"
+                  type="text"
+                  value={newUser.username}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNewUser(u => ({ ...u, username: v }));
+                    setCreateErrors(errs => ({ ...errs, username: undefined }));
+                    setUsernameStatus('idle');
+                  }}
+                  className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+                />
+                {createErrors.username && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.username}</p>}
+                {!createErrors.username && newUser.username && (
+                  <p className="text-xs mt-1 flex items-center gap-1" aria-live="polite" aria-atomic="true">
+                    {usernameStatus === 'checking' && (
+                      <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                      </svg>
+                    )}
+                    {usernameStatus === 'available' && <span className="text-green-600">Username available</span>}
+                    {usernameStatus === 'taken' && <span className="text-red-500">Username already taken</span>}
+                    {usernameStatus === 'error' && <span className="text-orange-500">Username check failed</span>}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="create-email" className="block text-sm font-medium mb-1">Email</label>
+                <input
+                  id="create-email"
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNewUser(u => ({ ...u, email: v }));
+                    setCreateErrors(errs => ({ ...errs, email: undefined }));
+                    setEmailStatus('idle');
+                  }}
+                  className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+                />
+                {createErrors.email && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.email}</p>}
+                {!createErrors.email && newUser.email && (
+                  <p className="text-xs mt-1 flex items-center gap-1" aria-live="polite" aria-atomic="true">
+                    {emailStatus === 'checking' && (
+                      <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                      </svg>
+                    )}
+                    {emailStatus === 'available' && <span className="text-green-600">Email available</span>}
+                    {emailStatus === 'taken' && <span className="text-red-500">Email already taken</span>}
+                    {emailStatus === 'error' && <span className="text-orange-500">Email check failed</span>}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="create-first-name" className="block text-sm font-medium mb-1">First Name <span className="text-xs text-pf-text-tertiary">(optional)</span></label>
+                  <input
+                    id="create-first-name"
+                    type="text"
+                    value={newUser.firstName}
+                    onChange={(e) => setNewUser(u => ({ ...u, firstName: e.target.value }))}
+                    className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="create-last-name" className="block text-sm font-medium mb-1">Last Name <span className="text-xs text-pf-text-tertiary">(optional)</span></label>
+                  <input
+                    id="create-last-name"
+                    type="text"
+                    value={newUser.lastName}
+                    onChange={(e) => setNewUser(u => ({ ...u, lastName: e.target.value }))}
+                    className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+                  />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="create-password" className="block text-sm font-medium mb-1">Password</label>
+                <input
+                  id="create-password"
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser(u => ({ ...u, password: e.target.value }))}
+                  className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+                />
+                {createErrors.password && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.password}</p>}
+                {passwordPolicy && (
+                  <ul className="mt-2 text-xs space-y-1 text-pf-text-secondary">
+                    <li className={newUser.password.length >= passwordPolicy.minLength ? 'text-green-500' : ''}>Min length: {passwordPolicy.minLength}</li>
+                    {passwordPolicy.requireUppercase && <li className={/[A-Z]/.test(newUser.password) ? 'text-green-500' : ''}>At least one uppercase letter</li>}
+                    {passwordPolicy.requireLowercase && <li className={/[a-z]/.test(newUser.password) ? 'text-green-500' : ''}>At least one lowercase letter</li>}
+                    {passwordPolicy.requireDigit && <li className={/[0-9]/.test(newUser.password) ? 'text-green-500' : ''}>At least one digit</li>}
+                    {passwordPolicy.requireSymbol && <li className={/[^A-Za-z0-9]/.test(newUser.password) ? 'text-green-500' : ''}>At least one symbol</li>}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="block text-sm font-medium">Roles</span>
+                  {roles.length > 0 && (
+                    <div className="flex gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoleIds(roles.map(r => r.id))}
+                        className="text-pf-accent hover:underline"
+                      >Select All</button>
+                      <span className="text-pf-text-tertiary">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoleIds([])}
+                        className="text-pf-accent hover:underline"
+                      >Clear</button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Assign roles">
+                  {roles.map(role => (
+                    <label key={role.id} className="inline-flex items-center space-x-1 bg-pf-bg-0 border border-pf-border rounded px-2 py-1 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="accent-pf-accent"
+                        checked={selectedRoleIds.includes(role.id)}
+                        onChange={() => setSelectedRoleIds(prev => prev.includes(role.id) ? prev.filter(id => id !== role.id) : [...prev, role.id])}
+                      />
+                      <span>{role.displayName}</span>
+                    </label>
+                  ))}
+                  {roles.length === 0 && (
+                    <span className="text-xs text-pf-text-tertiary">No roles available</span>
+                  )}
+                </div>
+                {createErrors.roles && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.roles}</p>}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 bg-gray-600 text-white rounded-md"
+              >Cancel</button>
+                <button
+                  onClick={createUser}
+                  disabled={creating || !newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
+                  className="px-4 py-2 bg-pf-accent text-white rounded-md disabled:opacity-50 flex items-center gap-2"
+                >{creating && (
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                )}Create</button>
+            </div>
           </div>
         </div>
       )}

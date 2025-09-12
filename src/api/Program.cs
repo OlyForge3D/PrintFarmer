@@ -1,4 +1,4 @@
-﻿using System;
+﻿// Global using cleanup handled by project settings; explicit System removed.
 using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Infrastructure.Normalization;
@@ -482,7 +482,149 @@ builder.Services.AddAuthorization(options =>
 // Register authorization handlers
 builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Farm.Web.Api.Infrastructure.Authorization.PermissionAuthorizationHandler>();
 
+// Extract raw args for potential headless commands (do not remove from hosting args beyond our flags)
+var rawArgs = args.ToList();
+var headlessCreateAdmin = rawArgs.Contains("--create-admin");
+var headlessListUsers = rawArgs.Contains("--list-users");
+
 var app = builder.Build();
+
+// Early headless commands (no web host run) to support automation:
+// Usage examples:
+//   dotnet run --project src/api/Farm.Web.Api.csproj -- --list-users
+//   dotnet run --project src/api/Farm.Web.Api.csproj -- --create-admin --username admin --email admin@example.com --password "VeryStrongPassw0rd!" --first Alice --last Admin
+if (headlessCreateAdmin || headlessListUsers)
+{
+    using var scope = app.Services.CreateScope();
+    // Ensure database is initialized before any headless operations
+    try
+    {
+        // Minimal initialization for CLI: Ensure database exists & auth seed only (skip catalog for speed)
+        var cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await cliDb.Database.EnsureCreatedAsync();
+        await Farm.Web.Api.Data.Seed.AuthenticationDataSeeder.SeedAsync(cliDb);
+    }
+    catch (Exception ex)
+    {
+        await Console.Error.WriteLineAsync($"[CLI] Database initialization failed: {ex.Message}");
+        return;
+    }
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    if (headlessListUsers)
+    {
+        var users = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).ToListAsync();
+        Console.WriteLine($"Users ({users.Count}):");
+        foreach (var u in users)
+        {
+            var roles = string.Join(',', u.UserRoles.Where(r => r.IsActive).Select(r => r.Role.Name));
+            Console.WriteLine($" - {u.Username} <{u.Email}> Roles=[{roles}] Active={u.IsActive}");
+        }
+        return; // exit app
+    }
+    if (headlessCreateAdmin)
+    {
+        string GetArg(string name)
+        {
+            var idx = rawArgs.IndexOf(name);
+            if (idx >= 0 && idx + 1 < rawArgs.Count)
+            {
+                return rawArgs[idx + 1];
+            }
+            return string.Empty;
+        }
+        var username = GetArg("--username");
+        var email = GetArg("--email");
+        var password = GetArg("--password");
+        var first = GetArg("--first");
+        var last = GetArg("--last");
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            await Console.Error.WriteLineAsync("Missing required arguments. Usage: --create-admin --username <u> --email <e> --password <p> [--first First] [--last Last]");
+            return;
+        }
+        // Dynamic password policy
+        var policy = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync();
+        var minLength = policy?.MinLength ?? 12;
+        if (password.Length < minLength)
+        {
+            await Console.Error.WriteLineAsync($"Password must be at least {minLength} characters.");
+            return;
+        }
+        if (policy != null)
+        {
+            if (policy.RequireUppercase && !password.Any(char.IsUpper))
+            {
+                await Console.Error.WriteLineAsync("Password must contain an uppercase letter.");
+                return;
+            }
+            if (policy.RequireLowercase && !password.Any(char.IsLower))
+            {
+                await Console.Error.WriteLineAsync("Password must contain a lowercase letter.");
+                return;
+            }
+            if (policy.RequireDigit && !password.Any(char.IsDigit))
+            {
+                await Console.Error.WriteLineAsync("Password must contain a digit.");
+                return;
+            }
+            if (policy.RequireSymbol && password.All(char.IsLetterOrDigit))
+            {
+                await Console.Error.WriteLineAsync("Password must contain a symbol.");
+                return;
+            }
+        }
+        // Ensure seed ran (roles etc.) already handled above.
+        var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
+        var authSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
+        var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+        if (adminRole == null)
+        {
+            await Console.Error.WriteLineAsync("Admin role not found; seeding failure.");
+            return;
+        }
+        // Idempotent check
+        var existing = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.Username == username || u.Email == email);
+        if (existing != null)
+        {
+            var hasAdmin = existing.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive);
+            if (hasAdmin && scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>().VerifyPassword(password, existing.PasswordHash))
+            {
+                var tokenExisting = await authSvc.GenerateJwtTokenAsync(existing);
+                Console.WriteLine($"Existing admin '{existing.Username}' detected. Reusing credentials. JWT={tokenExisting.Substring(0, Math.Min(32, tokenExisting.Length))}... (truncated)");
+                return;
+            }
+            await Console.Error.WriteLineAsync("User with same username or email already exists (not matching provided password for idempotency). Aborting.");
+            return;
+        }
+        var user = new Farm.Web.Api.Domain.User
+        {
+            Id = Guid.NewGuid(),
+            Username = username,
+            Email = email,
+            FirstName = string.IsNullOrWhiteSpace(first) ? "Admin" : first,
+            LastName = string.IsNullOrWhiteSpace(last) ? "CLI" : last,
+            PasswordHash = hashing.HashPassword(password),
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(user);
+        db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            RoleId = adminRole.Id,
+            AssignedAt = DateTime.UtcNow,
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+        var token = await authSvc.GenerateJwtTokenAsync(user);
+        Console.WriteLine($"Created admin user '{username}' ({email}). JWT={token.Substring(0, Math.Min(32, token.Length))}... (truncated)");
+        return;
+    }
+}
 
 // Database initialization with retry logic for resilient startup
 using (var scope = app.Services.CreateScope())
@@ -556,60 +698,74 @@ using (var scope = app.Services.CreateScope())
         logger.LogWarning(ex, "Failed to seed Spoolman configuration from environment");
     }
 
-    // Optional unattended initial admin bootstrap from environment variables
+    // Optional unattended initial admin bootstrap (deprecated default). Now requires explicit ENABLE_ADMIN_BOOTSTRAP=true.
     try
     {
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var hasAdmin = await db.Users.AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive));
-        if (!hasAdmin)
+        var enableBootstrap = Environment.GetEnvironmentVariable("ENABLE_ADMIN_BOOTSTRAP");
+        if (string.Equals(enableBootstrap, "true", StringComparison.OrdinalIgnoreCase))
         {
-            var adminUser = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-            var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
-            var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
-            if (!string.IsNullOrWhiteSpace(adminUser) && !string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword) && adminPassword.Length >= 8)
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var hasAdmin = await db.Users.AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive));
+            if (!hasAdmin)
             {
-                var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
-                // Previously retrieved auth service was unused here; removed to satisfy analyzer.
-                var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
-                if (adminRole != null)
+                var adminUser = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
+                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
+                var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+                if (!string.IsNullOrWhiteSpace(adminUser) && !string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword) && adminPassword.Length >= 12)
                 {
-                    var user = new Farm.Web.Api.Domain.User
+                    var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
+                    var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+                    if (adminRole != null)
                     {
-                        Id = Guid.NewGuid(),
-                        Username = adminUser,
-                        Email = adminEmail,
-                        FirstName = "Admin",
-                        LastName = "Bootstrap",
-                        PasswordHash = hashing.HashPassword(adminPassword),
-                        IsActive = true,
-                        EmailConfirmed = true,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-                    db.Users.Add(user);
-                    db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
+                        var user = new Farm.Web.Api.Domain.User
+                        {
+                            Id = Guid.NewGuid(),
+                            Username = adminUser,
+                            Email = adminEmail,
+                            FirstName = "Admin",
+                            LastName = "Bootstrap",
+                            PasswordHash = hashing.HashPassword(adminPassword),
+                            IsActive = true,
+                            EmailConfirmed = true,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        db.Users.Add(user);
+                        db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
+                        {
+                            Id = Guid.NewGuid(),
+                            UserId = user.Id,
+                            RoleId = adminRole.Id,
+                            AssignedAt = DateTime.UtcNow,
+                            IsActive = true
+                        });
+                        await db.SaveChangesAsync();
+                        logger.LogInformation("[Startup] Created initial admin user from environment (USERNAME={Username}, EMAIL={Email})", adminUser, adminEmail);
+                    }
+                    else
                     {
-                        Id = Guid.NewGuid(),
-                        UserId = user.Id,
-                        RoleId = adminRole.Id,
-                        AssignedAt = DateTime.UtcNow,
-                        IsActive = true
-                    });
-                    await db.SaveChangesAsync();
-                    logger.LogInformation("[Startup] Created initial admin user from environment (USERNAME={Username}, EMAIL={Email})", adminUser, adminEmail);
+                        logger.LogWarning("[Startup] Cannot create admin user from environment because farm_admin role not found.");
+                    }
                 }
                 else
                 {
-                    logger.LogWarning("[Startup] Cannot create admin user from environment because farm_admin role not found.");
+                    logger.LogWarning("[Startup] ENABLE_ADMIN_BOOTSTRAP=true but ADMIN_* variables missing or password policy not met (>=12 chars). Skipping.");
                 }
             }
+            else
+            {
+                logger.LogDebug("[Startup] ENABLE_ADMIN_BOOTSTRAP=true but admin already exists; no action taken.");
+            }
+        }
+        else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ADMIN_USERNAME")))
+        {
+            logger.LogWarning("[Startup] ADMIN_* variables detected but ENABLE_ADMIN_BOOTSTRAP!=true. Bootstrap skipped by design.");
         }
     }
     catch (Exception ex)
     {
-        // Don't fail startup for bootstrap issues
         var logger2 = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger2.LogWarning(ex, "[Startup] Failed to perform environment admin bootstrap");
+        logger2.LogWarning(ex, "[Startup] Admin bootstrap attempt failed (non-fatal)");
     }
 }
 

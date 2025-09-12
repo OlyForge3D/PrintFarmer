@@ -31,6 +31,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Domain.Action> Actions => Set<Domain.Action>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -468,6 +469,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.IsPublic);
             b.HasIndex(p => p.CreatedByUserId);
         });
+
+        modelBuilder.Entity<PasswordPolicy>(b =>
+        {
+            b.HasKey(pp => pp.Id);
+            b.Property(pp => pp.MinLength).IsRequired();
+            b.Property(pp => pp.RequireUppercase);
+            b.Property(pp => pp.RequireLowercase);
+            b.Property(pp => pp.RequireDigit);
+            b.Property(pp => pp.RequireSymbol);
+        });
+
+        // Seed default password policy if table empty (idempotent for EnsureCreated)
+        if (Database.ProviderName != null)
+        {
+            modelBuilder.Entity<PasswordPolicy>().HasData(new PasswordPolicy
+            {
+                Id = 1,
+                MinLength = 12,
+                RequireUppercase = false,
+                RequireLowercase = false,
+                RequireDigit = false,
+                RequireSymbol = false,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
