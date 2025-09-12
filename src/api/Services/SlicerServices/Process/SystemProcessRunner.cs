@@ -1,4 +1,9 @@
-﻿namespace Farm.Web.Api.Services.SlicerServices.Process;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Farm.Web.Api.Services.SlicerServices.Process;
 
 public class SystemProcessRunner : IProcessRunner
 {
@@ -32,28 +37,9 @@ public class SystemProcessRunner : IProcessRunner
             catch (OperationCanceledException)
             {
                 // If cancelled, try to kill process gracefully and return non-zero
-                try
-                {
-                    if (!_proc.HasExited)
-                    {
-                        _proc.Kill(entireProcessTree: true);
-                    }
-                }
-                catch { }
+                try { if (!_proc.HasExited) _proc.Kill(entireProcessTree: true); } catch { }
                 throw;
             }
-        }
-
-        public void Kill()
-        {
-            try
-            {
-                if (!_proc.HasExited)
-                {
-                    _proc.Kill(entireProcessTree: true);
-                }
-            }
-            catch { /* best effort */ }
         }
     }
 }

@@ -68,7 +68,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
 
         try
         {
-            var psi = new ProcessStartInfo
+            var psi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = exe,
                 Arguments = "--version",
@@ -77,7 +77,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            using var proc = Process.Start(psi);
+            using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null)
                 return false;
             await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);

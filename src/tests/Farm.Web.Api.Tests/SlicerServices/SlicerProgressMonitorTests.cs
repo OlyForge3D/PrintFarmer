@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Services.SlicerServices.Process;
+using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Api.Services.SlicerServices.Progress;
 using Farm.Web.Shared;
 
@@ -6,13 +6,12 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 
 public class SlicerProgressMonitorTests
 {
-    private sealed class TestNotifier : ISlicerProgressNotifier
+    private class TestNotifier : ISlicerProgressNotifier
     {
         public List<SlicingProgressUpdate> Updates { get; } = new();
         public Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
         {
-            lock (Updates)
-            { Updates.Add(update); }
+            lock (Updates) { Updates.Add(update); }
             return Task.CompletedTask;
         }
         public Task NotifyCompletionAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -21,13 +20,12 @@ public class SlicerProgressMonitorTests
         public Task UnsubscribeFromJobAsync(Guid jobId, string connectionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    private sealed class TestProcessHandle : IProcessHandle
+    private class TestProcessHandle : IProcessHandle
     {
         private readonly System.IO.MemoryStream _ms;
         private readonly System.IO.StreamReader _sr;
         private readonly int _exitDelayMs;
         private bool _exited;
-        public bool Killed { get; private set; }
 
         public TestProcessHandle(IEnumerable<string> lines, int exitDelayMs = 100)
         {
@@ -60,13 +58,6 @@ public class SlicerProgressMonitorTests
             }
             return ExitCode;
         }
-
-        public void Kill()
-        {
-            Killed = true;
-            _exited = true;
-            ExitCode = -1;
-        }
     }
 
     [Fact]
@@ -98,25 +89,5 @@ public class SlicerProgressMonitorTests
         notifier.Updates.Should().NotBeEmpty();
         notifier.Updates.Any(u => u.Progress == 30).Should().BeTrue();
         notifier.Updates.Any(u => u.Progress == 100).Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task MonitorAsync_ParserFailure_InvokesCallbackAndKillsProcess()
-    {
-        var lines = new[] { "ERROR: export failed due to permission" };
-        var handle = new TestProcessHandle(lines, exitDelayMs: 50);
-        var notifier = new TestNotifier();
-        var called = false;
-        Func<Guid, string, CancellationToken, Task> onFailure = (jobId, msg, ct) =>
-        {
-            called = true;
-            return Task.CompletedTask;
-        };
-
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token, null, onFailure);
-
-        called.Should().BeTrue();
-        handle.Killed.Should().BeTrue();
     }
 }

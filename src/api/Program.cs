@@ -319,6 +319,8 @@ builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>()
 
 // Ensure SlicerExecutableManager can consult runtime admin settings
 builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
+// Process runner used by SlicerWorkerHostedService; abstraction allows test injection of fake processes.
+builder.Services.AddTransient<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner, Farm.Web.Api.Services.SlicerServices.Process.SystemProcessRunner>();
 
 // Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
 builder.Services.AddHostedService<SlicerWorkerHostedService>();

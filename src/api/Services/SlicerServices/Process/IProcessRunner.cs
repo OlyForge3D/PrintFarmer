@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Farm.Web.Api.Services.SlicerServices.Process;
 
@@ -9,10 +12,6 @@ public interface IProcessHandle
     bool HasExited { get; }
     int ExitCode { get; }
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);
-    /// <summary>
-    /// Attempt to terminate the underlying process.
-    /// </summary>
-    void Kill();
 }
 
 public interface IProcessRunner
