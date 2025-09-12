@@ -61,6 +61,11 @@ public interface ISlicerJobQueue
     Task RequeueFailedJobsAsync(int maxRetryCount = 3, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Requeue a specific job for retry, optionally with a delay/backoff and optional jitter percent.
+    /// </summary>
+    Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Find existing job by correlation ID and checksum for idempotency
     /// </summary>
     Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default);

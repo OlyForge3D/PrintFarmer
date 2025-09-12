@@ -11,7 +11,8 @@ public class SlicerProgressMonitorTests
         public List<SlicingProgressUpdate> Updates { get; } = new();
         public Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
         {
-            lock (Updates) { Updates.Add(update); }
+            lock (Updates)
+            { Updates.Add(update); }
             return Task.CompletedTask;
         }
         public Task NotifyCompletionAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -113,7 +114,7 @@ public class SlicerProgressMonitorTests
         };
 
         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token, onFailure);
+        await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token, null, onFailure);
 
         called.Should().BeTrue();
         handle.Killed.Should().BeTrue();

@@ -11,6 +11,8 @@ import { HarvestPage } from '@/pages/HarvestPage';
 import { ModelsPage } from '@/pages/ModelsPage';
 import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
+import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
 import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { UserManagementPage } from '@/pages/UserManagementPage';
@@ -131,6 +133,22 @@ function App() {
                     element={
                       <ProtectedRoute requiredRole="farm_admin">
                         <SlicerSettingsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/slicer/dry-run"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <SlicerDryRunPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/slicer/job-status"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <SlicerJobStatusPage />
                       </ProtectedRoute>
                     }
                   />

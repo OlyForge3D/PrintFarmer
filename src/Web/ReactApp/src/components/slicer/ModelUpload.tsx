@@ -40,9 +40,9 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
       if (onUploaded && data?.id) onUploaded(data.id);
       setProgress(null);
       setError(null);
-    } catch (err: any) {
-      setError(err?.response?.data ?? (err.message || 'Upload failed'));
-      setProgress(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
     }
   };
 

@@ -10,11 +10,27 @@ public class SlicingJobsController : ControllerBase
 {
     private readonly ILogger<SlicingJobsController> _logger;
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
+    private readonly ISlicerOrchestrator _orchestrator;
+    private readonly string _tempRoot;
 
-    public SlicingJobsController(ILogger<SlicingJobsController> logger, Infrastructure.Temp.ITempPathProvider tempPathProvider)
+    public SlicingJobsController(ILogger<SlicingJobsController> logger, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
     {
         _logger = logger;
         _tempPathProvider = tempPathProvider;
+        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+        _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
+        Directory.CreateDirectory(_tempRoot);
+    }
+
+    [HttpGet("jobs/{jobId}/status")]
+    [ProducesResponseType(typeof(SlicingJobStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetJobStatusAsync(Guid jobId)
+    {
+        var status = await _orchestrator.GetJobStatusAsync(jobId);
+        if (status == null)
+            return NotFound();
+        return Ok(status);
     }
 
     // Canonical plural route

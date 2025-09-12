@@ -136,13 +136,15 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ResultFileUrl = job.ResultFileUrl,
                 EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = job.EstimatedFilamentUsageGrams,
-                LayerCount = job.LayerCount ?? 0
+                LayerCount = job.LayerCount ?? 0,
+                RetryCount = job.RetryCount,
+                ScheduledAt = job.ScheduledAt
             };
 
-                foreach (var kv in job.Metadata)
-                {
-                    response.Metadata[kv.Key] = kv.Value;
-                }
+            foreach (var kv in job.Metadata)
+            {
+                response.Metadata[kv.Key] = kv.Value;
+            }
 
             return response;
         }
@@ -401,21 +403,21 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
 
         // Validate file exists and is supported
-    var fileExists = await _fileStorage.FileExistsAsync(request.ModelFileUrl.ToString(), cancellationToken);
+        var fileExists = await _fileStorage.FileExistsAsync(request.ModelFileUrl.ToString(), cancellationToken);
         if (!fileExists)
         {
             throw new FileNotFoundException($"Model file not found: {request.ModelFileUrl}");
         }
 
         // Check file extension
-    var extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl.ToString()).ToLowerInvariant();
+        var extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl.ToString()).ToLowerInvariant();
         if (!engineMeta.SupportedExtensions.Contains(extension))
         {
             throw new ArgumentException($"File extension {extension} is not supported by {request.SlicerEngine}");
         }
 
         // Validate file size
-    var metadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl.ToString(), cancellationToken);
+        var metadata = await _fileStorage.GetFileMetadataAsync(request.ModelFileUrl.ToString(), cancellationToken);
         if (metadata != null && metadata.SizeBytes > 100_000_000)
         {
             throw new ArgumentException("File size exceeds maximum limit of 100MB");

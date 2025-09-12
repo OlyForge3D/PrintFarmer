@@ -566,3 +566,17 @@ export interface CommandResult {
   success: boolean;
   error?: string;
 }
+
+// Failure detail for an individual file during multi-upload.
+export interface MultiUploadFailure {
+  fileName: string;
+  error: string;
+}
+
+// Response for multi-file upload endpoint.
+export interface MultiUploadResponse {
+  created: GcodeFile[];
+  failed: MultiUploadFailure[];
+  succeededCount: number;
+  failedCount: number;
+}

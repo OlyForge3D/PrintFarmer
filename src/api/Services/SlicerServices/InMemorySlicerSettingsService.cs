@@ -26,7 +26,8 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
                 per[engine] = new PerEngineSlicerSetting(path, args);
             }
         }
-        _settings = new SlicerSettingsDto(enabled, per);
+        var jitterPercent = cfg.GetValue<double?>("SlicerWorker:JitterPercent") ?? 15.0;
+        _settings = new SlicerSettingsDto(enabled, per, jitterPercent);
     }
 
     public SlicerSettingsDto GetSettings()
@@ -34,17 +35,19 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
         lock (_lock)
         {
             // Return a shallow copy to avoid callers mutating internal state directly
-            return new SlicerSettingsDto(_settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(_settings.PerEngine));
+            return new SlicerSettingsDto(_settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(_settings.PerEngine), _settings.JitterPercent);
         }
     }
 
     public void SaveSettings(SlicerSettingsDto settings)
     {
         if (settings is null)
-            throw new ArgumentNullException(nameof(settings));
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+        }
         lock (_lock)
         {
-            _settings = new SlicerSettingsDto(settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(settings.PerEngine));
+            _settings = new SlicerSettingsDto(settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(settings.PerEngine), settings.JitterPercent);
         }
     }
 }

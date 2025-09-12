@@ -10,9 +10,9 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-  "test:coverage": "vitest run --coverage",
-  "test:ui": "vitest --ui",
-  "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.7",

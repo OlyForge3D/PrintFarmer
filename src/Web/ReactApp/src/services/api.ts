@@ -1,34 +1,35 @@
-import axios from 'axios';
-import type { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import { 
-  Printer, 
-  CreatePrinterDto, 
-  UpdatePrinterDto, 
-  PrinterDetails, 
-  ManufacturerDto, 
-  ModelDto, 
-  FilamentPresets,
-  TempTargets,
-  FilamentTypeDto,
-  CreateFilamentTypeRequest,
-  UpdateFilamentTypeRequest,
-  UpdateModelRequest,
-  MoveRequest,
+import {
+  ApiError,
+  AuthenticationResult,
   CommandResult,
-  ResolveHostnameRequest,
-  ResolveHostnameResponse,
+  CreateFilamentTypeRequest,
+  CreatePrinterDto,
+  DiscoveredPrinterDto,
+  FilamentPresets,
+  FilamentTypeDto,
   GcodeFile,
   GcodeHarvestOperation,
+  GetGcodeFilesResponse,
+  HealthStatus,
   JobQueuePrintJob,
-  ApiError,
   LoginRequest,
+  ManufacturerDto,
+  ModelDto,
+  MoveRequest,
+  MultiUploadResponse,
+  Printer,
+  PrinterDetails,
   RegisterRequest,
-  AuthenticationResult,
-  UserDto,
-  DiscoveredPrinterDto,
-  GetGcodeFilesResponse, 
-  HealthStatus 
+  ResolveHostnameRequest,
+  ResolveHostnameResponse,
+  TempTargets,
+  UpdateFilamentTypeRequest,
+  UpdateModelRequest,
+  UpdatePrinterDto,
+  UserDto
 } from '@/types/api';
+import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios from 'axios';
 
 export class ApiClient {
   private client: AxiosInstance;
@@ -36,7 +37,7 @@ export class ApiClient {
   constructor() {
     // Use environment variable for API base URL, fallback to relative path for monolithic deployment
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
-    
+
     this.client = axios.create({
       baseURL: apiBaseUrl,
       timeout: 30000,
@@ -350,11 +351,11 @@ export class ApiClient {
   }
 
   async downloadGcodeFile(filePath: string): Promise<void> {
-    const response = await this.client.get(`/gcode-files/download`, { 
+    const response = await this.client.get(`/gcode-files/download`, {
       params: { path: filePath },
       responseType: 'blob'
     });
-    
+
     // Create a download link
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
@@ -375,14 +376,14 @@ export class ApiClient {
     });
   }
 
-  async uploadMultipleGcodeLibraryFiles(files: File[], virtualPath = '/'): Promise<{ created: any[]; failed: any[]; succeededCount: number; failedCount: number; }> {
+  async uploadMultipleGcodeLibraryFiles(files: File[], virtualPath = '/'): Promise<MultiUploadResponse> {
     const form = new FormData();
     files.forEach(f => form.append('files', f));
-    const resp = await this.client.post(`/gcode-files/upload-multiple`, form, {
+    const resp = await this.client.post<MultiUploadResponse>(`/gcode-files/upload-multiple`, form, {
       params: { path: virtualPath },
       headers: { 'Content-Type': 'multipart/form-data' }
     });
-    return resp.data;
+    return resp.data as MultiUploadResponse;
   }
 
   async getGcodeUploadSettings(): Promise<import('@/types/api').GcodeUploadSettings> {

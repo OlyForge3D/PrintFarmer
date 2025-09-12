@@ -1,7 +1,7 @@
 import { LoginModal } from '@/components/auth/LoginModal';
 import { RegisterModal } from '@/components/auth/RegisterModal';
-import { ThemeToggle } from '@/components/ThemeToggle';
 import { BuildInfo } from '@/components/BuildInfo';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSignalRConnection } from '@/hooks/useSignalR';
 import {
@@ -24,7 +24,7 @@ import {
   X
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, useLocation, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 // Layout now uses <Outlet /> for nested routes
 
 interface NavigationItem {
@@ -75,7 +75,9 @@ const navigation: NavigationItem[] = [
       { name: 'Catalog', href: '/catalog', icon: Layers },
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Spools', href: '/spools', icon: Box },
-      { name: 'User Management', href: '/admin/users', icon: Users }
+      { name: 'User Management', href: '/admin/users', icon: Users },
+      { name: 'Slicer Dry Run', href: '/admin/slicer/dry-run', icon: FileText },
+      { name: 'Slicer Job Status', href: '/admin/slicer/job-status', icon: FileText }
     ]
   },
 ];
@@ -112,7 +114,7 @@ export function Layout() {
   const announcementTimer = useRef<number | null>(null);
 
   const toggleExpand = (name: string) => {
-    setExpanded(prev => {
+    setExpanded((prev: Record<string, boolean>) => {
       const nextValue = !prev[name];
       const next = { ...prev, [name]: nextValue };
       // Find item to get child count (from filtered list so it's permission-safe)
@@ -173,7 +175,7 @@ export function Layout() {
   // Auto-expand groups containing current route
   useEffect(() => {
     const path = location.pathname;
-    setExpanded(prev => {
+    setExpanded((prev: Record<string, boolean>) => {
       const next = { ...prev };
       filteredNavigation.forEach(item => {
         if (item.children) {
@@ -188,9 +190,9 @@ export function Layout() {
   }, [location.pathname, filteredNavigation]);
 
   return (
-      <div className="min-h-screen bg-pf-bg-0 flex flex-col">
-        {/* Live region for accessibility announcements */}
-        <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
+    <div className="min-h-screen bg-pf-bg-0 flex flex-col">
+      {/* Live region for accessibility announcements */}
+      <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
       {/* Top Header Bar */}
       <header className="bg-pf-bg-1 border-b border-pf-border sticky top-0 z-50">
         <div className="flex items-center justify-between h-16 px-4">
@@ -307,7 +309,7 @@ export function Layout() {
         </div>
       </header>
 
-  <div className="flex flex-1 h-[calc(100vh-4rem)]">
+      <div className="flex flex-1 h-[calc(100vh-4rem)]">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
@@ -347,7 +349,7 @@ export function Layout() {
                                   key={child.name}
                                   to={child.href}
                                   onClick={() => { setSidebarOpen(false); }}
-                                  className={({ isActive }) =>
+                                  className={({ isActive }: { isActive: boolean }) =>
                                     `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                                       ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                                       : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
@@ -365,7 +367,7 @@ export function Layout() {
                         <NavLink
                           to={item.href}
                           onClick={() => { setSidebarOpen(false); }}
-                          className={({ isActive }) =>
+                          className={({ isActive }: { isActive: boolean }) =>
                             `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                               ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                               : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
@@ -384,8 +386,8 @@ export function Layout() {
           </div>
         )}
 
-  {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
-  <aside className="hidden lg:flex lg:flex-shrink-0 z-40">
+        {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
+        <aside className="hidden lg:flex lg:flex-shrink-0 z-40">
           <div className="flex flex-col w-64 bg-pf-bg-1 border-r border-pf-border">
             <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
               {filteredNavigation.map(item => {
@@ -408,7 +410,7 @@ export function Layout() {
                                 key={child.name}
                                 to={child.href}
                                 onClick={() => { /* child nav */ }}
-                                className={({ isActive }) =>
+                                className={({ isActive }: { isActive: boolean }) =>
                                   `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                                     ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
@@ -426,7 +428,7 @@ export function Layout() {
                       <NavLink
                         to={item.href}
                         onClick={() => { /* top-level nav */ }}
-                        className={({ isActive }) =>
+                        className={({ isActive }: { isActive: boolean }) =>
                           `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                             ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                             : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'

@@ -477,6 +477,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(s => s.Enabled).IsRequired();
             b.Property(s => s.PerEngineJson).HasColumnType("TEXT");
             b.Property(s => s.UpdatedAt).IsRequired();
+            b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
         });
     }
 
