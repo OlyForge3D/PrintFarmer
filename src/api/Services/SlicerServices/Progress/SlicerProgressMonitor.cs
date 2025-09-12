@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
 public static class SlicerProgressMonitor
 {
-    public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, ILogger? logger, CancellationToken ct)
+    public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, ILogger? logger, CancellationToken ct, Func<Guid, string, CancellationToken, Task>? onParserFailure = null)
     {
         try
         {
@@ -37,6 +37,24 @@ public static class SlicerProgressMonitor
                             if (parsed.State == SlicerProgressState.Completed)
                             {
                                 await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = 100, Status = SlicingJobStatus.Slicing, CurrentStep = parsed.Message }, ct);
+                            }
+                            else if (parsed.State == SlicerProgressState.Failed)
+                            {
+                                // Notify the worker/controller that parser reported a failure so higher-level logic can mark job failed.
+                                try
+                                {
+                                    if (onParserFailure != null)
+                                    {
+                                        await onParserFailure(jobId, parsed.Message ?? "Parser reported failure", ct);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger?.LogDebug(ex, "onParserFailure callback threw for job {JobId}", jobId);
+                                }
+
+                                // Ask the underlying process to terminate as an early stop
+                                try { processHandle.Kill(); } catch { }
                             }
                             continue;
                         }

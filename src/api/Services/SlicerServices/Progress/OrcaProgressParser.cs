@@ -14,7 +14,8 @@ public class OrcaProgressParser : IProgressParser
 
     public ProgressUpdate? Parse(string line)
     {
-        if (string.IsNullOrWhiteSpace(line)) return null;
+        if (string.IsNullOrWhiteSpace(line))
+            return null;
 
         // If we find a percent token, prefer it
         var m = PercentRegex.Match(line);

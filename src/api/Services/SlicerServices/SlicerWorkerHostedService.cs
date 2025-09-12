@@ -192,12 +192,34 @@ public class SlicerWorkerHostedService : BackgroundService
                 if (job.EngineType == SlicerEngineType.PrusaSlicer)
                 {
                     var parser = new PrusaProgressParser();
-                    _ = Task.Run(async () => await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken), cancellationToken);
+                    _ = Task.Run(async () =>
+                    {
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken, async (jid, msg, ct) =>
+                        {
+                            try
+                            {
+                                await jobQueue.FailJobAsync(job.Id, msg, cancellationToken);
+                                await notifier.NotifyFailureAsync(job, msg, cancellationToken);
+                            }
+                            catch { /* best-effort */ }
+                        });
+                    }, cancellationToken);
                 }
                 else if (job.EngineType == SlicerEngineType.OrcaSlicer)
                 {
                     var parser = new OrcaProgressParser();
-                    _ = Task.Run(async () => await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken), cancellationToken);
+                    _ = Task.Run(async () =>
+                    {
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken, async (jid, msg, ct) =>
+                        {
+                            try
+                            {
+                                await jobQueue.FailJobAsync(job.Id, msg, cancellationToken);
+                                await notifier.NotifyFailureAsync(job, msg, cancellationToken);
+                            }
+                            catch { /* best-effort */ }
+                        });
+                    }, cancellationToken);
                 }
                 else
                 {
