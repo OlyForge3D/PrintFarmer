@@ -1,4 +1,6 @@
-﻿namespace Farm.Web.Api.Domain;
+using System;
+
+namespace Farm.Web.Api.Domain;
 
 public class SlicerSettings
 {
@@ -13,7 +15,4 @@ public class SlicerSettings
 
     // Last update timestamp for auditing/diagnostics
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-
-    // Jitter percent (+/-) applied to retry backoff scheduling
-    public double JitterPercent { get; set; } = 15.0;
 }

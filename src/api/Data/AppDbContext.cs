@@ -32,7 +32,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Domain.Action> Actions => Set<Domain.Action>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
-    public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -471,17 +470,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.CreatedByUserId);
         });
 
-        // Password policy entity configuration (merged from origin/main)
-        modelBuilder.Entity<PasswordPolicy>(b =>
-        {
-            b.HasKey(pp => pp.Id);
-            b.Property(pp => pp.MinLength).IsRequired();
-            b.Property(pp => pp.RequireUppercase);
-            b.Property(pp => pp.RequireLowercase);
-            b.Property(pp => pp.RequireDigit);
-            b.Property(pp => pp.RequireSymbol);
-        });
-
         // SlicerSettings Entity Configuration
         modelBuilder.Entity<SlicerSettings>(b =>
         {
@@ -489,23 +477,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(s => s.Enabled).IsRequired();
             b.Property(s => s.PerEngineJson).HasColumnType("TEXT");
             b.Property(s => s.UpdatedAt).IsRequired();
-            b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
         });
-
-        // Seed default password policy if table empty (idempotent for EnsureCreated)
-        if (Database.ProviderName != null)
-        {
-            modelBuilder.Entity<PasswordPolicy>().HasData(new PasswordPolicy
-            {
-                Id = 1,
-                MinLength = 8,
-                RequireUppercase = false,
-                RequireLowercase = false,
-                RequireDigit = false,
-                RequireSymbol = false,
-                UpdatedAt = DateTime.UtcNow
-            });
-        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

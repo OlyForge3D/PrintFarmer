@@ -314,8 +314,8 @@ builder.Services.AddScoped<ISlicerProgressNotifier, SignalRSlicerProgressNotifie
 builder.Services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
 builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 
-// Register slicer runtime settings store
-builder.Services.AddSingleton<ISlicerSettingsService, InMemorySlicerSettingsService>();
+// Register slicer runtime settings store (DB-backed)
+builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>();
 
 // Ensure SlicerExecutableManager can consult runtime admin settings
 builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();

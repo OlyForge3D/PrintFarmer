@@ -1,16 +1,18 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Data;
+using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Domain;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
 public class DbSlicerSettingsServiceTests
 {
-    private static ServiceProvider BuildServiceProvider(string dbName)
+    private ServiceProvider BuildServiceProvider(string dbName)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -48,7 +50,7 @@ public class DbSlicerSettingsServiceTests
         var newSettings = new SlicerSettingsDto(true, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>
         {
             { SlicerEngineType.OrcaSlicer, new PerEngineSlicerSetting("/usr/bin/orca", "--export-gcode -o {output} {input}") }
-        }, 12.5);
+        });
 
         svc.SaveSettings(newSettings);
 
@@ -61,11 +63,9 @@ public class DbSlicerSettingsServiceTests
         var map = JsonSerializer.Deserialize<Dictionary<SlicerEngineType, PerEngineSlicerSetting>>(row!.PerEngineJson ?? "{}", opts);
         map.Should().ContainKey(SlicerEngineType.OrcaSlicer);
         map![SlicerEngineType.OrcaSlicer].Path.Should().Be("/usr/bin/orca");
-        row.JitterPercent.Should().BeApproximately(12.5, 0.0001);
 
         // GetSettings should return the saved value
         var fetched = svc.GetSettings();
         fetched.PerEngine.Should().ContainKey(SlicerEngineType.OrcaSlicer);
-        fetched.JitterPercent.Should().BeApproximately(12.5, 0.0001);
     }
 }
