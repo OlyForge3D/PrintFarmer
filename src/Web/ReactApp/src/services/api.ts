@@ -225,10 +225,7 @@ export class ApiClient {
     });
   }
 
-  async autoDetectNetworkRanges(): Promise<string[]> {
-    const resp = await this.client.post('/network-discovery/auto-detect', {});
-    return (resp.data as { ranges: string[] }).ranges;
-  }
+  // autoDetectNetworkRanges removed (unreliable in containerized environments)
 
   // ============ Filament Type API methods ============
 
