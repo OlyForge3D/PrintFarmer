@@ -1,21 +1,20 @@
-﻿using System.Text.RegularExpressions;
+using System;
+using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
-public partial class OrcaProgressParser : IProgressParser
+public class OrcaProgressParser : IProgressParser
 {
     // Examples parsed:
     // "[info] Exporting: 30%"
     // "Saving G-code: 100%"
-    private static readonly Regex PercentRegex = MyRegex();
+    private static readonly Regex PercentRegex = new(@"(?i)(?<pct>\d{1,3})%", RegexOptions.Compiled);
     private static readonly Regex ExportingRegex = new(@"(?i)exporting|saving|writing", RegexOptions.Compiled);
 
     public ProgressUpdate? Parse(string line)
     {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(line)) return null;
 
         // If we find a percent token, prefer it
         var m = PercentRegex.Match(line);
@@ -33,14 +32,11 @@ public partial class OrcaProgressParser : IProgressParser
         }
 
         // Error detection
-        if (line.Contains("error", StringComparison.OrdinalIgnoreCase) || line.Contains("failed", StringComparison.OrdinalIgnoreCase))
+        if (line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 || line.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             return new ProgressUpdate(0.0, line, SlicerProgressState.Failed);
         }
 
         return null;
     }
-
-    [GeneratedRegex(@"(?i)(?<pct>\d{1,3})%", RegexOptions.Compiled, "en-US")]
-    private static partial Regex MyRegex();
 }

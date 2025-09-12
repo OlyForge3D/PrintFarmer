@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.SlicerServices.Progress;
+namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
 public enum SlicerProgressState
 {
