@@ -25,7 +25,9 @@ public class PrusaProgressParser : IProgressParser
 
     public SlicerProgress? ParseLine(string line)
     {
-        if (string.IsNullOrWhiteSpace(line)) return null;
+        if (string.IsNullOrWhiteSpace(line))
+            return null;
+
         var lower = line.ToLowerInvariant();
 
         if (lower.Contains('%'))
@@ -65,7 +67,8 @@ public class PrusaProgressParser : IProgressParser
 
     public ProgressUpdate? Parse(string line)
     {
-        if (string.IsNullOrWhiteSpace(line)) return null;
+        if (string.IsNullOrWhiteSpace(line))
+            return null;
 
         var m = PercentRegex.Match(line);
         if (m.Success && int.TryParse(m.Groups["pct"].Value, out var pct))

@@ -41,5 +41,17 @@ public class SystemProcessRunner : IProcessRunner
                 throw;
             }
         }
+
+        public void Kill()
+        {
+            try
+            {
+                if (!_proc.HasExited)
+                {
+                    _proc.Kill(entireProcessTree: true);
+                }
+            }
+            catch { /* best effort */ }
+        }
     }
 }

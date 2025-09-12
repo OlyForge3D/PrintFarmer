@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Farm.Web.Api.Services.SlicerServices.Process;
 
 namespace Farm.Web.Api.Tests.TestUtilities;
@@ -17,7 +17,7 @@ public class TestProcessRunner : IProcessRunner
         return _factory(startInfo);
     }
 
-    private sealed class TestProcessHandle : IProcessHandle
+    private class TestProcessHandle : IProcessHandle
     {
         private readonly System.IO.MemoryStream _ms;
         private readonly System.IO.StreamReader _sr;
