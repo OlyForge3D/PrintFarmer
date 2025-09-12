@@ -1,9 +1,10 @@
-﻿using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Linq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
@@ -13,7 +14,6 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// </summary>
 [Trait("Category", "Docker")]
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
 public class SlicerServicesIntegrationTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
@@ -67,8 +67,8 @@ public class SlicerServicesIntegrationTests : IDisposable
 
         // Upload a test model file
         var modelContent = CreateTestStlContent();
-        var modelFileUrlString = await fileStorage.UploadFileAsync("test-models/cube.stl", modelContent, "application/octet-stream");
-        var modelFileUrl = new Uri(modelFileUrlString, UriKind.RelativeOrAbsolute);
+    var modelFileUrlString = await fileStorage.UploadFileAsync("test-models/cube.stl", modelContent, "application/octet-stream");
+    var modelFileUrl = new Uri(modelFileUrlString, UriKind.RelativeOrAbsolute);
 
         var request = new SlicingJobRequest
         {
@@ -108,7 +108,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         jobResponse.Should().NotBeNull();
         jobResponse.JobId.Should().NotBeEmpty();
         jobResponse.Status.Should().Be(SlicingJobStatus.Queued);
-        jobResponse.SlicerWorkerUrl.ToString().Should().Contain("orcaslicer-service");
+    jobResponse.SlicerWorkerUrl.ToString().Should().Contain("orcaslicer-service");
 
         // Verify job was enqueued
         _mockJobQueue.Verify(q => q.EnqueueAsync(
@@ -122,10 +122,10 @@ public class SlicerServicesIntegrationTests : IDisposable
         ), Times.Once);
 
         // Verify file storage integration
-        var fileExists = await fileStorage.FileExistsAsync(modelFileUrl.ToString());
+    var fileExists = await fileStorage.FileExistsAsync(modelFileUrl.ToString());
         fileExists.Should().BeTrue();
 
-        var downloadedContent = await fileStorage.DownloadFileBytesAsync(modelFileUrl.ToString());
+    var downloadedContent = await fileStorage.DownloadFileBytesAsync(modelFileUrl.ToString());
         downloadedContent.Should().BeEquivalentTo(modelContent);
     }
 
@@ -140,8 +140,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         // Act - Upload model file
         var modelKey = "integration-test/model.stl";
         var modelContent = CreateTestStlContent();
-        var modelUrlString = await fileStorage.UploadFileAsync(modelKey, modelContent, "application/octet-stream");
-        var modelUrl = new Uri(modelUrlString, UriKind.RelativeOrAbsolute);
+    var modelUrlString = await fileStorage.UploadFileAsync(modelKey, modelContent, "application/octet-stream");
+    var modelUrl = new Uri(modelUrlString, UriKind.RelativeOrAbsolute);
 
         // Verify upload
         var modelExists = await fileStorage.FileExistsAsync(modelKey);
@@ -152,7 +152,7 @@ public class SlicerServicesIntegrationTests : IDisposable
 
         // Upload G-code result
         var gcodeKey = "integration-test/result.gcode";
-        var gcodeUrlString = await fileStorage.UploadFileAsync(gcodeKey, gcodeContent, "text/plain");
+    var gcodeUrlString = await fileStorage.UploadFileAsync(gcodeKey, gcodeContent, "text/plain");
 
         // Removed direct engine processing test (in-process engines deprecated). External workers handle slicing now.
         var orchestrator = _serviceProvider.GetRequiredService<ISlicerOrchestrator>();
@@ -163,14 +163,12 @@ public class SlicerServicesIntegrationTests : IDisposable
 
         // Test empty model file URL
         var emptyModelRequest = CreateValidSlicingJobRequest();
-        emptyModelRequest.ModelFileUrl = new Uri("about:blank", UriKind.RelativeOrAbsolute);
+    emptyModelRequest.ModelFileUrl = new Uri("about:blank", UriKind.RelativeOrAbsolute);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(invalidUserRequest));
         await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(invalidPrinterRequest));
-        // For an about:blank URL we now expect a FileNotFoundException because the orchestrator validates
-        // physical existence of the model file after normalizing/attempted lookup.
-        await Assert.ThrowsAsync<FileNotFoundException>(() => orchestrator.SubmitJobAsync(emptyModelRequest));
+        await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(emptyModelRequest));
     }
 
     [Fact]
@@ -225,8 +223,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
 
         var modelBytes = CreateTestStlContent();
-        var modelUrlStringDup = await fileStorage.UploadFileAsync("dup-idem/cube.stl", modelBytes, "application/octet-stream");
-        var modelUrl = new Uri(modelUrlStringDup, UriKind.RelativeOrAbsolute);
+    var modelUrlStringDup = await fileStorage.UploadFileAsync("dup-idem/cube.stl", modelBytes, "application/octet-stream");
+    var modelUrl = new Uri(modelUrlStringDup, UriKind.RelativeOrAbsolute);
 
         var originalRequest = new SlicingJobRequest
         {
@@ -401,8 +399,8 @@ public class SlicerServicesIntegrationTests : IDisposable
         var orchestrator = _serviceProvider.GetRequiredService<ISlicerOrchestrator>();
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
         var bytes = CreateTestStlContent();
-        var urlStringChecksum = await fileStorage.UploadFileAsync("checksum/cube.stl", bytes, "application/octet-stream");
-        var url = new Uri(urlStringChecksum, UriKind.RelativeOrAbsolute);
+    var urlStringChecksum = await fileStorage.UploadFileAsync("checksum/cube.stl", bytes, "application/octet-stream");
+    var url = new Uri(urlStringChecksum, UriKind.RelativeOrAbsolute);
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
@@ -431,13 +429,16 @@ public class SlicerServicesIntegrationTests : IDisposable
     [InlineData("ABS", 240, 100)]
     public async Task MaterialSpecificSlicing_ShouldGenerateCorrectSettings(string material, int nozzleTemp, int bedTemp)
     {
-        ArgumentNullException.ThrowIfNull(material);
+        if (material is null)
+        {
+            throw new ArgumentNullException(nameof(material));
+        }
         // In-process slicing removed; simulate expected profile assignment & queue routing only
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
         // Upload model first, then build request referencing actual stored file so validation succeeds
         var modelBytes = CreateTestStlContent();
-        var uploadedModelUrlString = await fileStorage.UploadFileAsync($"materials/{material.ToLowerInvariant()}.stl", modelBytes, "application/octet-stream");
-        var uploadedModelUrl = new Uri(uploadedModelUrlString, UriKind.RelativeOrAbsolute);
+    var uploadedModelUrlString = await fileStorage.UploadFileAsync($"materials/{material.ToLowerInvariant()}.stl", modelBytes, "application/octet-stream");
+    var uploadedModelUrl = new Uri(uploadedModelUrlString, UriKind.RelativeOrAbsolute);
         var request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
