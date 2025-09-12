@@ -1,23 +1,23 @@
-﻿// Global using cleanup handled by project settings; explicit System removed.
+﻿using System;
 using System.Diagnostics.CodeAnalysis;
+using Farm.Web.Api.Infrastructure.Temp;
+using Farm.Web.Api.Infrastructure.Normalization;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Caching;
-using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
+using StackExchange.Redis;
 using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using StackExchange.Redis;
+using Farm.Web.Api.Infrastructure.Caching;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
 var builder = WebApplication.CreateBuilder(args);
@@ -255,16 +255,12 @@ builder.Services.AddScoped<IPresetService, PresetService>();
 builder.Services.AddScoped<ISpoolmanService, SpoolmanService>();
 builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
-builder.Services.AddScoped<ISignalRSettingsService, SignalRSettingsService>();
 builder.Services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
-// Model analysis and virus scanning services for ModelController
-builder.Services.AddScoped<IModelAnalysisService, ModelAnalysisService>();
-builder.Services.AddScoped<IVirusScanner, ClamAVVirusScanner>();
 // Migration status provider (lightweight introspection without forcing migrations strategy changes)
 // NOTE: Was singleton; changed to Scoped because it directly depends on AppDbContext (scoped) to avoid scoped->singleton injection violation in tests.
 builder.Services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
@@ -318,19 +314,14 @@ builder.Services.AddScoped<ISlicerProgressNotifier, SignalRSlicerProgressNotifie
 builder.Services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
 builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 
-// Register slicer runtime settings store (DB-backed)
-builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>();
+// Register slicer runtime settings store
+builder.Services.AddSingleton<ISlicerSettingsService, InMemorySlicerSettingsService>();
 
 // Ensure SlicerExecutableManager can consult runtime admin settings
 builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
-// Process runner used by SlicerWorkerHostedService; abstraction allows test injection of fake processes.
-builder.Services.AddTransient<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner, Farm.Web.Api.Services.SlicerServices.Process.SystemProcessRunner>();
 
 // Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
 builder.Services.AddHostedService<SlicerWorkerHostedService>();
-
-// Network URL rewriting for cross-environment compatibility
-builder.Services.AddSingleton<NetworkUrlRewriteService>();
 
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
@@ -381,6 +372,7 @@ if (isMonolithicDeployment)
         catch
         {
             // Safety: if relative path resolution fails (null args, etc.), skip static file mapping to avoid container crash.
+            return;
         }
     });
 }
@@ -499,149 +491,11 @@ builder.Services.AddAuthorization(options =>
 // Register authorization handlers
 builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Farm.Web.Api.Infrastructure.Authorization.PermissionAuthorizationHandler>();
 
-// Extract raw args for potential headless commands (do not remove from hosting args beyond our flags)
-var rawArgs = args.ToList();
-var headlessCreateAdmin = rawArgs.Contains("--create-admin");
-var headlessListUsers = rawArgs.Contains("--list-users");
+// Register model analysis and virus scanning services
+builder.Services.AddScoped<Farm.Web.Api.Services.Interfaces.IModelAnalysisService, Farm.Web.Api.Services.ModelAnalysisService>();
+builder.Services.AddSingleton<Farm.Web.Api.Services.Interfaces.IVirusScanner, Farm.Web.Api.Services.ClamAVVirusScanner>();
 
 var app = builder.Build();
-
-// Early headless commands (no web host run) to support automation:
-// Usage examples:
-//   dotnet run --project src/api/Farm.Web.Api.csproj -- --list-users
-//   dotnet run --project src/api/Farm.Web.Api.csproj -- --create-admin --username admin --email admin@example.com --password "VeryStrongPassw0rd!" --first Alice --last Admin
-if (headlessCreateAdmin || headlessListUsers)
-{
-    using var scope = app.Services.CreateScope();
-    // Ensure database is initialized before any headless operations
-    try
-    {
-        // Minimal initialization for CLI: Ensure database exists & auth seed only (skip catalog for speed)
-        var cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await cliDb.Database.EnsureCreatedAsync();
-        await Farm.Web.Api.Data.Seed.AuthenticationDataSeeder.SeedAsync(cliDb);
-    }
-    catch (Exception ex)
-    {
-        await Console.Error.WriteLineAsync($"[CLI] Database initialization failed: {ex.Message}");
-        return;
-    }
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    if (headlessListUsers)
-    {
-        var users = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).ToListAsync();
-        Console.WriteLine($"Users ({users.Count}):");
-        foreach (var u in users)
-        {
-            var roles = string.Join(',', u.UserRoles.Where(r => r.IsActive).Select(r => r.Role.Name));
-            Console.WriteLine($" - {u.Username} <{u.Email}> Roles=[{roles}] Active={u.IsActive}");
-        }
-        return; // exit app
-    }
-    if (headlessCreateAdmin)
-    {
-        string GetArg(string name)
-        {
-            var idx = rawArgs.IndexOf(name);
-            if (idx >= 0 && idx + 1 < rawArgs.Count)
-            {
-                return rawArgs[idx + 1];
-            }
-            return string.Empty;
-        }
-        var username = GetArg("--username");
-        var email = GetArg("--email");
-        var password = GetArg("--password");
-        var first = GetArg("--first");
-        var last = GetArg("--last");
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
-        {
-            await Console.Error.WriteLineAsync("Missing required arguments. Usage: --create-admin --username <u> --email <e> --password <p> [--first First] [--last Last]");
-            return;
-        }
-        // Dynamic password policy
-        var policy = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync();
-        var minLength = policy?.MinLength ?? 12;
-        if (password.Length < minLength)
-        {
-            await Console.Error.WriteLineAsync($"Password must be at least {minLength} characters.");
-            return;
-        }
-        if (policy != null)
-        {
-            if (policy.RequireUppercase && !password.Any(char.IsUpper))
-            {
-                await Console.Error.WriteLineAsync("Password must contain an uppercase letter.");
-                return;
-            }
-            if (policy.RequireLowercase && !password.Any(char.IsLower))
-            {
-                await Console.Error.WriteLineAsync("Password must contain a lowercase letter.");
-                return;
-            }
-            if (policy.RequireDigit && !password.Any(char.IsDigit))
-            {
-                await Console.Error.WriteLineAsync("Password must contain a digit.");
-                return;
-            }
-            if (policy.RequireSymbol && password.All(char.IsLetterOrDigit))
-            {
-                await Console.Error.WriteLineAsync("Password must contain a symbol.");
-                return;
-            }
-        }
-        // Ensure seed ran (roles etc.) already handled above.
-        var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
-        var authSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
-        var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
-        if (adminRole == null)
-        {
-            await Console.Error.WriteLineAsync("Admin role not found; seeding failure.");
-            return;
-        }
-        // Idempotent check
-        var existing = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Username == username || u.Email == email);
-        if (existing != null)
-        {
-            var hasAdmin = existing.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive);
-            if (hasAdmin && scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>().VerifyPassword(password, existing.PasswordHash))
-            {
-                var tokenExisting = await authSvc.GenerateJwtTokenAsync(existing);
-                Console.WriteLine($"Existing admin '{existing.Username}' detected. Reusing credentials. JWT={tokenExisting.Substring(0, Math.Min(32, tokenExisting.Length))}... (truncated)");
-                return;
-            }
-            await Console.Error.WriteLineAsync("User with same username or email already exists (not matching provided password for idempotency). Aborting.");
-            return;
-        }
-        var user = new Farm.Web.Api.Domain.User
-        {
-            Id = Guid.NewGuid(),
-            Username = username,
-            Email = email,
-            FirstName = string.IsNullOrWhiteSpace(first) ? "Admin" : first,
-            LastName = string.IsNullOrWhiteSpace(last) ? "CLI" : last,
-            PasswordHash = hashing.HashPassword(password),
-            IsActive = true,
-            EmailConfirmed = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-        db.Users.Add(user);
-        db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
-        {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            RoleId = adminRole.Id,
-            AssignedAt = DateTime.UtcNow,
-            IsActive = true
-        });
-        await db.SaveChangesAsync();
-        var token = await authSvc.GenerateJwtTokenAsync(user);
-        Console.WriteLine($"Created admin user '{username}' ({email}). JWT={token.Substring(0, Math.Min(32, token.Length))}... (truncated)");
-        return;
-    }
-}
 
 // Database initialization with retry logic for resilient startup
 using (var scope = app.Services.CreateScope())
@@ -715,74 +569,60 @@ using (var scope = app.Services.CreateScope())
         logger.LogWarning(ex, "Failed to seed Spoolman configuration from environment");
     }
 
-    // Optional unattended initial admin bootstrap (deprecated default). Now requires explicit ENABLE_ADMIN_BOOTSTRAP=true.
+    // Optional unattended initial admin bootstrap from environment variables
     try
     {
-        var enableBootstrap = Environment.GetEnvironmentVariable("ENABLE_ADMIN_BOOTSTRAP");
-        if (string.Equals(enableBootstrap, "true", StringComparison.OrdinalIgnoreCase))
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var hasAdmin = await db.Users.AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive));
+        if (!hasAdmin)
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var hasAdmin = await db.Users.AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive));
-            if (!hasAdmin)
+            var adminUser = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
+            var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
+            var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+            if (!string.IsNullOrWhiteSpace(adminUser) && !string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword) && adminPassword.Length >= 8)
             {
-                var adminUser = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
-                var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
-                if (!string.IsNullOrWhiteSpace(adminUser) && !string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword) && adminPassword.Length >= 12)
+                var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
+                // Previously retrieved auth service was unused here; removed to satisfy analyzer.
+                var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+                if (adminRole != null)
                 {
-                    var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
-                    var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
-                    if (adminRole != null)
+                    var user = new Farm.Web.Api.Domain.User
                     {
-                        var user = new Farm.Web.Api.Domain.User
-                        {
-                            Id = Guid.NewGuid(),
-                            Username = adminUser,
-                            Email = adminEmail,
-                            FirstName = "Admin",
-                            LastName = "Bootstrap",
-                            PasswordHash = hashing.HashPassword(adminPassword),
-                            IsActive = true,
-                            EmailConfirmed = true,
-                            CreatedAt = DateTime.UtcNow,
-                            UpdatedAt = DateTime.UtcNow
-                        };
-                        db.Users.Add(user);
-                        db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
-                        {
-                            Id = Guid.NewGuid(),
-                            UserId = user.Id,
-                            RoleId = adminRole.Id,
-                            AssignedAt = DateTime.UtcNow,
-                            IsActive = true
-                        });
-                        await db.SaveChangesAsync();
-                        logger.LogInformation("[Startup] Created initial admin user from environment (USERNAME={Username}, EMAIL={Email})", adminUser, adminEmail);
-                    }
-                    else
+                        Id = Guid.NewGuid(),
+                        Username = adminUser,
+                        Email = adminEmail,
+                        FirstName = "Admin",
+                        LastName = "Bootstrap",
+                        PasswordHash = hashing.HashPassword(adminPassword),
+                        IsActive = true,
+                        EmailConfirmed = true,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    db.Users.Add(user);
+                    db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
                     {
-                        logger.LogWarning("[Startup] Cannot create admin user from environment because farm_admin role not found.");
-                    }
+                        Id = Guid.NewGuid(),
+                        UserId = user.Id,
+                        RoleId = adminRole.Id,
+                        AssignedAt = DateTime.UtcNow,
+                        IsActive = true
+                    });
+                    await db.SaveChangesAsync();
+                    logger.LogInformation("[Startup] Created initial admin user from environment (USERNAME={Username}, EMAIL={Email})", adminUser, adminEmail);
                 }
                 else
                 {
-                    logger.LogWarning("[Startup] ENABLE_ADMIN_BOOTSTRAP=true but ADMIN_* variables missing or password policy not met (>=12 chars). Skipping.");
+                    logger.LogWarning("[Startup] Cannot create admin user from environment because farm_admin role not found.");
                 }
             }
-            else
-            {
-                logger.LogDebug("[Startup] ENABLE_ADMIN_BOOTSTRAP=true but admin already exists; no action taken.");
-            }
-        }
-        else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ADMIN_USERNAME")))
-        {
-            logger.LogWarning("[Startup] ADMIN_* variables detected but ENABLE_ADMIN_BOOTSTRAP!=true. Bootstrap skipped by design.");
         }
     }
     catch (Exception ex)
     {
+        // Don't fail startup for bootstrap issues
         var logger2 = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger2.LogWarning(ex, "[Startup] Admin bootstrap attempt failed (non-fatal)");
+        logger2.LogWarning(ex, "[Startup] Failed to perform environment admin bootstrap");
     }
 }
 
@@ -890,21 +730,6 @@ app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] Filam
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
 app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
-app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettingsDto body) =>
-{
-    var validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
-    return Results.Ok(new
-    {
-        isValid = validation.IsValid,
-        errors = validation.Errors,
-        warnings = validation.Warnings,
-        suggestions = validation.Suggestions
-    });
-});
-
-// Minimal API for SignalR settings
-app.MapGet("/api/signalr/settings", ([FromServices] ISignalRSettingsService svc) => Results.Ok(svc.GetSettings()));
-app.MapPost("/api/signalr/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] ISignalRSettingsService svc, [FromBody] SignalRSettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
 app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () =>
 {
     // Enumerate local IPv4 addresses and suggest /24 CIDR blocks.
@@ -983,20 +808,15 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
     List<string> ranges = current.NetworkRanges;
     if (!string.IsNullOrWhiteSpace(rangesEnv))
     {
-        ranges = rangesEnv
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct()
-            .ToList();
+        ranges = [.. rangesEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct()];
     }
     List<int> ports = current.Ports;
     if (!string.IsNullOrWhiteSpace(portsEnv))
     {
-        ports = portsEnv
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        ports = [.. portsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(p => int.TryParse(p, out var v) ? v : -1)
             .Where(v => v > 0 && v < 65536)
-            .Distinct()
-            .ToList();
+            .Distinct()];
         if (ports.Count == 0)
         {
             ports = current.Ports;

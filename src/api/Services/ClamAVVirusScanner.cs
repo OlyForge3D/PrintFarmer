@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
@@ -92,7 +95,7 @@ public class ClamAVVirusScanner : IVirusScanner
         {
             try
             {
-                var paths = System.Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+                var paths = System.Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? Array.Empty<string>();
                 foreach (var p in paths)
                 {
                     var candidate = Path.Combine(p, name + (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? ".exe" : string.Empty));

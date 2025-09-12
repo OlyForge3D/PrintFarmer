@@ -4,37 +4,23 @@ import React, { useState } from 'react';
 
 // Lightweight mapping to match server DTOs
 type PerEngineSetting = { path?: string | null; argsTemplate?: string | null };
-type SlicerSettingsDto = { enabled: boolean; perEngine: Record<string, PerEngineSetting>; jitterPercent?: number };
+type SlicerSettingsDto = { enabled: boolean; perEngine: Record<string, PerEngineSetting> };
 
 export const SlicerSettingsPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery<SlicerSettingsDto, Error>({
-    queryKey: ['slicerSettings'],
-    queryFn: async () => {
-      const res = await fetch('/api/slicer/settings');
-      if (!res.ok) throw new Error('Failed to fetch settings');
-      return res.json();
-    }
+  const { data, isLoading } = useQuery<SlicerSettingsDto>(['slicerSettings'], async () => {
+    const res = await fetch('/api/slicer/settings');
+    if (!res.ok) throw new Error('Failed to fetch settings');
+    return res.json();
   });
 
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Enhance save mutation to surface server messages
-  const saveMutation = useMutation<void, Error, SlicerSettingsDto>({
-    mutationFn: async (payload: SlicerSettingsDto) => {
-      const res = await fetch('/api/slicer/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Save failed with status ${res.status}`);
-      }
-    },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['slicerSettings'] }); setSaveError(null); },
-    onError: (err: unknown) => setSaveError(err instanceof Error ? err.message : String(err))
-  });
+  const saveMutation = useMutation(async (payload: SlicerSettingsDto) => {
+    const res = await fetch('/api/slicer/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error('Failed to save settings');
+  }, { onSuccess: () => queryClient.invalidateQueries(['slicerSettings']) });
 
   const [local, setLocal] = useState<SlicerSettingsDto | null>(null);
-  React.useEffect(() => { if (data) setLocal(data); else setLocal(null); }, [data]);
+  React.useEffect(() => { if (data) setLocal(data); }, [data]);
 
   const [openExamplesEngine, setOpenExamplesEngine] = useState<string | null>(null);
 
@@ -51,18 +37,6 @@ export const SlicerSettingsPage: React.FC = () => {
     });
   };
 
-  const onJitterChange = (valueStr: string) => {
-    const v = parseFloat(valueStr);
-    setLocal(prev => ({ ...(prev as SlicerSettingsDto), jitterPercent: Number.isNaN(v) ? undefined : v }));
-    if (Number.isNaN(v)) {
-      setValidationError('Jitter percent must be a number');
-    } else if (v < 0 || v > 100) {
-      setValidationError('Jitter percent must be between 0 and 100');
-    } else {
-      setValidationError(null);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div>
@@ -72,7 +46,7 @@ export const SlicerSettingsPage: React.FC = () => {
 
       <div className="bg-white rounded shadow p-4">
         <label className="inline-flex items-center">
-          <input type="checkbox" checked={local.enabled} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocal({ ...local, enabled: e.target.checked })} className="mr-2" />
+          <input type="checkbox" checked={local.enabled} onChange={(e) => setLocal({ ...local, enabled: e.target.checked })} className="mr-2" />
           <span>Enable local slicer worker (process jobs locally)</span>
         </label>
       </div>
@@ -84,12 +58,12 @@ export const SlicerSettingsPage: React.FC = () => {
             <div key={engine} className="grid grid-cols-3 gap-3 items-center">
               <div className="font-medium">{engine}</div>
               <div>
-                <input type="text" value={local.perEngine[engine]?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'path', e.target.value)} placeholder="Path to binary" className="w-full border rounded px-2 py-1" />
+                <input type="text" value={local.perEngine[engine]?.path ?? ''} onChange={(e) => updateEngineField(engine, 'path', e.target.value)} placeholder="Path to binary" className="w-full border rounded px-2 py-1" />
                 <div className="text-xs text-gray-500 mt-1">Path to slicer executable (leave empty to attempt PATH discovery)</div>
               </div>
               <div>
-                <input type="text" value={local.perEngine[engine]?.argsTemplate ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'argsTemplate', e.target.value)} placeholder="Args template" className="w-full border rounded px-2 py-1" />
-                <div className="text-xs text-gray-500 mt-1">Args template — use {'{input}'} and {'{output}'} placeholders</div>
+                <input type="text" value={local.perEngine[engine]?.argsTemplate ?? ''} onChange={(e) => updateEngineField(engine, 'argsTemplate', e.target.value)} placeholder="Args template" className="w-full border rounded px-2 py-1" />
+                <div className="text-xs text-gray-500 mt-1">Args template — use {input} and {output} placeholders</div>
 
                 {engine === 'OrcaSlicer' && (
                   <div className="mt-2">
@@ -115,20 +89,11 @@ export const SlicerSettingsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded shadow p-4">
-        <label className="block">
-          <div className="font-medium">Retry jitter percent</div>
-          <div className="text-xs text-gray-500">Percentage +/- applied to retry backoff delays (e.g. 15 = +/-15%)</div>
-          <input type="number" step="0.1" min={0} max={100} value={local.jitterPercent ?? 15} onChange={(e: React.ChangeEvent<HTMLInputElement>) => onJitterChange(e.target.value)} className="mt-2 w-32 border rounded px-2 py-1" />
-          {validationError && <div className="text-sm text-red-600 mt-1">{validationError}</div>}
-        </label>
-      </div>
-
       <div className="flex justify-end">
-        <button onClick={() => local && saveMutation.mutate(local)} disabled={!!validationError || !local} className="px-4 py-2 bg-blue-600 text-white rounded">Save Settings</button>
+        <button onClick={() => saveMutation.mutate(local)} className="px-4 py-2 bg-blue-600 text-white rounded">Save Settings</button>
       </div>
 
-      {(saveMutation.error || saveError) && <div className="text-red-600">{(saveError) ?? (saveMutation.error as Error)?.message ?? 'Failed to save settings'}</div>}
+      {saveMutation.error && <div className="text-red-600">Failed to save settings</div>}
     </div>
   );
 };

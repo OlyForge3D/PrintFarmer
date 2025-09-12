@@ -1,4 +1,4 @@
-﻿using Farm.Web.Shared;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -16,7 +16,7 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
         // Initialize from configuration if available
         var enabled = cfg.GetValue<bool?>("SlicerWorker:Enabled") ?? false;
         var per = new Dictionary<SlicerEngineType, PerEngineSlicerSetting>();
-        foreach (SlicerEngineType engine in Enum.GetValues<SlicerEngineType>())
+        foreach (SlicerEngineType engine in Enum.GetValues(typeof(SlicerEngineType)))
         {
             var section = cfg.GetSection($"SlicerExecutables:{engine}");
             var path = section["Path"];
@@ -26,8 +26,7 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
                 per[engine] = new PerEngineSlicerSetting(path, args);
             }
         }
-        var jitterPercent = cfg.GetValue<double?>("SlicerWorker:JitterPercent") ?? 15.0;
-        _settings = new SlicerSettingsDto(enabled, per, jitterPercent);
+        _settings = new SlicerSettingsDto(enabled, per);
     }
 
     public SlicerSettingsDto GetSettings()
@@ -35,19 +34,17 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
         lock (_lock)
         {
             // Return a shallow copy to avoid callers mutating internal state directly
-            return new SlicerSettingsDto(_settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(_settings.PerEngine), _settings.JitterPercent);
+            return new SlicerSettingsDto(_settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(_settings.PerEngine));
         }
     }
 
     public void SaveSettings(SlicerSettingsDto settings)
     {
         if (settings is null)
-        {
-            ArgumentNullException.ThrowIfNull(settings);
-        }
+            throw new ArgumentNullException(nameof(settings));
         lock (_lock)
         {
-            _settings = new SlicerSettingsDto(settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(settings.PerEngine), settings.JitterPercent);
+            _settings = new SlicerSettingsDto(settings.Enabled, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(settings.PerEngine));
         }
     }
 }

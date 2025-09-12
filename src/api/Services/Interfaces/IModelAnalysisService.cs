@@ -1,4 +1,7 @@
-﻿namespace Farm.Web.Api.Services.Interfaces;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Farm.Web.Api.Services.Interfaces;
 
 public record ModelAnalysisResult(double? DimensionX, double? DimensionY, double? DimensionZ, int? TriangleCount, double? VolumeMm3);
 

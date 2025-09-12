@@ -1,5 +1,8 @@
-﻿using System.Globalization;
+using System.Globalization;
+using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
@@ -65,13 +68,13 @@ public class ModelAnalysisService : IModelAnalysisService
             double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
             int vertexCount = 0;
             string? line;
-            while ((line = await sr.ReadLineAsync(cancellationToken)) != null)
+            while ((line = await sr.ReadLineAsync()) != null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var trimmed = line.Trim();
                 if (trimmed.StartsWith("vertex", StringComparison.OrdinalIgnoreCase))
                 {
-                    var parts = trimmed.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+                    var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length >= 4 &&
                         double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var vx) &&
                         double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var vy) &&

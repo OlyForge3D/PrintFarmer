@@ -1,6 +1,7 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using System.Text.Json;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -13,23 +14,24 @@ public class SlicingSubmissionController : ControllerBase
     private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
     private readonly ISlicerFileStorage _fileStorage;
     private readonly ILogger<SlicingSubmissionController> _logger;
+    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
+    private readonly string _tempRoot;
     private readonly ISlicerOrchestrator _orchestrator;
-    private readonly IHostEnvironment _env;
 
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env)
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(tempPathProvider);
         _fileStorage = fileStorage;
         _logger = logger;
-        // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
-        var tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
-        Directory.CreateDirectory(tempRoot);
+        _tempPathProvider = tempPathProvider;
+        _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
+        Directory.CreateDirectory(_tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _env = env ?? throw new ArgumentNullException(nameof(env));
     }
 
     [HttpPost("slice")]
+    [Authorize]
     [ProducesResponseType(typeof(SlicingJobResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)]
@@ -141,7 +143,7 @@ public class SlicingSubmissionController : ControllerBase
             Guid userId;
             if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
             {
-                if (_env.IsEnvironment("Testing"))
+                if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Testing")
                 {
                     // Provide a stable test user id for integration tests that don't include auth
                     userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
@@ -164,31 +166,26 @@ public class SlicingSubmissionController : ControllerBase
 
             var response = await _orchestrator.SubmitJobAsync(request);
 
-            // Build a SliceResultDto to include richer metadata for tests and client consumption
-            var sliceResult = new SliceResultDto
-            {
-                JobId = response.JobId.ToString(),
-                Status = response.Status.ToString(),
-                Progress = 0,
-                PrintTime = 0,
-                FilamentUsed = 0,
-                LayerCount = 0,
-                GcodeUrl = string.Empty,
-                Metadata = new SliceMetadataDto
-                {
-                    SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                    ProfileUsed = profile!.Quality + " - " + profile.Material,
-                    EstimatedCost = 0
-                }
-            };
-
-            // In Testing environment register the job in the in-memory SlicingJobStore as Queued
-            if (_env.IsEnvironment("Testing"))
+            // In Testing environment register the job in the in-memory SlicingJobStore as Queued for predictable test behavior
+            if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Testing")
             {
                 var jobId = response.JobId.ToString();
-                sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode"; // placeholder path; actual file will be created by the worker
-                sliceResult.Status = SlicingJobStatus.Queued.ToString();
-                sliceResult.Progress = 0;
+                var sliceResult = new SliceResultDto
+                {
+                    JobId = jobId,
+                    Status = SlicingJobStatus.Queued.ToString(),
+                    Progress = 0,
+                    PrintTime = 0,
+                    FilamentUsed = 0,
+                    LayerCount = 0,
+                    GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode",
+                    Metadata = new SliceMetadataDto
+                    {
+                        SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
+                        ProfileUsed = profile!.Quality + " - " + profile.Material,
+                        EstimatedCost = 0
+                    }
+                };
 
                 var storeJob = new SlicingJobDto
                 {
@@ -204,9 +201,20 @@ public class SlicingSubmissionController : ControllerBase
                 };
 
                 SlicingJobStore.Add(storeJob);
+
+                return Accepted(sliceResult);
             }
 
-            return Accepted(sliceResult);
+            var accepted = new
+            {
+                jobId = response.JobId,
+                status = response.Status.ToString(),
+                estimatedCompletionTime = response.EstimatedCompletionTime,
+                queuePosition = response.QueuePosition,
+                slicerWorkerUrl = response.SlicerWorkerUrl
+            };
+
+            return Accepted(accepted);
         }
         catch (Exception ex)
         {
