@@ -23,7 +23,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     lastName: '',
   });
 
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  // Field-level errors
+  const [fieldErrors, setFieldErrors] = useState<{[K in keyof typeof formData]?: string} & {passwordPolicy?: string}>({});
 
   useEffect(() => {
     checkSetupStatus();
@@ -53,35 +54,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
+  const passwordPolicy = { minLength: 8, recommendUpper: true, recommendLower: true, recommendDigit: true, recommendSymbol: true };
+
   const validateForm = () => {
-    const errors: string[] = [];
-
-    if (formData.username.length < 3) {
-      errors.push('Username must be at least 3 characters long');
-    }
-
-    if (!formData.email || !/\S+@\S+\.\S+/.test(formData.email)) {
-      errors.push('Please enter a valid email address');
-    }
-
-    if (formData.password.length < 8) {
-      errors.push('Password must be at least 8 characters long for admin accounts');
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      errors.push('Passwords do not match');
-    }
-
-    if (!formData.firstName.trim()) {
-      errors.push('First name is required');
-    }
-
-    if (!formData.lastName.trim()) {
-      errors.push('Last name is required');
-    }
-
-    setValidationErrors(errors);
-    return errors.length === 0;
+    const errs: typeof fieldErrors = {};
+    if (formData.username.trim().length < 3) errs.username = 'At least 3 characters';
+    if (!formData.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(formData.email)) errs.email = 'Invalid email address';
+    if (formData.password.length < passwordPolicy.minLength) errs.password = `Min ${passwordPolicy.minLength} characters`;
+    if (formData.password !== formData.confirmPassword) errs.confirmPassword = 'Passwords do not match';
+    if (!formData.firstName.trim()) errs.firstName = 'Required';
+    if (!formData.lastName.trim()) errs.lastName = 'Required';
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -134,9 +118,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const handleInputChange = (field: keyof typeof formData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear validation errors when user starts typing
-    if (validationErrors.length > 0) {
-      setValidationErrors([]);
-    }
+    if (Object.keys(fieldErrors).length) setFieldErrors({});
     if (error) {
       setError(null);
     }
@@ -172,13 +154,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
         {/* Setup Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Error Display */}
-          {(error || validationErrors.length > 0) && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm space-y-1">
-              {error && <div>{error}</div>}
-              {validationErrors.map((err, index) => (
-                <div key={index}>{err}</div>
-              ))}
+          {/* General Error */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm" role="alert">
+              {error}
             </div>
           )}
 
@@ -200,6 +179,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 autoComplete="given-name"
                 disabled={creating}
               />
+              {fieldErrors.firstName && <p className="text-xs text-red-500 mt-1" role="alert">{fieldErrors.firstName}</p>}
             </div>
             <div>
               <label htmlFor="lastName" className="block text-sm font-medium text-pf-text-primary mb-2">
@@ -216,6 +196,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 autoComplete="family-name"
                 disabled={creating}
               />
+              {fieldErrors.lastName && <p className="text-xs text-red-500 mt-1" role="alert">{fieldErrors.lastName}</p>}
             </div>
           </div>
 
@@ -236,6 +217,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 autoComplete="username"
               disabled={creating}
             />
+            {fieldErrors.username && <p className="text-xs text-red-500 mt-1" role="alert">{fieldErrors.username}</p>}
           </div>
 
           {/* Email */}
@@ -255,6 +237,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 autoComplete="email"
               disabled={creating}
             />
+            {fieldErrors.email && <p className="text-xs text-red-500 mt-1" role="alert">{fieldErrors.email}</p>}
           </div>
 
           {/* Password */}
@@ -284,9 +267,26 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-xs text-pf-text-tertiary mt-1">
-              Must be at least 8 characters and ideally include upper, lower, number & symbol.
-            </p>
+            <div className="mt-2">
+              <ul className="text-xs space-y-0.5">
+                <li className={formData.password.length >= passwordPolicy.minLength ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                  Min {passwordPolicy.minLength} characters
+                </li>
+                <li className={/[A-Z]/.test(formData.password) ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                  Uppercase letter (recommended)
+                </li>
+                <li className={/[a-z]/.test(formData.password) ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                  Lowercase letter (recommended)
+                </li>
+                <li className={/[0-9]/.test(formData.password) ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                  Digit (recommended)
+                </li>
+                <li className={/[^A-Za-z0-9]/.test(formData.password) ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                  Symbol (recommended)
+                </li>
+              </ul>
+            </div>
+            {fieldErrors.password && <p className="text-xs text-red-500 mt-1" role="alert">{fieldErrors.password}</p>}
           </div>
 
           {/* Confirm Password */}
@@ -306,12 +306,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               autoComplete="new-password"
               disabled={creating}
             />
+            {fieldErrors.confirmPassword && <p className="text-xs text-red-500 mt-1" role="alert">{fieldErrors.confirmPassword}</p>}
           </div>
 
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={creating || !formData.username || !formData.email || !formData.password || !formData.firstName || !formData.lastName}
+            disabled={creating || !formData.username || !formData.email || !formData.password || !formData.firstName || !formData.lastName || Object.keys(fieldErrors).length > 0}
             className="w-full px-4 py-3 bg-pf-accent text-white rounded-md hover:bg-pf-accent-dark focus:outline-none focus:ring-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           >
             {creating ? (

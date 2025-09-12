@@ -3,7 +3,8 @@ namespace Farm.Web.Api.Domain;
 public class PasswordPolicy
 {
     public int Id { get; set; }
-    public int MinLength { get; set; } = 12;
+    // Relaxed default minimum length (was 12)
+    public int MinLength { get; set; } = 8;
     public bool RequireUppercase { get; set; }
     public bool RequireLowercase { get; set; }
     public bool RequireDigit { get; set; }

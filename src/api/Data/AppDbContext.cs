@@ -480,6 +480,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(s => s.UpdatedAt).IsRequired();
             b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
         });
+
+        // Seed default password policy if table empty (idempotent for EnsureCreated)
+        if (Database.ProviderName != null)
+        {
+            modelBuilder.Entity<PasswordPolicy>().HasData(new PasswordPolicy
+            {
+                Id = 1,
+                MinLength = 8,
+                RequireUppercase = false,
+                RequireLowercase = false,
+                RequireDigit = false,
+                RequireSymbol = false,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
