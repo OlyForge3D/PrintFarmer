@@ -2,12 +2,11 @@ namespace Farm.Web.Shared;
 
 public class PasswordPolicyDto
 {
-    // Default minimum length relaxed from 12 -> 8 to improve initial setup UX
-    public int MinLength { get; set; } = 8;
-    public bool RequireUppercase { get; set; }
-    public bool RequireLowercase { get; set; }
-    public bool RequireDigit { get; set; }
-    public bool RequireSymbol { get; set; }
+    public int MinLength { get; set; } = 12;
+    public bool RequireUppercase { get; set; } = false;
+    public bool RequireLowercase { get; set; } = false;
+    public bool RequireDigit { get; set; } = false;
+    public bool RequireSymbol { get; set; } = false;
 }
 
 public class UpdatePasswordPolicyRequest
