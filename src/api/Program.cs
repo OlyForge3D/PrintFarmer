@@ -314,6 +314,15 @@ builder.Services.AddScoped<ISlicerProgressNotifier, SignalRSlicerProgressNotifie
 builder.Services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
 builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 
+// Register slicer runtime settings store
+builder.Services.AddSingleton<ISlicerSettingsService, InMemorySlicerSettingsService>();
+
+// Ensure SlicerExecutableManager can consult runtime admin settings
+builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
+
+// Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
+builder.Services.AddHostedService<SlicerWorkerHostedService>();
+
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
@@ -482,6 +491,10 @@ builder.Services.AddAuthorization(options =>
 // Register authorization handlers
 builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Farm.Web.Api.Infrastructure.Authorization.PermissionAuthorizationHandler>();
 
+// Register model analysis and virus scanning services
+builder.Services.AddScoped<Farm.Web.Api.Services.Interfaces.IModelAnalysisService, Farm.Web.Api.Services.ModelAnalysisService>();
+builder.Services.AddSingleton<Farm.Web.Api.Services.Interfaces.IVirusScanner, Farm.Web.Api.Services.ClamAVVirusScanner>();
+
 var app = builder.Build();
 
 // Database initialization with retry logic for resilient startup
@@ -646,6 +659,7 @@ app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDesc
 });
 
 app.UseCors("Default");
+
 
 // Authentication and Authorization
 app.UseAuthentication();

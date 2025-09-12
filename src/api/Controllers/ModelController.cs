@@ -6,6 +6,7 @@ using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -19,13 +20,17 @@ public class ModelController : ControllerBase
     private readonly ILogger<ModelController> _logger;
     private readonly AppDbContext _context;
     private readonly string _modelsPath;
+    private readonly IModelAnalysisService _analysisService;
+    private readonly IVirusScanner _virusScanner;
 
-    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration)
+    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner)
     {
         _logger = logger;
         _context = context;
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
+        _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
+        _virusScanner = virusScanner ?? throw new ArgumentNullException(nameof(virusScanner));
 
         // Ensure models directory exists
         if (!Directory.Exists(_modelsPath))
@@ -72,7 +77,7 @@ public class ModelController : ControllerBase
         }
 
         // Validate file extension
-        var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
+        var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
         var originalName = modelFile.FileName ?? string.Empty;
         var fileExtension = Path.GetExtension(originalName).ToLowerInvariant();
 
@@ -108,6 +113,39 @@ public class ModelController : ControllerBase
                 // Write to file
                 memoryStream.Position = 0;
                 await memoryStream.CopyToAsync(stream);
+            }
+
+            // Run virus scan (best-effort). If infected, delete file and reject upload.
+            try
+            {
+                var scanResult = await _virusScanner.ScanFileAsync(filePath, CancellationToken.None);
+                if (scanResult == VirusScanResult.Infected)
+                {
+                    // Clean up infected file
+                    if (IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
+                    {
+                        System.IO.File.Delete(filePath);
+                    }
+
+                    _logger.LogWarning("Upload rejected - file {FileName} flagged as infected", originalName);
+                    return BadRequest("Uploaded file failed security scan");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Don't fail the upload if the scanner is unavailable — log and continue
+                _logger.LogWarning(ex, "Virus scanner failed or unavailable; continuing without scan for {FileName}", originalName);
+            }
+
+            // Analyze model metadata (dimensions, triangle count) where possible
+            ModelAnalysisResult? analysis = null;
+            try
+            {
+                analysis = await _analysisService.AnalyzeModelAsync(filePath, fileExtension, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Model analysis failed for {FileName}; marking model as valid but without metadata", originalName);
             }
 
             // Duplicate handling strategy (test-aligned):
@@ -169,7 +207,12 @@ public class ModelController : ControllerBase
                 UploadedAt = DateTime.UtcNow,
                 IsValid = true,
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = DateTime.UtcNow,
+                DimensionX = analysis?.DimensionX,
+                DimensionY = analysis?.DimensionY,
+                DimensionZ = analysis?.DimensionZ,
+                TriangleCount = analysis?.TriangleCount,
+                VolumeM3 = analysis?.VolumeMm3
             };
 
             _context.Models3D.Add(model);

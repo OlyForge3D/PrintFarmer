@@ -1,5 +1,7 @@
+using System.Security.Claims;
 using System.Text.Json;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -14,7 +16,9 @@ public class SlicingSubmissionController : ControllerBase
     private readonly ILogger<SlicingSubmissionController> _logger;
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
     private readonly string _tempRoot;
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider)
+    private readonly ISlicerOrchestrator _orchestrator;
+
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         _fileStorage = fileStorage;
@@ -22,9 +26,11 @@ public class SlicingSubmissionController : ControllerBase
         _tempPathProvider = tempPathProvider;
         _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
         Directory.CreateDirectory(_tempRoot);
+        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     }
 
     [HttpPost("slice")]
+    [Authorize]
     [ProducesResponseType(typeof(SlicingJobResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)]
@@ -102,76 +108,40 @@ public class SlicingSubmissionController : ControllerBase
                 modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, stream, "application/octet-stream");
             }
 
-            var job = new SlicingJobDto
+            // Determine authenticated user
+            var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+            if (subClaim == null || !Guid.TryParse(subClaim.Value, out var userId) || userId == Guid.Empty)
             {
-                JobId = Guid.NewGuid().ToString(),
-                Status = SlicingJobStatus.Queued,
-                Progress = 0,
-                SlicerEngine = slicerEngine,
-                PrinterId = printerGuid,
-                ModelFilePath = modelFileUrl,
-                Profile = profile,
-                CreatedAt = DateTime.UtcNow
-            };
-            SlicingJobStore.Add(job);
-            _ = Task.Run(() => SimulateAsync(job));
+                return Unauthorized("Authenticated user is required to submit slicing jobs");
+            }
 
-            var version = slicerEngine.Equals("prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0";
-            var response = new
+            var request = new Farm.Web.Shared.SlicingJobRequest
             {
-                jobId = job.JobId,
-                status = job.Status.ToString(),
-                progress = job.Progress,
-                gcodeUrl = $"/api/slicer/jobs/{job.JobId}/gcode",
-                metadata = new { slicerVersion = version, profileUsed = profile != null ? $"{profile.Quality} - {profile.Material}" : string.Empty, estimatedCost = 0d },
-                estimatedCompletionTime = DateTime.UtcNow.AddMinutes(5),
-                queuePosition = 0,
-                slicerWorkerUrl = "local-simulator"
+                UserId = userId,
+                PrinterId = printerGuid,
+                ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
+                ModelFileName = modelFile.FileName,
+                SlicerEngine = Enum.Parse<Farm.Web.Shared.SlicerEngineType>(slicerEngine, true),
+                SlicerProfile = profile!
             };
-            return Accepted(response);
+
+            var response = await _orchestrator.SubmitJobAsync(request);
+
+            var accepted = new
+            {
+                jobId = response.JobId,
+                status = response.Status.ToString(),
+                estimatedCompletionTime = response.EstimatedCompletionTime,
+                queuePosition = response.QueuePosition,
+                slicerWorkerUrl = response.SlicerWorkerUrl
+            };
+
+            return Accepted(accepted);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to enqueue slicing job");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
-        }
-    }
-
-    private async Task SimulateAsync(SlicingJobDto job)
-    {
-        try
-        {
-            job.Status = SlicingJobStatus.Slicing;
-            job.Message = "Initializing slicer...";
-            for (var i = 0; i <= 100; i += 10)
-            {
-                job.Progress = i;
-                job.Message = i switch
-                {
-                    10 => "Loading model...",
-                    30 => "Analyzing geometry...",
-                    50 => "Generating toolpaths...",
-                    70 => "Calculating print time...",
-                    90 => "Writing G-code...",
-                    100 => "Slicing completed",
-                    _ => $"Processing... {i}%"
-                };
-                await Task.Delay(1000);
-            }
-            var gcodeContent = $"; Mock G-code for job {job.JobId}\\nG28";
-            var path = Path.Combine(_tempRoot, $"{job.JobId}_output.gcode");
-            await System.IO.File.WriteAllTextAsync(path, gcodeContent);
-            job.GcodeFilePath = path;
-            job.Status = SlicingJobStatus.Completed;
-            job.EstimatedPrintTime = 3600;
-            job.EstimatedFilamentUsed = 15.5;
-            job.LayerCount = 200;
-            job.CompletedAt = DateTime.UtcNow;
-        }
-        catch (Exception ex)
-        {
-            job.Status = SlicingJobStatus.Error;
-            job.Message = ex.Message;
         }
     }
 }
