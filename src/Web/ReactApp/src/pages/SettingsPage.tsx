@@ -309,22 +309,7 @@ export function SettingsPage() {
     }
   };
 
-  const autoDetectNetworks = async () => {
-    setLoadingDynamic(true);
-    try {
-      const detected = await apiClient.autoDetectNetworkRanges();
-      if (detected.length === 0) {
-        toast.info('No active network interfaces detected');
-      }
-      setNetworkRanges(detected.map(cidr => ({ cidr })));
-    } catch (err) {
-      setError('Failed to auto-detect networks');
-      console.error('Error auto-detecting networks:', err);
-      toast.error('Failed to auto-detect networks');
-    } finally {
-      setLoadingDynamic(false);
-    }
-  };
+  // autoDetectNetworks removed
 
   if (loading) {
     return (
@@ -612,7 +597,7 @@ export function SettingsPage() {
       <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
         <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Network Discovery Settings</h2>
         <p className="text-sm text-pf-text-secondary mb-4">
-          Configure network ranges and parameters for printer discovery. Leave ranges empty to auto-detect from current network interfaces.
+          Configure network ranges and parameters for printer discovery. Leave ranges empty to disable discovery until configured.
         </p>
         
         <div className="space-y-4">
@@ -648,14 +633,7 @@ export function SettingsPage() {
               </button>
             </div>
             
-            <button
-              onClick={autoDetectNetworks}
-              disabled={loadingDynamic}
-              className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-            >
-              <RefreshCw className="h-4 w-4" />
-              {loadingDynamic ? 'Detecting...' : 'Auto-detect Networks'}
-            </button>
+            {/* Auto-detect removed due to Docker / container network constraints */}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
