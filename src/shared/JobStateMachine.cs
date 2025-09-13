@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 // Serialization constructors removed (legacy binary serialization not required)
 
 namespace Farm.Web.Shared;

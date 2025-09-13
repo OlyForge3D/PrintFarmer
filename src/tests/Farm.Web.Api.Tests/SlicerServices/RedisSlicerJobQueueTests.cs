@@ -12,6 +12,8 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Note: These tests use mocked Redis interfaces to avoid requiring a real Redis instance
 /// </summary>
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class RedisSlicerJobQueueTests
 {
     private readonly Mock<IConnectionMultiplexer> _mockRedis;

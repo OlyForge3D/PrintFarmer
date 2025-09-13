@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Tests.Util;
 using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Tests.Util;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.SlicerServices;

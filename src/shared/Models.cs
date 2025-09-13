@@ -209,7 +209,8 @@ public record MoveRequest(double? X, double? Y, double? Z, double? F);
 /// <summary>
 /// Configuration settings for integrating with an external Spoolman instance.
 /// </summary>
-public partial record SpoolmanConfigDto(string BaseUrl);
+// Made BaseUrl nullable so that an empty JSON object posted to probe endpoint doesn't trigger automatic 400 from [ApiController].
+public partial record SpoolmanConfigDto(string? BaseUrl);
 public partial record SpoolmanConfigDto
 {
     [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null);

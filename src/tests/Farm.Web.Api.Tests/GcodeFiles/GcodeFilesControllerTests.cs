@@ -4,6 +4,8 @@ using System.Text.Json;
 namespace Farm.Web.Api.Tests.GcodeFiles;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;

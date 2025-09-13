@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.Util;
@@ -59,10 +59,35 @@ public static class DockerTestHelpers
             WorkingDirectory = workingDir
         };
         output.WriteLine($"Running: {command} {string.Join(" ", args)}");
-        process.Start();
+        var started = process.Start();
+        if (!started)
+        {
+            return (false, string.Empty, $"Failed to start process {command}");
+        }
+
         var stdOutTask = process.StandardOutput.ReadToEndAsync();
         var stdErrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+
+        // Hard cap to prevent hangs (default 5 minutes) – can tune if necessary.
+        var timeout = TimeSpan.FromMinutes(5);
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            await process.WaitForExitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch { /* ignore */ }
+            return (false, await stdOutTask, $"Process timeout after {timeout.TotalSeconds}s: {command} {string.Join(" ", args)}\n{await stdErrTask}");
+        }
+
         var stdOut = await stdOutTask;
         var stdErr = await stdErrTask;
         return (process.ExitCode == 0, stdOut, stdErr);

@@ -9,6 +9,8 @@ namespace Farm.Web.Api.Tests;
 /// Tests for new database entities and their EF Core configuration
 /// </summary>
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming("DbHeavy")]
 public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -386,31 +388,13 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
         retrieved!.FileFormat.Should().Be(format);
     }
 
-    [Theory]
-    [InlineData(PrintJobStatus.Queued)]
-    [InlineData(PrintJobStatus.Assigned)]
-    [InlineData(PrintJobStatus.Starting)]
-    [InlineData(PrintJobStatus.Printing)]
-    [InlineData(PrintJobStatus.Paused)]
-    [InlineData(PrintJobStatus.Completed)]
-    [InlineData(PrintJobStatus.Failed)]
-    [InlineData(PrintJobStatus.Cancelled)]
-    public async Task PrintJob_ShouldSupportAllStatusesAsync(PrintJobStatus status)
+    [Fact]
+    public async Task PrintJob_ShouldSupportAllStatuses_BatchedLoop()
     {
-        // Arrange
         using var scope = _factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Create prerequisites
-        var printer = new Printer
-        {
-            Id = Guid.NewGuid(),
-            Name = "Status Test Printer",
-            ServerUrl = "http://test-printer:7125",
-            Backend = 0
-        };
-        dbContext.Printers.Add(printer);
-
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "Status Test Printer", ServerUrl = "http://test-printer:7125", Backend = 0 };
         var gcodeFile = new GcodeFile
         {
             Id = Guid.NewGuid(),
@@ -424,30 +408,49 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
+        dbContext.Printers.Add(printer);
         dbContext.GcodeFiles.Add(gcodeFile);
+        await dbContext.SaveChangesAsync();
 
-        var printJob = new PrintJob
+        // Loop statuses on a single job (update + save) to avoid full object graph re-creation.
+        var jobId = Guid.NewGuid();
+        var job = new PrintJob
         {
-            Id = Guid.NewGuid(),
-            Name = $"Test {status} Job",
+            Id = jobId,
+            Name = "Status Loop Job",
             GcodeFileId = gcodeFile.Id,
             AssignedPrinterId = printer.Id,
-            Status = status,
+            Status = PrintJobStatus.Queued,
             Priority = 1,
             QueuePosition = 1,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow
         };
-
-        // Act
-        dbContext.PrintJobs.Add(printJob);
+        dbContext.PrintJobs.Add(job);
         await dbContext.SaveChangesAsync();
 
-        // Assert
-        var retrieved = await dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == printJob.Id);
-        retrieved.Should().NotBeNull();
-        retrieved!.Status.Should().Be(status);
+        var statuses = new[]
+        {
+            PrintJobStatus.Queued,
+            PrintJobStatus.Assigned,
+            PrintJobStatus.Starting,
+            PrintJobStatus.Printing,
+            PrintJobStatus.Paused,
+            PrintJobStatus.Completed,
+            PrintJobStatus.Failed,
+            PrintJobStatus.Cancelled
+        };
+
+        foreach (var s in statuses)
+        {
+            job.Status = s;
+            job.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync();
+            var retrieved = await dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId);
+            retrieved.Should().NotBeNull();
+            retrieved!.Status.Should().Be(s);
+        }
     }
 
     [Fact]
