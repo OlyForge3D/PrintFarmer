@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using System.Collections.Concurrent;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
@@ -7,7 +8,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
-using System.Collections.Concurrent;
 
 namespace Farm.Web.Api.Tests;
 
@@ -233,7 +233,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             .ReturnsAsync((Guid userId, int? limit, CancellationToken _) =>
             {
                 var list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
-                return list.ToList();
+                return [.. list];
             });
 
         // File storage mocks (accept any path & simulate existence)

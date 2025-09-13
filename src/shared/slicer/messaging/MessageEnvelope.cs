@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -137,7 +137,9 @@ public record MessageEnvelope
     public bool IsDuplicateOf(MessageEnvelope other)
     {
         if (other is null)
+        {
             return false;
+        }
 
         return CorrelationId == other.CorrelationId &&
                string.Equals(Checksum, other.Checksum, StringComparison.Ordinal);

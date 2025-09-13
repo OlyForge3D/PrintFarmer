@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Infrastructure.Normalization;
+﻿namespace Farm.Web.Api.Infrastructure.Normalization;
 
 /// <summary>
 /// Provides consistent normalization for catalog display names.

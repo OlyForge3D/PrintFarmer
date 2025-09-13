@@ -1,4 +1,4 @@
-using Farm.Slicer.Worker.Core;
+﻿using Farm.Slicer.Worker.Core;
 using Farm.Web.Shared;
 using StackExchange.Redis;
 

@@ -1,6 +1,5 @@
-using System;
+﻿using Farm.Web.Api.Data;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Data;
 
 namespace Farm.Web.Api.Infrastructure.Database;
 
@@ -16,7 +15,9 @@ public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusPro
     public MigrationStatus GetStatus()
     {
         string? provider = null;
-        try { provider = context.Database.ProviderName; } catch { /* ignore */ }
+        try
+        { provider = context.Database.ProviderName; }
+        catch { /* ignore */ }
 
         bool hasMigrations = false;
         bool appliedAny = false;

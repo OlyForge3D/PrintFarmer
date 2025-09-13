@@ -1,4 +1,4 @@
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.Slicer.Worker.Core;

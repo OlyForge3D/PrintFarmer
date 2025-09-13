@@ -1,4 +1,4 @@
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;
@@ -11,7 +11,9 @@ public class SlicerAdminController : ControllerBase
     public ActionResult<DryRunResult> DryRun([FromBody] DryRunRequest request)
     {
         if (request == null)
+        {
             return BadRequest("Empty request");
+        }
 
         var template = request.Template ?? string.Empty;
         var engine = request.Engine;

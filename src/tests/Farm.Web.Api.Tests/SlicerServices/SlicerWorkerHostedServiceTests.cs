@@ -1,12 +1,10 @@
-using System.Diagnostics;
+﻿using Farm.Web.Api.Infrastructure.Temp;
+using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.SlicerServices.Process;
-using Farm.Web.Api.Services.SlicerServices.Progress;
 using Farm.Web.Shared;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Api.Infrastructure.Temp;
-using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
@@ -41,7 +39,7 @@ public class SlicerWorkerHostedServiceTests
             return Task.FromResult($"/mock/{key}");
         }
         public Task<string> UploadFileAsync(string key, byte[] fileData, string contentType, CancellationToken cancellationToken = default) { Uploads.Add((key, fileData)); return Task.FromResult($"/mock/{key}"); }
-        public Task<Stream> DownloadFileAsync(string keyOrUrl, CancellationToken cancellationToken = default) => Task.FromResult<Stream>(new MemoryStream(new byte[0]));
+        public Task<Stream> DownloadFileAsync(string keyOrUrl, CancellationToken cancellationToken = default) => Task.FromResult<Stream>(new MemoryStream([]));
         public Task<byte[]> DownloadFileBytesAsync(string keyOrUrl, CancellationToken cancellationToken = default) => Task.FromResult(new byte[] { 0x20 });
         public Task<bool> FileExistsAsync(string keyOrUrl, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task DeleteFileAsync(string keyOrUrl, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -130,7 +128,7 @@ public class SlicerWorkerHostedServiceTests
         };
 
         // Invoke private ProcessJobAsync via reflection
-        var task = (Task)typeof(SlicerWorkerHostedService).GetMethod("ProcessJobAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(worker, new object[] { job, CancellationToken.None })!;
+        var task = (Task)typeof(SlicerWorkerHostedService).GetMethod("ProcessJobAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(worker, [job, CancellationToken.None])!;
 
         await task; // wait for completion
 
@@ -240,7 +238,7 @@ public class SlicerWorkerHostedServiceTests
         };
 
         // Invoke private ProcessJobAsync via reflection
-        var task = (Task)typeof(SlicerWorkerHostedService).GetMethod("ProcessJobAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(worker, new object[] { job, CancellationToken.None })!;
+        var task = (Task)typeof(SlicerWorkerHostedService).GetMethod("ProcessJobAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(worker, [job, CancellationToken.None])!;
 
         await task; // wait for completion
 

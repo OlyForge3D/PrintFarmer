@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Logging;
@@ -185,7 +185,7 @@ public class RedisSlicerJobQueueTests
         // Assert
         job.Status.Should().Be(SlicingJobStatus.Completed);
         job.CompletedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
-    job.ResultFileUrl.Should().Be(result.ResultFileUrl);
+        job.ResultFileUrl.Should().Be(result.ResultFileUrl);
         job.EstimatedPrintTimeSeconds.Should().Be(result.EstimatedPrintTimeSeconds);
         job.EstimatedFilamentUsageGrams.Should().Be(result.EstimatedFilamentUsageGrams);
         job.LayerCount.Should().Be(result.LayerCount);
@@ -436,7 +436,7 @@ public class RedisSlicerJobQueueTests
         _mockDatabase.Setup(d => d.SortedSetRangeByRankAsync("slicer:completed", 0, 100, Order.Descending, It.IsAny<CommandFlags>()))
             .ReturnsAsync(completedJobs);
         _mockDatabase.Setup(d => d.SortedSetRangeByRankAsync("slicer:failed", 0, 100, Order.Descending, It.IsAny<CommandFlags>()))
-            .ReturnsAsync(Array.Empty<RedisValue>());
+            .ReturnsAsync([]);
 
         // Act
         var result = await _queue.GetUserJobsAsync(userId, 10);

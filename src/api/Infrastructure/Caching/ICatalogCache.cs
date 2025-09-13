@@ -1,9 +1,9 @@
-using Farm.Web.Shared;
+﻿using System.Security.Cryptography;
+using System.Text;
 using Farm.Web.Api.Data;
+using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace Farm.Web.Api.Infrastructure.Caching;
 

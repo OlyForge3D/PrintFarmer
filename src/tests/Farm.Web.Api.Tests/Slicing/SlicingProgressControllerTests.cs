@@ -1,7 +1,5 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
-using FluentAssertions;
-using Xunit;
 
 namespace Farm.Web.Api.Tests.Slicing;
 

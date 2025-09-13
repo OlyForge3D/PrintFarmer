@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Controllers.Requests;
+﻿namespace Farm.Web.Api.Controllers.Requests;
 
 using System.ComponentModel.DataAnnotations;
 

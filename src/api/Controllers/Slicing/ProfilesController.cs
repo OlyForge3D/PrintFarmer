@@ -1,4 +1,4 @@
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain; // for SlicerType enum if namespace differs
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -217,10 +217,9 @@ public class ProfilesController : ControllerBase
                 ["standard"] = 1,
                 ["fine"] = 2
             };
-            profiles = profiles
+            profiles = [.. profiles
                 .OrderBy(p => qualityOrder.TryGetValue(p.quality, out var precedence) ? precedence : 99)
-                .ThenBy(p => p.name)
-                .ToList();
+                .ThenBy(p => p.name)];
 
             return Ok(profiles);
         }

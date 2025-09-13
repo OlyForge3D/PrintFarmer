@@ -1,5 +1,5 @@
+﻿using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Farm.Slicer.Worker.Core;
 
 namespace Farm.OrcaSlicer.Worker.Health;
 

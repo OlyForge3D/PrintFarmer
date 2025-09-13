@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;

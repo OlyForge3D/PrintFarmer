@@ -1,4 +1,4 @@
-using Farm.Web.Api.Tests.Util;
+﻿using Farm.Web.Api.Tests.Util;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -17,7 +17,7 @@ public class SlicerWorkerDockerCommonTests
     public static IEnumerable<object[]> WorkerMatrix => new[]
     {
         new object[] { "prusaslicer-worker", 8082, "/usr/local/bin/prusa-slicer", "Worker__PrusaSlicerPath", "Prusa" },
-        new object[] { "orcaslicer-worker", 8081, "/usr/local/bin/orcaslicer", "Worker__OrcaSlicerPath", "Orca" }
+        ["orcaslicer-worker", 8081, "/usr/local/bin/orcaslicer", "Worker__OrcaSlicerPath", "Orca"]
     };
 
     public SlicerWorkerDockerCommonTests(ITestOutputHelper output)

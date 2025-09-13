@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Web.Shared;
 using StackExchange.Redis;
@@ -48,8 +48,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             if (transaction != null)
             {
                 _ = transaction.HashSetAsync(jobKey,
-                    new HashEntry[]
-                    {
+                    [
                         new HashEntry("id", job.Id.ToString()),
                         new HashEntry("status", job.Status.ToString()),
                         new HashEntry("engine", job.SlicerEngine.ToString()),
@@ -58,7 +57,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                         new HashEntry("correlation_id", job.CorrelationId.ToString()),
                         new HashEntry("checksum", job.Checksum ?? string.Empty),
                         new HashEntry("data", jobJson)
-                    });
+                    ]);
 
                 // Store correlation mapping for idempotency
                 var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
@@ -76,8 +75,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             {
                 // Fallback for test doubles that don't provide transactions
                 await _database.HashSetAsync(jobKey,
-                    new HashEntry[]
-                    {
+                    [
                         new HashEntry("id", job.Id.ToString()),
                         new HashEntry("status", job.Status.ToString()),
                         new HashEntry("engine", job.SlicerEngine.ToString()),
@@ -86,7 +84,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                         new HashEntry("correlation_id", job.CorrelationId.ToString()),
                         new HashEntry("checksum", job.Checksum ?? string.Empty),
                         new HashEntry("data", jobJson)
-                    },
+                    ],
                     CommandFlags.None);
 
                 var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
@@ -343,7 +341,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 }
             }
 
-            return jobs.OrderByDescending(j => j.CreatedAt).Take(limit ?? 100).ToList();
+            return [.. jobs.OrderByDescending(j => j.CreatedAt).Take(limit ?? 100)];
         }
         catch (Exception ex)
         {

@@ -1,6 +1,5 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
-using Farm.Web.Api.Tests;
 
 namespace Farm.Web.Api.Tests;
 

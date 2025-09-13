@@ -1,9 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Shared;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -54,13 +51,13 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         // Assert
         Assert.NotEqual(Guid.Empty, response.JobId);
         Assert.Equal(SlicingJobStatus.Queued, response.Status);
-    Assert.NotNull(response.SlicerWorkerUrl);
-    Assert.NotEqual("about:blank", response.SlicerWorkerUrl.ToString());
+        Assert.NotNull(response.SlicerWorkerUrl);
+        Assert.NotEqual("about:blank", response.SlicerWorkerUrl.ToString());
 
         _output.WriteLine($"Job submitted: {response.JobId}");
         _output.WriteLine($"Status: {response.Status}");
         _output.WriteLine($"Queue position: {response.QueuePosition}");
-    _output.WriteLine($"Worker URL: {response.SlicerWorkerUrl}");
+        _output.WriteLine($"Worker URL: {response.SlicerWorkerUrl}");
 
         // Verify job can be retrieved
         var jobStatus = await orchestrator.GetJobStatusAsync(response.JobId);

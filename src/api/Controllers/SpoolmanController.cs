@@ -1,7 +1,7 @@
 ﻿using Farm.Web.Api.Services;
 using Farm.Web.Shared;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -93,7 +93,7 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
 
         return Ok(new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
     }
-    
+
     private static (string category, string message) CategorizeException(Exception ex)
     {
         if (ex is TaskCanceledException or OperationCanceledException)

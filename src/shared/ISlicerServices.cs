@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared;
+﻿namespace Farm.Web.Shared;
 
 /// <summary>
 /// Interface for job queue operations in distributed slicing system
