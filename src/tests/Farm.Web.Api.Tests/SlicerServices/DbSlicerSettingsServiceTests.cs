@@ -1,12 +1,10 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 

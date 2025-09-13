@@ -1,7 +1,4 @@
-using System.Diagnostics;
-using Microsoft.Extensions.Configuration;
-using Farm.Web.Shared;
-using Farm.Web.Api.Services.SlicerServices; // ensure symbol availability
+﻿using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -79,7 +76,10 @@ public class SlicerExecutableManager : ISlicerExecutableManager
             };
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null)
+            {
                 return false;
+            }
+
             await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             return proc.ExitCode == 0;
         }
@@ -93,14 +93,16 @@ public class SlicerExecutableManager : ISlicerExecutableManager
     private static string? FindOnPath(string linuxName, string windowsName)
     {
         var name = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? windowsName : linuxName;
-        var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? Array.Empty<string>();
+        var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
         foreach (var p in paths)
         {
             try
             {
                 var candidate = Path.Combine(p, name);
                 if (File.Exists(candidate))
+                {
                     return candidate;
+                }
             }
             catch { }
         }

@@ -160,7 +160,7 @@ public class CatalogController : ControllerBase
         }
         return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
+            [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)]));
     }
 
     [HttpPost("printer-models")]

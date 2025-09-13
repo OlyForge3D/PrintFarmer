@@ -1,5 +1,4 @@
-using Farm.Web.Api.Services.SlicerServices.Progress;
-using Xunit;
+﻿using Farm.Web.Api.Services.SlicerServices.Progress;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 

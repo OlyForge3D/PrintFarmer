@@ -1,5 +1,4 @@
-using System.Threading.Tasks;
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 

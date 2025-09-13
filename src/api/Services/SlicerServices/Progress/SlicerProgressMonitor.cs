@@ -1,6 +1,4 @@
-using System.Threading;
-using System.Threading.Tasks;
-using Farm.Web.Api.Services.SlicerServices.Process;
+﻿using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;

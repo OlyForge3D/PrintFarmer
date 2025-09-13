@@ -1,14 +1,7 @@
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Diagnostics;
 using Farm.Web.Api.Infrastructure.Temp;
-using Farm.Web.Shared;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Farm.Web.Api.Services.SlicerServices.Progress;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 

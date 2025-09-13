@@ -244,7 +244,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             .ReturnsAsync((Guid userId, int? limit, CancellationToken _) =>
             {
                 var list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
-                return list.ToList();
+                return [.. list];
             });
 
         // File storage mocks (accept any path & simulate existence)

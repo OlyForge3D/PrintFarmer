@@ -1,17 +1,9 @@
-using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net;
 using System.Text.Json;
-using FluentAssertions;
-using Xunit;
 
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
-<<<<<<< HEAD
-[Collection("DbHeavySerial")]
-[TestTiming]
-=======
->>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class SpoolmanControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

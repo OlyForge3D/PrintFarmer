@@ -148,7 +148,7 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         var failedList = new List<string>();
         if (payload.TryGetProperty("failed", out var failedArr))
         {
-            failedList = failedArr.EnumerateArray().Select(e => e.GetString()!).ToList();
+            failedList = [.. failedArr.EnumerateArray().Select(e => e.GetString()!)];
         }
         (skippedList.Contains("/folder/..") || failedList.Contains("/folder/..")).Should().BeTrue();
         payload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();

@@ -1,4 +1,4 @@
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -29,7 +29,10 @@ public class SlicingJobsController : ControllerBase
     {
         var status = await _orchestrator.GetJobStatusAsync(jobId);
         if (status == null)
+        {
             return NotFound();
+        }
+
         return Ok(status);
     }
 

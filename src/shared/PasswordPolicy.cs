@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared;
+﻿namespace Farm.Web.Shared;
 
 public class PasswordPolicyDto
 {

@@ -1,23 +1,23 @@
 ﻿// Global using cleanup handled by project settings; explicit System removed.
 using System.Diagnostics.CodeAnalysis;
-using Farm.Web.Api.Infrastructure.Temp;
-using Farm.Web.Api.Infrastructure.Normalization;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Caching;
+using Farm.Web.Api.Infrastructure.Normalization;
+using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
-using StackExchange.Redis;
 using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Infrastructure.Caching;
+using StackExchange.Redis;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
 var builder = WebApplication.CreateBuilder(args);
@@ -212,14 +212,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                                o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
-        {
-            var cs = builder.Configuration.GetConnectionString("MySql")
-                     ?? builder.Configuration.GetConnectionString("Default")
-                     ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-            var serverVersion = ServerVersion.AutoDetect(cs);
-            options.UseMySql(cs, serverVersion);
-            break;
-        }
+            {
+                var cs = builder.Configuration.GetConnectionString("MySql")
+                         ?? builder.Configuration.GetConnectionString("Default")
+                         ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
+                var serverVersion = ServerVersion.AutoDetect(cs);
+                options.UseMySql(cs, serverVersion);
+                break;
+            }
         default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")

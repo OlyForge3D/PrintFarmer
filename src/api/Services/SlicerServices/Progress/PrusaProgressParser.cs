@@ -1,6 +1,4 @@
-using System;
-using System.Linq;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
@@ -13,13 +11,13 @@ public class PrusaProgressParser : IProgressParser
     private static readonly Regex LayerRegex = new(@"(?i)layer\s+(?<idx>\d+)\s*/\s*(?<total>\d+)", RegexOptions.Compiled);
 
     private static readonly (int Start, int End, string Message)[] _phases =
-    {
+    [
         (0, 20, "Initializing slicer"),
         (20, 45, "Loading model"),
         (45, 70, "Generating toolpaths"),
         (70, 90, "Calculating time & writes"),
         (90, 100, "Finalizing G-code")
-    };
+    ];
 
     private int _phaseIdx;
 

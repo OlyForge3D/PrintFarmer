@@ -1,9 +1,4 @@
-using System.Diagnostics;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-
-namespace Farm.Web.Api.Services.SlicerServices.Process;
+﻿namespace Farm.Web.Api.Services.SlicerServices.Process;
 
 public class SystemProcessRunner : IProcessRunner
 {
