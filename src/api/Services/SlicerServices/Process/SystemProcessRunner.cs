@@ -37,7 +37,14 @@ public class SystemProcessRunner : IProcessRunner
             catch (OperationCanceledException)
             {
                 // If cancelled, try to kill process gracefully and return non-zero
-                try { if (!_proc.HasExited) _proc.Kill(entireProcessTree: true); } catch { }
+                try
+                {
+                    if (!_proc.HasExited)
+                    {
+                        _proc.Kill(entireProcessTree: true);
+                    }
+                }
+                catch { }
                 throw;
             }
         }

@@ -9,10 +9,14 @@ public static class SlicerProgressMonitor
 {
     public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, ILogger? logger, CancellationToken ct, Func<Guid, CancellationToken, Task>? onParserCompleted = null, Func<Guid, string, CancellationToken, Task>? onParserFailure = null)
     {
+        ArgumentNullException.ThrowIfNull(processHandle);
+        ArgumentNullException.ThrowIfNull(parser);
+        ArgumentNullException.ThrowIfNull(notifier);
+
         try
         {
             var start = DateTime.UtcNow;
-            using var stdout = processHandle.StandardOutput;
+            var stdout = processHandle.StandardOutput; // do not dispose injected stream
             while (!processHandle.HasExited && !ct.IsCancellationRequested)
             {
                 if (!stdout.EndOfStream)
@@ -66,7 +70,9 @@ public static class SlicerProgressMonitor
 
                                 // Ask the underlying process to terminate as an early stop
                                 try
-                                { processHandle.Kill(); }
+                                {
+                                    processHandle.Kill();
+                                }
                                 catch { }
                             }
                             continue;
