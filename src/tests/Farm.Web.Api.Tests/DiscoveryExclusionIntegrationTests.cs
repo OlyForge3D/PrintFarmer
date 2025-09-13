@@ -13,6 +13,8 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;

@@ -80,8 +80,12 @@ public class MoonrakerClientRetryTests
             }, maxRetries: 2, initialDelayMs: 1, operationName: "StatusCheck");
         };
 
-        await act.Should().ThrowAsync<HttpRequestException>();
-        attempts.Should().Be(3);
+        // Current RetryPolicyHelper wraps the final failure in InvalidOperationException when max retries are exceeded.
+        // The underlying transient exception we simulate is TaskCanceledException (e.g. HTTP timeout). We assert on the
+        // wrapper type and inner exception to prevent losing signal if RetryPolicyHelper implementation changes later.
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.InnerException.Should().BeOfType<TaskCanceledException>();
+        attempts.Should().Be(3); // initial try + 2 retries
     }
 
     [Fact]

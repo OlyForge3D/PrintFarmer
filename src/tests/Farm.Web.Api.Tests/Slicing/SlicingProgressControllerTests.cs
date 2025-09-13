@@ -6,6 +6,8 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Slicing;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class SlicingProgressControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;

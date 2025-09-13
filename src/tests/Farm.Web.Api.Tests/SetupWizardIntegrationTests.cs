@@ -4,6 +4,8 @@ using Farm.Web.Shared;
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public sealed class SetupWizardIntegrationTests : IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;

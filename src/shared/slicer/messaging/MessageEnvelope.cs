@@ -12,6 +12,12 @@ namespace Farm.Web.Shared.Slicer.Messaging;
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public record MessageEnvelope
 {
+    private static readonly JsonSerializerOptions CachedSerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
     /// <summary>
     /// Envelope version for compatibility tracking
     /// </summary>
@@ -65,16 +71,8 @@ public record MessageEnvelope
     public static string GenerateChecksum(object content)
     {
         ArgumentNullException.ThrowIfNull(content);
-
-        var json = JsonSerializer.Serialize(content, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-        });
-
-        using var sha256 = SHA256.Create();
-        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(json));
+        var json = JsonSerializer.Serialize(content, CachedSerializerOptions);
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
         return Convert.ToBase64String(hashBytes);
     }
 
@@ -137,7 +135,9 @@ public record MessageEnvelope
     public bool IsDuplicateOf(MessageEnvelope other)
     {
         if (other is null)
+        {
             return false;
+        }
 
         return CorrelationId == other.CorrelationId &&
                string.Equals(Checksum, other.Checksum, StringComparison.Ordinal);
@@ -151,7 +151,9 @@ public record SlicingJobContent
 {
     public Guid UserId { get; init; }
     public Guid PrinterId { get; init; }
-    public string ModelFileUrl { get; init; } = string.Empty; // remains string for stable checksum across versions
+#pragma warning disable CA1056 // We intentionally keep raw string to preserve checksum stability across versions
+    public string ModelFileUrl { get; init; } = string.Empty;
+#pragma warning restore CA1056
     public string ModelFileName { get; init; } = string.Empty;
     public SlicerEngineType SlicerEngine { get; init; }
     public SlicerProfileDto SlicerProfile { get; init; } = new();

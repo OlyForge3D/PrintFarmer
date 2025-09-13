@@ -8,6 +8,10 @@ namespace Farm.Web.Api.Tests.ContractTests;
 /// Contract tests for Slicer Jobs API to ensure API compliance with OpenAPI specification
 /// These tests validate the external REST contract defined in openapi/slicer-jobs.yaml
 /// </summary>
+// Uses full WebApplicationFactory and interacts with API + in-memory SQLite; classify as DbHeavy
+[Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

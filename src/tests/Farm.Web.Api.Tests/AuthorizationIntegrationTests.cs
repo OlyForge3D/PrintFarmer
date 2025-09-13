@@ -4,6 +4,8 @@ using Farm.Web.Shared;
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class AuthorizationIntegrationTests : IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;

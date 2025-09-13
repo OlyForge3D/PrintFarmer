@@ -46,17 +46,16 @@ public class SpoolmanService : ISpoolmanService
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
-
         var baseUrl = NormalizeBaseUrl(config.BaseUrl);
         var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
         if (row is null)
         {
-            row = new SpoolmanConfig { Id = 1, BaseUrl = baseUrl };
+            row = new SpoolmanConfig { Id = 1, BaseUrl = baseUrl ?? string.Empty };
             db.SpoolmanConfigs.Add(row);
         }
         else
         {
-            row.BaseUrl = baseUrl;
+            row.BaseUrl = baseUrl ?? string.Empty;
             db.SpoolmanConfigs.Update(row);
         }
         db.SaveChanges();
@@ -72,11 +71,11 @@ public class SpoolmanService : ISpoolmanService
         }
     }
 
-    private static string NormalizeBaseUrl(string url)
+    private static string? NormalizeBaseUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
-            return url;
+            return url; // allow null/empty to propagate (controller returns 200 with success=false)
         }
 
         var t = url.Trim();

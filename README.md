@@ -400,6 +400,85 @@ Preferred (script):
 ```bash
 ./scripts/pf-dev.sh start
 ```
+
+### Test Timing Instrumentation
+
+PrintFarmer includes an opt-in lightweight per-test timing instrumentation system for xUnit integration tests. It provides:
+
+- Per-test CSV logging (timestamp, duration, category, class, method)
+- Optional percentile & hotspot summary at the end of a run
+- Manual categorization via an attribute OR automatic instrumentation for all tests not already attributed
+
+#### Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PF_TIMING` | unset (off) | Master switch. Set to `1`/`true` to enable writing `test-timings.csv`. `0` disables. |
+| `PF_TIMING_AUTO` | unset (off) | When enabled (`1`/`true`) automatically times every test method that does not already have the `TestTimingAttribute`. Logged with category `Auto`. |
+| `PF_TIMING_RESET` | unset | If set to `1`/`true` a new `RUN,<id>,<UTC start>` marker is appended before first write, allowing multiple logical runs to share one CSV. |
+| `PF_TIMING_SUMMARY` | unset (on) | Set to `0`/`false` to suppress generation of `test-timings-summary.txt` + console summary on process exit. |
+
+#### Manual Timing & Categories
+
+Add the attribute to a test (or test class) to control inclusion & category label:
+
+```csharp
+[TestTiming("DbHeavy")] // category appears in CSV instead of Auto
+public class DbHeavyTests {
+  [Fact]
+  public async Task DoesWork() { /* ... */ }
+}
+```
+
+If the attribute is applied at class level all test methods inherit that category. Auto instrumentation will detect the attribute (class or method) and will NOT double-log.
+
+#### Output Files
+
+Files are emitted to the test binary output directory (e.g. `src/tests/Farm.Web.Api.Tests/bin/Debug/net9.0/`):
+
+- `test-timings.csv` – Raw entries and RUN markers
+- `test-timings-summary.txt` – Percentiles (P50/P90/P95/P99), mean, top 10 slowest executions, heaviest classes by P90
+
+#### Sample Usage
+
+Full suite (opt-in auto instrumentation + summary + fresh RUN block):
+
+```bash
+PF_TIMING=1 PF_TIMING_AUTO=1 PF_TIMING_RESET=1 dotnet test src/farm-web.sln -c Debug
+```
+
+Only manually attributed tests (no auto timing):
+
+```bash
+PF_TIMING=1 dotnet test src/farm-web.sln -c Debug
+```
+
+Disable summary (raw CSV only):
+
+```bash
+PF_TIMING=1 PF_TIMING_AUTO=1 PF_TIMING_SUMMARY=0 dotnet test src/farm-web.sln -c Debug
+```
+
+#### Interpreting the CSV
+
+Format (header omitted here):
+
+```
+2025-09-12T23:18:49.1284880Z,1245.95,JobStatus,Farm.Web.Api.Tests.SlicerServices.OrcaSlicerWorkerIntegrationTests,GetJobStatus_ForNonExistentJob_ShouldReturnNull
+```
+
+Columns: `TimestampUtc,DurationMs,Category,Class,Method`
+
+`RUN,<runId>,<utc-start>` markers delineate logical runs when `PF_TIMING_RESET` is used between invocations.
+
+#### Notes
+
+- Overhead: measuring + file append is typically sub‑millisecond; safe for broad use when diagnosing performance regressions.
+- Auto instrumentation intentionally ignores any test already annotated to avoid duplicate lines.
+- The summary only considers entries after the last `RUN,` marker (if present) to keep multi-run CSVs manageable.
+- Future enhancements (namespace → category mapping, exclusion filters) can be layered without changing existing file formats.
+
+---
 Manual alternative:
 1. API Backend: `dotnet run --project api/Farm.Web.Api.csproj`  
 2. React Frontend: `cd Web/ReactApp && npm run dev`

@@ -5,9 +5,10 @@ using Moq;
 
 namespace Farm.Web.Api.Tests;
 
-// Mark as slow due to multi-step upload / start print operations with mocked backends.
-[Trait("Category", "Slow")]
+// DB-backed multi-step upload / print operations.
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class PrintersFileOpsTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
