@@ -212,14 +212,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                                o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
-            {
-                var cs = builder.Configuration.GetConnectionString("MySql")
-                         ?? builder.Configuration.GetConnectionString("Default")
-                         ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-                var serverVersion = ServerVersion.AutoDetect(cs);
-                options.UseMySql(cs, serverVersion);
-                break;
-            }
+        {
+            var cs = builder.Configuration.GetConnectionString("MySql")
+                     ?? builder.Configuration.GetConnectionString("Default")
+                     ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
+            var serverVersion = ServerVersion.AutoDetect(cs);
+            options.UseMySql(cs, serverVersion);
+            break;
+        }
         default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")
