@@ -12,7 +12,7 @@ public class PrusaProgressParser : IProgressParser
     private static readonly Regex PercentRegex = new(@"(?i)progress[:\s]+(?<pct>\d{1,3})%", RegexOptions.Compiled);
     private static readonly Regex LayerRegex = new(@"(?i)layer\s+(?<idx>\d+)\s*/\s*(?<total>\d+)", RegexOptions.Compiled);
 
-    private readonly (int Start, int End, string Message)[] _phases = new[]
+    private static readonly (int Start, int End, string Message)[] _phases =
     {
         (0, 20, "Initializing slicer"),
         (20, 45, "Loading model"),
@@ -21,12 +21,14 @@ public class PrusaProgressParser : IProgressParser
         (90, 100, "Finalizing G-code")
     };
 
-    private int _phaseIdx = 0;
+    private int _phaseIdx;
 
     public SlicerProgress? ParseLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
+        {
             return null;
+        }
 
         var lower = line.ToLowerInvariant();
 
@@ -68,7 +70,9 @@ public class PrusaProgressParser : IProgressParser
     public ProgressUpdate? Parse(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
+        {
             return null;
+        }
 
         var m = PercentRegex.Match(line);
         if (m.Success && int.TryParse(m.Groups["pct"].Value, out var pct))
@@ -86,13 +90,13 @@ public class PrusaProgressParser : IProgressParser
         }
 
         // Completed detection (Prusa may print 'Exported gcode' or similar)
-        if (line.IndexOf("exported", StringComparison.OrdinalIgnoreCase) >= 0 && line.IndexOf("gcode", StringComparison.OrdinalIgnoreCase) >= 0)
+        if (line.Contains("exported", StringComparison.OrdinalIgnoreCase) && line.Contains("gcode", StringComparison.OrdinalIgnoreCase))
         {
             return new ProgressUpdate(100.0, line, SlicerProgressState.Completed);
         }
 
         // Error detection
-        if (line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 || line.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0)
+        if (line.Contains("error", StringComparison.OrdinalIgnoreCase) || line.Contains("failed", StringComparison.OrdinalIgnoreCase))
         {
             return new ProgressUpdate(0.0, line, SlicerProgressState.Failed);
         }

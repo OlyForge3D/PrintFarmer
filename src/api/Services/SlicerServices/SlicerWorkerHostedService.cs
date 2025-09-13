@@ -62,18 +62,20 @@ public class SlicerWorkerHostedService : BackgroundService
                 }
 
                 // Attempt to dequeue a job (non-blocking)
+                DistributedSlicingJob? dequeuedJob = null;
                 using (var scope = _scopeFactory.CreateScope())
                 {
                     var jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
-                    var job = await jobQueue.DequeueAsync(_config.WorkerId, null, stoppingToken);
-                    if (job == null)
+                    dequeuedJob = await jobQueue.DequeueAsync(_config.WorkerId, null, stoppingToken);
+                    if (dequeuedJob == null)
                     {
                         await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                         continue;
                     }
-
-                    _ = Task.Run(() => ProcessJobAsync(job, stoppingToken), stoppingToken);
                 }
+
+                // Start background processing after scope is disposed (ProcessJobAsync creates its own scope)
+                _ = Task.Run(() => ProcessJobAsync(dequeuedJob!, stoppingToken), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -304,7 +306,7 @@ public class SlicerWorkerHostedService : BackgroundService
                         // simple stdout scanning for percent-like lines
                         try
                         {
-                            using var sr = procHandle.StandardOutput;
+                            var sr = procHandle.StandardOutput; // do not dispose injected stream
                             while (!sr.EndOfStream)
                             {
                                 var line = await sr.ReadLineAsync();
@@ -330,13 +332,10 @@ public class SlicerWorkerHostedService : BackgroundService
                 await procHandle.WaitForExitAsync(cancellationToken);
 
                 // If parser already completed and finalized the job, skip additional exit code checks and completion logic
-                if (System.Threading.Volatile.Read(ref parserCompletedFlag) != 1)
+                if (System.Threading.Volatile.Read(ref parserCompletedFlag) != 1 && procHandle.ExitCode != 0)
                 {
-                    if (procHandle.ExitCode != 0)
-                    {
-                        var err = await procHandle.StandardError.ReadToEndAsync();
-                        throw new InvalidOperationException($"Slicer process failed (exit {procHandle.ExitCode}): {err}");
-                    }
+                    var err = await procHandle.StandardError.ReadToEndAsync();
+                    throw new InvalidOperationException($"Slicer process failed (exit {procHandle.ExitCode}): {err}");
                 }
 
                 // Upload gcode

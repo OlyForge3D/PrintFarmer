@@ -15,7 +15,9 @@ public class OrcaProgressParser : IProgressParser
     public ProgressUpdate? Parse(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
+        {
             return null;
+        }
 
         // If we find a percent token, prefer it
         var m = PercentRegex.Match(line);
@@ -33,7 +35,7 @@ public class OrcaProgressParser : IProgressParser
         }
 
         // Error detection
-        if (line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 || line.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0)
+        if (line.Contains("error", StringComparison.OrdinalIgnoreCase) || line.Contains("failed", StringComparison.OrdinalIgnoreCase))
         {
             return new ProgressUpdate(0.0, line, SlicerProgressState.Failed);
         }
