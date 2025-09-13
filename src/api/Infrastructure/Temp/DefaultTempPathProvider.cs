@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Infrastructure.Temp;
+﻿namespace Farm.Web.Api.Infrastructure.Temp;
 
 /// <summary>
 /// Default implementation that resolves a temp root using (descending precedence):

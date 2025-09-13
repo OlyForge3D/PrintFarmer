@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared;
 
@@ -134,6 +134,7 @@ public class DistributedSlicingJob : SlicingJobDto
     public Dictionary<string, object> Metadata { get; } = [];
     public int RetryCount { get; set; } // default 0
     public DateTime? LastRetryAt { get; set; }
+    public DateTime? ScheduledAt { get; set; } // Optional: when job becomes available for processing (for delayed retries)
 
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
@@ -263,6 +264,9 @@ public class SlicingJobStatusResponse
     public double EstimatedFilamentUsageGrams { get; set; }
     public int LayerCount { get; set; }
     public Dictionary<string, object> Metadata { get; } = [];
+    // Retry & scheduling metadata
+    public int RetryCount { get; set; }
+    public DateTime? ScheduledAt { get; set; }
 }
 
 /// <summary>
@@ -313,6 +317,7 @@ public class SlicerWorkerConfiguration
     // Default falls back to current working directory /temp to avoid system global temp (macOS TCC prompts).
     public string TempDirectory { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "temp");
     public long MaxFileSizeBytes { get; set; } = 100_000_000; // 100MB
+    public double JitterPercent { get; set; } = 15.0; // Percent (+/-) applied to retry backoff range (e.g., 15 = +/-15%)
     public Dictionary<string, object> SlicerSpecificSettings { get; } = [];
 
     public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)

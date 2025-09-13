@@ -1,5 +1,5 @@
+﻿using Farm.Web.Api.Grpc;
 using Google.Protobuf; // For ToByteArray extension methods
-using Farm.Web.Api.Grpc;
 
 namespace Farm.Web.Api.Tests.ContractTests;
 

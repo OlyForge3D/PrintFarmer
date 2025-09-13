@@ -56,6 +56,12 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         Assert.NotNull(response.SlicerWorkerUrl);
         Assert.NotEqual("about:blank", response.SlicerWorkerUrl.ToString());
 
+        _output.WriteLine($"Job submitted: {response.JobId}");
+        _output.WriteLine($"Status: {response.Status}");
+        _output.WriteLine($"Queue position: {response.QueuePosition}");
+        _output.WriteLine($"Worker URL: {response.SlicerWorkerUrl}");
+
+        // Verify job can be retrieved
         var jobStatus = await orchestrator.GetJobStatusAsync(response.JobId);
         Assert.NotNull(jobStatus);
         Assert.Equal(response.JobId, jobStatus!.JobId);

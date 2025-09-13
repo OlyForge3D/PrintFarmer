@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.SlicerServices;
+﻿using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -171,7 +171,7 @@ public class SignalRSlicerProgressNotifierTests
         var connectionId1 = "connection-1";
         var connectionId2 = "connection-2";
 
-    var result = new SlicingResult { Success = true };
+        var result = new SlicingResult { Success = true };
 
         // Subscribe connections to job
         await _notifier.SubscribeToJobAsync(job.Id, connectionId1);

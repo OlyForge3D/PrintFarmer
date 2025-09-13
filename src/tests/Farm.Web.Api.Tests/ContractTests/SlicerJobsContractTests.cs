@@ -1,6 +1,6 @@
-using Xunit.Abstractions;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
+using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.ContractTests;
 

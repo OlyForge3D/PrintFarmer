@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 /**
  * React Query hook to fetch & cache a file hash for a virtual G-code path.
@@ -14,11 +14,11 @@ export function useFileHash(path: string | undefined, algorithm: 'sha256' | 'sha
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
-        const map = JSON.parse(raw) as Record<string, { d: any; t: number }>;
+        const map = JSON.parse(raw) as Record<string, { d: unknown; t: number }>;
         const k = `${algorithm}:${path}`;
         const entry = map[k];
-        if (entry?.d?.hash) {
-          initialData = entry.d;
+        if (entry && entry.d && typeof (entry.d as any).hash === 'string') {
+          initialData = entry.d as { fileName: string; size: number; algorithm: string; hash: string };
           initialDataUpdatedAt = entry.t;
         }
       }
@@ -36,10 +36,10 @@ export function useFileHash(path: string | undefined, algorithm: 'sha256' | 'sha
         // Optional: cap size to 500 entries
         const entries = Object.entries(map);
         if (entries.length > 500) {
-          entries.sort((a,b)=>a[1].t-b[1].t); // oldest first
+          entries.sort((a, b) => a[1].t - b[1].t); // oldest first
           const trimmed = entries.slice(entries.length - 500);
           const newMap: Record<string, { d: any; t: number }> = {};
-            for (const [k,v] of trimmed) newMap[k]=v;
+          for (const [k, v] of trimmed) newMap[k] = v;
           localStorage.setItem(storageKey, JSON.stringify(newMap));
         } else {
           localStorage.setItem(storageKey, JSON.stringify(map));

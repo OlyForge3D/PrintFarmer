@@ -11,12 +11,15 @@ import { HarvestPage } from '@/pages/HarvestPage';
 import { ModelsPage } from '@/pages/ModelsPage';
 import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
+import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
+import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { UserManagementPage } from '@/pages/UserManagementPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
-import { Navigate, BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import './App.css';
 
 // Create a query client for React Query
@@ -77,7 +80,7 @@ function App() {
   if (checkingSetup) {
     return (
       <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center">
-  <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+        <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
       </div>
     );
   }
@@ -103,11 +106,11 @@ function App() {
           <QueryClientProvider client={queryClient}>
             <Router>
               <Routes>
-                <Route path="/" element={<Layout />}> 
+                <Route path="/" element={<Layout />}>
                   <Route index element={<PrinterDashboard />} />
                   <Route path="dashboard" element={<PrinterDashboard />} />
                   <Route path="printers">
-                  <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route index element={<Navigate to="dashboard" replace />} />
                     <Route path="dashboard" element={<PrinterDashboard />} />
                     <Route path="table" element={<PrinterTableViewPage />} />
                   </Route>
@@ -122,6 +125,30 @@ function App() {
                     element={
                       <ProtectedRoute requiredRole="farm_admin">
                         <UserManagementPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/slicer"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <SlicerSettingsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/slicer/dry-run"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <SlicerDryRunPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/slicer/job-status"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <SlicerJobStatusPage />
                       </ProtectedRoute>
                     }
                   />

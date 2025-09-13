@@ -1,8 +1,8 @@
 ﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Infrastructure.Normalization;
 
 namespace Farm.Web.Api.Services;
 

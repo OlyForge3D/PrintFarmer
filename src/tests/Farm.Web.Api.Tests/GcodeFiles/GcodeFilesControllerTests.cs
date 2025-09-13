@@ -1,8 +1,5 @@
-using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net;
 using System.Text.Json;
-using FluentAssertions;
-using Xunit;
 
 namespace Farm.Web.Api.Tests.GcodeFiles;
 
@@ -112,13 +109,13 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         };
         var deleteResp = await _client.SendAsync(deleteRequest);
         deleteResp.StatusCode.Should().Be(HttpStatusCode.OK);
-    var deletePayload = await deleteResp.Content.ReadFromJsonAsync<JsonElement>();
-    deletePayload.TryGetProperty("deleted", out var delCount).Should().BeTrue();
-    delCount.GetInt32().Should().Be(1);
-    deletePayload.TryGetProperty("deletedFiles", out var delFiles).Should().BeTrue();
-    delFiles.EnumerateArray().Select(e => e.GetString()).Should().ContainSingle(x => x == "/remove.gcode");
-    deletePayload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();
-    totalReq.GetInt32().Should().Be(1);
+        var deletePayload = await deleteResp.Content.ReadFromJsonAsync<JsonElement>();
+        deletePayload.TryGetProperty("deleted", out var delCount).Should().BeTrue();
+        delCount.GetInt32().Should().Be(1);
+        deletePayload.TryGetProperty("deletedFiles", out var delFiles).Should().BeTrue();
+        delFiles.EnumerateArray().Select(e => e.GetString()).Should().ContainSingle(x => x == "/remove.gcode");
+        deletePayload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();
+        totalReq.GetInt32().Should().Be(1);
 
         var after = await _client.GetFromJsonAsync<GcodeListResponse>("/api/gcode-files");
         after!.TotalFiles.Should().Be(1);
@@ -148,7 +145,7 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         var failedList = new List<string>();
         if (payload.TryGetProperty("failed", out var failedArr))
         {
-            failedList = failedArr.EnumerateArray().Select(e => e.GetString()!).ToList();
+            failedList = [.. failedArr.EnumerateArray().Select(e => e.GetString()!)];
         }
         (skippedList.Contains("/folder/..") || failedList.Contains("/folder/..")).Should().BeTrue();
         payload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();
@@ -219,7 +216,7 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
 
         var resp = await _client.GetFromJsonAsync<GcodeListResponse>("/api/gcode-files?search=rocket&pageSize=25");
         resp!.TotalFiles.Should().Be(2);
-        resp.Files.Select(f => f.Name).Should().BeEquivalentTo(new[] { "rocket_part.gcode", "ROCKET_NOSE.gcode" });
+        resp.Files.Select(f => f.Name).Should().BeEquivalentTo(["rocket_part.gcode", "ROCKET_NOSE.gcode"]);
     }
 
     [Fact]
@@ -271,8 +268,8 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         var head = new HttpRequestMessage(HttpMethod.Head, "/api/gcode-files/download?path=/cache-test.gcode");
         var headResp = await _client.SendAsync(head);
         headResp.StatusCode.Should().Be(HttpStatusCode.OK);
-    // HEAD should now report the actual file size while omitting the body
-    headResp.Content.Headers.ContentLength.Should().Be(new FileInfo(path).Length);
+        // HEAD should now report the actual file size while omitting the body
+        headResp.Content.Headers.ContentLength.Should().Be(new FileInfo(path).Length);
 
         // Conditional GET with If-None-Match
         var cond = new HttpRequestMessage(HttpMethod.Get, "/api/gcode-files/download?path=/cache-test.gcode");

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
 
@@ -23,7 +23,10 @@ public static class TestPaths
             }
             var parent = Directory.GetParent(current);
             if (parent == null)
+            {
                 break;
+            }
+
             current = parent.FullName;
         }
         return Directory.GetCurrentDirectory();

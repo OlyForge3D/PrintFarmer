@@ -1,9 +1,9 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Shared;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Slicer.Worker.Core;
 

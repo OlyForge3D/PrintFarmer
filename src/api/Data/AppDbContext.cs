@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
     public DbSet<SlicerProfile> SlicerProfiles => Set<SlicerProfile>();
+    public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -478,6 +479,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(pp => pp.RequireLowercase);
             b.Property(pp => pp.RequireDigit);
             b.Property(pp => pp.RequireSymbol);
+        });
+
+        // SlicerSettings Entity Configuration
+        modelBuilder.Entity<SlicerSettings>(b =>
+        {
+            b.HasKey(s => s.Id);
+            b.Property(s => s.Enabled).IsRequired();
+            b.Property(s => s.PerEngineJson).HasColumnType("TEXT");
+            b.Property(s => s.UpdatedAt).IsRequired();
+            b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
         });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)

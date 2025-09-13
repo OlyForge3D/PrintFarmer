@@ -1,4 +1,4 @@
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SlicerServices;

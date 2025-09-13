@@ -16,7 +16,10 @@ public static class DockerTestHelpers
             directory = directory.Parent;
         }
         if (directory == null)
+        {
             throw new InvalidOperationException("Could not find repository root (global.json not found)");
+        }
+
         return directory.FullName;
     }
 

@@ -1,4 +1,4 @@
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
 
 namespace Farm.Web.Api.Tests.SlicerServices.Messaging;
@@ -223,7 +223,7 @@ public class MessageEnvelopeTests
         // Assert
         content.UserId.Should().Be(request.UserId);
         content.PrinterId.Should().Be(request.PrinterId);
-    content.ModelFileUrl.Should().Be(request.ModelFileUrl.ToString());
+        content.ModelFileUrl.Should().Be(request.ModelFileUrl.ToString());
         content.ModelFileName.Should().Be(request.ModelFileName);
         content.SlicerEngine.Should().Be(request.SlicerEngine);
         content.Priority.Should().Be(request.Priority);
