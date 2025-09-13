@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.SlicerServices.Process;
+﻿using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Api.Services.SlicerServices.Progress;
 using Farm.Web.Shared;
 
@@ -8,7 +8,7 @@ public class SlicerProgressMonitorTests
 {
     private class TestNotifier : ISlicerProgressNotifier
     {
-        public List<SlicingProgressUpdate> Updates { get; } = new();
+        public List<SlicingProgressUpdate> Updates { get; } = new List<SlicingProgressUpdate>();
         public Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
         {
             lock (Updates)

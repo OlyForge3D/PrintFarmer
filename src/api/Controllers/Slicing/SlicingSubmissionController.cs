@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -13,19 +13,18 @@ public class SlicingSubmissionController : ControllerBase
     private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
     private readonly ISlicerFileStorage _fileStorage;
     private readonly ILogger<SlicingSubmissionController> _logger;
-    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
-    private readonly string _tempRoot;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
 
     public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env)
     {
         ArgumentNullException.ThrowIfNull(cfg);
+        ArgumentNullException.ThrowIfNull(tempPathProvider);
         _fileStorage = fileStorage;
         _logger = logger;
-        _tempPathProvider = tempPathProvider;
-        _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
-        Directory.CreateDirectory(_tempRoot);
+        // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
+        var tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
+        Directory.CreateDirectory(tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _env = env ?? throw new ArgumentNullException(nameof(env));
     }
@@ -34,7 +33,7 @@ public class SlicingSubmissionController : ControllerBase
     [ProducesResponseType(typeof(SlicingJobResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)]
-    public async Task<IActionResult> SliceAsync([FromForm(Name = "modelFile")] IFormFile? modelFile, [FromForm(Name = "slicerEngine")] string? slicerEngine, [FromForm(Name = "printerId")] string? printerId, [FromForm(Name = "profile")] string? profileRaw, [FromForm(Name = "priority")] string? priorityRaw, [FromForm(Name = "files")] IFormFileCollection? files = null)
+    public async Task<IActionResult> SliceAsync([FromForm(Name = "modelFile")] IFormFile? modelFile, [FromForm(Name = "slicerEngine")] string? slicerEngine, [FromForm(Name = "printerId")] string? printerId, [FromForm(Name = "profile")] string? profileRaw, [FromForm(Name = "priority")] string? priorityRaw, [FromForm] IFormFileCollection? files = null)
     {
         if (!Request.HasFormContentType)
         {
@@ -45,20 +44,16 @@ public class SlicingSubmissionController : ControllerBase
         if (modelFile == null && Request.HasFormContentType)
         {
             var form = await Request.ReadFormAsync();
-            // Prefer bound files collection; fall back to reading form.Files for clients/tests that use a different field name
+            // Prefer bound files collection populated by the model binder (handles arbitrary field names)
             if (files != null && files.Count > 0)
             {
                 modelFile = files[0];
             }
-            else if (form.Files != null && form.Files.Count > 0)
-            {
-                modelFile = form.Files[0];
-            }
-             // Preserve other fields from form when not supplied via bound parameters
-             slicerEngine ??= form["slicerEngine"].FirstOrDefault();
-             printerId ??= form["printerId"].FirstOrDefault();
-             profileRaw ??= form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
-             priorityRaw ??= form["priority"].FirstOrDefault();
+            // Preserve other fields from form when not supplied via bound parameters
+            slicerEngine ??= form["slicerEngine"].FirstOrDefault();
+            printerId ??= form["printerId"].FirstOrDefault();
+            profileRaw ??= form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
+            priorityRaw ??= form["priority"].FirstOrDefault();
         }
         if (modelFile == null || modelFile.Length == 0)
         {
@@ -80,7 +75,10 @@ public class SlicingSubmissionController : ControllerBase
                 return BadRequest("Invalid model file");
             }
         }
-        catch { return BadRequest("Invalid model file"); }
+        catch
+        {
+            return BadRequest("Invalid model file");
+        }
 
         if (string.IsNullOrWhiteSpace(slicerEngine) || !AllowedEngines.Contains(slicerEngine))
         {
@@ -99,8 +97,13 @@ public class SlicingSubmissionController : ControllerBase
 
         SlicerProfileDto? profile;
         try
-        { profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw); }
-        catch { return BadRequest("Invalid slicer profile format"); }
+        {
+            profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw);
+        }
+        catch
+        {
+            return BadRequest("Invalid slicer profile format");
+        }
 
         if (!string.IsNullOrWhiteSpace(priorityRaw) && !Enum.TryParse(priorityRaw, true, out SlicingJobPriority _))
         {
@@ -180,7 +183,7 @@ public class SlicingSubmissionController : ControllerBase
                     JobId = jobId,
                     Status = SlicingJobStatus.Queued,
                     Progress = 0,
-                    SlicerEngine = slicerEngine ?? string.Empty,
+                    SlicerEngine = slicerEngine,
                     PrinterId = printerGuid,
                     ModelFilePath = modelFileUrl,
                     GcodeFilePath = null,
@@ -192,11 +195,11 @@ public class SlicingSubmissionController : ControllerBase
             }
 
             return Accepted(sliceResult);
-         }
-         catch (Exception ex)
-         {
-             _logger.LogError(ex, "Failed to enqueue slicing job");
-             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
-         }
-     }
- }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to enqueue slicing job");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
+        }
+    }
+}
