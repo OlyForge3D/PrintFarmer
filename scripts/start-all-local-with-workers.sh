@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/e#   --fresh            Terminate all existing containers/apps and clean up database files before starting freshv bash
 # PrintFarmer - Complete Local Development with Distributed Slicer Workers
 # This script starts ALL services including separate OrcaSlicer and PrusaSlicer worker containers
 #
@@ -10,6 +10,7 @@
 #   --no-prusa          Skip PrusaSlicer worker container  
 #   --no-tests          Skip running initial tests
 #   --clean             Clean build artifacts before starting
+#   --fresh             Terminate all existing containers/apps before starting fresh
 #
 # Services started:
 #   1. API Backend (ASP.NET Core) - localhost:5245
@@ -61,6 +62,7 @@ NO_ORCA=0
 NO_PRUSA=0
 NO_TESTS=0
 CLEAN=0
+FRESH=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -84,9 +86,13 @@ while [[ $# -gt 0 ]]; do
       CLEAN=1
       shift
       ;;
+    --fresh)
+      FRESH=1
+      shift
+      ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--foreground] [--no-orca] [--no-prusa] [--no-tests] [--clean]"
+      echo "Usage: $0 [--foreground] [--no-orca] [--no-prusa] [--no-tests] [--clean] [--fresh]"
       exit 1
       ;;
   esac
@@ -114,6 +120,79 @@ check_port() {
       error "Could not free port $port. Please stop the conflicting process manually."
     fi
   fi
+}
+
+# Fresh cleanup function - terminates all existing containers and processes
+fresh_cleanup() {
+  info "Starting fresh cleanup - terminating all existing containers and processes..."
+  
+  # Stop and remove PrintFarmer Docker containers by name pattern
+  local containers=(
+    "printfarmer-redis-distributed"
+    "printfarmer-orca-worker" 
+    "printfarmer-prusa-worker"
+  )
+  
+  for container_name in "${containers[@]}"; do
+    if docker ps -q --filter "name=$container_name" | grep -q .; then
+      warn "Stopping container: $container_name"
+      docker stop "$container_name" >/dev/null 2>&1 || true
+      docker rm "$container_name" >/dev/null 2>&1 || true
+    fi
+  done
+  
+  # Kill any processes on PrintFarmer ports
+  local ports=(5000 5245 7281 3000 6379)  # API, React, Redis ports
+  for port in "${ports[@]}"; do
+    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+      warn "Terminating processes on port $port"
+      lsof -ti:$port | xargs kill -9 2>/dev/null || true
+      sleep 1
+    fi
+  done
+  
+  # Remove any existing metadata file
+  rm -f "$META_FILE" 2>/dev/null || true
+  
+  # Clean up database files and persistent resources
+  info "Cleaning up database files and persistent resources..."
+  
+  # Clean up database files
+  if [[ -f "$SRC_DIR/api/farm.db" ]]; then
+    rm -f "$SRC_DIR/api/farm.db"
+    warn "Removed main database file: farm.db"
+  fi
+  
+  if [[ -f "$SRC_DIR/api/bin/Debug/net9.0/farm.db" ]]; then
+    rm -f "$SRC_DIR/api/bin/Debug/net9.0/farm.db"
+    warn "Removed build output database file"
+  fi
+  
+  # Clean up test database files
+  if [[ -d "$SRC_DIR/tests/_temp" ]]; then
+    rm -rf "$SRC_DIR/tests/_temp"
+    warn "Removed test temporary database files"
+  fi
+  
+  # Clean up log files
+  if [[ -d "$LOG_DIR" ]] && [[ "$(ls -A $LOG_DIR 2>/dev/null)" ]]; then
+    rm -f "$LOG_DIR"/*.log 2>/dev/null || true
+    warn "Cleared log files"
+  fi
+  
+  # Clean up PID directory
+  if [[ -d "$PID_DIR" ]] && [[ "$(ls -A $PID_DIR 2>/dev/null)" ]]; then
+    rm -f "$PID_DIR"/* 2>/dev/null || true
+    warn "Cleared PID files"
+  fi
+  
+  # Clean up Vite cache
+  if [[ -d "$REACT_DIR/node_modules/.vite" ]]; then
+    rm -rf "$REACT_DIR/node_modules/.vite"
+    warn "Cleared Vite cache"
+  fi
+  
+  success "Fresh cleanup completed - ready for clean startup"
 }
 
 # Cleanup function for graceful shutdown
@@ -204,6 +283,11 @@ if [[ $CLEAN -eq 1 ]]; then
     rm -rf "$REACT_DIR/node_modules/.vite"
   fi
   success "Build artifacts cleaned"
+fi
+
+# Fresh cleanup - terminate all existing containers and processes
+if [[ $FRESH -eq 1 ]]; then
+  fresh_cleanup
 fi
 
 # Check and free ports
