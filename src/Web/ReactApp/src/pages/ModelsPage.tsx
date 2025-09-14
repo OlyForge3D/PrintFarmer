@@ -11,7 +11,9 @@ const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>
 const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
   () => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer }))
 );
-import { SlicerConfigModal } from '@/components/slicer/SlicerConfigModal';
+const SlicerConfigModal = lazyWithPreload<any, React.FC<any>>(
+  () => import('@/components/slicer/SlicerConfigModal').then(m => ({ default: m.SlicerConfigModal }))
+);
 import { slicerService } from '@/services/slicerService';
 import type { SlicedModelSummary } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
@@ -51,16 +53,20 @@ export const ModelsPage: React.FC = () => {
   // Fetch models
   const { data: models = [], isLoading } = useQuery<Model[]>({
     queryKey: ['models'],
-    queryFn: slicerService.listModels
+    queryFn: slicerService.listModels,
+    staleTime: 2 * 60 * 1000, // Cache for 2 minutes
+    gcTime: 5 * 60 * 1000 // Keep in cache for 5 minutes
   });
 
-  // Fetch available printers for slicing
+  // Fetch available printers for slicing (using fast endpoint without status checks)
   const { data: availablePrinters = [] } = useQuery({
-    queryKey: ['printers'],
+    queryKey: ['printers-fast'],
     queryFn: async () => {
-      const response = await fetch('/api/printers');
+      const response = await fetch('/api/printers/fast');
       return response.json();
-    }
+    },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    gcTime: 10 * 60 * 1000 // Keep in cache for 10 minutes
   });
 
   // Upload mutation
@@ -304,6 +310,8 @@ export const ModelsPage: React.FC = () => {
               {/* Actions */}
               <div className="mt-4 flex space-x-2">
                 <button
+                  onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
+                  onFocus={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
                   onClick={() => setSlicerModal({ 
                     isOpen: true, 
                     model: new File([], model.fileName || `${model.name}.stl`) // Simplified placeholder
@@ -378,16 +386,20 @@ export const ModelsPage: React.FC = () => {
       )}
 
       {/* Slicer Configuration Modal */}
-      <SlicerConfigModal
-        isOpen={slicerModal.isOpen}
-        onClose={() => setSlicerModal({ isOpen: false, model: null })}
-        modelFile={slicerModal.model!}
-        availablePrinters={availablePrinters}
-        onSliceComplete={(result) => {
-          console.log('Slicing completed:', result);
-          // Could navigate to G-code viewer or print queue
-        }}
-      />
+      {slicerModal.isOpen && (
+        <Suspense fallback={<div>Loading slicer...</div>}>
+          <SlicerConfigModal
+            isOpen={slicerModal.isOpen}
+            onClose={() => setSlicerModal({ isOpen: false, model: null })}
+            modelFile={slicerModal.model!}
+            availablePrinters={availablePrinters}
+            onSliceComplete={(result: any) => {
+              console.log('Slicing completed:', result);
+              // Could navigate to G-code viewer or print queue
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };
