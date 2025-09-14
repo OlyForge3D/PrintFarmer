@@ -1,5 +1,4 @@
-using System;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared.Json;
@@ -34,7 +33,10 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
 
     private static PrinterBackend ParseString(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value)) return PrinterBackend.Moonraker;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return PrinterBackend.Moonraker;
+        }
         // numeric-as-string
         if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrinterBackend), num))
         {

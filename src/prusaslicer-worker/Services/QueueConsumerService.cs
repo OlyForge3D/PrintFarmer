@@ -1,4 +1,4 @@
-using Farm.Slicer.Worker.Core; // base consumer + abstractions
+﻿using Farm.Slicer.Worker.Core; // base consumer + abstractions
 using Farm.Web.Shared;
 using StackExchange.Redis;
 

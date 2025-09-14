@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services;
+﻿using Farm.Web.Api.Services;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.Web.Api.Health;

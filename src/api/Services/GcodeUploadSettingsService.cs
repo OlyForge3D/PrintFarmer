@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace Farm.Web.Api.Services;
 
@@ -16,7 +16,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
     {
         // Seed from environment variable or defaults
         var env = Environment.GetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS");
-        var list = string.IsNullOrWhiteSpace(env) ? new[] { ".gcode", ".bgcode" } : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var list = string.IsNullOrWhiteSpace(env) ? [".gcode", ".bgcode"] : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var e in list)
         {
             var norm = e.StartsWith('.') ? e : "." + e;

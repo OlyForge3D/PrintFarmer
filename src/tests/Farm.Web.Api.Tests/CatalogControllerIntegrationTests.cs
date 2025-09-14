@@ -1,10 +1,5 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using Farm.Web.Api.Tests;
+﻿using System.Net;
 using Farm.Web.Shared;
-using FluentAssertions;
-using Xunit;
 
 namespace Farm.Web.Api.Tests;
 

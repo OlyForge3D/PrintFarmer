@@ -1,13 +1,12 @@
-﻿using System;
-using Farm.Web.Api.Controllers.Requests;
+﻿using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Infrastructure.Caching;
+using Farm.Web.Api.Infrastructure.Exceptions;
+using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Api.Infrastructure.Exceptions;
-using Farm.Web.Api.Infrastructure.Caching;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -161,7 +160,7 @@ public class CatalogController : ControllerBase
         }
         return Ok(new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
+            [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)]));
     }
 
     [HttpPost("models")]
@@ -185,7 +184,7 @@ public class CatalogController : ControllerBase
         var normalizedName = CatalogNameNormalizer.NormalizeModel(originalModelName);
         _normLogger.Log("Model", originalModelName, normalizedName, "create");
         // Ensure the manufacturer exists to avoid FK violations
-    var mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
+        var mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
         if (!mfgExists)
         {
             return NotFound("Manufacturer not found");
@@ -223,7 +222,7 @@ public class CatalogController : ControllerBase
             MaxZ = req.MaxZ,
             DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null
         };
-    _db.Models.Add(model);
+        _db.Models.Add(model);
 
         // Add supported filament types if provided
         if (req.SupportedFilamentTypeIds?.Length > 0)
@@ -277,7 +276,7 @@ public class CatalogController : ControllerBase
     public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(req);
-    var model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
+        var model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null)
         {
             return NotFound();

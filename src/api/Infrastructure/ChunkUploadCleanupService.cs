@@ -1,8 +1,4 @@
-using System.Collections.Concurrent;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-
-namespace Farm.Web.Api.Infrastructure;
+﻿namespace Farm.Web.Api.Infrastructure;
 
 /// <summary>
 /// Periodically scans the gcode-library for stale chunk upload temp files (.part and .meta.json) and removes
@@ -40,9 +36,17 @@ public class ChunkUploadCleanupService : BackgroundService
     private void RunCleanup()
     {
         var root = _env.WebRootPath;
-        if (string.IsNullOrWhiteSpace(root)) return;
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return;
+        }
+
         var libraryRoot = Path.Combine(root, "gcode-library");
-        if (!Directory.Exists(libraryRoot)) return;
+        if (!Directory.Exists(libraryRoot))
+        {
+            return;
+        }
+
         var now = DateTime.UtcNow;
         int removed = 0;
         foreach (var meta in Directory.EnumerateFiles(libraryRoot, "*.part.meta.json", SearchOption.AllDirectories))
@@ -50,7 +54,10 @@ public class ChunkUploadCleanupService : BackgroundService
             try
             {
                 var fi = new FileInfo(meta);
-                if (now - fi.LastWriteTimeUtc < _ttl) continue;
+                if (now - fi.LastWriteTimeUtc < _ttl)
+                {
+                    continue;
+                }
                 // Paired .part file
                 var part = meta[..^(".meta.json".Length)];
                 if (File.Exists(part))

@@ -1,3 +1,4 @@
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Web.Shared;
 using StackExchange.Redis;
@@ -35,35 +36,62 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             var jobJson = JsonSerializer.Serialize(job);
-            var score = GetPriorityScore(job.Priority, job.CreatedAt);
+            // Use ScheduledAt if present so delayed jobs are ordered correctly
+            var referenceTime = job.ScheduledAt ?? job.CreatedAt;
+            var score = GetPriorityScore(job.Priority, referenceTime);
 
             // Use a transaction to ensure atomicity
             var transaction = _database.CreateTransaction();
 
             // Store job details
             var jobKey = GetJobKey(job.Id);
-            _ = transaction.HashSetAsync(jobKey,
-            [
-                new HashEntry("id", job.Id.ToString()),
-                new HashEntry("status", job.Status.ToString()),
-                new HashEntry("engine", job.SlicerEngine.ToString()),
-                new HashEntry("created_at", job.CreatedAt.ToString("O")),
-                new HashEntry("correlation_id", job.CorrelationId.ToString()),
-                new HashEntry("checksum", job.Checksum),
-                new HashEntry("data", jobJson)
-            ]);
+            if (transaction != null)
+            {
+                _ = transaction.HashSetAsync(jobKey,
+                    [
+                        new HashEntry("id", job.Id.ToString()),
+                        new HashEntry("status", job.Status.ToString()),
+                        new HashEntry("engine", job.SlicerEngine.ToString()),
+                        new HashEntry("created_at", job.CreatedAt.ToString("O")),
+                        new HashEntry("scheduled_at", job.ScheduledAt?.ToString("O") ?? string.Empty),
+                        new HashEntry("correlation_id", job.CorrelationId.ToString()),
+                        new HashEntry("checksum", job.Checksum ?? string.Empty),
+                        new HashEntry("data", jobJson)
+                    ]);
 
-            // Store correlation mapping for idempotency
-            var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum);
-            _ = transaction.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
+                // Store correlation mapping for idempotency
+                var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
+                _ = transaction.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
 
-            // Add to priority queue (explicitly use overload without SortedSetWhen so tests can verify 4-arg signature)
-            _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
+                // Add to priority queue
+                _ = transaction.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
 
-            // Set job expiration (30 days)
-            _ = transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
+                // Set job expiration (30 days)
+                _ = transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
 
-            await transaction.ExecuteAsync();
+                await transaction.ExecuteAsync();
+            }
+            else
+            {
+                // Fallback for test doubles that don't provide transactions
+                await _database.HashSetAsync(jobKey,
+                    [
+                        new HashEntry("id", job.Id.ToString()),
+                        new HashEntry("status", job.Status.ToString()),
+                        new HashEntry("engine", job.SlicerEngine.ToString()),
+                        new HashEntry("created_at", job.CreatedAt.ToString("O")),
+                        new HashEntry("scheduled_at", job.ScheduledAt?.ToString("O") ?? string.Empty),
+                        new HashEntry("correlation_id", job.CorrelationId.ToString()),
+                        new HashEntry("checksum", job.Checksum ?? string.Empty),
+                        new HashEntry("data", jobJson)
+                    ],
+                    CommandFlags.None);
+
+                var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
+                await _database.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
+                await _database.SortedSetAddAsync(_queueKey, jobJson, score, CommandFlags.None);
+                await _database.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
+            }
 
             _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine} (correlation {CorrelationId})",
                 job.Id, job.Priority, job.SlicerEngine, job.CorrelationId);
@@ -87,6 +115,14 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             }
 
             var job = RedisSlicerJobQueueHelpers.DeserializeJob(jobData.Value.Element);
+
+            // Respect scheduled start times: if job has ScheduledAt in the future, re-enqueue and skip
+            if (job != null && job.ScheduledAt.HasValue && job.ScheduledAt.Value > DateTime.UtcNow)
+            {
+                // Put back into the queue unchanged (EnqueueAsync will respect ScheduledAt)
+                await EnqueueAsync(job);
+                return null;
+            }
 
             if (job != null && preferredEngine != null && job.EngineType != preferredEngine)
             {
@@ -305,7 +341,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 }
             }
 
-            return jobs.OrderByDescending(j => j.CreatedAt).Take(limit ?? 100).ToList();
+            return [.. jobs.OrderByDescending(j => j.CreatedAt).Take(limit ?? 100)];
         }
         catch (Exception ex)
         {
@@ -346,16 +382,13 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 if (job != null && job.RetryCount < maxRetryCount)
                 {
                     job.Status = SlicingJobStatus.Queued;
-                    job.RetryCount++;
-                    job.LastRetryAt = DateTime.UtcNow;
-                    job.ErrorMessage = null;
-                    job.StartedAt = null;
-                    job.CompletedAt = null;
-                    job.WorkerId = null;
+                    // compute a backoff delay based on current RetryCount
+                    var delaySeconds = Math.Min(3600, (int)(Math.Pow(2, job.RetryCount) * 10));
+                    var delay = TimeSpan.FromSeconds(delaySeconds);
 
-                    // Remove from failed queue and re-enqueue
+                    // Remove from failed queue and schedule requeue
                     await _database.SortedSetRemoveAsync(_failedKey, jobJson);
-                    await EnqueueAsync(job, cancellationToken);
+                    await RequeueJobAsync(job, delay, jitterPercent: 0.0, cancellationToken: cancellationToken);
                     requeuedCount++;
                 }
             }
@@ -381,16 +414,68 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 new("status", job.Status.ToString()),
                 new("progress", job.Progress),
                 new("updated_at", DateTime.UtcNow.ToString("O")),
+                new("scheduled_at", job.ScheduledAt?.ToString("O") ?? string.Empty),
                 new("data", jobJson)
             ],
             CommandFlags.None);
     }
 
-    private async Task RequeueJobAsync(DistributedSlicingJob job)
+    public async Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
     {
-        var jobJson = JsonSerializer.Serialize(job);
-        var score = GetPriorityScore(job.Priority, job.CreatedAt);
-        await _database.SortedSetAddAsync(_queueKey, jobJson, score, flags: CommandFlags.None);
+        try
+        {
+            ArgumentNullException.ThrowIfNull(job);
+
+            // Attempt to remove any existing representation in the processing set by matching job.Id
+            var processingEntries = await _database.SortedSetRangeByRankAsync(_processingKey, 0, -1, Order.Ascending, CommandFlags.None);
+            foreach (var entry in processingEntries)
+            {
+                var pjob = RedisSlicerJobQueueHelpers.DeserializeJob(entry);
+                if (pjob != null && pjob.Id == job.Id)
+                {
+                    await _database.SortedSetRemoveAsync(_processingKey, entry, CommandFlags.None);
+                    break;
+                }
+            }
+
+            // Increment counters and set timing metadata
+            job.RetryCount++;
+            job.LastRetryAt = DateTime.UtcNow;
+            job.ErrorMessage = null;
+            job.StartedAt = null;
+            job.CompletedAt = null;
+            job.WorkerId = null;
+            // Schedule by setting ScheduledAt if delay provided
+            if (delay.HasValue && delay.Value > TimeSpan.Zero)
+            {
+                // Determine jitter percent to apply; if none provided, default to 15%
+                var jitter = jitterPercent > 0 ? Math.Abs(jitterPercent) / 100.0 : 0.15;
+                // Clip jitter reasonably
+                jitter = Math.Max(0.0, Math.Min(jitter, 1.0));
+
+                var baseSeconds = delay.Value.TotalSeconds;
+                var minFactor = Math.Max(0.0, 1.0 - jitter);
+                var maxFactor = 1.0 + jitter;
+                var jitterFactor = minFactor + ((RandomNumberGenerator.GetInt32(0, 1_000_000) / 1_000_000.0) * (maxFactor - minFactor));
+                var scheduledSeconds = Math.Max(1, (int)Math.Round(baseSeconds * jitterFactor));
+                job.ScheduledAt = DateTime.UtcNow.AddSeconds(scheduledSeconds);
+                _logger.LogDebug("Applied jitter to scheduled retry for job {JobId}: base={BaseSeconds}s jitterPercent={JitterPercent}% jitterFactor={JitterFactor:F2} scheduledIn={ScheduledSeconds}s", job.Id, baseSeconds, jitter * 100.0, jitterFactor, scheduledSeconds);
+            }
+            else
+            {
+                job.ScheduledAt = DateTime.UtcNow;
+            }
+
+            // Enqueue with updated scheduledAt which influences priority score and thus acts as a delayed enqueue
+            await EnqueueAsync(job, cancellationToken);
+
+            _logger.LogInformation("Requeued job {JobId} for retry (retryCount={RetryCount}, scheduledInSeconds={Delay})", job.Id, job.RetryCount, delay?.TotalSeconds ?? 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to requeue job {JobId}", job?.Id);
+            throw;
+        }
     }
 
     private static string GetJobKey(Guid jobId) => $"slicer:job:{jobId}";
