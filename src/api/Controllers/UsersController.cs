@@ -131,7 +131,7 @@ public class UsersController : ControllerBase
         {
             foreach (var roleId in request.RoleIds)
             {
-                var role = await _db.Roles.FindAsync(roleId);
+                var role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
                     _db.UserRoles.Add(new UserRole
@@ -169,7 +169,7 @@ public class UsersController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var user = await _db.Users.FindAsync(id);
+        var user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (user == null)
         {
             return NotFound();
@@ -202,7 +202,7 @@ public class UsersController : ControllerBase
             // Add new roles
             foreach (var roleId in request.RoleIds)
             {
-                var role = await _db.Roles.FindAsync(roleId);
+                var role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
                     _db.UserRoles.Add(new UserRole
@@ -243,7 +243,7 @@ public class UsersController : ControllerBase
             return BadRequest("Cannot delete your own account");
         }
 
-        var user = await _db.Users.FindAsync(id);
+        var user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (user == null)
         {
             return NotFound();

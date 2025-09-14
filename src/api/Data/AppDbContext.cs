@@ -471,6 +471,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.CreatedByUserId);
         });
 
+        // Password policy entity configuration (merged from origin/main)
+        modelBuilder.Entity<PasswordPolicy>(b =>
+        {
+            b.HasKey(pp => pp.Id);
+            b.Property(pp => pp.MinLength).IsRequired();
+            b.Property(pp => pp.RequireUppercase);
+            b.Property(pp => pp.RequireLowercase);
+            b.Property(pp => pp.RequireDigit);
+            b.Property(pp => pp.RequireSymbol);
+        });
+
         // SlicerSettings Entity Configuration
         modelBuilder.Entity<SlicerSettings>(b =>
         {

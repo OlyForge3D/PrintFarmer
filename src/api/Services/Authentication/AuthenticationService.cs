@@ -77,9 +77,9 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<AuthenticationResult> RegisterAsync(RegisterRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
         try
         {
-            ArgumentNullException.ThrowIfNull(request);
             // If a user with the same username AND email already exists and the password matches,
             // treat registration as idempotent and return a valid authentication result.
             var existingExact = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Email == request.Email);
@@ -152,7 +152,7 @@ public class AuthenticationService : IAuthenticationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during registration for username: {Username}", request.Username);
+            _logger.LogError(ex, "Error during registration for username: {Username}", request?.Username);
             return new AuthenticationResult(false, Error: "Registration service error");
         }
     }

@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Domain;
+namespace Farm.Web.Api.Domain;
 
 public class PasswordPolicy
 {

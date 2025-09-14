@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Tests.Util;
+using Farm.Web.Api.Tests.Util;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -112,7 +112,7 @@ public class OrcaSlicerDockerIntegrationTests : IAsyncLifetime
         }
     }
 
-    [Fact(Skip = "Long running full-stack smoke; enable when needed")]
+    [Fact]
     public async Task FullStack_Microservices_ShouldServeFrontendAndApi()
     {
         var up = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "up", "-d", "redis", "database", "api", "orcaslicer-worker", "prusaslicer-worker", "frontend");

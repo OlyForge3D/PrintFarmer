@@ -4,6 +4,8 @@ using System.Text.Json;
 namespace Farm.Web.Api.Tests.GcodeFiles;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
@@ -143,7 +145,7 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         var failedList = new List<string>();
         if (payload.TryGetProperty("failed", out var failedArr))
         {
-            failedList = [.. failedArr.EnumerateArray().Select(e => e.GetString()!)];
+            failedList = failedArr.EnumerateArray().Select(e => e.GetString()!).ToList();
         }
         (skippedList.Contains("/folder/..") || failedList.Contains("/folder/..")).Should().BeTrue();
         payload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();

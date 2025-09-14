@@ -6,7 +6,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 
 public class SlicerProgressMonitorTests
 {
-    private class TestNotifier : ISlicerProgressNotifier
+    private sealed class TestNotifier : ISlicerProgressNotifier
     {
         public List<SlicingProgressUpdate> Updates { get; } = new();
         public Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
@@ -21,7 +21,7 @@ public class SlicerProgressMonitorTests
         public Task UnsubscribeFromJobAsync(Guid jobId, string connectionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    private class TestProcessHandle : IProcessHandle
+    private sealed class TestProcessHandle : IProcessHandle
     {
         private readonly System.IO.MemoryStream _ms;
         private readonly System.IO.StreamReader _sr;

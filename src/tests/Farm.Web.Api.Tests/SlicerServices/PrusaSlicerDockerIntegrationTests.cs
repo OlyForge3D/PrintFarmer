@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Tests.Util;
 using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Tests.Util;
 using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -145,7 +145,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     }
 
 
-    [Fact(Skip = "Long running test - enable for full integration validation")]
+    [Fact]
     public async Task EndToEndSlicing_ShouldWork_WithPrusaSlicerWorker()
     {
         // This test would simulate a complete slicing workflow:

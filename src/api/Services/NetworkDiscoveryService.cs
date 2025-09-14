@@ -126,7 +126,13 @@ public partial class NetworkDiscoveryService(
         }
 
         LogDiscoveryCompleted(logger, discovered.Count);
-        return [.. discovered.OrderBy(p => p.IpAddress)];
+        // previous: return [.. discovered.OrderBy(p => p.IpAddress)];
+        if (discovered == null || discovered.Count == 0)
+        {
+            return new List<DiscoveredPrinterDto>();
+        }
+
+        return discovered.OrderBy(p => p.IpAddress).ToList();
     }
 
     public async Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default)

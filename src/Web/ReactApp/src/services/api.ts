@@ -40,6 +40,7 @@ export class ApiClient {
 
     // Limit maximum response/body sizes to mitigate DoS via extremely large responses
     const MAX_RESPONSE_BYTES = 50 * 1024 * 1024; // 50 MB
+
     this.client = axios.create({
       baseURL: apiBaseUrl,
       timeout: 30000,

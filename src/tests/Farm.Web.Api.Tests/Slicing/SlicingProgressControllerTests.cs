@@ -4,16 +4,15 @@ using System.Text;
 namespace Farm.Web.Api.Tests.Slicing;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class SlicingProgressControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
 
     public SlicingProgressControllerTests(CustomWebApplicationFactory factory)
     {
-        if (factory is null)
-        {
-            throw new ArgumentNullException(nameof(factory));
-        }
+        ArgumentNullException.ThrowIfNull(factory);
         _client = factory.CreateClient();
     }
 
@@ -40,7 +39,7 @@ public class SlicingProgressControllerTests : IClassFixture<CustomWebApplication
         // Read a small chunk to ensure stream begins
         var stream = await progressResponse.Content.ReadAsStreamAsync();
         var buffer = new byte[256];
-        var read = await stream.ReadAsync(buffer, 0, buffer.Length);
+        var read = await stream.ReadAsync(buffer);
         read.Should().BeGreaterThan(0);
         var chunk = Encoding.UTF8.GetString(buffer, 0, read);
         chunk.Should().Contain("data:");

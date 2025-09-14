@@ -5,7 +5,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 
 [ApiController]
 [Route("api/admin/slicer")]
-public class SlicerAdminController : ControllerBase
+public partial class SlicerAdminController : ControllerBase
 {
     [HttpPost("dryrun")]
     public ActionResult<DryRunResult> DryRun([FromBody] DryRunRequest request)
@@ -19,7 +19,7 @@ public class SlicerAdminController : ControllerBase
         var engine = request.Engine;
 
         // Find placeholders
-        var rx = new System.Text.RegularExpressions.Regex("\\{([a-zA-Z0-9_]+)\\}");
+        var rx = MyRegex();
         var matches = rx.Matches(template);
         var placeholders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (System.Text.RegularExpressions.Match m in matches)
@@ -70,7 +70,7 @@ public class SlicerAdminController : ControllerBase
         });
 
         // Safety checks on rendered args
-        if (rendered.Contains("..") || rendered.Contains("~"))
+        if (rendered.Contains("..") || rendered.Contains('~'))
         {
             result.Warnings.Add("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
         }
@@ -80,6 +80,9 @@ public class SlicerAdminController : ControllerBase
         result.SamplePlaceholders = samples;
         return Ok(result);
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("\\{([a-zA-Z0-9_]+)\\}")]
+    private static partial System.Text.RegularExpressions.Regex MyRegex();
 }
 
 public class DryRunRequest

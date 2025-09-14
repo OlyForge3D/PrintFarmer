@@ -1,18 +1,10 @@
 ﻿using Farm.Web.Api.Services.Authentication;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
-public class PasswordSecurityTests : IClassFixture<CustomWebApplicationFactory>
+public class PasswordSecurityTests
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly IPasswordHashingService _passwordHashingService;
-
-    public PasswordSecurityTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-        _passwordHashingService = _factory.Services.GetRequiredService<IPasswordHashingService>();
-    }
+    private readonly IPasswordHashingService _passwordHashingService = new PasswordHashingService();
 
     [Fact]
     public void HashPassword_ShouldReturnNonEmptyHash()

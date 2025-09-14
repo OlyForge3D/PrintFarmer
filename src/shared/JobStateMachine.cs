@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 // Serialization constructors removed (legacy binary serialization not required)
 
 namespace Farm.Web.Shared;
@@ -80,14 +80,14 @@ public static class JobStateMachine
     /// </summary>
     private static readonly Dictionary<JobState, HashSet<JobState>> ValidTransitions = new()
     {
-        [JobState.Queued] = [JobState.Dispatched, JobState.Cancelled],
-        [JobState.Dispatched] = [JobState.Processing, JobState.Cancelled, JobState.DeadLetter],
-        [JobState.Processing] = [JobState.Succeeded, JobState.Failed, JobState.Cancelled, JobState.DeadLetter],
+        [JobState.Queued] = new HashSet<JobState> { JobState.Dispatched, JobState.Cancelled },
+        [JobState.Dispatched] = new HashSet<JobState> { JobState.Processing, JobState.Cancelled, JobState.DeadLetter },
+        [JobState.Processing] = new HashSet<JobState> { JobState.Succeeded, JobState.Failed, JobState.Cancelled, JobState.DeadLetter },
         // Terminal states have no valid transitions
-        [JobState.Succeeded] = [],
-        [JobState.Failed] = [],
-        [JobState.Cancelled] = [],
-        [JobState.DeadLetter] = []
+        [JobState.Succeeded] = new HashSet<JobState>(),
+        [JobState.Failed] = new HashSet<JobState>(),
+        [JobState.Cancelled] = new HashSet<JobState>(),
+        [JobState.DeadLetter] = new HashSet<JobState>()
     };
 
     /// <summary>

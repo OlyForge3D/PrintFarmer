@@ -10,7 +10,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 {
     private readonly IHubContext<SlicerProgressHub> _hubContext;
     private readonly ILogger<SignalRSlicerProgressNotifier> _logger;
-    private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = [];
+    private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = new();
     private readonly object _lockObject = new();
 
     public SignalRSlicerProgressNotifier(
@@ -157,7 +157,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         {
             if (!_jobSubscriptions.TryGetValue(jobId, out var set))
             {
-                set = [];
+                set = new HashSet<string>();
                 _jobSubscriptions[jobId] = set;
             }
 
@@ -186,15 +186,15 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         return Task.CompletedTask;
     }
 
-    private List<string> GetJobSubscribers(Guid jobId)
+    private IReadOnlyList<string> GetJobSubscribers(Guid jobId)
     {
         lock (_lockObject)
         {
             if (_jobSubscriptions.TryGetValue(jobId, out var subscribers))
             {
-                return [.. subscribers];
+                return subscribers.ToArray();
             }
-            return [];
+            return Array.Empty<string>();
         }
     }
 
@@ -283,7 +283,7 @@ public class SlicingCompletionNotification
     public int LayerCount { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CompletedAt { get; set; }
-    public Dictionary<string, object> Metadata { get; } = [];
+    public Dictionary<string, object> Metadata { get; } = new();
 }
 
 /// <summary>
@@ -298,5 +298,5 @@ public class SlicingFailureNotification
     public DateTime FailedAt { get; set; }
     public int RetryCount { get; set; }
     public bool CanRetry { get; set; }
-    public Dictionary<string, object> Metadata { get; } = [];
+    public Dictionary<string, object> Metadata { get; } = new();
 }

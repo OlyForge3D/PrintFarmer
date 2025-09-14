@@ -28,6 +28,9 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<RequirePermis
         AuthorizationHandlerContext context,
         RequirePermissionAttribute requirement)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(requirement);
+
         var user = context.User;
 
         if (!user.Identity?.IsAuthenticated ?? true)

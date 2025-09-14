@@ -1,9 +1,11 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class SpoolmanControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

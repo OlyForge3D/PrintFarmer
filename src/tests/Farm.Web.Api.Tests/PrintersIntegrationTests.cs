@@ -3,9 +3,10 @@ using Moq;
 
 namespace Farm.Web.Api.Tests;
 
-// Mark as long-running because these tests perform real create/delete cycles and external host resolution.
-[Trait("Category", "Slow")]
+// DB-backed printer lifecycle; previously also tagged Slow.
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -242,7 +243,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         }
     }
 
-    private record HealthzDto(string Status);
+    private sealed record HealthzDto(string Status);
 }
 
 internal sealed record CameraUrlResultDto(string? StreamUrl, string? SnapshotUrl);

@@ -194,7 +194,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // Set up default discovery behavior to return empty list
         MockNetworkDiscoveryService
             .Setup(x => x.DiscoverPrintersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
+            .ReturnsAsync(new List<DiscoveredPrinterDto>());
     }
 
     private void SetupSlicerServiceMocks()
@@ -233,7 +233,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             .ReturnsAsync((Guid userId, int? limit, CancellationToken _) =>
             {
                 var list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
-                return [.. list];
+                return list.ToList();
             });
 
         // File storage mocks (accept any path & simulate existence)

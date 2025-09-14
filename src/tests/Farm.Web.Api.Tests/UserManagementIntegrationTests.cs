@@ -4,6 +4,8 @@ using Farm.Web.Shared;
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
+[Collection("DbHeavySerial")]
+[TestTiming]
 public class UserManagementIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -143,7 +145,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
             Password = "CreatedPassword123!",
             FirstName = "Created",
             LastName = "User",
-            RoleIds = [] // Will get default role
+            RoleIds = Array.Empty<Guid>() // Will get default role
         };
 
         // Act

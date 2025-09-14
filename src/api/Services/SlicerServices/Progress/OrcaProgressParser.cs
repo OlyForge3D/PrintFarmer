@@ -2,12 +2,12 @@
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
-public class OrcaProgressParser : IProgressParser
+public partial class OrcaProgressParser : IProgressParser
 {
     // Examples parsed:
     // "[info] Exporting: 30%"
     // "Saving G-code: 100%"
-    private static readonly Regex PercentRegex = new(@"(?i)(?<pct>\d{1,3})%", RegexOptions.Compiled);
+    private static readonly Regex PercentRegex = MyRegex();
     private static readonly Regex ExportingRegex = new(@"(?i)exporting|saving|writing", RegexOptions.Compiled);
 
     public ProgressUpdate? Parse(string line)
@@ -40,4 +40,7 @@ public class OrcaProgressParser : IProgressParser
 
         return null;
     }
+
+    [GeneratedRegex(@"(?i)(?<pct>\d{1,3})%", RegexOptions.Compiled, "en-US")]
+    private static partial Regex MyRegex();
 }

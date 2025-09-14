@@ -16,7 +16,7 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
         // Initialize from configuration if available
         var enabled = cfg.GetValue<bool?>("SlicerWorker:Enabled") ?? false;
         var per = new Dictionary<SlicerEngineType, PerEngineSlicerSetting>();
-        foreach (SlicerEngineType engine in Enum.GetValues(typeof(SlicerEngineType)))
+        foreach (SlicerEngineType engine in Enum.GetValues<SlicerEngineType>())
         {
             var section = cfg.GetSection($"SlicerExecutables:{engine}");
             var path = section["Path"];

@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 
 public class SlicerSettingsControllerTests
 {
-    private class FakeSettingsService : ISlicerSettingsService
+    private sealed class FakeSettingsService : ISlicerSettingsService
     {
         public SlicerSettingsDto? Saved;
         public SlicerSettingsDto GetSettings() => new SlicerSettingsDto(true, new Dictionary<SlicerEngineType, PerEngineSlicerSetting>(), 15.0);

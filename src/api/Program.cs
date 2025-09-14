@@ -962,15 +962,20 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
     List<string> ranges = current.NetworkRanges;
     if (!string.IsNullOrWhiteSpace(rangesEnv))
     {
-        ranges = [.. rangesEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct()];
+        ranges = rangesEnv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct()
+            .ToList();
     }
     List<int> ports = current.Ports;
     if (!string.IsNullOrWhiteSpace(portsEnv))
     {
-        ports = [.. portsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        ports = portsEnv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(p => int.TryParse(p, out var v) ? v : -1)
             .Where(v => v > 0 && v < 65536)
-            .Distinct()];
+            .Distinct()
+            .ToList();
         if (ports.Count == 0)
         {
             ports = current.Ports;
