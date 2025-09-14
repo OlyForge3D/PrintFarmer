@@ -2,7 +2,6 @@
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -12,7 +11,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Spoolman Integration")]
-public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory httpClientFactory) : ControllerBase
+public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory httpClientFactory, NetworkUrlRewriteService urlRewriter) : ControllerBase
 {
     /// <summary>
     /// Tests connectivity to an arbitrary Spoolman base URL without persisting configuration.
@@ -42,7 +41,10 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
         {
             return Ok(new { success = false, message = "Invalid URL" });
         }
-        var normalized = baseUri.ToString().TrimEnd('/');
+        
+        // Apply environment-specific URL rewriting for network access
+        var rewrittenUrl = urlRewriter.RewriteUrl(baseUri.ToString(), "Spoolman");
+        var normalized = rewrittenUrl.TrimEnd('/');
 
         string[] probePaths = ["/api/v1/health", "/api/v1/info"]; // order matters
         foreach (var path in probePaths)

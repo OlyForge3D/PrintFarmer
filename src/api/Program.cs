@@ -325,6 +325,9 @@ builder.Services.AddTransient<Farm.Web.Api.Services.SlicerServices.Process.IProc
 // Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
 builder.Services.AddHostedService<SlicerWorkerHostedService>();
 
+// Network URL rewriting for cross-environment compatibility
+builder.Services.AddSingleton<NetworkUrlRewriteService>();
+
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
