@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
+import { signalRService } from '@/services/signalr';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
@@ -25,6 +26,11 @@ export function SettingsPage() {
   const { data: passwordPolicy, savePolicy, saving, reset: resetPolicy } = usePasswordPolicy();
   const [draftPolicy, setDraftPolicy] = useState({ minLength: 12, requireUppercase: false, requireLowercase: false, requireDigit: false, requireSymbol: false });
   const [policyDirty, setPolicyDirty] = useState(false);
+  
+  // SignalR settings
+  const [signalrSettings, setSignalrSettings] = useState<{ logLevel: string; consoleLoggingEnabled: boolean }>({ logLevel: 'Information', consoleLoggingEnabled: true });
+  const [signalrDirty, setSignalrDirty] = useState(false);
+  const [signalrSaving, setSignalrSaving] = useState(false);
   
   const [testing, setTesting] = useState(false);
   const [testOk, setTestOk] = useState<boolean | null>(null);
@@ -58,6 +64,16 @@ export function SettingsPage() {
       const types = await apiClient.getFilamentTypes();
       setFilamentTypes(types);
       // password policy handled by usePasswordPolicy
+      
+      // Load SignalR settings
+      try {
+        const signalrConfig = await apiClient.getSignalRSettings();
+        setSignalrSettings(signalrConfig);
+        setSignalrDirty(false);
+      } catch (err) {
+        console.warn('Failed to load SignalR settings, using defaults:', err);
+        setSignalrSettings({ logLevel: 'Information', consoleLoggingEnabled: true });
+      }
       
       // Load Spoolman configuration: prefer backend, fallback to localStorage
       try {
@@ -134,6 +150,30 @@ export function SettingsPage() {
       console.error('Failed to save password policy', err);
       toast.error('Failed to save password policy');
     }
+  };
+
+  const saveSignalRSettings = async () => {
+    if (!hasRole('farm_admin')) return;
+    try {
+      setSignalrSaving(true);
+      await apiClient.saveSignalRSettings(signalrSettings);
+      setSignalrDirty(false);
+      
+      // Refresh the SignalR service with new settings
+      await signalRService.refreshSettings();
+      
+      toast.success('SignalR settings saved');
+    } catch (err) {
+      console.error('Failed to save SignalR settings', err);
+      toast.error('Failed to save SignalR settings');
+    } finally {
+      setSignalrSaving(false);
+    }
+  };
+
+  const updateSignalRField = (field: string, value: unknown) => {
+    setSignalrSettings(prev => ({ ...prev, [field]: value }));
+    setSignalrDirty(true);
   };
 
   const normalizedUrl = normalizeSpoolmanBaseUrl(spoolmanBase);
@@ -809,6 +849,70 @@ export function SettingsPage() {
               <button
                 type="button"
                 onClick={() => { setPolicyDirty(false); resetPolicy(); }}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {hasRole('farm_admin') && (
+        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+          <h2 className="text-xl font-semibold text-pf-text-primary mb-4">SignalR Settings</h2>
+          <p className="text-sm text-pf-text-secondary mb-4">Configure SignalR console logging and verbosity level for real-time communication debugging.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-pf-text-primary mb-2">Log Level</label>
+              <select
+                id="signalr-loglevel"
+                value={signalrSettings.logLevel}
+                onChange={(e) => updateSignalRField('logLevel', e.target.value)}
+                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
+                aria-label="SignalR log level"
+              >
+                <option value="None">None</option>
+                <option value="Critical">Critical</option>
+                <option value="Error">Error</option>
+                <option value="Warning">Warning</option>
+                <option value="Information">Information</option>
+                <option value="Debug">Debug</option>
+                <option value="Trace">Trace</option>
+              </select>
+              <p className="text-xs text-pf-text-secondary mt-1">Controls verbosity of SignalR client logging. Changes take effect after page refresh.</p>
+            </div>
+            <div className="flex flex-col justify-start">
+              <label className="block text-sm font-medium text-pf-text-primary mb-2">Console Logging</label>
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  id="signalr-console"
+                  type="checkbox"
+                  checked={signalrSettings.consoleLoggingEnabled}
+                  onChange={(e) => updateSignalRField('consoleLoggingEnabled', e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="signalr-console" className="text-sm text-pf-text-primary">Enable Console Logging</label>
+              </div>
+              <p className="text-xs text-pf-text-secondary mt-1">When disabled, SignalR logging is completely suppressed regardless of level.</p>
+            </div>
+          </div>
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={saveSignalRSettings}
+              disabled={!signalrDirty || signalrSaving}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save className="h-4 w-4" />
+              {signalrSaving ? 'Saving...' : 'Save Settings'}
+            </button>
+            {signalrDirty && !signalrSaving && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSignalrSettings({ logLevel: 'Information', consoleLoggingEnabled: true });
+                  setSignalrDirty(false);
+                }}
                 className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
               >
                 Reset

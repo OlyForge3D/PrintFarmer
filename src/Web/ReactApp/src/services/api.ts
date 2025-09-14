@@ -226,6 +226,20 @@ export class ApiClient {
     });
   }
 
+  // SignalR settings
+  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
+    const resp = await this.client.get('/signalr/settings');
+    const data = resp.data as { logLevel: string; consoleLoggingEnabled: boolean };
+    return data;
+  }
+
+  async saveSignalRSettings(payload: { logLevel: string; consoleLoggingEnabled: boolean }): Promise<void> {
+    await this.client.post('/signalr/settings', {
+      logLevel: payload.logLevel,
+      consoleLoggingEnabled: payload.consoleLoggingEnabled
+    });
+  }
+
   // autoDetectNetworkRanges removed (unreliable in containerized environments)
 
   // ============ Filament Type API methods ============
