@@ -38,35 +38,43 @@ export class ApiClient {
     // Use environment variable for API base URL, fallback to relative path for monolithic deployment
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
 
+    // Limit maximum response/body sizes to mitigate DoS via extremely large responses
+    const MAX_RESPONSE_BYTES = 50 * 1024 * 1024; // 50 MB
     this.client = axios.create({
       baseURL: apiBaseUrl,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
+      // Node-specific: limit body length
+      maxContentLength: MAX_RESPONSE_BYTES,
+      maxBodyLength: MAX_RESPONSE_BYTES,
     });
 
-    // Request interceptor for authentication
-    this.client.interceptors.request.use((config) => {
-      const token = localStorage.getItem('auth-token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+    // Response size guard: if server advertises Content-Length larger than allowed, reject early
+    this.client.interceptors.response.use((response) => {
+      try {
+        const cl = response.headers && (response.headers['content-length'] || response.headers['Content-Length']);
+        if (cl) {
+          const size = Number(cl);
+          if (!Number.isNaN(size) && size > MAX_RESPONSE_BYTES) {
+            class ResponseTooLargeError extends Error { code = 'ERR_RESPONSE_TOO_LARGE'; }
+            throw new ResponseTooLargeError('Response payload too large');
+          }
+        }
       }
-      return config;
+      catch (e) {
+        return Promise.reject(e);
+      }
+      return response;
+    }, (error: AxiosError) => {
+      const apiError: ApiError = {
+        message: error.message,
+        statusCode: error.response?.status || 500,
+        details: error.response?.data as string || undefined,
+      };
+      return Promise.reject(apiError);
     });
-
-    // Response interceptor for error handling
-    this.client.interceptors.response.use(
-      (response) => response,
-      (error: AxiosError) => {
-        const apiError: ApiError = {
-          message: error.message,
-          statusCode: error.response?.status || 500,
-          details: error.response?.data as string || undefined,
-        };
-        return Promise.reject(apiError);
-      }
-    );
   }
 
   // ============ Printer API methods ============
