@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield, User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { isValidCidr, normalizeUrl } from '@/utils/validation';
+import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { apiClient } from '@/services/api';
 import type { FilamentTypeDto } from '@/types/api';
 
@@ -260,11 +260,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       await apiClient.saveNetworkDiscoverySettings(netPayload);
 
       // 3. Spoolman config (optional)
-  if (spoolmanEnabled && spoolmanUrl) {
-        const normalized = normalizeUrl(spoolmanUrl);
+      if (spoolmanEnabled && spoolmanUrl) {
+        const normalized = normalizeSpoolmanBaseUrl(spoolmanUrl);
         const token = localStorage.getItem('auth-token');
         const saveResp = await fetch('/api/spoolman/config', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ baseUrl: normalized }) });
         if (!saveResp.ok && saveResp.status !== 204) throw new Error('Failed to save Spoolman config');
+        // Keep localStorage synchronized so Settings page reflects wizard-entered value immediately
+        localStorage.setItem('spoolman-base-url', normalized);
       }
 
       // 4. Filament presets (create/update & delete unselected)
@@ -490,7 +492,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <div><strong>Network Ranges:</strong> {networkRanges.filter(r=>r.trim()).length ? networkRanges.filter(r=>r.trim()).join(', ') : 'None (discovery disabled)'}</div>
           <div><strong>Spoolman:</strong> {spoolmanEnabled ? (
             <span>
-              {normalizeUrl(spoolmanUrl)} {spoolmanTestOk && spoolmanVersion && (
+              {normalizeSpoolmanBaseUrl(spoolmanUrl)} {spoolmanTestOk && spoolmanVersion && (
                 <span className="text-green-500">(v{spoolmanVersion}{spoolmanEndpoint ? ` · ${spoolmanEndpoint}`:''})</span>
               )}
               {!spoolmanTestOk && spoolmanErrorCategory && (

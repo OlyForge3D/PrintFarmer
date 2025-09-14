@@ -363,7 +363,6 @@ if (isMonolithicDeployment)
         catch
         {
             // Safety: if relative path resolution fails (null args, etc.), skip static file mapping to avoid container crash.
-            return;
         }
     });
 }

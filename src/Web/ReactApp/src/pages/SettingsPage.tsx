@@ -3,6 +3,7 @@ import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
+import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
 import type { FilamentType } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -58,10 +59,30 @@ export function SettingsPage() {
       setFilamentTypes(types);
       // password policy handled by usePasswordPolicy
       
-      // For other settings, we might need to implement API endpoints
-      // For now, use default values or localStorage
-      const savedSpoolman = localStorage.getItem('spoolman-base-url') || '';
-      setSpoolmanBase(savedSpoolman);
+      // Load Spoolman configuration: prefer backend, fallback to localStorage
+      try {
+        const cfgResp = await fetch('/api/spoolman/config');
+        if (cfgResp.ok && cfgResp.status !== 204) {
+          const cfg = await cfgResp.json();
+          if (cfg?.baseUrl) {
+            const normalized = normalizeSpoolmanBaseUrl(cfg.baseUrl);
+            setSpoolmanBase(normalized);
+            // Sync localStorage if out of date
+            if (localStorage.getItem('spoolman-base-url') !== normalized) {
+              localStorage.setItem('spoolman-base-url', normalized);
+            }
+          } else {
+            const savedSpoolman = localStorage.getItem('spoolman-base-url') || '';
+            setSpoolmanBase(savedSpoolman);
+          }
+        } else {
+          const savedSpoolman = localStorage.getItem('spoolman-base-url') || '';
+          setSpoolmanBase(savedSpoolman);
+        }
+      } catch {
+        const savedSpoolman = localStorage.getItem('spoolman-base-url') || '';
+        setSpoolmanBase(savedSpoolman);
+      }
       
       // Load network discovery settings from backend
       try {
@@ -115,7 +136,7 @@ export function SettingsPage() {
     }
   };
 
-  const normalizedUrl = spoolmanBase.trim().replace(/\/$/, '');
+  const normalizedUrl = normalizeSpoolmanBaseUrl(spoolmanBase);
 
   const testSpoolman = async () => {
     if (!normalizedUrl) return;
