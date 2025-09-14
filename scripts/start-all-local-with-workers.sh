@@ -1,4 +1,4 @@
-#!/usr/bin/e#   --fresh            Terminate all existing containers/apps and clean up database files before starting freshv bash
+#!/usr/bin/env bash
 # PrintFarmer - Complete Local Development with Distributed Slicer Workers
 # This script starts ALL services including separate OrcaSlicer and PrusaSlicer worker containers
 #
