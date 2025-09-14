@@ -57,22 +57,20 @@ public class DatabaseSeeder : IDatabaseSeeder
                 ("SV08 Max", "Sovol", 500, 500, 500, 0), // Moonraker (Klipper)
                 ("Zero", "Sovol", 150, 150, 150, 0), // Moonraker (Klipper)
                 ("Thinker X400", "Eryone", 400, 400, 400, 0), // Moonraker (Klipper)
+                ("Centauri", "Elegoo", 256, 256, 256, 2), // SDCP
                 ("Centauri Carbon", "Elegoo", 256, 256, 256, 2), // SDCP
-                ("Micron 120", "PrintersForAnts", 120, 120, 120, 0), // Moonraker (Klipper)
-                ("Micron 180", "PrintersForAnts", 180, 180, 165, 0), // Moonraker (Klipper)
-                ("Voron Trident 250", "Voron", 250, 250, 250, 0), // Moonraker (Klipper)
-                ("Voron Trident 300", "Voron", 300, 300, 250, 0), // Moonraker (Klipper)
-                ("Voron Trident 300 Cube", "Voron", 300, 300, 300, 0), // Moonraker (Klipper)
-                ("Voron Trident 350", "Voron", 350, 350, 250, 0), // Moonraker (Klipper)
+                ("SaladFork", "PrintersForAnts", 120, 120, 120, 0), // Moonraker (Klipper)
+                ("Micron", "PrintersForAnts", 180, 180, 165, 0), // Moonraker (Klipper)
                 ("Voron v0", "Voron", 120, 120, 120, 0), // Moonraker (Klipper)
-                ("Voron v2.4 300", "Voron", 300, 300, 300, 0), // Moonraker (Klipper)
-                ("Voron v2.4 350", "Voron", 350, 350, 350, 0), // Moonraker (Klipper)
-                ("vCore4 400", "RatRig", 400, 400, 400, 0), // Moonraker (Klipper)
-                ("vCore4 500", "RatRig", 500, 500, 500, 0), // Moonraker (Klipper)
+                ("Voron v2.4", "Voron", 350, 350, 350, 0), // Moonraker (Klipper)
+                ("Voron Trident", "Voron", 300, 300, 200, 0), // Moonraker (Klipper)
+                ("vCore3.1", "RatRig", 400, 400, 400, 0), // Moonraker (Klipper)
+                ("vCore4", "RatRig", 500, 500, 500, 0), // Moonraker (Klipper)
+                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1), // PrusaLink
                 ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1), // PrusaLink
                 ("Original Prusa MK4S", "Prusa", 250, 210, 220, 1), // PrusaLink
                 ("Original Prusa Core One", "Prusa", 250, 220, 270, 1), // PrusaLink
-                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1) // PrusaLink
+                ("Original Prusa XL", "Prusa", 250, 220, 270, 1), // PrusaLink
             };
 
             foreach (var (name, mfg, x, y, z, defaultBackend) in modelSeeds)

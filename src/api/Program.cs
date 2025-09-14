@@ -261,6 +261,9 @@ builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
+// Model analysis and virus scanning services for ModelController
+builder.Services.AddScoped<IModelAnalysisService, ModelAnalysisService>();
+builder.Services.AddScoped<IVirusScanner, ClamAVVirusScanner>();
 // Migration status provider (lightweight introspection without forcing migrations strategy changes)
 // NOTE: Was singleton; changed to Scoped because it directly depends on AppDbContext (scoped) to avoid scoped->singleton injection violation in tests.
 builder.Services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
@@ -325,6 +328,9 @@ builder.Services.AddTransient<Farm.Web.Api.Services.SlicerServices.Process.IProc
 // Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
 builder.Services.AddHostedService<SlicerWorkerHostedService>();
 
+// Network URL rewriting for cross-environment compatibility
+builder.Services.AddSingleton<NetworkUrlRewriteService>();
+
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
@@ -374,7 +380,6 @@ if (isMonolithicDeployment)
         catch
         {
             // Safety: if relative path resolution fails (null args, etc.), skip static file mapping to avoid container crash.
-            // no-op; fall through
         }
     });
 }

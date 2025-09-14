@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Filter, RefreshCw, ExternalLink, Package, Pencil, LayoutGrid, Table as TableIcon, Settings2 } from 'lucide-react';
 import { classifyColor, getRepresentativeHex } from '@/utils/colorFamilies';
+import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { ColorFamilySelect } from '@/components/ColorFamilySelect';
 import { ColorSwatch } from '@/components/ColorSwatch';
 import { SpoolUsageBar } from '@/components/SpoolUsageBar';
@@ -82,13 +83,7 @@ export function SpoolsPage() {
     { id: 'location', label: 'Location', visible: true, sortable: true, render: s => (s.location || ''), sortValue: s => (s.location || '').toLowerCase() },
     { id: 'archived', label: 'Archived', visible: true, sortable: true, render: s => (s.archived ? 'Yes' : ''), sortValue: s => (s.archived ? 1 : 0) },
     { id: 'edit', label: 'Edit', visible: true, sortable: false, render: s => {
-      const normalizeBaseUrl = (url: string): string => {
-        if (!url) return '';
-        const trimmed = url.trim();
-        if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
-        return `http://${trimmed.replace(/\/$/, '')}`;
-      };
-      const base = normalizeBaseUrl(spoolmanBaseUrl);
+      const base = normalizeSpoolmanBaseUrl(spoolmanBaseUrl);
       const hasBase = !!base;
       const editUrl = hasBase ? `${base}/spool/edit/${s.id}` : '/settings';
       const title = hasBase ? `Edit spool ${s.id} in Spoolman` : 'Configure Spoolman URL first';
@@ -138,13 +133,7 @@ export function SpoolsPage() {
       return {
         ...c,
         render: (s: SpoolmanSpoolDto) => {
-          const normalizeBaseUrl = (url: string): string => {
-            if (!url) return '';
-            const trimmed = url.trim();
-            if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
-            return `http://${trimmed.replace(/\/$/, '')}`;
-          };
-          const base = normalizeBaseUrl(spoolmanBaseUrl);
+          const base = normalizeSpoolmanBaseUrl(spoolmanBaseUrl);
           const hasBase = !!base;
           const editUrl = hasBase ? `${base}/spool/edit/${s.id}` : '/settings';
           const title = hasBase ? `Edit spool ${s.id} in Spoolman` : 'Configure Spoolman URL first';

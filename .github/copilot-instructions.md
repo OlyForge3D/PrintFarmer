@@ -118,11 +118,37 @@ npm run lint
 
 **CRITICAL**: This is a two-tier architecture - API backend + separate React TypeScript frontend.
 
-**API Server (Backend):**
+⚠️ **CRITICAL DEVELOPMENT WORKFLOW**: 
+- **NEVER run API server and test commands in the same terminal** - this kills the server
+- **ALWAYS use background processes or separate terminals** for API server
+- **ALWAYS verify server is running before testing** with `curl http://localhost:5245/healthz`
+
+**API Server (Backend) - Choose ONE method:**
+
+**Method 1: Background Process (Recommended for testing):**
 ```powershell
 cd ./src
-dotnet run --project ./api/Farm.Web.Api.csproj
+dotnet run --project ./api/Farm.Web.Api.csproj &
+# Server runs in background, terminal remains available for testing commands
 ```
+
+**Method 2: Separate Terminal (Recommended for development):**
+```powershell
+# Terminal 1 - API Server (keep this running)
+cd ./src
+dotnet run --project ./api/Farm.Web.Api.csproj
+
+# Terminal 2 - Testing/Commands (use this for curl, tests, etc.)
+curl http://localhost:5245/healthz
+```
+
+**Method 3: Watch Mode (For active development with hot reload):**
+```powershell
+# Terminal 1 - API Server with hot reload
+cd ./src
+dotnet watch --project ./api/Farm.Web.Api.csproj run
+```
+
 - API starts at http://localhost:5245 (http profile)
 - HTTPS available at https://localhost:7281
 - Health check at http://localhost:5245/health
@@ -154,13 +180,25 @@ npm run dev
 
 **ALWAYS test actual functionality after making changes:**
 
-1. **API Health Check:**
+**CRITICAL**: Ensure API server is running in background or separate terminal BEFORE running any curl/test commands!
+
+1. **Start API Server First:**
+   ```bash
+   # Option A: Background process
+   cd ./src && dotnet run --project ./api/Farm.Web.Api.csproj &
+   
+   # Option B: Separate terminal (recommended)
+   # Terminal 1: cd ./src && dotnet run --project ./api/Farm.Web.Api.csproj
+   # Terminal 2: (use for testing commands below)
+   ```
+
+2. **API Health Check:**
    ```bash
    curl -s http://localhost:5245/healthz
    # Should return: {"status":"ok"}
    ```
 
-2. **API Endpoints:**
+3. **API Endpoints:**
    ```bash
    curl -s http://localhost:5245/api/printers
    # Should return: [] (empty array)
@@ -245,6 +283,13 @@ npm run dev
 ## Project Architecture & Layout
 
 **IMPORTANT**: This is a separate API + React frontend architecture (migrated from Blazor WebAssembly).
+
+**🔥 LOCAL DEVELOPMENT SETUP - NO DOCKER CONTAINERS:**
+- **API Backend**: Run natively with `dotnet run` (NOT in Docker)
+- **React Frontend**: Run natively with `npm run dev` (NOT in Docker)
+- **Database**: SQLite file-based database (auto-created, no container needed)
+- **External Services**: Configure for local network access (use NetworkUrlRewriteService)
+- **Docker**: Only used for production deployment, NOT for local development
 
 ```
 /

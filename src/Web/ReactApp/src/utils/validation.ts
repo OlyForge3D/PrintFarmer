@@ -13,5 +13,21 @@ export function isValidCidr(input: string): boolean {
 }
 
 export function normalizeUrl(url: string): string {
+  // Generic lightweight normalization (trim + single trailing slash removal)
   return url.trim().replace(/\/$/, '');
+}
+
+// Dedicated Spoolman base URL normalizer. Currently mirrors normalizeUrl but
+// kept separate so future Spoolman-specific rules (e.g. default scheme) can
+// be added in one place without touching generic URL handling.
+export function normalizeSpoolmanBaseUrl(url: string): string {
+  let working = url.trim();
+  if (!working) return '';
+  // Prepend http:// if user omitted scheme (safer default inside container / LAN)
+  if (!/^https?:\/\//i.test(working)) {
+    working = 'http://' + working;
+  }
+  // Remove single trailing slash
+  working = working.replace(/\/$/, '');
+  return working;
 }
