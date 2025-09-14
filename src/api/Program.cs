@@ -261,6 +261,9 @@ builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
+// Model analysis and virus scanning services for ModelController
+builder.Services.AddScoped<IModelAnalysisService, ModelAnalysisService>();
+builder.Services.AddScoped<IVirusScanner, ClamAVVirusScanner>();
 // Migration status provider (lightweight introspection without forcing migrations strategy changes)
 // NOTE: Was singleton; changed to Scoped because it directly depends on AppDbContext (scoped) to avoid scoped->singleton injection violation in tests.
 builder.Services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
