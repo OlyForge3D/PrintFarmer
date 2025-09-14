@@ -8,7 +8,7 @@ public class SlicerProgressMonitorTests
 {
     private class TestNotifier : ISlicerProgressNotifier
     {
-        public List<SlicingProgressUpdate> Updates { get; } = new List<SlicingProgressUpdate>();
+        public List<SlicingProgressUpdate> Updates { get; } = new();
         public Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
         {
             lock (Updates)
