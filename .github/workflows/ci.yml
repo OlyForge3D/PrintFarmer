@@ -50,15 +50,25 @@ jobs:
             --filter "Category!=DbHeavy&Category!=Docker" \
             /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
 
-      - name: Merge backend coverage (produce merged LCOV only)
+      - name: Merge backend coverage (simple custom merge)
         run: |
-          # Install reportgenerator as a lightweight tool for merging LCOV files (no HTML)
-          dotnet tool install --global dotnet-reportgenerator-globaltool
-          export PATH="$PATH:$HOME/.dotnet/tools"
-          # Merge any per-project LCOV files under src/coverage into a single LCOV
-          reportgenerator "-reports:src/coverage/*.info" "-targetdir:src/coverage/report" "-reporttypes:lcov;TextSummary"
-          if [ -f src/coverage/report/lcov.info ]; then mkdir -p src/coverage && cp src/coverage/report/lcov.info src/coverage/coverage.info; fi
-          cat src/coverage/report/Summary.txt || true
+          set -euo pipefail
+          mkdir -p src/coverage
+          # Locate per-project lcov files
+          files=(src/coverage/*.info)
+          if [ ! -e "${files[0]}" ]; then echo "No per-project LCOV files in src/coverage; nothing to merge"; exit 1; fi
+          tmpfile=$(mktemp)
+          # Concatenate all LCOV inputs into a temp file
+          for f in src/coverage/*.info; do
+            echo "# --- from: $f ---" >> "$tmpfile"
+            cat "$f" >> "$tmpfile"
+            echo "" >> "$tmpfile"
+          done
+          # Remove exact-duplicate lines to avoid repeated entries; write canonical merged file
+          awk '!seen[$0]++' "$tmpfile" > src/coverage/coverage.info
+          rm -f "$tmpfile"
+          echo "Merged $(ls -1 src/coverage/*.info | wc -l) LCOV files into src/coverage/coverage.info"
+          echo "Merged file size:" && ls -lh src/coverage/coverage.info
       - name: Upload .NET coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
