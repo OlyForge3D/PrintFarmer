@@ -53,7 +53,7 @@ export const ModelsPage: React.FC = () => {
   // Fetch models
   const { data: models = [], isLoading } = useQuery<Model[]>({
     queryKey: ['models'],
-    queryFn: slicerService.listModels,
+    queryFn: () => slicerService.listModels(),
     staleTime: 2 * 60 * 1000, // Cache for 2 minutes
     gcTime: 5 * 60 * 1000 // Keep in cache for 5 minutes
   });
@@ -71,7 +71,7 @@ export const ModelsPage: React.FC = () => {
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: slicerService.uploadModel,
+    mutationFn: (file: File) => slicerService.uploadModel(file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] });
       setSelectedFiles([]);
@@ -81,7 +81,7 @@ export const ModelsPage: React.FC = () => {
 
   // Delete mutation
   const deleteMutation = useMutation({
-    mutationFn: slicerService.deleteModel,
+    mutationFn: (modelId: string) => slicerService.deleteModel(modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] });
     }
