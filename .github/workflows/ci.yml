@@ -55,7 +55,8 @@ jobs:
       - name: Generate HTML coverage report
         run: |
           export PATH="$PATH:$HOME/.dotnet/tools"
-          reportgenerator -reports:src/coverage/coverage.info -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary
+          # Accept multiple coverage info files (one per test project) and generate a merged HTML report
+          reportgenerator -reports:src/coverage/*.info -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary
           cat src/coverage/report/Summary.txt || true
       - name: Upload .NET HTML coverage report
         if: always()
@@ -111,7 +112,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: |
-            src/coverage/coverage.info
+            src/coverage/*.info
             src/Web/ReactApp/coverage/lcov.info
           flags: backend,frontend
           fail_ci_if_error: false
@@ -131,12 +132,12 @@ jobs:
       - name: Enforce backend coverage thresholds
         if: success()
         run: |
-          BACKEND_LCOV=src/coverage/coverage.info
-          if [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov"; exit 1; fi
+          # Find first coverage.info file produced by dotnet test (supports multiple test projects)
+          BACKEND_LCOV=$(ls src/coverage/*.info 2>/dev/null | head -n 1 || true)
+          if [ -z "$BACKEND_LCOV" ] || [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov"; exit 1; fi
           LINES=$(grep -c '^DA:' "$BACKEND_LCOV")
-          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{split($2,a,":"); if ($2 ~ /,/) {} }')
-          # Simplistic: count DA lines with execution >0
-          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{split($2,a,":"); if ($2>0) c++} END {print c+0}')
+          # Count DA lines with execution > 0
+          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{ if ($2+0>0) c++ } END {print c+0}')
           if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse backend coverage"; exit 1; fi
           PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
           echo "Backend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
