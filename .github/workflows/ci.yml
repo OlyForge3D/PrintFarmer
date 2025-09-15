@@ -55,10 +55,10 @@ jobs:
       - name: Generate HTML coverage report
         run: |
           export PATH="$PATH:$HOME/.dotnet/tools"
-          # Accept multiple coverage info files and coverage reports produced by the XPlat collector under TestResults
-          reportgenerator -reports:src/coverage/*.info;src/TestResults/*/coverage.* -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary;lcov
-          # If reportgenerator produced an lcov file in the report folder, copy it to a stable location expected by subsequent steps
-          if [ -f src/coverage/report/lcov.info ]; then mkdir -p src/coverage && cp src/coverage/report/lcov.info src/coverage/coverage.info; fi
+          # Generate merged HTML + LCOV from backend lcov outputs in src/coverage
+          reportgenerator "-reports:src/coverage/*.info" "-targetdir:src/coverage/report" "-reporttypes:HtmlInline_AzurePipelines;TextSummary;lcov"
+           # If reportgenerator produced an lcov file in the report folder, copy it to a stable location expected by subsequent steps
+           if [ -f src/coverage/report/lcov.info ]; then mkdir -p src/coverage && cp src/coverage/report/lcov.info src/coverage/coverage.info; fi
            cat src/coverage/report/Summary.txt || true
       - name: Upload .NET HTML coverage report
         if: always()
