@@ -218,12 +218,12 @@ public class GcodeFilesController(
             // Sorting
             entries = (sortBy?.ToLowerInvariant(), sortOrder?.ToLowerInvariant()) switch
             {
-                ("size", "desc") => [.. entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)],
-                ("size", _) => [.. entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)],
-                ("date", "desc") => [.. entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)],
-                ("date", _) => [.. entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)],
-                ("name", "desc") => [.. entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase)],
-                _ => [.. entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)]
+                ("size", "desc") => entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+                ("size", _) => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+                ("date", "desc") => entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+                ("date", _) => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+                ("name", "desc") => entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+                _ => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
             };
 
             var totalFiles = entries.Count(e => !e.IsDirectory);
@@ -231,7 +231,7 @@ public class GcodeFilesController(
 
             // Apply pagination AFTER computing totals so client can derive total pages.
             var skip = (page - 1) * pageSize;
-            var pagedEntries = skip >= entries.Count ? new List<GcodeFileEntryDto>(0) : [.. entries.Skip(skip).Take(pageSize)];
+            IReadOnlyList<GcodeFileEntryDto> pagedEntries = skip >= entries.Count ? Array.Empty<GcodeFileEntryDto>() : entries.Skip(skip).Take(pageSize).ToList();
             var totalItems = entries.Count; // directories + files for pagination context
             var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
             return Ok(new GcodeFileListResponse(
@@ -1329,7 +1329,7 @@ public sealed record UpdateSettingsRequest(
 /// <summary>Request body for bulk deletion of virtual G-code files.</summary>
 public sealed class DeleteFilesRequest
 {
-    [JsonPropertyName("filePaths")] public IList<string> FilePaths { get; init; } = [];
+    [JsonPropertyName("filePaths")] public IList<string> FilePaths { get; init; } = Array.Empty<string>();
 }
 
 // ---------------- Chunk Upload DTOs ----------------

@@ -4,7 +4,7 @@ using Farm.Web.Api.Services.Interfaces;
 namespace Farm.Web.Api.Services;
 
 // Simple adapter to convert ILogger<T> to ILogger<U>
-internal class LoggerAdapter<T>(ILogger logger) : ILogger<T>
+internal sealed class LoggerAdapter<T>(ILogger logger) : ILogger<T>
 {
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => logger.BeginScope(state);
     public bool IsEnabled(LogLevel logLevel) => logger.IsEnabled(logLevel);
@@ -157,16 +157,21 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
             var folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
-                return [.. folder.Children
-                    .Where(f => f.Type == FileTypes.PrintFile && f.Name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
-                    .Select(f => f.Name)];
+                // Return names of non-folder entries; FolderInfo.Children is an array so prefer Length checks
+                if (folder.Children != null && folder.Children.Length > 0)
+                {
+                    // Upstream API encodes file vs folder in the 'Type' property
+                    return folder.Children.Where(f => f.Type != FileTypes.Folder).Select(f => f.Name).ToArray();
+                }
+
+                return Array.Empty<string>();
             }
-            return [];
+            return Array.Empty<string>();
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get file list from {BaseUrl}", baseUrl);
-            return [];
+            return Array.Empty<string>();
         }
     }
 
@@ -333,7 +338,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
         try
         {
             var storageList = await _apiClient.GetStorageAsync(baseUrl, apiKey, ct: ct);
-            return [.. storageList.StorageList.Select(s => new StorageInformation
+            return storageList.StorageList.Select(s => new StorageInformation
             {
                 Name = s.Name,
                 Type = s.Type,
@@ -344,11 +349,11 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
                 TotalSpace = s.TotalSpace,
                 PrintFileSize = s.PrintFiles,
                 SystemFileSize = s.SystemFiles
-            })];
+            }).ToArray();
         }
         catch
         {
-            return [];
+            return Array.Empty<StorageInformation>();
         }
     }
 

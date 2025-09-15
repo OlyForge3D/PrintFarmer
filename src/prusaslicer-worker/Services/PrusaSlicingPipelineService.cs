@@ -8,7 +8,7 @@ namespace Farm.PrusaSlicer.Worker.Services;
 /// <summary>
 /// Implementation of the STL fetch -> slice -> G-code upload pipeline for PrusaSlicer
 /// </summary>
-public class PrusaSlicingPipelineService : ISlicingPipelineService
+public partial class PrusaSlicingPipelineService : ISlicingPipelineService
 {
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
@@ -175,8 +175,8 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
             process.Start();
 
             // Read output and error streams
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            var errorTask = process.StandardError.ReadToEndAsync();
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
             // Wait for process completion
             await process.WaitForExitAsync(cancellationToken);
@@ -269,7 +269,7 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
         };
 
         // Parse G-code comments for metadata (PrusaSlicer format)
-        var printTimeRegex = new Regex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase);
+        var printTimeRegex = MyRegex();
         var printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
         var filamentRegex = new Regex(@";\s*filament used.*?(\d+\.?\d*)(?:mm|g)", RegexOptions.IgnoreCase);
         var layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
@@ -455,4 +455,7 @@ public class PrusaSlicingPipelineService : ISlicingPipelineService
         public double FilamentUsageGrams { get; set; }
         public int LayerCount { get; set; }
     }
+
+    [GeneratedRegex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex MyRegex();
 }

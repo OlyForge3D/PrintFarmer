@@ -10,7 +10,6 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// </summary>
 public class RedisSlicerJobQueue : ISlicerJobQueue
 {
-    private readonly IConnectionMultiplexer _redis;
     private readonly IDatabase _database;
     private readonly ILogger<RedisSlicerJobQueue> _logger;
 
@@ -25,7 +24,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
     public RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlicerJobQueue> logger)
     {
-        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
+        ArgumentNullException.ThrowIfNull(redis);
         _database = redis.GetDatabase();
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -48,7 +47,8 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             if (transaction != null)
             {
                 _ = transaction.HashSetAsync(jobKey,
-                    [
+                    new[]
+                    {
                         new HashEntry("id", job.Id.ToString()),
                         new HashEntry("status", job.Status.ToString()),
                         new HashEntry("engine", job.SlicerEngine.ToString()),
@@ -57,7 +57,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                         new HashEntry("correlation_id", job.CorrelationId.ToString()),
                         new HashEntry("checksum", job.Checksum ?? string.Empty),
                         new HashEntry("data", jobJson)
-                    ]);
+                    });
 
                 // Store correlation mapping for idempotency
                 var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
@@ -75,7 +75,8 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             {
                 // Fallback for test doubles that don't provide transactions
                 await _database.HashSetAsync(jobKey,
-                    [
+                    new[]
+                    {
                         new HashEntry("id", job.Id.ToString()),
                         new HashEntry("status", job.Status.ToString()),
                         new HashEntry("engine", job.SlicerEngine.ToString()),
@@ -84,7 +85,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                         new HashEntry("correlation_id", job.CorrelationId.ToString()),
                         new HashEntry("checksum", job.Checksum ?? string.Empty),
                         new HashEntry("data", jobJson)
-                    ],
+                    },
                     CommandFlags.None);
 
                 var correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
@@ -120,14 +121,14 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
             if (job != null && job.ScheduledAt.HasValue && job.ScheduledAt.Value > DateTime.UtcNow)
             {
                 // Put back into the queue unchanged (EnqueueAsync will respect ScheduledAt)
-                await EnqueueAsync(job);
+                await EnqueueAsync(job, cancellationToken);
                 return null;
             }
 
             if (job != null && preferredEngine != null && job.EngineType != preferredEngine)
             {
                 // Re-queue if engine doesn't match preference
-                await RequeueJobAsync(job);
+                await RequeueJobAsync(job, cancellationToken: cancellationToken);
                 return null;
             }
 
@@ -213,10 +214,10 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         try
         {
             var jobKey = GetJobKey(jobId);
-            var updates = new List<HashEntry>
+            List<HashEntry> updates = new()
             {
-                new("progress", progress),
-                new("updated_at", DateTime.UtcNow.ToString("O"))
+                new HashEntry("progress", progress),
+                new HashEntry("updated_at", DateTime.UtcNow.ToString("O"))
             };
 
             if (currentStep != null)
@@ -224,7 +225,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 updates.Add(new HashEntry("current_step", currentStep));
             }
 
-            await _database.HashSetAsync(jobKey, [.. updates]);
+            await _database.HashSetAsync(jobKey, updates.ToArray());
 
             // Also update the job data if we have it
             var job = await GetJobAsync(jobId, cancellationToken);
@@ -326,7 +327,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     {
         try
         {
-            var jobs = new List<DistributedSlicingJob>();
+            List<DistributedSlicingJob> jobs = new();
 
             // Simplified implementation - scan through a fixed recent window (tests expect end rank 100 regardless of requested limit)
             var completedJobs = await _database.SortedSetRangeByRankAsync(_completedKey, 0, 100, Order.Descending, CommandFlags.None);
@@ -341,7 +342,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
                 }
             }
 
-            return [.. jobs.OrderByDescending(j => j.CreatedAt).Take(limit ?? 100)];
+            return jobs.OrderByDescending(j => j.CreatedAt).Take(limit ?? 100).ToList();
         }
         catch (Exception ex)
         {
@@ -410,22 +411,22 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
 
         await _database.HashSetAsync(
             jobKey,
-            [
-                new("status", job.Status.ToString()),
-                new("progress", job.Progress),
-                new("updated_at", DateTime.UtcNow.ToString("O")),
-                new("scheduled_at", job.ScheduledAt?.ToString("O") ?? string.Empty),
-                new("data", jobJson)
-            ],
+            new[]
+            {
+                new HashEntry("status", job.Status.ToString()),
+                new HashEntry("progress", job.Progress),
+                new HashEntry("updated_at", DateTime.UtcNow.ToString("O")),
+                new HashEntry("scheduled_at", job.ScheduledAt?.ToString("O") ?? string.Empty),
+                new HashEntry("data", jobJson)
+            },
             CommandFlags.None);
     }
 
     public async Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(job);
         try
         {
-            ArgumentNullException.ThrowIfNull(job);
-
             // Attempt to remove any existing representation in the processing set by matching job.Id
             var processingEntries = await _database.SortedSetRangeByRankAsync(_processingKey, 0, -1, Order.Ascending, CommandFlags.None);
             foreach (var entry in processingEntries)
@@ -473,7 +474,7 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to requeue job {JobId}", job?.Id);
+            _logger.LogError(ex, "Failed to requeue job {JobId}", job.Id);
             throw;
         }
     }

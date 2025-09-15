@@ -5,6 +5,7 @@ namespace Farm.Web.Api.Tests.Util;
 
 /// <summary>
 /// Shared helper utilities for Docker-based integration tests providing adaptive polling.
+/// PRESUBMIT: SKIP-DOCKER - This is a utility class, not a test class itself
 /// </summary>
 public static class DockerTestHelpers
 {

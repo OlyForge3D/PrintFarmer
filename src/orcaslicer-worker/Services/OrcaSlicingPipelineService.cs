@@ -5,7 +5,7 @@ using Farm.Web.Shared;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
-public class OrcaSlicingPipelineService : ISlicingPipelineService
+public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 {
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
@@ -86,7 +86,7 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         return stlFilePath;
     }
 
-    private async Task<string> PrepareSlicerConfigAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
+    private static async Task<string> PrepareSlicerConfigAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
     {
         var configContent = GenerateOrcaSlicerConfig(job.Profile);
         var configFilePath = Path.Combine(workDir, "config.ini");
@@ -117,8 +117,8 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         };
         var progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
         process.Start();
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         await progressTask;
         var error = await errorTask; // output ignored for brevity
@@ -161,12 +161,12 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         catch (Exception ex) { _logger.LogWarning(ex, "Error monitoring slicing progress for job {JobId}", jobId); }
     }
 
-    private async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
+    private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
     {
         var fileInfo = new FileInfo(gcodeFilePath);
         var lines = await File.ReadAllLinesAsync(gcodeFilePath, cancellationToken);
         var metadata = new GcodeMetadata();
-        var printTimeRegex = new Regex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase);
+        var printTimeRegex = MyRegex();
         var printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
         var filamentRegex = new Regex(@";\s*filament used.*?(\d+\.?\d*)(?:mm|g)", RegexOptions.IgnoreCase);
         var layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
@@ -292,4 +292,7 @@ public class OrcaSlicingPipelineService : ISlicingPipelineService
         public double FilamentUsageGrams { get; set; }
         public int LayerCount { get; set; }
     }
+
+    [GeneratedRegex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex MyRegex();
 }

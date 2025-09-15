@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 
 public class SlicerWorkerHostedServiceTests
 {
-    private class FakeExecutableManager : ISlicerExecutableManager
+    private sealed class FakeExecutableManager : ISlicerExecutableManager
     {
         private readonly string _exePath;
         private readonly string _argsTemplate;
@@ -28,9 +28,9 @@ public class SlicerWorkerHostedServiceTests
         }
     }
 
-    private class FakeFileStorage : ISlicerFileStorage
+    private sealed class FakeFileStorage : ISlicerFileStorage
     {
-        public List<(string key, byte[] data)> Uploads { get; } = new List<(string, byte[])>();
+        public List<(string key, byte[] data)> Uploads { get; } = new();
         public Task<string> UploadFileAsync(string key, Stream fileStream, string contentType, CancellationToken cancellationToken = default)
         {
             using var ms = new MemoryStream();
@@ -48,7 +48,7 @@ public class SlicerWorkerHostedServiceTests
         public void CleanupTempFiles(TimeSpan maxAge, CancellationToken cancellationToken = default) { }
     }
 
-    private class FakeJobQueue : ISlicerJobQueue
+    private sealed class FakeJobQueue : ISlicerJobQueue
     {
         public bool CompletedCalled { get; private set; }
         public bool FailedCalled { get; private set; }
@@ -138,7 +138,7 @@ public class SlicerWorkerHostedServiceTests
         fileStorage.Uploads.Should().NotBeEmpty();
     }
 
-    private class WorkerTestProcessHandle : IProcessHandle
+    private sealed class WorkerTestProcessHandle : IProcessHandle
     {
         private readonly System.IO.MemoryStream _ms;
         private readonly System.IO.StreamReader _sr;
@@ -178,9 +178,9 @@ public class SlicerWorkerHostedServiceTests
         }
     }
 
-    private class TestNotifier : ISlicerProgressNotifier
+    private sealed class TestNotifier : ISlicerProgressNotifier
     {
-        public List<SlicingProgressUpdate> Updates { get; } = new List<SlicingProgressUpdate>();
+        public List<SlicingProgressUpdate> Updates { get; } = new();
         public Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
         {
             lock (Updates)
@@ -255,7 +255,7 @@ public class SlicerWorkerHostedServiceTests
         jitterValue.Should().BeApproximately(5.0, 0.0001);
     }
 
-    private class FailingProcessHandle : IProcessHandle
+    private sealed class FailingProcessHandle : IProcessHandle
     {
         private readonly System.IO.StreamReader _srOut;
         private readonly System.IO.StreamReader _srErr;

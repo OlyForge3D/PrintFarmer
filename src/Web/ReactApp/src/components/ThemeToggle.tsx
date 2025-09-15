@@ -64,11 +64,11 @@ export function ThemeToggle({
   if (variant === 'buttons') {
     const groupName = 'theme-toggle-group';
     return (
-      <fieldset className={`flex bg-pf-panel border border-pf-border rounded-lg ${className}`} aria-label="Theme selection">
-        <legend className="sr-only">Theme selection</legend>
+      <div role="radiogroup" data-testid="theme-radiogroup" className={`flex bg-pf-panel border border-pf-border rounded-lg ${className}`} aria-label="Theme selection">
         {themes.map(({ value, label, icon: Icon }) => (
           <label
             key={value}
+            data-testid={`theme-option-${value}`}
             className={`cursor-pointer first:rounded-l-lg last:rounded-r-lg border-r last:border-r-0 border-pf-border ${sizeClasses[size]} flex items-center space-x-2 transition-all duration-200 ${theme === value ? 'bg-pf-accent text-white' : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'}`}
           >
             <input
@@ -78,12 +78,14 @@ export function ThemeToggle({
               checked={theme === value}
               onChange={() => setTheme(value)}
               className="sr-only"
+              aria-label={`Switch to ${label.toLowerCase()} theme`}
+              aria-checked={theme === value}
             />
-            <Icon className={iconSizes[size]} />
+            <Icon className={iconSizes[size]} aria-hidden="true" />
             {showLabels && <span className="hidden sm:inline">{label}</span>}
           </label>
         ))}
-      </fieldset>
+      </div>
     );
   }
 

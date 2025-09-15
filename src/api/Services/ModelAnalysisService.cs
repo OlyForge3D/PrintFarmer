@@ -65,7 +65,7 @@ public class ModelAnalysisService : IModelAnalysisService
             double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
             int vertexCount = 0;
             string? line;
-            while ((line = await sr.ReadLineAsync()) != null)
+            while ((line = await sr.ReadLineAsync(cancellationToken)) != null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var trimmed = line.Trim();

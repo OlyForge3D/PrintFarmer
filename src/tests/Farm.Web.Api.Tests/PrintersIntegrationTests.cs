@@ -243,7 +243,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         }
     }
 
-    private record HealthzDto(string Status);
+    private sealed record HealthzDto(string Status);
 }
 
 internal sealed record CameraUrlResultDto(string? StreamUrl, string? SnapshotUrl);

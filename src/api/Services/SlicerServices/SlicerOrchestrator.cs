@@ -143,9 +143,8 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ScheduledAt = job.ScheduledAt
             };
 
-            if (job.Metadata.Count != 0)
+            if (job.Metadata != null && job.Metadata.Count != 0)
             {
-                // Copy entries; capacity already 0 so let dictionary grow; small count expected
                 foreach (var kv in job.Metadata)
                 {
                     response.Metadata[kv.Key] = kv.Value;
@@ -195,7 +194,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
     public async Task<List<SlicerEngineInfo>> GetAvailableEnginesAsync(CancellationToken cancellationToken = default)
     {
-        var engineInfos = new List<SlicerEngineInfo>();
+        List<SlicerEngineInfo> engineInfos = new();
         var failures = 0;
 
         foreach (var kvp in _engineCatalog)
@@ -241,7 +240,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             throw ex;
         }
 
-        return [.. engineInfos.OrderBy(e => e.Engine)];
+        return engineInfos.OrderBy(e => e.Engine).ToList();
     }
 
     public async Task<Dictionary<SlicerEngineType, SlicerQueueStats>> GetAllQueueStatsAsync(CancellationToken cancellationToken = default)
@@ -271,7 +270,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         {
             var jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
 
-            var responses = new List<SlicingJobStatusResponse>(jobs.Count);
+            List<SlicingJobStatusResponse> responses = new(jobs.Count);
             foreach (var job in jobs)
             {
                 var r = new SlicingJobStatusResponse

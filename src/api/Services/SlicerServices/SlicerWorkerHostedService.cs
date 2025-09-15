@@ -327,7 +327,7 @@ public class SlicerWorkerHostedService : BackgroundService
                 // If parser already completed and finalized the job, skip additional exit code checks and completion logic
                 if (System.Threading.Volatile.Read(ref parserCompletedFlag) != 1 && procHandle.ExitCode != 0)
                 {
-                    var err = await procHandle.StandardError.ReadToEndAsync();
+                    var err = await procHandle.StandardError.ReadToEndAsync(cancellationToken);
                     throw new InvalidOperationException($"Slicer process failed (exit {procHandle.ExitCode}): {err}");
                 }
 

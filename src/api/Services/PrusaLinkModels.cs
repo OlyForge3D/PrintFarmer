@@ -13,7 +13,7 @@ public class VersionInfo
     public string Firmware { get; set; } = string.Empty;
     public string? Sdk { get; set; }
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO for JSON transport; setter needed for deserialization")]
-    public Dictionary<string, object> Capabilities { get; set; } = [];
+    public Dictionary<string, object> Capabilities { get; set; } = new Dictionary<string, object>();
 }
 
 // Printer Information
@@ -137,7 +137,7 @@ public class Job : JobFilePrint { }
 // Storage
 public class StorageListResponse
 {
-    public Storage[] StorageList { get; set; } = [];
+    public Storage[] StorageList { get; set; } = Array.Empty<Storage>();
 }
 
 [SuppressMessage("Naming", "CA1724:Type names should not conflict with namespaces", Justification = "Matches upstream API schema; renaming would be a breaking change.")]
@@ -288,7 +288,7 @@ public class FirmwareMetadata
 
 public class FolderInfo : FileInfoBase
 {
-    public FileInfoBase[] Children { get; set; } = [];
+    public FileInfoBase[] Children { get; set; } = Array.Empty<FileInfoBase>();
 }
 
 public record FileStatus(bool Exists, bool ReadOnly, bool CurrentlyPrinted);
@@ -316,10 +316,10 @@ public class CameraConfig
 {
     public string Name { get; set; } = string.Empty;
     public string TriggerScheme { get; set; } = string.Empty;
-    public CameraResolution[] AvailableResolutions { get; set; } = [];
+    public CameraResolution[] AvailableResolutions { get; set; } = Array.Empty<CameraResolution>();
     public CameraResolution Resolution { get; set; } = new();
     public double Focus { get; set; }
-    public string[] Capabilities { get; set; } = [];
+    public string[] Capabilities { get; set; } = Array.Empty<string>();
 }
 
 public class CameraConfigSet

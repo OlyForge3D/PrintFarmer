@@ -73,8 +73,9 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-  // Loading skeleton present (look for one of skeleton elements)
-  expect(screen.getAllByText(/./).length).toBeGreaterThan(0);
+    // Loading skeleton present — look for the status region or loading placeholders with aria-label
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/Loading printer/i).length).toBeGreaterThan(0);
   });
 
   it('should render empty state when no printers', () => {
@@ -91,8 +92,8 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-  expect(screen.getByText('No Printers Found')).toBeTruthy();
-  expect(screen.getByText('Get started by adding your first 3D printer.')).toBeTruthy();
+    expect(screen.getByText('No Printers Found')).toBeTruthy();
+    expect(screen.getByText('Get started by adding your first 3D printer.')).toBeTruthy();
   });
 
   it('should render error state', () => {
@@ -114,8 +115,8 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-  expect(screen.getByText('Error Loading Printers')).toBeTruthy();
-  expect(screen.getByText('Failed to fetch printers')).toBeTruthy();
+    expect(screen.getByText('Error Loading Printers')).toBeTruthy();
+    expect(screen.getByText('Failed to fetch printers')).toBeTruthy();
   });
 
   it('should render printers when data is available', () => {
@@ -155,9 +156,9 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-  expect(screen.getByText('Test Printer 1')).toBeTruthy();
-  expect(screen.getByText('Test Printer 2')).toBeTruthy();
-  expect(screen.getByText('Prusa MK3S+')).toBeTruthy();
-  expect(screen.getByText('Creality Ender 3')).toBeTruthy();
+    expect(screen.getByText('Test Printer 1')).toBeTruthy();
+    expect(screen.getByText('Test Printer 2')).toBeTruthy();
+    expect(screen.getByText('Prusa MK3S+')).toBeTruthy();
+    expect(screen.getByText('Creality Ender 3')).toBeTruthy();
   });
 });

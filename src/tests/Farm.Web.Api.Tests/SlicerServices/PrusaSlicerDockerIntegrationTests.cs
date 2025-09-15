@@ -145,7 +145,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     }
 
 
-    [Fact(Skip = "Long running test - enable for full integration validation")]
+    [Fact]
     public async Task EndToEndSlicing_ShouldWork_WithPrusaSlicerWorker()
     {
         // This test would simulate a complete slicing workflow:

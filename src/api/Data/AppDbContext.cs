@@ -471,6 +471,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.CreatedByUserId);
         });
 
+        // Password policy entity configuration (merged from origin/main)
         modelBuilder.Entity<PasswordPolicy>(b =>
         {
             b.HasKey(pp => pp.Id);

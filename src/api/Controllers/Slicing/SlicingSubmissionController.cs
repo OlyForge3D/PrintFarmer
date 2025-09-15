@@ -40,15 +40,27 @@ public class SlicingSubmissionController : ControllerBase
             return BadRequest("Multipart form data is required");
         }
 
-        // If modelFile was not bound by the model binder, fall back to first file in the multipart payload
-        if (modelFile == null && Request.HasFormContentType)
+        // Always read the form when present and populate any missing bound parameters. Tests (and some clients)
+        // may supply the slicer profile under alternate field names (e.g. 'slicerProfile') while also
+        // including a bound file; ensure we capture that value regardless of whether the model file was
+        // successfully bound by the model binder.
+        if (Request.HasFormContentType)
         {
             var form = await Request.ReadFormAsync();
             // Prefer bound files collection populated by the model binder (handles arbitrary field names)
-            if (files != null && files.Count > 0)
+            if (modelFile == null)
             {
-                modelFile = files[0];
+                if (files != null && files.Count > 0)
+                {
+                    modelFile = files[0];
+                }
+                // Fall back to explicitly-parsed form files when binder does not populate the files parameter
+                else if (form.Files.Count > 0)
+                {
+                    modelFile = form.Files[0];
+                }
             }
+
             // Preserve other fields from form when not supplied via bound parameters
             slicerEngine ??= form["slicerEngine"].FirstOrDefault();
             printerId ??= form["printerId"].FirstOrDefault();

@@ -170,7 +170,7 @@ public class SlicerJobsContractTests : IClassFixture<CustomWebApplicationFactory
         var profiles = JsonSerializer.Deserialize<JsonDocument>(responseContent);
 
         Assert.NotNull(profiles);
-        Assert.True(profiles.RootElement.ValueKind == JsonValueKind.Array);
+        Assert.Equal(JsonValueKind.Array, profiles.RootElement.ValueKind);
 
         // Validate profile structure if any profiles exist
         if (profiles.RootElement.GetArrayLength() > 0)

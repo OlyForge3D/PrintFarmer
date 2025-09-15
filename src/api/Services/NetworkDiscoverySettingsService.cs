@@ -46,20 +46,21 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         List<int> defaultPorts;
         if (!string.IsNullOrWhiteSpace(envPorts))
         {
-            defaultPorts = [.. envPorts
+            defaultPorts = envPorts
                 .Split(PortSeparators, StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => int.TryParse(s.Trim(), out var p) ? p : -1)
                 .Where(p => p > 0 && p < 65536)
-                .Distinct()];
+                .Distinct()
+                .ToList();
             if (defaultPorts.Count == 0)
             {
-                defaultPorts = [7125, 80]; // Fallback if parsing failed
+                defaultPorts = new List<int> { 7125, 80 }; // Fallback if parsing failed
             }
         }
         else
         {
             // Default discovery ports: Moonraker (7125) and HTTP (80)
-            defaultPorts = [7125, 80];
+            defaultPorts = new List<int> { 7125, 80 };
         }
 
         return new NetworkDiscoverySettingsDto(
