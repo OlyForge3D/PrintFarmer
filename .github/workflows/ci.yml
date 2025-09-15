@@ -55,9 +55,11 @@ jobs:
       - name: Generate HTML coverage report
         run: |
           export PATH="$PATH:$HOME/.dotnet/tools"
-          # Accept multiple coverage info files (one per test project) and generate a merged HTML report
-          reportgenerator -reports:src/coverage/*.info -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary
-          cat src/coverage/report/Summary.txt || true
+          # Accept multiple coverage info files and coverage reports produced by the XPlat collector under TestResults
+          reportgenerator -reports:src/coverage/*.info;src/TestResults/*/coverage.* -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary;lcov
+          # If reportgenerator produced an lcov file in the report folder, copy it to a stable location expected by subsequent steps
+          if [ -f src/coverage/report/lcov.info ]; then mkdir -p src/coverage && cp src/coverage/report/lcov.info src/coverage/coverage.info; fi
+           cat src/coverage/report/Summary.txt || true
       - name: Upload .NET HTML coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,6 +115,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: |
             src/coverage/*.info
+            src/coverage/report/lcov.info
             src/Web/ReactApp/coverage/lcov.info
           flags: backend,frontend
           fail_ci_if_error: false
@@ -132,8 +135,15 @@ jobs:
       - name: Enforce backend coverage thresholds
         if: success()
         run: |
-          # Find first coverage.info file produced by dotnet test (supports multiple test projects)
-          BACKEND_LCOV=$(ls src/coverage/*.info 2>/dev/null | head -n 1 || true)
+          # Prefer the canonical coverage file created in src/coverage/coverage.info (copied from reportgenerator),
+          # otherwise fall back to any .info file in the report folder or TestResults.
+          BACKEND_LCOV=$(ls src/coverage/coverage.info 2>/dev/null | head -n 1 || true)
+          if [ -z "$BACKEND_LCOV" ]; then
+            BACKEND_LCOV=$(ls src/coverage/*.info 2>/dev/null | head -n 1 || true)
+          fi
+          if [ -z "$BACKEND_LCOV" ]; then
+            BACKEND_LCOV=$(ls src/coverage/report/*.info 2>/dev/null | head -n 1 || true)
+          fi
           if [ -z "$BACKEND_LCOV" ] || [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov"; exit 1; fi
           LINES=$(grep -c '^DA:' "$BACKEND_LCOV")
           # Count DA lines with execution > 0
