@@ -53,7 +53,7 @@ jobs:
       - name: "Merge backend coverage (strict merge: combine SF blocks)"
         id: merge-backend-coverage
         run: |
-          ./.github/scripts/merge-lcov.sh
+          bash ./.github/scripts/merge-lcov.sh
 
       - name: Upload .NET coverage artifact
         if: always()
