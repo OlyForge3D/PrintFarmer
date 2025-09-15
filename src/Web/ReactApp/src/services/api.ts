@@ -322,7 +322,7 @@ export class ApiClient {
       minFileSizeBytes: opts?.minFileSizeBytes,
       duplicateHandling: opts?.duplicateHandling
     };
-    const response = await this.client.post('/gcode-harvest/start', payload);
+    const response = await this.client.post('/api/gcode-harvest/start', payload);
     return response.data as { operationId: string };
   }
 
@@ -341,14 +341,19 @@ export class ApiClient {
     return { operationIds: results.filter(r => r !== null).map(r => (r as { operationId: string }).operationId) };
   }
 
-  async getHarvestOperations(printerId?: string): Promise<GcodeHarvestOperation[]> {
-    const params = printerId ? { printerId } : {};
-    const response = await this.client.get<GcodeHarvestOperation[]>('/gcode-harvest/active', { params });
+  async getHarvestOperations(printerId?: string, status?: string, limit?: number, offset?: number): Promise<GcodeHarvestOperation[]> {
+    const params: Record<string, string | number> = {};
+    if (printerId) params.printerId = printerId;
+    if (status) params.status = status;
+    if (limit) params.limit = limit;
+    if (offset) params.offset = offset;
+    
+    const response = await this.client.get<GcodeHarvestOperation[]>('/api/gcode-harvest/operations', { params });
     return response.data;
   }
 
   async getHarvestOperation(id: string): Promise<GcodeHarvestOperation> {
-    const response = await this.client.get<GcodeHarvestOperation>(`/gcode-harvest/operations/${id}`);
+    const response = await this.client.get<GcodeHarvestOperation>(`/api/gcode-harvest/operations/${id}`);
     return response.data;
   }
 

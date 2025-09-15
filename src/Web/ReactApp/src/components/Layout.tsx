@@ -58,7 +58,11 @@ const navigation: NavigationItem[] = [
     name: 'G-code Harvest',
     href: '/harvest',
     icon: Cog,
-    requiredPermission: { resource: 'gcode_harvest', action: 'read' }
+    requiredPermission: { resource: 'gcode_harvest', action: 'read' },
+    children: [
+      { name: 'Start Harvest', href: '/harvest', icon: Cog },
+      { name: 'History', href: '/harvest/history', icon: FileText }
+    ]
   },
   {
     name: 'G-code Files',

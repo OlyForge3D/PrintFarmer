@@ -668,6 +668,33 @@ public class GcodeHarvestService : IGcodeHarvestService
         return [.. operations.Select(MapToDto)];
     }
 
+    public async Task<GcodeHarvestOperationDto[]> GetHarvestOperationsAsync(Guid? printerId = null, string? status = null, int limit = 100, int offset = 0, CancellationToken ct = default)
+    {
+        var query = _db.GcodeHarvestOperations
+            .Include(h => h.Printer)
+            .AsQueryable();
+
+        // Apply filters
+        if (printerId.HasValue)
+        {
+            query = query.Where(h => h.PrinterId == printerId.Value);
+        }
+
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<GcodeHarvestStatus>(status, true, out var statusEnum))
+        {
+            query = query.Where(h => h.Status == statusEnum);
+        }
+
+        // Apply pagination and ordering
+        var operations = await query
+            .OrderByDescending(h => h.StartedAt)
+            .Skip(offset)
+            .Take(limit)
+            .ToArrayAsync(ct);
+
+        return [.. operations.Select(MapToDto)];
+    }
+
     // (moved below to be adjacent to the other overload)
 
     private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IMoonrakerClient? moonraker = null, ILogger<GcodeHarvestService>? logger = null)

@@ -31,6 +31,9 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    port: 3000,
+  },
   build: {
     sourcemap: true,
     outDir: 'dist',

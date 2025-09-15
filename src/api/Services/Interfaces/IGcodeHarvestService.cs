@@ -53,6 +53,11 @@ public interface IGcodeHarvestService
     Task<GcodeHarvestOperationDto[]> GetActiveHarvestsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Get harvest operations with optional filtering
+    /// </summary>
+    Task<GcodeHarvestOperationDto[]> GetHarvestOperationsAsync(Guid? printerId = null, string? status = null, int limit = 100, int offset = 0, CancellationToken ct = default);
+
+    /// <summary>
     /// Extract metadata from G-code content
     /// </summary>
     Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default);

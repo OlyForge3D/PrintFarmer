@@ -8,6 +8,7 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { FilesPage } from '@/pages/FilesPage';
 import { HarvestPage } from '@/pages/HarvestPage';
+import { HarvestHistoryPage } from '@/pages/HarvestHistoryPage';
 import { ModelsPage } from '@/pages/ModelsPage';
 import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
 import { SettingsPage } from '@/pages/SettingsPage';
@@ -115,7 +116,10 @@ function App() {
                     <Route path="table" element={<PrinterTableViewPage />} />
                   </Route>
                   <Route path="models" element={<ModelsPage />} />
-                  <Route path="harvest" element={<HarvestPage />} />
+                  <Route path="harvest">
+                    <Route index element={<HarvestPage />} />
+                    <Route path="history" element={<HarvestHistoryPage />} />
+                  </Route>
                   <Route path="files" element={<FilesPage />} />
                   <Route path="catalog" element={<CatalogPage />} />
                   <Route path="settings" element={<SettingsPage />} />

@@ -147,6 +147,18 @@ public class CatalogController : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>
+    /// Legacy endpoint - redirects to printer-models for compatibility.
+    /// </summary>
+    [HttpGet("models")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterModelDto>), 200)]
+    [ProducesResponseType(304)]
+    public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetModelsLegacyAsync([FromQuery] Guid? manufacturerId, [FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
+    {
+        // Redirect to the correct endpoint
+        return await GetPrinterModelsAsync(manufacturerId, ifNoneMatch, ct);
+    }
+
     [HttpGet("printer-models/{id:guid}", Name = "GetPrinterModelById")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(404)]

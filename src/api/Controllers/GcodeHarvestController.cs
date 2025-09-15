@@ -293,5 +293,36 @@ public class GcodeHarvestController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Get all harvest operations with optional filtering
+    /// </summary>
+    /// <param name="printerId">Optional printer ID to filter by</param>
+    /// <param name="status">Optional status to filter by</param>
+    /// <param name="limit">Maximum number of operations to return (default: 100)</param>
+    /// <param name="offset">Number of operations to skip (default: 0)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">List of harvest operations</response>
+    [HttpGet("operations")]
+    [ProducesResponseType(typeof(GcodeHarvestOperationDto[]), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<GcodeHarvestOperationDto[]>> GetAllHarvestsAsync(
+        [FromQuery] Guid? printerId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] int limit = 100,
+        [FromQuery] int offset = 0,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var operations = await _harvestService.GetHarvestOperationsAsync(printerId, status, limit, offset, ct);
+            return Ok(operations);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get harvest operations");
+            return StatusCode(500, "Failed to retrieve harvest operations");
+        }
+    }
+
     // Diagnostics and test endpoints moved to GcodeHarvestDiagnosticsController
 }
