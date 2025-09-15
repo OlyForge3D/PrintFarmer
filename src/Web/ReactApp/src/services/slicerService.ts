@@ -66,8 +66,7 @@ class SlicerService {
     formData.append('printerId', request.printerId);
     formData.append('profile', JSON.stringify(request.profile));
 
-    const baseUrl = this.getBaseUrl();
-        const response = await axios.post(`${this.getBaseUrl()}/3d-models`, formData, {
+    const response = await fetch(`${this.getBaseUrl()}/3d-models`, {
       method: 'POST',
       body: formData,
       headers: {

@@ -72,16 +72,43 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
 
     public void SaveSettings(NetworkDiscoverySettingsDto settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+        
+        // Validate settings before saving
+        var validation = NetworkValidationService.ValidateSettings(settings);
+        
+        if (!validation.IsValid)
+        {
+            var errors = string.Join("; ", validation.Errors);
+            _logger.LogWarning("Network discovery settings validation failed: {Errors}", errors);
+            throw new ArgumentException($"Invalid network discovery settings: {errors}");
+        }
+
+        // Log warnings if any
+        if (validation.Warnings.Count > 0)
+        {
+            var warnings = string.Join("; ", validation.Warnings);
+            _logger.LogWarning("Network discovery settings saved with warnings: {Warnings}", warnings);
+        }
+
         _settings = settings;
         try
         {
             var json = JsonSerializer.Serialize(_settings, s_writeOptions);
             File.WriteAllText(_path, json);
-            _logger.LogInformation("Saved network discovery settings to {Path}", _path);
+            _logger.LogInformation("Saved network discovery settings to {Path} - {RangeCount} ranges, {PortCount} ports", _path, settings.NetworkRanges.Count, settings.Ports.Count);
+            
+            // Log suggestions if any
+            if (validation.Suggestions.Count > 0)
+            {
+                var suggestions = string.Join("; ", validation.Suggestions);
+                _logger.LogInformation("Network discovery settings suggestions: {Suggestions}", suggestions);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to save network discovery settings to {Path}", _path);
+            throw;
         }
     }
 }

@@ -90,6 +90,21 @@ public partial class NetworkDiscoveryService(
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink discovery failed for {BaseUrl}")]
     private static partial void LogPrusaLinkDiscoveryError(ILogger logger, Exception exception, string baseUrl);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting multi-network scan for {NetworkCount} networks: {Networks}")]
+    private static partial void LogMultiNetworkScanStarting(ILogger logger, int networkCount, string networks);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Progress after {Network}: {ScannedIps}/{TotalIps} IPs ({Progress:F1}%), {FoundPrinters} total")]
+    private static partial void LogNetworkProgress(ILogger logger, string network, int scannedIps, int totalIps, double progress, int foundPrinters);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Discovery cancelled during {Network} scan after {ScannedIps}/{TotalIps} IPs")]
+    private static partial void LogDiscoveryCancelled(ILogger logger, string network, int scannedIps, int totalIps);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to scan network {Network}, continuing with next network. Scanned {ScannedIps}/{TotalIps} IPs so far")]
+    private static partial void LogNetworkScanContinue(ILogger logger, string network, int scannedIps, int totalIps);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Multi-network scan complete: {ScannedIps}/{TotalIps} IPs, {FoundPrinters} printers")]
+    private static partial void LogMultiNetworkScanComplete(ILogger logger, int scannedIps, int totalIps, int foundPrinters);
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)
     {
         LogDiscoveryStarting(logger);
@@ -199,20 +214,43 @@ public partial class NetworkDiscoveryService(
 
         var excludedPrinters = 0; // count of printers skipped because already present
 
+        LogMultiNetworkScanStarting(logger, settings.NetworkRanges.Count, string.Join(", ", settings.NetworkRanges));
+
         foreach (var network in settings.NetworkRanges)
         {
             LogScanningNetwork(logger, network);
 
-            // Calculate hosts count for this network to properly track scanned IPs
-            var (networkAddr, cidr) = ParseCidr(network);
-            var hosts = GetHostsInRange(networkAddr, cidr);
+            try
+            {
+                // Calculate hosts count for this network to properly track scanned IPs
+                var (networkAddr, cidr) = ParseCidr(network);
+                var hosts = GetHostsInRange(networkAddr, cidr);
 
-            var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, existingServerUrls, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, () => Interlocked.Increment(ref excludedPrinters), cancellationToken);
-            scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
-            foundPrinters += networkPrinters.Count;
+                // Pass current progress state to network scanner
+                var networkPrinters = await ScanNetworkWithProgressAsync(network, settings, existingServerUrls, sessionId, totalIps, scannedIps, foundPrinters, autoDetectedNetworks, () => Interlocked.Increment(ref excludedPrinters), cancellationToken);
 
-            LogNetworkScanCompleted(logger, network, networkPrinters.Count);
+                // Update cumulative counters after network completes
+                scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
+                foundPrinters += networkPrinters.Count;
+
+                LogNetworkScanCompleted(logger, network, networkPrinters.Count);
+                LogNetworkProgress(logger, network, scannedIps, totalIps, (double)scannedIps / totalIps * 100, foundPrinters);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Discovery cancelled during {Network} scan after {ScannedIps}/{TotalIps} IPs", network, scannedIps, totalIps);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LogNetworkScanError(logger, ex, network);
+                logger.LogWarning("Failed to scan network {Network}, continuing with next network. Scanned {ScannedIps}/{TotalIps} IPs so far", network, scannedIps, totalIps);
+                // Continue with next network range instead of stopping entire discovery
+                continue;
+            }
         }
+
+        logger.LogInformation("Multi-network scan complete: {ScannedIps}/{TotalIps} IPs, {FoundPrinters} printers", scannedIps, totalIps, foundPrinters);
 
         // Emit a final progress snapshot with Completed status for clients that only listen to progress stream
         if (totalIps > 0)

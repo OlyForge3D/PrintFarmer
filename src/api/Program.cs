@@ -890,6 +890,17 @@ app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] Filam
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
 app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
+app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettingsDto body) =>
+{
+    var validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
+    return Results.Ok(new
+    {
+        isValid = validation.IsValid,
+        errors = validation.Errors,
+        warnings = validation.Warnings,
+        suggestions = validation.Suggestions
+    });
+});
 
 // Minimal API for SignalR settings
 app.MapGet("/api/signalr/settings", ([FromServices] ISignalRSettingsService svc) => Results.Ok(svc.GetSettings()));
