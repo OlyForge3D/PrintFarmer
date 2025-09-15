@@ -9,10 +9,16 @@ namespace Farm.Web.Api.Tests;
 /// <summary>
 /// Integration tests for QueueController (job queue management)
 /// </summary>
+<<<<<<< HEAD
 // DB-backed queue lifecycle tests.
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
+=======
+// Mark as slow due to repeated queue/job lifecycle operations.
+[Trait("Category", "Slow")]
+[Trait("Category", "DbHeavy")]
+>>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

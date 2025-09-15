@@ -11,8 +11,11 @@ namespace Farm.Web.Api.Tests;
 /// Integration tests for ModelController (3D model management)
 /// </summary>
 [Trait("Category", "DbHeavy")]
+<<<<<<< HEAD
 [Collection("DbHeavySerial")]
 [TestTiming]
+=======
+>>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

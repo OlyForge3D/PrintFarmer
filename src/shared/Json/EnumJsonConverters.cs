@@ -52,7 +52,6 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
 
     public override void Write(Utf8JsonWriter writer, PrinterBackend value, JsonSerializerOptions options)
     {
-        ArgumentNullException.ThrowIfNull(writer);
         // Preserve existing string enum behavior (exact enum name)
         writer.WriteStringValue(value.ToString());
     }
@@ -87,6 +86,7 @@ public sealed class PrintJobStatusDtoJsonConverter : JsonConverter<PrintJobStatu
         {
             return PrintJobStatusDto.Queued;
         }
+
         if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrintJobStatusDto), num))
         {
             return (PrintJobStatusDto)num;
@@ -100,7 +100,6 @@ public sealed class PrintJobStatusDtoJsonConverter : JsonConverter<PrintJobStatu
 
     public override void Write(Utf8JsonWriter writer, PrintJobStatusDto value, JsonSerializerOptions options)
     {
-        ArgumentNullException.ThrowIfNull(writer);
         writer.WriteStringValue(value.ToString());
     }
 }

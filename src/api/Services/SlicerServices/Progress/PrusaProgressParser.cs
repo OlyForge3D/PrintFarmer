@@ -2,12 +2,12 @@
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
-public partial class PrusaProgressParser : IProgressParser
+public class PrusaProgressParser : IProgressParser
 {
     // Examples parsed:
     // "Progress: 45%"
     // "Layer 10/100" => percentage = 10/100
-    private static readonly Regex PercentRegex = MyRegex();
+    private static readonly Regex PercentRegex = new(@"(?i)progress[:\s]+(?<pct>\d{1,3})%", RegexOptions.Compiled);
     private static readonly Regex LayerRegex = new(@"(?i)layer\s+(?<idx>\d+)\s*/\s*(?<total>\d+)", RegexOptions.Compiled);
 
     private static readonly (int Start, int End, string Message)[] _phases =
@@ -101,7 +101,4 @@ public partial class PrusaProgressParser : IProgressParser
 
         return null;
     }
-
-    [GeneratedRegex(@"(?i)progress[:\s]+(?<pct>\d{1,3})%", RegexOptions.Compiled, "en-US")]
-    private static partial Regex MyRegex();
 }

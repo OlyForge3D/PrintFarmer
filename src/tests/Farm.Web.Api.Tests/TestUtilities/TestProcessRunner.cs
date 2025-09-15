@@ -17,7 +17,7 @@ public class TestProcessRunner : IProcessRunner
         return _factory(startInfo);
     }
 
-    private sealed class TestProcessHandle : IProcessHandle
+    private class TestProcessHandle : IProcessHandle
     {
         private readonly System.IO.MemoryStream _ms;
         private readonly System.IO.StreamReader _sr;

@@ -4,8 +4,11 @@ using System.Text.Json;
 namespace Farm.Web.Api.Tests.GcodeFiles;
 
 [Trait("Category", "DbHeavy")]
+<<<<<<< HEAD
 [Collection("DbHeavySerial")]
 [TestTiming]
+=======
+>>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
@@ -145,7 +148,7 @@ public class GcodeFilesControllerTests : IClassFixture<CustomWebApplicationFacto
         var failedList = new List<string>();
         if (payload.TryGetProperty("failed", out var failedArr))
         {
-            failedList = failedArr.EnumerateArray().Select(e => e.GetString()!).ToList();
+            failedList = [.. failedArr.EnumerateArray().Select(e => e.GetString()!)];
         }
         (skippedList.Contains("/folder/..") || failedList.Contains("/folder/..")).Should().BeTrue();
         payload.TryGetProperty("totalRequested", out var totalReq).Should().BeTrue();

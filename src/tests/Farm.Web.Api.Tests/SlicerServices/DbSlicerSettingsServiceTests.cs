@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 
 public class DbSlicerSettingsServiceTests
 {
-    private static ServiceProvider BuildServiceProvider(string dbName)
+    private ServiceProvider BuildServiceProvider(string dbName)
     {
         var services = new ServiceCollection();
         services.AddLogging();

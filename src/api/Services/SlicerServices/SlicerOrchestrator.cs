@@ -117,14 +117,12 @@ public class SlicerOrchestrator : ISlicerOrchestrator
     {
         try
         {
-            // Retrieve the job (single round-trip). Caller just needs a status snapshot; we do a shallow map only.
             var job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
-            if (job is null)
+            if (job == null)
             {
-                return null; // Fast null path (no allocations beyond awaited state machine)
+                return null;
             }
 
-            // Avoid unnecessary dictionary iteration if no metadata present
             var response = new SlicingJobStatusResponse
             {
                 JobId = job.Id,
@@ -143,12 +141,9 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ScheduledAt = job.ScheduledAt
             };
 
-            if (job.Metadata != null && job.Metadata.Count != 0)
+            foreach (var kv in job.Metadata)
             {
-                foreach (var kv in job.Metadata)
-                {
-                    response.Metadata[kv.Key] = kv.Value;
-                }
+                response.Metadata[kv.Key] = kv.Value;
             }
 
             return response;
@@ -194,7 +189,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
 
     public async Task<List<SlicerEngineInfo>> GetAvailableEnginesAsync(CancellationToken cancellationToken = default)
     {
-        List<SlicerEngineInfo> engineInfos = new();
+        var engineInfos = new List<SlicerEngineInfo>();
         var failures = 0;
 
         foreach (var kvp in _engineCatalog)
@@ -240,7 +235,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             throw ex;
         }
 
-        return engineInfos.OrderBy(e => e.Engine).ToList();
+        return [.. engineInfos.OrderBy(e => e.Engine)];
     }
 
     public async Task<Dictionary<SlicerEngineType, SlicerQueueStats>> GetAllQueueStatsAsync(CancellationToken cancellationToken = default)
@@ -270,7 +265,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         {
             var jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
 
-            List<SlicingJobStatusResponse> responses = new(jobs.Count);
+            var responses = new List<SlicingJobStatusResponse>(jobs.Count);
             foreach (var job in jobs)
             {
                 var r = new SlicingJobStatusResponse

@@ -13,7 +13,6 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// </summary>
 [Trait("Category", "Docker")]
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
 public class SlicerServicesIntegrationTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
@@ -168,9 +167,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(invalidUserRequest));
         await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(invalidPrinterRequest));
-        // For an about:blank URL we now expect a FileNotFoundException because the orchestrator validates
-        // physical existence of the model file after normalizing/attempted lookup.
-        await Assert.ThrowsAsync<FileNotFoundException>(() => orchestrator.SubmitJobAsync(emptyModelRequest));
+        await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.SubmitJobAsync(emptyModelRequest));
     }
 
     [Fact]
@@ -418,7 +415,7 @@ public class SlicerServicesIntegrationTests : IDisposable
         var envelope = MessageEnvelope.Create(content, request.SlicerEngine, request.Priority);
         envelope.Checksum.Should().NotBeNullOrWhiteSpace();
         // Tamper checksum
-        request.Envelope = envelope with { Checksum = new string(envelope.Checksum.Reverse().ToArray()) };
+        request.Envelope = envelope with { Checksum = new string([.. envelope.Checksum.Reverse()]) };
 
         Func<Task> act = () => orchestrator.SubmitJobAsync(request);
         await act.Should().ThrowAsync<ArgumentException>()
@@ -431,7 +428,10 @@ public class SlicerServicesIntegrationTests : IDisposable
     [InlineData("ABS", 240, 100)]
     public async Task MaterialSpecificSlicing_ShouldGenerateCorrectSettings(string material, int nozzleTemp, int bedTemp)
     {
-        ArgumentNullException.ThrowIfNull(material);
+        if (material is null)
+        {
+            throw new ArgumentNullException(nameof(material));
+        }
         // In-process slicing removed; simulate expected profile assignment & queue routing only
         var fileStorage = _serviceProvider.GetRequiredService<ISlicerFileStorage>();
         // Upload model first, then build request referencing actual stored file so validation succeeds
