@@ -8,7 +8,7 @@ import {
   GcodeHarvestOperation,
   JobQueuePrintJob,
   ManufacturerDto,
-  ModelDto,
+  PrinterModelDto,
   Printer,
   PrinterDetails,
   UpdatePrinterDto
@@ -249,7 +249,7 @@ export function useCreateManufacturer() {
   });
 }
 
-export function useModels(manufacturerId?: string, options?: UseQueryOptions<ModelDto[], ApiError>) {
+export function useModels(manufacturerId?: string, options?: UseQueryOptions<PrinterModelDto[], ApiError>) {
   return useQuery({
     queryKey: queryKeys.models(manufacturerId),
     queryFn: () => apiClient.getModels(manufacturerId),
@@ -262,12 +262,12 @@ export function useCreateModel() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (model: Omit<ModelDto, 'id'>) => apiClient.createModel(model),
+    mutationFn: (model: Omit<PrinterModelDto, 'id'>) => apiClient.createModel(model),
     onMutate: async (model) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.models(model.manufacturerId) });
       const key = queryKeys.models(model.manufacturerId);
-      const previous = queryClient.getQueryData<ModelDto[]>(key);
-      const temp: ModelDto = { id: `temp-${Date.now()}`, ...model } as ModelDto;
+      const previous = queryClient.getQueryData<PrinterModelDto[]>(key);
+      const temp: PrinterModelDto = { id: `temp-${Date.now()}`, ...model } as PrinterModelDto;
       if (previous) {
         queryClient.setQueryData(key, [...previous, temp]);
       } else {
@@ -281,7 +281,7 @@ export function useCreateModel() {
     },
     onSuccess: (created, vars, ctx) => {
       if (ctx?.key) {
-        const list = queryClient.getQueryData<ModelDto[]>(ctx.key);
+        const list = queryClient.getQueryData<PrinterModelDto[]>(ctx.key);
         if (list) {
           queryClient.setQueryData(ctx.key, list.map(m => m.id.startsWith('temp-') && m.name === created.name ? created : m));
         }

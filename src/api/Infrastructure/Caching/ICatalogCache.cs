@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Infrastructure.Caching;
 public interface ICatalogCache
 {
     Task<(IReadOnlyList<ManufacturerDto> list, string etag)> GetManufacturersAsync(CancellationToken ct);
-    Task<(IReadOnlyList<ModelDto> list, string etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct);
+    Task<(IReadOnlyList<PrinterModelDto> list, string etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct);
     void InvalidateManufacturers();
     void InvalidateModels(Guid? manufacturerId = null);
 }
@@ -55,10 +55,10 @@ internal sealed class CatalogCache : ICatalogCache
         return (list, etag);
     }
 
-    public async Task<(IReadOnlyList<ModelDto> list, string etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public async Task<(IReadOnlyList<PrinterModelDto> list, string etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         var key = manufacturerId is Guid mid ? ModelsKey(mid) : ModelsAllKey;
-        if (_cache.TryGetValue<(IReadOnlyList<ModelDto> list, string etag)>(key, out var cached))
+        if (_cache.TryGetValue<(IReadOnlyList<PrinterModelDto> list, string etag)>(key, out var cached))
         {
             return cached;
         }
@@ -69,7 +69,7 @@ internal sealed class CatalogCache : ICatalogCache
             q = q.Where(m => m.ManufacturerId == mid2);
         }
         var list = await q.OrderBy(m => m.Name)
-            .Select(m => new ModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ,
+            .Select(m => new PrinterModelDto(m.Id, m.Name, m.ManufacturerId, m.MaxX, m.MaxY, m.MaxZ,
                 m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null,
                 m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray())).ToListAsync(ct);
         var etagInput = list.Select(m => m.Id.ToString("N") + ":" + m.Name).Prepend(manufacturerId?.ToString("N") ?? "all");

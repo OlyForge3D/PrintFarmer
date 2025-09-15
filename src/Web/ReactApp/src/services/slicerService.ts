@@ -67,7 +67,7 @@ class SlicerService {
     formData.append('profile', JSON.stringify(request.profile));
 
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/slice`, {
+        const response = await axios.post(`${this.getBaseUrl()}/3d-models`, formData, {
       method: 'POST',
       body: formData,
       headers: {
@@ -150,7 +150,7 @@ class SlicerService {
     formData.append('modelFile', file);
 
     const baseUrl = this.getBaseUrl();
-    const uploadUrl = `${baseUrl}/models`;
+    const uploadUrl = `${baseUrl}/3d-models`;
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
@@ -166,7 +166,7 @@ class SlicerService {
 
   async listModels(): Promise<SlicedModelSummary[]> {
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/models`);
+    const response = await fetch(`${baseUrl}/3d-models`);
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.statusText}`);
     }
@@ -175,7 +175,7 @@ class SlicerService {
 
   async deleteModel(modelId: string): Promise<void> {
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/models/${modelId}`, {
+    const response = await fetch(`${baseUrl}/3d-models/${modelId}`, {
       method: 'DELETE'
     });
     if (!response.ok) {

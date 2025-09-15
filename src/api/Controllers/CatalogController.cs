@@ -128,10 +128,10 @@ public class CatalogController : ControllerBase
         return CreatedAtRoute("GetManufacturerById", new { id = mfg.Id }, new ManufacturerDto(mfg.Id, mfg.Name));
     }
 
-    [HttpGet("models")]
-    [ProducesResponseType(typeof(IEnumerable<ModelDto>), 200)]
+    [HttpGet("printer-models")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterModelDto>), 200)]
     [ProducesResponseType(304)]
-    public async Task<ActionResult<IEnumerable<ModelDto>>> GetModelsAsync([FromQuery] Guid? manufacturerId, [FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, [FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
     {
         var (list, etag) = await _catalogCache.GetModelsAsync(manufacturerId, ct);
         if (!string.IsNullOrEmpty(ifNoneMatch))
@@ -147,10 +147,10 @@ public class CatalogController : ControllerBase
         return Ok(list);
     }
 
-    [HttpGet("models/{id:guid}", Name = "GetModelById")]
-    [ProducesResponseType(typeof(ModelDto), 200)]
+    [HttpGet("printer-models/{id:guid}", Name = "GetPrinterModelById")]
+    [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(404)]
-    public async Task<ActionResult<ModelDto>> GetModelByIdAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterModelDto>> GetPrinterModelByIdAsync(Guid id, CancellationToken ct)
     {
         var model = await _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
             .FirstOrDefaultAsync(m => m.Id == id, ct);
@@ -158,17 +158,17 @@ public class CatalogController : ControllerBase
         {
             return NotFound();
         }
-        return Ok(new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+        return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
             [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)]));
     }
 
-    [HttpPost("models")]
-    [ProducesResponseType(typeof(ModelDto), 201)]
+    [HttpPost("printer-models")]
+    [ProducesResponseType(typeof(PrinterModelDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
-    public async Task<ActionResult<ModelDto>> CreateModelAsync([FromBody] CreateModelRequest req, CancellationToken ct)
+    public async Task<ActionResult<PrinterModelDto>> CreatePrinterModelAsync([FromBody] CreateModelRequest req, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(req);
         if (req.ManufacturerId == Guid.Empty)
@@ -207,7 +207,7 @@ public class CatalogController : ControllerBase
             {
                 headerName = existing.Name;
             }
-            throw new DuplicateEntityException("Model", new ModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MaxX, existing.MaxY, existing.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MaxX, existing.MaxY, existing.MaxZ,
                 existing.DefaultBackend.HasValue ? (PrinterBackend)existing.DefaultBackend.Value : (PrinterBackend?)null), headerName,
                 $"A model with the normalized name '{existing.Name}' already exists for this manufacturer.");
         }
@@ -250,7 +250,7 @@ public class CatalogController : ControllerBase
         {
             var existingNow = await _db.Models.AsNoTracking()
                 .FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == normalizedName, ct) ?? new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
-            throw new DuplicateEntityException("Model", new ModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
                 existingNow.DefaultBackend.HasValue ? (PrinterBackend)existingNow.DefaultBackend.Value : (PrinterBackend?)null), null,
                 $"A model with the normalized name '{existingNow.Name}' already exists for this manufacturer.");
         }
@@ -264,7 +264,7 @@ public class CatalogController : ControllerBase
             Response.Headers["X-Normalized-Name"] = model.Name;
         }
         _catalogCache.InvalidateModels(model.ManufacturerId);
-        return CreatedAtRoute("GetModelById", new { id = model.Id }, new ModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
                     model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
                     createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
     }

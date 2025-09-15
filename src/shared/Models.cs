@@ -290,7 +290,7 @@ public record ManufacturerDto(Guid Id, string Name);
 /// <summary>
 /// Printer model catalog entry including optional build volume and defaults.
 /// </summary>
-public record ModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null, string[]? SupportedFilamentTypes = null);
+public record PrinterModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null, string[]? SupportedFilamentTypes = null);
 
 // Filament type management
 /// <summary>

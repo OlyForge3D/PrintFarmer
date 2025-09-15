@@ -150,7 +150,7 @@ export interface ManufacturerDto {
   name: string;
 }
 
-export interface ModelDto {
+export interface PrinterModelDto {
   id: string;
   name: string;
   manufacturerId: string;
