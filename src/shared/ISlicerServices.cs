@@ -1,8 +1,11 @@
-﻿namespace Farm.Web.Shared;
+﻿using System.Diagnostics.CodeAnalysis;
+
+namespace Farm.Web.Shared;
 
 /// <summary>
 /// Interface for job queue operations in distributed slicing system
 /// </summary>
+[SuppressMessage("Naming", "CA1711", Justification = "ISlicerJobQueue models a worker job queue abstraction; renaming would be a breaking API change and 'Queue' accurately describes the semantics.")]
 public interface ISlicerJobQueue
 {
     /// <summary>
