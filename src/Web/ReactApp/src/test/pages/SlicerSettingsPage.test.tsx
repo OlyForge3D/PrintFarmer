@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, vi, beforeEach, expect } from 'vitest';
 import SlicerSettingsPage from '@/pages/SlicerSettingsPage';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 describe('SlicerSettingsPage', () => {
   beforeEach(() => {
@@ -8,11 +9,18 @@ describe('SlicerSettingsPage', () => {
     (global as any).fetch = vi.fn();
   });
 
+  const createTestQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
   it('loads settings and validates jitter input', async () => {
     const mockGet = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ enabled: true, perEngine: {}, jitterPercent: 15.0 }) });
     (global as any).fetch = mockGet;
 
-    render(<SlicerSettingsPage />);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SlicerSettingsPage />
+      </QueryClientProvider>
+    );
 
     // Wait for the jitter input to show current value
     const input = await screen.findByRole('spinbutton');

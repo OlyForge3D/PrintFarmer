@@ -8,6 +8,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Integration tests for the OrcaSlicer worker end-to-end functionality
 /// </summary>
 // Uses orchestrator + DI with database-backed services; classify as DbHeavy
+[Trait("Category", "Docker")]
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming("DbHeavy")]
