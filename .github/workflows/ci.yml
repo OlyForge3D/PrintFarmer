@@ -50,7 +50,7 @@ jobs:
             --filter "Category!=DbHeavy&Category!=Docker" \
             /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
 
-      - name: Merge backend coverage (strict merge: combine SF blocks)
+      - name: "Merge backend coverage (strict merge: combine SF blocks)"
         id: merge-backend-coverage
         run: |
           ./.github/scripts/merge-lcov.sh
