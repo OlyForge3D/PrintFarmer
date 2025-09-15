@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
@@ -8,14 +10,13 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Xunit;
+
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
-<<<<<<< HEAD
 [Collection("DbHeavySerial")]
 [TestTiming]
-=======
->>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;

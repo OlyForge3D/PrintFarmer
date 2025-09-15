@@ -13,11 +13,8 @@ namespace Farm.Web.Api.Tests;
 /// Integration tests for SlicerController (slicer integration and profile management)
 /// </summary>
 [Trait("Category", "DbHeavy")]
-<<<<<<< HEAD
 [Collection("DbHeavySerial")]
 [TestTiming]
-=======
->>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
