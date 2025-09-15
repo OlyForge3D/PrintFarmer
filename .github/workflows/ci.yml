@@ -114,8 +114,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: |
-            src/coverage/*.info
-            src/coverage/report/lcov.info
+            src/coverage/coverage.info
             src/Web/ReactApp/coverage/lcov.info
           flags: backend,frontend
           fail_ci_if_error: false
@@ -135,16 +134,9 @@ jobs:
       - name: Enforce backend coverage thresholds
         if: success()
         run: |
-          # Prefer the canonical coverage file created in src/coverage/coverage.info (copied from reportgenerator),
-          # otherwise fall back to any .info file in the report folder or TestResults.
-          BACKEND_LCOV=$(ls src/coverage/coverage.info 2>/dev/null | head -n 1 || true)
-          if [ -z "$BACKEND_LCOV" ]; then
-            BACKEND_LCOV=$(ls src/coverage/*.info 2>/dev/null | head -n 1 || true)
-          fi
-          if [ -z "$BACKEND_LCOV" ]; then
-            BACKEND_LCOV=$(ls src/coverage/report/*.info 2>/dev/null | head -n 1 || true)
-          fi
-          if [ -z "$BACKEND_LCOV" ] || [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov"; exit 1; fi
+          # Use the single canonical merged backend coverage file created by reportgenerator
+          BACKEND_LCOV=src/coverage/coverage.info
+          if [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov at $BACKEND_LCOV"; exit 1; fi
           LINES=$(grep -c '^DA:' "$BACKEND_LCOV")
           # Count DA lines with execution > 0
           LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{ if ($2+0>0) c++ } END {print c+0}')
