@@ -48,7 +48,7 @@ jobs:
         run: |
           dotnet test ./farm-web.sln -c Debug --no-build --logger trx --results-directory TestResults \
             --filter "Category!=DbHeavy&Category!=Docker" \
-            /p:CollectCoverage=true /p:CoverletOutput=../coverage/ /p:CoverletOutputFormat=lcov
+            /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
 
       - name: Install ReportGenerator
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
