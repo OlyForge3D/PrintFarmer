@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
 
+// PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
 namespace Farm.Web.Api.Tests;
 
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
