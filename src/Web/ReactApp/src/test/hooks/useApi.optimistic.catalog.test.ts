@@ -4,7 +4,7 @@ import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useCreateManufacturer, useCreateModel, useCancelJob, useDeleteJob, useQueuePrintJob, queryKeys } from '../../hooks/useApi';
 import { apiClient } from '../../services/api';
-import { ModelDto, JobQueueStatus, JobQueuePrintJob } from '../../types/api';
+import { PrinterModelDto, JobQueueStatus, JobQueuePrintJob } from '../../types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -46,11 +46,11 @@ describe('optimistic manufacturer/model creation', () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
     const manufacturerId = 'mfg-1';
-    client.setQueryData(queryKeys.models(manufacturerId), [] as ModelDto[]);
+    client.setQueryData(queryKeys.models(manufacturerId), [] as PrinterModelDto[]);
 
-    const createSpy = vi.spyOn(apiClient, 'createModel').mockImplementation(async (model: Omit<ModelDto, 'id'>) => {
+    const createSpy = vi.spyOn(apiClient, 'createModel').mockImplementation(async (model: Omit<PrinterModelDto, 'id'>) => {
       await new Promise(r => setTimeout(r, 5));
-      return { id: 'model-real', ...model } as ModelDto;
+      return { id: 'model-real', ...model } as PrinterModelDto;
     });
 
     const { result } = renderHook(() => useCreateModel(), { wrapper });
@@ -59,15 +59,15 @@ describe('optimistic manufacturer/model creation', () => {
       result.current.mutate({ name: 'MK4', manufacturerId });
     });
 
-    const tempModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
+    const tempModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-') && m.name === 'MK4')).toBe(true);
 
     await waitFor(() => {
-      const models = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
+      const models = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
       expect(models?.some(m => m.id === 'model-real')).toBe(true);
     });
 
-    const finalModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId))!;
+    const finalModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId))!;
     expect(finalModels.some(m => m.id.startsWith('temp-'))).toBe(false);
     expect(createSpy).toHaveBeenCalledOnce();
   });
@@ -76,7 +76,7 @@ describe('optimistic manufacturer/model creation', () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
     const manufacturerId = 'mfg-err';
-    client.setQueryData(queryKeys.models(manufacturerId), [] as ModelDto[]);
+    client.setQueryData(queryKeys.models(manufacturerId), [] as PrinterModelDto[]);
 
     vi.spyOn(apiClient, 'createModel').mockImplementation(async () => {
       await new Promise(r => setTimeout(r, 5));
@@ -86,11 +86,11 @@ describe('optimistic manufacturer/model creation', () => {
     const { result } = renderHook(() => useCreateModel(), { wrapper });
     await act(async () => { result.current.mutate({ name: 'Bad', manufacturerId }); });
 
-    const tempModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
+    const tempModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-'))).toBe(true);
 
     await waitFor(() => {
-      const finalModels = client.getQueryData<ModelDto[]>(queryKeys.models(manufacturerId));
+      const finalModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
       expect(finalModels?.some(m => m.id.startsWith('temp-'))).toBe(false);
     });
   });

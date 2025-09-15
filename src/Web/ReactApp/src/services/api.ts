@@ -14,7 +14,7 @@ import {
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
-  ModelDto,
+  PrinterModelDto,
   MoveRequest,
   MultiUploadResponse,
   Printer,
@@ -183,29 +183,37 @@ export class ApiClient {
     await this.client.delete(`/catalog/manufacturers/${id}`);
   }
 
-  async getModels(manufacturerId?: string): Promise<ModelDto[]> {
+  async getModels(manufacturerId?: string): Promise<PrinterModelDto[]> {
     const params = manufacturerId ? { manufacturerId } : {};
-    const response = await this.client.get<ModelDto[]>('/catalog/models', { params });
+    const response = await this.client.get<PrinterModelDto[]>('/catalog/models', { params });
     return response.data;
   }
 
-  async createModel(model: Omit<ModelDto, 'id'>): Promise<ModelDto> {
-    const response = await this.client.post<ModelDto>('/catalog/models', model);
+  async createModel(model: Omit<PrinterModelDto, 'id'>): Promise<PrinterModelDto> {
+    const response = await this.client.post<PrinterModelDto>('/catalog/models', model);
     return response.data;
   }
 
-  async updateModel(id: string, request: UpdateModelRequest): Promise<ModelDto> {
-    const response = await this.client.put<ModelDto>(`/catalog/models/${id}`, request);
+  async updateModel(id: string, request: UpdateModelRequest): Promise<PrinterModelDto> {
+    const response = await this.client.put<PrinterModelDto>(`/catalog/models/${id}`, request);
     return response.data;
   }
 
   // Legacy method for simple name updates
-  async updateModelName(id: string, name: string): Promise<ModelDto> {
+  async updateModelName(id: string, name: string): Promise<PrinterModelDto> {
     return this.updateModel(id, { name });
   }
 
-  async deleteModel(id: string): Promise<void> {
-    await this.client.delete(`/catalog/models/${id}`);
+  // ============ SignalR / client settings ============
+  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
+    const resp = await this.client.get('/signalr/settings');
+    const raw = resp.data as Record<string, unknown>;
+    const logLevel = (raw['logLevel'] ?? raw['LogLevel']) as string | undefined;
+    const consoleLoggingEnabled = (raw['consoleLoggingEnabled'] ?? raw['ConsoleLoggingEnabled']) as boolean | undefined;
+    return {
+      logLevel: logLevel ?? 'Information',
+      consoleLoggingEnabled: typeof consoleLoggingEnabled === 'boolean' ? consoleLoggingEnabled : true
+    };
   }
 
   // ============ Settings API methods ============
