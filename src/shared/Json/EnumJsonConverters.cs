@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared.Json;
@@ -52,6 +53,7 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
 
     public override void Write(Utf8JsonWriter writer, PrinterBackend value, JsonSerializerOptions options)
     {
+        ArgumentNullException.ThrowIfNull(writer);
         // Preserve existing string enum behavior (exact enum name)
         writer.WriteStringValue(value.ToString());
     }
@@ -100,6 +102,7 @@ public sealed class PrintJobStatusDtoJsonConverter : JsonConverter<PrintJobStatu
 
     public override void Write(Utf8JsonWriter writer, PrintJobStatusDto value, JsonSerializerOptions options)
     {
+        ArgumentNullException.ThrowIfNull(writer);
         writer.WriteStringValue(value.ToString());
     }
 }
