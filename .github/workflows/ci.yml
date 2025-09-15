@@ -50,23 +50,15 @@ jobs:
             --filter "Category!=DbHeavy&Category!=Docker" \
             /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
 
-      - name: Install ReportGenerator
-        run: dotnet tool install --global dotnet-reportgenerator-globaltool
-      - name: Generate HTML coverage report
+      - name: Merge backend coverage (produce merged LCOV only)
         run: |
+          # Install reportgenerator as a lightweight tool for merging LCOV files (no HTML)
+          dotnet tool install --global dotnet-reportgenerator-globaltool
           export PATH="$PATH:$HOME/.dotnet/tools"
-          # Generate merged HTML + LCOV from backend lcov outputs in src/coverage
-          reportgenerator "-reports:src/coverage/*.info" "-targetdir:src/coverage/report" "-reporttypes:HtmlInline_AzurePipelines;TextSummary;lcov"
-           # If reportgenerator produced an lcov file in the report folder, copy it to a stable location expected by subsequent steps
-           if [ -f src/coverage/report/lcov.info ]; then mkdir -p src/coverage && cp src/coverage/report/lcov.info src/coverage/coverage.info; fi
-           cat src/coverage/report/Summary.txt || true
-      - name: Upload .NET HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dotnet-coverage-html
-          path: src/coverage/report
-
+          # Merge any per-project LCOV files under src/coverage into a single LCOV
+          reportgenerator "-reports:src/coverage/*.info" "-targetdir:src/coverage/report" "-reporttypes:lcov;TextSummary"
+          if [ -f src/coverage/report/lcov.info ]; then mkdir -p src/coverage && cp src/coverage/report/lcov.info src/coverage/coverage.info; fi
+          cat src/coverage/report/Summary.txt || true
       - name: Upload .NET coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
