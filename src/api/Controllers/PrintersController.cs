@@ -2100,7 +2100,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
             // Set timeout for network discovery - with 100ms per IP, 254 IPs * 2 ports = ~51 seconds + overhead
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromMinutes(5)); // 5 minute total timeout for full network scan
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout for full network scan
 
             var discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
 
@@ -2157,7 +2157,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 try
                 {
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timeoutCts.CancelAfter(TimeSpan.FromMinutes(5)); // 5 minute total timeout
+                    timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout to allow for multiple networks and slow responses
 
                     await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, timeoutCts.Token);
                 }

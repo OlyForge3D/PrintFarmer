@@ -16,6 +16,8 @@ obj/
 # Logs
 *.log
 
+.pids/
+
 deployment/
 
 # Visual Studio Code

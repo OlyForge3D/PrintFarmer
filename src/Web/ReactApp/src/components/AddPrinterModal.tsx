@@ -1,19 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertCircle, Check } from 'lucide-react';
+import type { PrinterModelDto } from '@/types/api';
 
 interface ManufacturerDto {
   id: string;
   name: string;
-}
-
-interface ModelDto {
-  id: string;
-  name: string;
-  manufacturerId: string;
-  maxX?: number;
-  maxY?: number;
-  maxZ?: number;
-  defaultBackend?: number;
 }
 
 interface CreatePrinterDto {
@@ -53,8 +44,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     modelId: undefined,
     apiKey: undefined,
   });  const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
-  const [models, setModels] = useState<ModelDto[]>([]);
-  const [filteredModels, setFilteredModels] = useState<ModelDto[]>([]);
+  const [models, setModels] = useState<PrinterModelDto[]>([]);
+  const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
@@ -92,7 +83,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
 
   const loadModels = async () => {
     try {
-      const response = await fetch('/api/catalog/models');
+      const response = await fetch('/api/catalog/printer-models');
       if (response.ok) {
         const data = await response.json();
         setModels(data);

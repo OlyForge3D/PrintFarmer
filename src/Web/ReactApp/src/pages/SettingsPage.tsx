@@ -2,14 +2,27 @@ import { useState, useEffect } from 'react';
 import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
+import { signalRService } from '@/services/signalr';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
-import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
-import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2 } from 'lucide-react';
+import { normalizeSpoolmanBaseUrl, isValidCidr, findOverlappingCidrRanges, suggestCorrectNetworkAddress } from '@/utils/validation';
+import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
 import type { FilamentType } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface NetworkRange {
   cidr: string;
+  isValid?: boolean;
+  suggestion?: string;
+}
+
+interface NetworkValidationState {
+  ranges: Array<{
+    cidr: string;
+    isValid: boolean;
+    suggestion?: string;
+  }>;
+  overlapping: string[];
+  hasErrors: boolean;
 }
 
 // (SettingsData interface removed - unused)
@@ -17,6 +30,7 @@ interface NetworkRange {
 export function SettingsPage() {
   const [spoolmanBase, setSpoolmanBase] = useState('');
   const [networkRanges, setNetworkRanges] = useState<NetworkRange[]>([]);
+  const [networkValidation, setNetworkValidation] = useState<NetworkValidationState>({ ranges: [], overlapping: [], hasErrors: false });
   const [discoveryTimeout, setDiscoveryTimeout] = useState(5000);
   const [maxConcurrentScans, setMaxConcurrentScans] = useState(20);
   const [scanPorts, setScanPorts] = useState<number[]>([80, 7125]);
@@ -25,6 +39,15 @@ export function SettingsPage() {
   const { data: passwordPolicy, savePolicy, saving, reset: resetPolicy } = usePasswordPolicy();
   const [draftPolicy, setDraftPolicy] = useState({ minLength: 12, requireUppercase: false, requireLowercase: false, requireDigit: false, requireSymbol: false });
   const [policyDirty, setPolicyDirty] = useState(false);
+  
+  // Save feedback state
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // SignalR settings
+  const [signalrSettings, setSignalrSettings] = useState<{ logLevel: string; consoleLoggingEnabled: boolean }>({ logLevel: 'Information', consoleLoggingEnabled: true });
+  const [signalrDirty, setSignalrDirty] = useState(false);
+  const [signalrSaving, setSignalrSaving] = useState(false);
   
   const [testing, setTesting] = useState(false);
   const [testOk, setTestOk] = useState<boolean | null>(null);
@@ -59,6 +82,16 @@ export function SettingsPage() {
       setFilamentTypes(types);
       // password policy handled by usePasswordPolicy
       
+      // Load SignalR settings
+      try {
+        const signalrConfig = await apiClient.getSignalRSettings();
+        setSignalrSettings(signalrConfig);
+        setSignalrDirty(false);
+      } catch (err) {
+        console.warn('Failed to load SignalR settings, using defaults:', err);
+        setSignalrSettings({ logLevel: 'Information', consoleLoggingEnabled: true });
+      }
+      
       // Load Spoolman configuration: prefer backend, fallback to localStorage
       try {
         const cfgResp = await fetch('/api/spoolman/config');
@@ -87,15 +120,20 @@ export function SettingsPage() {
       // Load network discovery settings from backend
       try {
         const nd = await apiClient.getNetworkDiscoverySettings();
-        setNetworkRanges(nd.networkRanges.map(r => ({ cidr: r })));
+        const ranges = nd.networkRanges.map(r => ({ cidr: r }));
+        setNetworkRanges(ranges);
         setDiscoveryTimeout(nd.timeoutMs);
         setMaxConcurrentScans(nd.maxConcurrentScans);
         setScanPorts(nd.ports);
+        // Validate the loaded ranges
+        validateNetworkRanges(ranges);
       } catch {
         // Fallback to any legacy localStorage values (backwards compatibility)
         const savedRanges = localStorage.getItem('network-ranges');
         if (savedRanges) {
-          setNetworkRanges(JSON.parse(savedRanges));
+          const ranges = JSON.parse(savedRanges);
+          setNetworkRanges(ranges);
+          validateNetworkRanges(ranges);
         }
         const savedTimeout = localStorage.getItem('discovery-timeout');
         if (savedTimeout) setDiscoveryTimeout(Number(savedTimeout));
@@ -134,6 +172,30 @@ export function SettingsPage() {
       console.error('Failed to save password policy', err);
       toast.error('Failed to save password policy');
     }
+  };
+
+  const saveSignalRSettings = async () => {
+    if (!hasRole('farm_admin')) return;
+    try {
+      setSignalrSaving(true);
+      await apiClient.saveSignalRSettings(signalrSettings);
+      setSignalrDirty(false);
+      
+      // Refresh the SignalR service with new settings
+      await signalRService.refreshSettings();
+      
+      toast.success('SignalR settings saved');
+    } catch (err) {
+      console.error('Failed to save SignalR settings', err);
+      toast.error('Failed to save SignalR settings');
+    } finally {
+      setSignalrSaving(false);
+    }
+  };
+
+  const updateSignalRField = (field: string, value: unknown) => {
+    setSignalrSettings(prev => ({ ...prev, [field]: value }));
+    setSignalrDirty(true);
   };
 
   const normalizedUrl = normalizeSpoolmanBaseUrl(spoolmanBase);
@@ -292,13 +354,52 @@ export function SettingsPage() {
   };
 
   const removeNetworkRange = (index: number) => {
-    setNetworkRanges(networkRanges.filter((_, i) => i !== index));
+    const updated = networkRanges.filter((_, i) => i !== index);
+    setNetworkRanges(updated);
+    validateNetworkRanges(updated);
   };
 
   const updateNetworkRange = (index: number, cidr: string) => {
     const updated = networkRanges.map((range, i) => i === index ? { cidr } : range);
     setNetworkRanges(updated);
+    validateNetworkRanges(updated);
   };
+
+  // Network validation logic
+  const validateNetworkRanges = (ranges: NetworkRange[]) => {
+    const validatedRanges = ranges.map(range => {
+      const trimmed = range.cidr.trim();
+      if (!trimmed) {
+        return { cidr: range.cidr, isValid: true }; // Empty ranges are valid (will be filtered out)
+      }
+      
+      const isValid = isValidCidr(trimmed);
+      const suggestion = !isValid ? suggestCorrectNetworkAddress(trimmed) : undefined;
+      
+      return {
+        cidr: range.cidr,
+        isValid,
+        suggestion: suggestion || undefined // Convert null to undefined
+      };
+    });
+
+    // Check for overlaps among valid, non-empty ranges
+    const nonEmptyValidCidrs = validatedRanges
+      .filter(r => r.cidr.trim() && r.isValid)
+      .map(r => r.cidr.trim());
+    
+    const overlapping = findOverlappingCidrRanges(nonEmptyValidCidrs);
+    const hasErrors = validatedRanges.some(r => r.cidr.trim() && !r.isValid) || overlapping.length > 0;
+
+    setNetworkValidation({
+      ranges: validatedRanges,
+      overlapping,
+      hasErrors
+    });
+  };
+
+  // Auto-validate when component mounts and network ranges are loaded
+  // (validation is now triggered in the loadData function when ranges are actually loaded)
 
   const addScanPort = () => {
     setScanPorts([...scanPorts, 80]);
@@ -313,20 +414,55 @@ export function SettingsPage() {
   };
 
   const saveNetworkSettings = async () => {
+    // Clear previous save state
+    setSaveSuccess(false);
+    
+    // Validate before saving
+    if (networkValidation.hasErrors) {
+      toast.error('Please fix validation errors before saving');
+      return;
+    }
+    
+    const filteredRanges = networkRanges.filter(r => r.cidr.trim()).map(r => r.cidr.trim());
+    const filteredPorts = scanPorts.filter(p => p > 0 && p < 65536);
+    
+    // Additional validation
+    if (filteredRanges.length > 0 && filteredPorts.length === 0) {
+      toast.error('At least one port is required when network ranges are configured');
+      return;
+    }
+
+    if (discoveryTimeout < 100 || discoveryTimeout > 30000) {
+      toast.error('Discovery timeout must be between 100ms and 30,000ms');
+      return;
+    }
+
+    if (maxConcurrentScans < 1 || maxConcurrentScans > 100) {
+      toast.error('Max concurrent scans must be between 1 and 100');
+      return;
+    }
+
+    setIsSaving(true);
     try {
       const payload = {
-        networkRanges: networkRanges.filter(r => r.cidr.trim()).map(r => r.cidr.trim()),
+        networkRanges: filteredRanges,
         timeoutMs: discoveryTimeout,
         maxConcurrentScans,
-        ports: scanPorts.filter(p => p > 0 && p < 65536)
+        ports: filteredPorts
       };
       await apiClient.saveNetworkDiscoverySettings(payload);
       setError(null);
-      toast.success('Network discovery settings saved');
+      setSaveSuccess(true);
+      toast.success(`Network discovery settings saved successfully! ${filteredRanges.length} ranges, ${filteredPorts.length} ports configured.`);
+      
+      // Clear success indicator after 3 seconds
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
       setError('Failed to save network settings');
       console.error('Error saving network settings:', err);
       toast.error('Failed to save network settings');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -618,7 +754,7 @@ export function SettingsPage() {
       <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
         <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Network Discovery Settings</h2>
         <p className="text-sm text-pf-text-secondary mb-4">
-          Configure network ranges and parameters for printer discovery. Leave ranges empty to disable discovery until configured.
+          Configure network ranges and parameters for printer discovery. Use proper CIDR notation (e.g., 192.168.1.0/24). Leave ranges empty to disable discovery.
         </p>
         
         <div className="space-y-4">
@@ -627,24 +763,77 @@ export function SettingsPage() {
               Network Ranges (CIDR notation)
             </label>
             <div className="space-y-2">
-              {networkRanges.map((range, index) => (
-                <div key={index} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={range.cidr}
-                    onChange={(e) => updateNetworkRange(index, e.target.value)}
-                    placeholder="192.168.1.0/24"
-                    className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary"
-                  />
-                  <button
-                    onClick={() => removeNetworkRange(index)}
-                    className="px-3 py-2 text-red-400 hover:text-red-300"
-                    title="Remove this range"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+              {networkRanges.map((range, index) => {
+                const validation = networkValidation.ranges[index];
+                const isOverlapping = networkValidation.overlapping.includes(range.cidr.trim());
+                const hasError = validation && range.cidr.trim() && (!validation.isValid || isOverlapping);
+                
+                return (
+                  <div key={index} className="space-y-1">
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <input
+                          type="text"
+                          value={range.cidr}
+                          onChange={(e) => updateNetworkRange(index, e.target.value)}
+                          placeholder="192.168.1.0/24"
+                          className={`w-full px-3 py-2 bg-pf-bg-0 border rounded text-pf-text-primary placeholder-pf-text-secondary ${
+                            hasError 
+                              ? 'border-red-500 focus:ring-red-500' 
+                              : validation && range.cidr.trim() && validation.isValid && !isOverlapping
+                              ? 'border-green-500 focus:ring-green-500'
+                              : 'border-pf-border focus:ring-pf-accent'
+                          }`}
+                        />
+                        {validation && range.cidr.trim() && (
+                          <div className="absolute right-8 top-2.5">
+                            {validation.isValid && !isOverlapping ? (
+                              <CheckCircle className="h-5 w-5 text-green-500" />
+                            ) : (
+                              <AlertCircle className="h-5 w-5 text-red-500" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => removeNetworkRange(index)}
+                        className="px-3 py-2 text-red-400 hover:text-red-300"
+                        title="Remove this range"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    
+                    {/* Validation messages */}
+                    {validation && range.cidr.trim() && (
+                      <div className="ml-3 text-xs">
+                        {!validation.isValid && (
+                          <div className="text-red-400 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Invalid CIDR format
+                            {validation.suggestion && (
+                              <span className="ml-1">
+                                - try: <button 
+                                  onClick={() => updateNetworkRange(index, validation.suggestion!)} 
+                                  className="underline hover:no-underline text-blue-400"
+                                >
+                                  {validation.suggestion}
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {validation.isValid && isOverlapping && (
+                          <div className="text-orange-400 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Overlaps with other network ranges
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <button
                 onClick={addNetworkRange}
                 className="px-4 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 flex items-center gap-2"
@@ -653,6 +842,31 @@ export function SettingsPage() {
                 Add Range
               </button>
             </div>
+            
+            {/* Network validation summary */}
+            {networkValidation.overlapping.length > 0 && (
+              <div className="mt-3 p-3 bg-orange-900/20 border border-orange-700 rounded">
+                <div className="text-orange-200 text-sm flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Overlapping network ranges detected:
+                </div>
+                <div className="mt-1 ml-6 text-xs text-orange-300">
+                  {networkValidation.overlapping.join(', ')}
+                </div>
+                <div className="mt-1 ml-6 text-xs text-orange-400">
+                  Overlapping ranges may cause duplicate scanning and inefficient discovery.
+                </div>
+              </div>
+            )}
+            
+            {networkValidation.ranges.some(r => r.cidr.trim() && !r.isValid) && (
+              <div className="mt-3 p-3 bg-red-900/20 border border-red-700 rounded">
+                <div className="text-red-200 text-sm flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Invalid CIDR formats detected. Please fix before saving.
+                </div>
+              </div>
+            )}
             
             {/* Auto-detect removed due to Docker / container network constraints */}
           </div>
@@ -726,10 +940,31 @@ export function SettingsPage() {
 
           <button
             onClick={saveNetworkSettings}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
+            disabled={networkValidation.hasErrors || isSaving}
+            className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
+              networkValidation.hasErrors || isSaving
+                ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                : saveSuccess
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-green-600 text-white hover:bg-green-700'
+            }`}
           >
-            <Save className="h-4 w-4" />
-            Save Network Settings
+            {isSaving ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : saveSuccess ? (
+              <>
+                <CheckCircle className="h-4 w-4" />
+                Saved!
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                Save Network Settings
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -809,6 +1044,70 @@ export function SettingsPage() {
               <button
                 type="button"
                 onClick={() => { setPolicyDirty(false); resetPolicy(); }}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {hasRole('farm_admin') && (
+        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+          <h2 className="text-xl font-semibold text-pf-text-primary mb-4">SignalR Settings</h2>
+          <p className="text-sm text-pf-text-secondary mb-4">Configure SignalR console logging and verbosity level for real-time communication debugging.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-pf-text-primary mb-2">Log Level</label>
+              <select
+                id="signalr-loglevel"
+                value={signalrSettings.logLevel}
+                onChange={(e) => updateSignalRField('logLevel', e.target.value)}
+                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
+                aria-label="SignalR log level"
+              >
+                <option value="None">None</option>
+                <option value="Critical">Critical</option>
+                <option value="Error">Error</option>
+                <option value="Warning">Warning</option>
+                <option value="Information">Information</option>
+                <option value="Debug">Debug</option>
+                <option value="Trace">Trace</option>
+              </select>
+              <p className="text-xs text-pf-text-secondary mt-1">Controls verbosity of SignalR client logging. Changes take effect after page refresh.</p>
+            </div>
+            <div className="flex flex-col justify-start">
+              <label className="block text-sm font-medium text-pf-text-primary mb-2">Console Logging</label>
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  id="signalr-console"
+                  type="checkbox"
+                  checked={signalrSettings.consoleLoggingEnabled}
+                  onChange={(e) => updateSignalRField('consoleLoggingEnabled', e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="signalr-console" className="text-sm text-pf-text-primary">Enable Console Logging</label>
+              </div>
+              <p className="text-xs text-pf-text-secondary mt-1">When disabled, SignalR logging is completely suppressed regardless of level.</p>
+            </div>
+          </div>
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={saveSignalRSettings}
+              disabled={!signalrDirty || signalrSaving}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save className="h-4 w-4" />
+              {signalrSaving ? 'Saving...' : 'Save Settings'}
+            </button>
+            {signalrDirty && !signalrSaving && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSignalrSettings({ logLevel: 'Information', consoleLoggingEnabled: true });
+                  setSignalrDirty(false);
+                }}
                 className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
               >
                 Reset

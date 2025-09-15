@@ -5,6 +5,7 @@ import {
   LogLevel 
 } from '@microsoft/signalr';
 import { PrinterStatusUpdate, DiscoveryProgressDto, DiscoveryPrinterFoundDto, DiscoveryCompletedDto, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
+import { apiClient } from '@/services/api';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
@@ -20,6 +21,7 @@ export class SignalRService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 30000; // Max 30 seconds
+  private signalrSettings: { logLevel: string; consoleLoggingEnabled: boolean } | null = null;
 
   // Event handlers
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
@@ -31,7 +33,43 @@ export class SignalRService {
   private discoveryCompletedCallbacks: DiscoveryCompletedCallback[] = [];
 
   constructor() {
-    this.buildConnection();
+    this.loadSettings().then(() => {
+      this.buildConnection();
+    });
+  }
+
+  private async loadSettings(): Promise<void> {
+    try {
+      this.signalrSettings = await apiClient.getSignalRSettings();
+    } catch (error) {
+      console.warn('Failed to load SignalR settings, using defaults:', error);
+      this.signalrSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
+    }
+  }
+
+  private getLogLevel(): LogLevel {
+    if (!this.signalrSettings?.consoleLoggingEnabled) {
+      return LogLevel.None;
+    }
+
+    switch (this.signalrSettings.logLevel?.toLowerCase()) {
+      case 'critical':
+        return LogLevel.Critical;
+      case 'error':
+        return LogLevel.Error;
+      case 'warning':
+        return LogLevel.Warning;
+      case 'information':
+        return LogLevel.Information;
+      case 'debug':
+        return LogLevel.Debug;
+      case 'trace':
+        return LogLevel.Trace;
+      case 'none':
+        return LogLevel.None;
+      default:
+        return LogLevel.Information;
+    }
   }
 
   private buildConnection(): void {
@@ -52,7 +90,7 @@ export class SignalRService {
           return Math.max(1000, delay + jitter);
         }
       })
-      .configureLogging(LogLevel.Information)
+      .configureLogging(this.getLogLevel())
       .build();
 
     // Set up event handlers
@@ -321,6 +359,18 @@ export class SignalRService {
 
   get connectionId(): string | null {
     return this.connection?.connectionId ?? null;
+  }
+
+  // Refresh SignalR settings and reconnect with new log level
+  async refreshSettings(): Promise<void> {
+    await this.loadSettings();
+    
+    // If connection exists and is connected, recreate it with new settings
+    if (this.connection && this.connection.state === HubConnectionState.Connected) {
+      await this.connection.stop();
+      this.buildConnection();
+      await this.connect();
+    }
   }
 
   // ============ Discovery Group Methods ============

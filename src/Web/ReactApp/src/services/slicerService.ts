@@ -46,7 +46,18 @@ export interface SlicedModelSummary {
 }
 
 class SlicerService {
-  private baseUrl = '/api';
+  private getBaseUrl(): string {
+    const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
+    const baseUrl = envBaseUrl || '/api';
+    
+    // Additional validation
+    if (!baseUrl || baseUrl === 'undefined') {
+      console.warn('Invalid baseUrl detected, using /api fallback:', baseUrl);
+      return '/api';
+    }
+    
+    return baseUrl;
+  }
 
   async sliceModel(request: SliceRequest): Promise<SliceResult> {
     const formData = new FormData();
@@ -55,7 +66,7 @@ class SlicerService {
     formData.append('printerId', request.printerId);
     formData.append('profile', JSON.stringify(request.profile));
 
-    const response = await fetch(`${this.baseUrl}/slicer/slice`, {
+    const response = await fetch(`${this.getBaseUrl()}/3d-models`, {
       method: 'POST',
       body: formData,
       headers: {
@@ -71,7 +82,8 @@ class SlicerService {
   }
 
   async getAvailableProfiles(printerId: string): Promise<SlicerProfile[]> {
-    const response = await fetch(`${this.baseUrl}/slicer/profiles?printerId=${printerId}`);
+    const baseUrl = this.getBaseUrl();
+    const response = await fetch(`${baseUrl}/slicer/profiles?printerId=${printerId}`);
     if (!response.ok) {
       throw new Error(`Failed to fetch profiles: ${response.statusText}`);
     }
@@ -82,7 +94,8 @@ class SlicerService {
     const formData = new FormData();
     formData.append('modelFile', file);
 
-    const response = await fetch(`${this.baseUrl}/slicer/validate`, {
+    const baseUrl = this.getBaseUrl();
+    const response = await fetch(`${baseUrl}/slicer/validate`, {
       method: 'POST',
       body: formData
     });
@@ -96,7 +109,8 @@ class SlicerService {
 
   // Real-time slicing progress via SSE
   subscribeToSlicingProgress(jobId: string, onProgress: (progress: SlicingProgress) => void): EventSource {
-    const eventSource = new EventSource(`${this.baseUrl}/slicer/progress/${jobId}`);
+    const baseUrl = this.getBaseUrl();
+    const eventSource = new EventSource(`${baseUrl}/slicer/progress/${jobId}`);
     
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -111,7 +125,8 @@ class SlicerService {
   }
 
   async getSlicingJob(jobId: string): Promise<SliceResult> {
-    const response = await fetch(`${this.baseUrl}/slicer/job/${jobId}`);
+    const baseUrl = this.getBaseUrl();
+    const response = await fetch(`${baseUrl}/slicer/job/${jobId}`);
     if (!response.ok) {
       throw new Error(`Failed to fetch slicing job: ${response.statusText}`);
     }
@@ -119,7 +134,8 @@ class SlicerService {
   }
 
   async cancelSlicingJob(jobId: string): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/slicer/job/${jobId}/cancel`, {
+    const baseUrl = this.getBaseUrl();
+    const response = await fetch(`${baseUrl}/slicer/job/${jobId}/cancel`, {
       method: 'POST'
     });
     if (!response.ok) {
@@ -132,7 +148,10 @@ class SlicerService {
     const formData = new FormData();
     formData.append('modelFile', file);
 
-    const response = await fetch(`${this.baseUrl}/models`, {
+    const baseUrl = this.getBaseUrl();
+    const uploadUrl = `${baseUrl}/3d-models`;
+
+    const response = await fetch(uploadUrl, {
       method: 'POST',
       body: formData
     });
@@ -145,7 +164,8 @@ class SlicerService {
   }
 
   async listModels(): Promise<SlicedModelSummary[]> {
-    const response = await fetch(`${this.baseUrl}/models`);
+    const baseUrl = this.getBaseUrl();
+    const response = await fetch(`${baseUrl}/3d-models`);
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.statusText}`);
     }
@@ -153,7 +173,8 @@ class SlicerService {
   }
 
   async deleteModel(modelId: string): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/models/${modelId}`, {
+    const baseUrl = this.getBaseUrl();
+    const response = await fetch(`${baseUrl}/3d-models/${modelId}`, {
       method: 'DELETE'
     });
     if (!response.ok) {

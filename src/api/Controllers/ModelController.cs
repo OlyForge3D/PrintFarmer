@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 /// Controller for managing 3D model files for slicing and printing
 /// </summary>
 [ApiController]
-[Route("api/models")] // Use explicit plural route to match test expectations and generated URLs
+[Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
 public class ModelController : ControllerBase
 {
     private readonly ILogger<ModelController> _logger;
@@ -197,7 +197,7 @@ public class ModelController : ControllerBase
                         FileSize = existingModel.FileSizeBytes,
                         FileType = GetFileTypeString(existingModel.FileFormat),
                         UploadedAt = existingModel.UploadedAt,
-                        Url = $"/api/models/{existingModel.Id}/file"
+                        Url = $"/api/3d-models/{existingModel.Id}/file"
                     };
                     return Ok(existingResult); // Duplicate scenario
                 }
@@ -241,7 +241,7 @@ public class ModelController : ControllerBase
                 FileSize = modelFile.Length,
                 FileType = fileExtension.TrimStart('.'),
                 UploadedAt = DateTime.UtcNow,
-                Url = $"/api/models/{modelId}/file"
+                Url = $"/api/3d-models/{modelId}/file"
             };
 
             _logger.LogInformation("Model uploaded: {ModelId} ({FileName}, {FileSize} bytes)",
@@ -285,8 +285,8 @@ public class ModelController : ControllerBase
                     FileSize = m.FileSizeBytes,
                     FileType = GetFileTypeString(m.FileFormat),
                     UploadedAt = m.UploadedAt,
-                    Url = $"/api/models/{m.Id}/file",
-                    ThumbnailUrl = m.ThumbnailPath != null ? $"/api/models/{m.Id}/thumbnail" : null
+                    Url = $"/api/3d-models/{m.Id}/file",
+                    ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null
                 })
                 .ToListAsync();
 
@@ -325,8 +325,8 @@ public class ModelController : ControllerBase
             FileSize = model.FileSizeBytes,
             FileType = GetFileTypeString(model.FileFormat),
             UploadedAt = model.UploadedAt,
-            Url = $"/api/models/{model.Id}/file",
-            ThumbnailUrl = model.ThumbnailPath != null ? $"/api/models/{model.Id}/thumbnail" : null
+            Url = $"/api/3d-models/{model.Id}/file",
+            ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null
         };
 
         return Ok(modelDto);

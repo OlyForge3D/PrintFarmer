@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { Plus, Edit, Trash2, Save, X, Settings } from 'lucide-react';
-import type { ManufacturerDto, ModelDto, FilamentTypeDto } from '@/types/api';
+import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto } from '@/types/api';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
-  const [models, setModels] = useState<ModelDto[]>([]);
+  const [models, setModels] = useState<PrinterModelDto[]>([]);
   const [filamentTypes, setFilamentTypes] = useState<FilamentTypeDto[]>([]);
   const [selectedManufacturer, setSelectedManufacturer] = useState<ManufacturerDto | null>(null);
-  const [selectedModel, setSelectedModel] = useState<ModelDto | null>(null);
+  const [selectedModel, setSelectedModel] = useState<PrinterModelDto | null>(null);
   const [newManufacturer, setNewManufacturer] = useState('');
   const [newModel, setNewModel] = useState('');
   const [editingManufacturer, setEditingManufacturer] = useState<{ id: string; name: string } | null>(null);
@@ -45,7 +45,7 @@ export function CatalogPage() {
     return models.filter(m => m.manufacturerId === manufacturerId).length;
   };
 
-  const getFilteredModels = (): ModelDto[] => {
+  const getFilteredModels = (): PrinterModelDto[] => {
     if (!selectedManufacturer) return models;
     return models.filter(m => m.manufacturerId === selectedManufacturer.id);
   };
@@ -153,7 +153,7 @@ export function CatalogPage() {
     }
   };
 
-  const toggleFilamentTypes = (model: ModelDto) => {
+  const toggleFilamentTypes = (model: PrinterModelDto) => {
     setSelectedModel(selectedModel?.id === model.id ? null : model);
     setShowFilamentEditor(selectedModel?.id !== model.id);
   };
