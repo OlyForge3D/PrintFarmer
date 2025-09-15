@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { useCreateManufacturer, useCreateModel, useCancelJob, useDeleteJob, useQueuePrintJob, queryKeys } from '../../hooks/useApi';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { queryKeys, useCancelJob, useCreateManufacturer, useCreateModel, useDeleteJob, useQueuePrintJob } from '../../hooks/useApi';
 import { apiClient } from '../../services/api';
-import { PrinterModelDto, JobQueueStatus, JobQueuePrintJob } from '../../types/api';
+import { JobQueuePrintJob, JobQueueStatus, PrinterModelDto } from '../../types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -133,7 +133,7 @@ describe('optimistic job cancel/delete', () => {
   it('queue job rollback on error', async () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
-    vi.spyOn(apiClient, 'queuePrintJob').mockImplementation(async () => { await new Promise(r => setTimeout(r,5)); throw new Error('queue fail'); });
+    vi.spyOn(apiClient, 'queuePrintJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('queue fail'); });
     const { result } = renderHook(() => useQueuePrintJob(), { wrapper });
     await act(async () => { result.current.mutate({ printerId: 'p-err', gcodeFileId: 'f1' }); });
     const key = queryKeys.jobQueue('p-err');
@@ -150,7 +150,7 @@ describe('optimistic job cancel/delete', () => {
     const wrapper = wrapperFactory(client);
     const job: JobQueuePrintJob = { id: 'job-cancel-err', printerId: 'p1', gcodeFileId: 'f', gcodeFileName: 'f.gcode', status: JobQueueStatus.Pending, priority: 0, queuedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as JobQueuePrintJob;
     client.setQueryData(queryKeys.jobQueue(), [job]);
-    vi.spyOn(apiClient, 'cancelJob').mockImplementation(async () => { await new Promise(r => setTimeout(r,5)); throw new Error('cancel fail'); });
+    vi.spyOn(apiClient, 'cancelJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('cancel fail'); });
     const { result } = renderHook(() => useCancelJob(), { wrapper });
     await act(async () => { result.current.mutate('job-cancel-err'); });
     const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
@@ -166,7 +166,7 @@ describe('optimistic job cancel/delete', () => {
     const wrapper = wrapperFactory(client);
     const job: JobQueuePrintJob = { id: 'job-del-err', printerId: 'p1', gcodeFileId: 'f', gcodeFileName: 'f.gcode', status: JobQueueStatus.Pending, priority: 0, queuedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as JobQueuePrintJob;
     client.setQueryData(queryKeys.jobQueue(), [job]);
-    vi.spyOn(apiClient, 'deleteJob').mockImplementation(async () => { await new Promise(r => setTimeout(r,5)); throw new Error('delete fail'); });
+    vi.spyOn(apiClient, 'deleteJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('delete fail'); });
     const { result } = renderHook(() => useDeleteJob(), { wrapper });
     await act(async () => { result.current.mutate('job-del-err'); });
     const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());

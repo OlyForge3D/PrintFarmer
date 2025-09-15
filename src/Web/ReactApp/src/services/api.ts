@@ -14,11 +14,11 @@ import {
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
-  PrinterModelDto,
   MoveRequest,
   MultiUploadResponse,
   Printer,
   PrinterDetails,
+  PrinterModelDto,
   RegisterRequest,
   ResolveHostnameRequest,
   ResolveHostnameResponse,
@@ -204,6 +204,11 @@ export class ApiClient {
     return this.updateModel(id, { name });
   }
 
+  // Delete a model by id
+  async deleteModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/models/${id}`);
+  }
+
   // ============ SignalR / client settings ============
   async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
     const resp = await this.client.get('/signalr/settings');
@@ -341,7 +346,7 @@ export class ApiClient {
     if (status) params.status = status;
     if (limit) params.limit = limit;
     if (offset) params.offset = offset;
-    
+
     const response = await this.client.get<GcodeHarvestOperation[]>('/api/gcode-harvest/operations', { params });
     return response.data;
   }
