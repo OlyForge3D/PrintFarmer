@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useEffect, useState, ReactNode, useContext } from 'react';
+import React, { createContext, useEffect, useState, ReactNode, useContext, useCallback } from 'react';
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import type { AuthContextType } from './AuthContextValue';
@@ -111,12 +111,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const hasRole = (role: string): boolean => {
+  const hasRole = useCallback((role: string): boolean => {
     if (!user || !user.roles) return false;
     return user.roles.includes(role) || user.roles.includes('farm_admin');
-  };
+  }, [user]);
 
-  const hasPermission = (resource: string, action: string): boolean => {
+  const hasPermission = useCallback((resource: string, action: string): boolean => {
     if (!user || !user.permissions) return false;
     
     // Admin has all permissions
@@ -125,7 +125,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Check specific permission
     const permissionString = `${resource}:${action}`;
     return user.permissions.includes(permissionString);
-  };
+  }, [user]);
 
   const value: AuthContextType = {
     user,

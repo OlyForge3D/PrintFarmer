@@ -20,19 +20,19 @@ public class ModelController : ControllerBase
     private readonly ILogger<ModelController> _logger;
     private readonly AppDbContext _context;
     private readonly string _modelsPath;
-    private readonly IModelAnalysisService? _analysisService;
+    private readonly IModelAnalysisService _analysisService;
     private readonly IVirusScanner _virusScanner;
+    private readonly IThumbnailGenerationService _thumbnailService;
 
-    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService? analysisService, IVirusScanner virusScanner)
+    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner, IThumbnailGenerationService thumbnailService)
     {
         _logger = logger;
         _context = context;
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-        // Model analysis is best-effort. Tests and some environments may not register an analysis service
-        // so accept a nullable service and perform analysis only when present.
-        _analysisService = analysisService;
+        _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
         _virusScanner = virusScanner ?? throw new ArgumentNullException(nameof(virusScanner));
+        _thumbnailService = thumbnailService ?? throw new ArgumentNullException(nameof(thumbnailService));
 
         // Ensure models directory exists
         if (!Directory.Exists(_modelsPath))
@@ -143,19 +143,7 @@ public class ModelController : ControllerBase
             ModelAnalysisResult? analysis = null;
             try
             {
-                // Run model analysis only if the analysis service is available. This keeps uploads resilient in
-                // environments (and tests) where the analysis service is intentionally not registered.
-                if (_analysisService != null)
-                {
-                    try
-                    {
-                        analysis = await _analysisService.AnalyzeModelAsync(filePath, fileExtension, CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Model analysis failed for {FileName}; marking model as valid but without metadata", originalName);
-                    }
-                }
+                analysis = await _analysisService.AnalyzeModelAsync(filePath, fileExtension, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -231,6 +219,47 @@ public class ModelController : ControllerBase
 
             _context.Models3D.Add(model);
             await _context.SaveChangesAsync();
+
+            // Generate thumbnail if supported
+            if (_thumbnailService.IsFormatSupported(model.FileFormat))
+            {
+                try
+                {
+                    var thumbnailFileName = $"{modelId}_thumbnail{_thumbnailService.ThumbnailFileExtension}";
+                    var thumbnailPath = Path.Combine(_modelsPath, "thumbnails", thumbnailFileName);
+                    
+                    // Ensure thumbnails directory exists
+                    var thumbnailDir = Path.GetDirectoryName(thumbnailPath);
+                    if (thumbnailDir != null && !Directory.Exists(thumbnailDir))
+                    {
+                        Directory.CreateDirectory(thumbnailDir);
+                    }
+
+                    var thumbnailGenerated = await _thumbnailService.GenerateThumbnailAsync(
+                        filePath,
+                        model.FileFormat,
+                        thumbnailPath,
+                        256,
+                        256,
+                        CancellationToken.None);
+
+                    if (thumbnailGenerated)
+                    {
+                        model.ThumbnailPath = thumbnailPath;
+                        await _context.SaveChangesAsync();
+                        _logger.LogDebug("Thumbnail generated for model {ModelId}", modelId);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to generate thumbnail for model {ModelId}", modelId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Exception during thumbnail generation for model {ModelId}", modelId);
+                    // Don't fail the upload if thumbnail generation fails
+                }
+            }
 
             // Create result
             var result = new Model3DUploadResultDto
@@ -369,6 +398,38 @@ public class ModelController : ControllerBase
     }
 
     /// <summary>
+    /// Get model thumbnail image
+    /// </summary>
+    /// <param name="id">Model ID</param>
+    /// <returns>Thumbnail image</returns>
+    [HttpGet("{id:guid}/thumbnail")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
+    {
+        var model = await _context.Models3D
+            .FirstOrDefaultAsync(m => m.Id == id && m.IsValid);
+
+        if (model == null)
+        {
+            return NotFound();
+        }
+
+        if (string.IsNullOrEmpty(model.ThumbnailPath) || !System.IO.File.Exists(model.ThumbnailPath))
+        {
+            return NotFound("Thumbnail not available");
+        }
+
+        if (!IsSafePath(model.ThumbnailPath, _modelsPath))
+        {
+            return NotFound();
+        }
+
+        var contentType = "image/png"; // Thumbnails are generated as PNG
+        return PhysicalFile(model.ThumbnailPath, contentType);
+    }
+
+    /// <summary>
     /// Delete a model
     /// </summary>
     /// <param name="id">Model ID</param>
@@ -451,7 +512,7 @@ public class ModelController : ControllerBase
         var result = new Model3DValidationResultDto
         {
             Valid = issues.Count == 0,
-            Issues = issues.Count > 0 ? issues.ToArray() : null
+            Issues = issues.Count > 0 ? [.. issues] : null
         };
 
         return Ok(result);
