@@ -4,11 +4,8 @@ using System.Text;
 namespace Farm.Web.Api.Tests.Slicing;
 
 [Trait("Category", "DbHeavy")]
-<<<<<<< HEAD
 [Collection("DbHeavySerial")]
 [TestTiming]
-=======
->>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class SlicingProgressControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;

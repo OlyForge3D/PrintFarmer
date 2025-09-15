@@ -1,18 +1,17 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using Moq;
+using FluentAssertions;
+using Xunit;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
-<<<<<<< HEAD
-// DB-backed printer lifecycle; previously also tagged Slow.
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-=======
-// Mark as long-running because these tests perform real create/delete cycles and external host resolution.
-[Trait("Category", "Slow")]
-[Trait("Category", "DbHeavy")]
->>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

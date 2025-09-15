@@ -1,20 +1,18 @@
-﻿using System.Net.Http.Headers;
-using System.Text;
+﻿using System.Net;
+using System.Net.Http.Json;
+using FluentAssertions;
+using Xunit;
 using Farm.Web.Shared;
+using System.IO;
+using System.Text;
 using Moq;
+using System.Net.Http.Headers;
 
 namespace Farm.Web.Api.Tests;
 
-<<<<<<< HEAD
-// DB-backed multi-step upload / print operations.
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-=======
-// Mark as slow due to multi-step upload / start print operations with mocked backends.
-[Trait("Category", "Slow")]
-[Trait("Category", "DbHeavy")]
->>>>>>> f93db7a (Refactor job state management and improve serialization handling)
 public class PrintersFileOpsTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
