@@ -1,6 +1,10 @@
-using System.Net;
+﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using FluentAssertions;
+using Xunit;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
@@ -13,10 +17,7 @@ public class SlicingSubmissionControllerTests : IClassFixture<CustomWebApplicati
 
     public SlicingSubmissionControllerTests(CustomWebApplicationFactory factory)
     {
-        if (factory is null)
-        {
-            throw new ArgumentNullException(nameof(factory));
-        }
+        ArgumentNullException.ThrowIfNull(factory);
         _client = factory.CreateClient();
     }
 
@@ -39,4 +40,3 @@ public class SlicingSubmissionControllerTests : IClassFixture<CustomWebApplicati
         jobIdProp.GetString().Should().NotBeNullOrWhiteSpace();
     }
 }
-// ReSharper restore RedundantUsingDirective

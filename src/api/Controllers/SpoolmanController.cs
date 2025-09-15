@@ -41,12 +41,12 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
         {
             return Ok(new { success = false, message = "Invalid URL" });
         }
-        
+
         // Apply environment-specific URL rewriting for network access
         var rewrittenUrl = urlRewriter.RewriteUrl(baseUri.ToString(), "Spoolman");
         var normalized = rewrittenUrl.TrimEnd('/');
 
-        string[] probePaths = ["/api/v1/health", "/api/v1/info"]; // order matters
+        string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
         foreach (var path in probePaths)
         {
             try
@@ -185,7 +185,7 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
 
         // Use a minimal endpoint (info or health). Try /api/v1/health first, fallback to /api/v1/info
         var baseUrl = cfg.BaseUrl.TrimEnd('/');
-        string[] probePaths = ["/api/v1/health", "/api/v1/info"]; // order matters
+        string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
         foreach (var p in probePaths)
         {
             try

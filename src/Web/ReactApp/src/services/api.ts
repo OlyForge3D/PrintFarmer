@@ -14,7 +14,7 @@ import {
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
-  PrinterModelDto,
+  ModelDto,
   MoveRequest,
   MultiUploadResponse,
   Printer,
@@ -183,29 +183,29 @@ export class ApiClient {
     await this.client.delete(`/catalog/manufacturers/${id}`);
   }
 
-  async getModels(manufacturerId?: string): Promise<PrinterModelDto[]> {
+  async getModels(manufacturerId?: string): Promise<ModelDto[]> {
     const params = manufacturerId ? { manufacturerId } : {};
-    const response = await this.client.get<PrinterModelDto[]>('/catalog/printer-models', { params });
+    const response = await this.client.get<ModelDto[]>('/catalog/models', { params });
     return response.data;
   }
 
-  async createModel(model: Omit<PrinterModelDto, 'id'>): Promise<PrinterModelDto> {
-    const response = await this.client.post<PrinterModelDto>('/catalog/printer-models', model);
+  async createModel(model: Omit<ModelDto, 'id'>): Promise<ModelDto> {
+    const response = await this.client.post<ModelDto>('/catalog/models', model);
     return response.data;
   }
 
-  async updateModel(id: string, request: UpdateModelRequest): Promise<PrinterModelDto> {
-    const response = await this.client.put<PrinterModelDto>(`/catalog/printer-models/${id}`, request);
+  async updateModel(id: string, request: UpdateModelRequest): Promise<ModelDto> {
+    const response = await this.client.put<ModelDto>(`/catalog/models/${id}`, request);
     return response.data;
   }
 
   // Legacy method for simple name updates
-  async updateModelName(id: string, name: string): Promise<PrinterModelDto> {
+  async updateModelName(id: string, name: string): Promise<ModelDto> {
     return this.updateModel(id, { name });
   }
 
   async deleteModel(id: string): Promise<void> {
-    await this.client.delete(`/catalog/printer-models/${id}`);
+    await this.client.delete(`/catalog/models/${id}`);
   }
 
   // ============ Settings API methods ============
@@ -223,20 +223,6 @@ export class ApiClient {
       timeoutMs: payload.timeoutMs,
       maxConcurrentScans: payload.maxConcurrentScans,
       ports: payload.ports
-    });
-  }
-
-  // SignalR settings
-  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
-    const resp = await this.client.get('/signalr/settings');
-    const data = resp.data as { logLevel: string; consoleLoggingEnabled: boolean };
-    return data;
-  }
-
-  async saveSignalRSettings(payload: { logLevel: string; consoleLoggingEnabled: boolean }): Promise<void> {
-    await this.client.post('/signalr/settings', {
-      logLevel: payload.logLevel,
-      consoleLoggingEnabled: payload.consoleLoggingEnabled
     });
   }
 

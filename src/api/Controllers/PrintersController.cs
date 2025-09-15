@@ -1448,14 +1448,14 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<Farm.Web.Shared.HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
-        var printer = await db.Printers.FindAsync(id);
+        var printer = await db.Printers.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (printer == null)
         { return NotFound(); }
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
             // For non-Moonraker printers, return empty history for now
-            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = [] };
+            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
         }
 
         try
@@ -1463,7 +1463,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             var moonrakerResponse = await moon.GetHistoryListAsync(printer.ServerUrl, limit, start, since, before, order, ct);
             if (moonrakerResponse == null)
             {
-                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = [] };
+                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
             }
 
             // Convert from Moonraker models to shared models
@@ -1500,7 +1500,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to get history for printer {id}: {ex.Message}");
-            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = [] };
+            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
         }
     }
 
@@ -1520,7 +1520,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             return BadRequest("Job ID is required");
         }
 
-        var printer = await db.Printers.FindAsync(id, ct);
+        var printer = await db.Printers.FindAsync(new object?[] { id, ct }, cancellationToken: ct);
         if (printer == null)
         {
             logger.LogWarning("Printer {PrinterId} not found for history job request", id);
@@ -1593,7 +1593,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<Farm.Web.Shared.HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
-        var printer = await db.Printers.FindAsync(id);
+        var printer = await db.Printers.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (printer == null)
         { return NotFound(); }
 
@@ -1659,7 +1659,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult> DeleteHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
-        var printer = await db.Printers.FindAsync(id);
+        var printer = await db.Printers.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (printer == null)
         { return NotFound(); }
 
@@ -1744,7 +1744,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         try
         {
             using var reader = new StreamReader(file.OpenReadStream());
-            var csvContent = await reader.ReadToEndAsync();
+            var csvContent = await reader.ReadToEndAsync(ct);
             var lines = csvContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
             if (lines.Length < 2)
@@ -1904,7 +1904,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Add the last field
         result.Add(current.ToString());
 
-        return [.. result];
+        return result.ToArray();
     }
 
     private async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)

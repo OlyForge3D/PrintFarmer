@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared.Json;
@@ -87,6 +88,7 @@ public sealed class PrintJobStatusDtoJsonConverter : JsonConverter<PrintJobStatu
         {
             return PrintJobStatusDto.Queued;
         }
+
         if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrintJobStatusDto), num))
         {
             return (PrintJobStatusDto)num;

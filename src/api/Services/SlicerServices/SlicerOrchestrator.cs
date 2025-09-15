@@ -117,14 +117,12 @@ public class SlicerOrchestrator : ISlicerOrchestrator
     {
         try
         {
-            // Retrieve the job (single round-trip). Caller just needs a status snapshot; we do a shallow map only.
             var job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
-            if (job is null)
+            if (job == null)
             {
-                return null; // Fast null path (no allocations beyond awaited state machine)
+                return null;
             }
 
-            // Avoid unnecessary dictionary iteration if no metadata present
             var response = new SlicingJobStatusResponse
             {
                 JobId = job.Id,
@@ -143,13 +141,9 @@ public class SlicerOrchestrator : ISlicerOrchestrator
                 ScheduledAt = job.ScheduledAt
             };
 
-            if (job.Metadata.Count != 0)
+            foreach (var kv in job.Metadata)
             {
-                // Copy entries; capacity already 0 so let dictionary grow; small count expected
-                foreach (var kv in job.Metadata)
-                {
-                    response.Metadata[kv.Key] = kv.Value;
-                }
+                response.Metadata[kv.Key] = kv.Value;
             }
 
             return response;

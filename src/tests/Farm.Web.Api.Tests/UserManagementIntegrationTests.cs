@@ -145,7 +145,7 @@ public class UserManagementIntegrationTests : IClassFixture<CustomWebApplication
             Password = "CreatedPassword123!",
             FirstName = "Created",
             LastName = "User",
-            RoleIds = [] // Will get default role
+            RoleIds = Array.Empty<Guid>() // Will get default role
         };
 
         // Act

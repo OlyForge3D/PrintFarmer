@@ -1,9 +1,14 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using Moq;
+using FluentAssertions;
+using Xunit;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
-// DB-backed printer lifecycle; previously also tagged Slow.
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
@@ -243,7 +248,7 @@ public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactor
         }
     }
 
-    private record HealthzDto(string Status);
+    private sealed record HealthzDto(string Status);
 }
 
 internal sealed record CameraUrlResultDto(string? StreamUrl, string? SnapshotUrl);

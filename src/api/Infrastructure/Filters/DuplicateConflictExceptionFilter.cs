@@ -11,6 +11,8 @@ public sealed class DuplicateConflictExceptionFilter : IExceptionFilter
 {
     public void OnException(ExceptionContext context)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         if (context.Exception is not DuplicateEntityException dup)
         {
             return;

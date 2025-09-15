@@ -536,7 +536,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
     public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
     {
-        var parts = new List<string> { "G91", "G0" };
+        List<string> parts = new() { "G91", "G0" };
         if (x is not null)
         {
             parts.Add($"X{x:0.###}");
@@ -563,7 +563,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
     public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
     {
-        var parts = new List<string> { "G90", "G0" };
+        List<string> parts = new() { "G90", "G0" };
         if (x is not null)
         {
             parts.Add($"X{x:0.###}");
@@ -838,7 +838,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             using var resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return [];
+                return Array.Empty<string>();
             }
 
             await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
@@ -848,7 +848,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             if (!root.TryGetProperty("result", out var result) ||
                 result.ValueKind != JsonValueKind.Array)
             {
-                return [];
+                return Array.Empty<string>();
             }
 
             var files = new List<string>();
@@ -864,11 +864,11 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                     }
                 }
             }
-            return [.. files];
+            return files.ToArray();
         }
         catch
         {
-            return [];
+            return Array.Empty<string>();
         }
     }
 
@@ -889,15 +889,15 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             using var resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return [];
+                return Array.Empty<FileRoot>();
             }
 
             var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileRoot[]>>(cancellationToken: cts.Token);
-            return response?.Result ?? [];
+            return response?.Result ?? Array.Empty<FileRoot>();
         }
         catch
         {
-            return [];
+            return Array.Empty<FileRoot>();
         }
     }
 

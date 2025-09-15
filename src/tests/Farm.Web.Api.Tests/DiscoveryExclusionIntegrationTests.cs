@@ -1,8 +1,12 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
+using FluentAssertions;
+using Xunit;
+using Farm.Web.Shared;
+using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Data.Sqlite;
@@ -21,10 +25,7 @@ public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFa
 
     public DiscoveryExclusionIntegrationTests(WebApplicationFactory<Program> factory)
     {
-        if (factory is null)
-        {
-            throw new ArgumentNullException(nameof(factory));
-        }
+        ArgumentNullException.ThrowIfNull(factory);
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>

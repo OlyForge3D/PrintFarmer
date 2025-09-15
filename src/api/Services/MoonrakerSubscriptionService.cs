@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Farm.Web.Api.Services;
 
 // Persistent state for a printer to avoid overwriting good values with nulls
-internal class PrinterState
+internal sealed class PrinterState
 {
     public double? X { get; set; }
     public double? Y { get; set; }

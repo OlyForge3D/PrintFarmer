@@ -20,16 +20,18 @@ public class ModelController : ControllerBase
     private readonly ILogger<ModelController> _logger;
     private readonly AppDbContext _context;
     private readonly string _modelsPath;
-    private readonly IModelAnalysisService _analysisService;
+    private readonly IModelAnalysisService? _analysisService;
     private readonly IVirusScanner _virusScanner;
 
-    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner)
+    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService? analysisService, IVirusScanner virusScanner)
     {
         _logger = logger;
         _context = context;
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-        _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
+        // Model analysis is best-effort. Tests and some environments may not register an analysis service
+        // so accept a nullable service and perform analysis only when present.
+        _analysisService = analysisService;
         _virusScanner = virusScanner ?? throw new ArgumentNullException(nameof(virusScanner));
 
         // Ensure models directory exists
@@ -141,7 +143,19 @@ public class ModelController : ControllerBase
             ModelAnalysisResult? analysis = null;
             try
             {
-                analysis = await _analysisService.AnalyzeModelAsync(filePath, fileExtension, CancellationToken.None);
+                // Run model analysis only if the analysis service is available. This keeps uploads resilient in
+                // environments (and tests) where the analysis service is intentionally not registered.
+                if (_analysisService != null)
+                {
+                    try
+                    {
+                        analysis = await _analysisService.AnalyzeModelAsync(filePath, fileExtension, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Model analysis failed for {FileName}; marking model as valid but without metadata", originalName);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -437,7 +451,7 @@ public class ModelController : ControllerBase
         var result = new Model3DValidationResultDto
         {
             Valid = issues.Count == 0,
-            Issues = issues.Count > 0 ? [.. issues] : null
+            Issues = issues.Count > 0 ? issues.ToArray() : null
         };
 
         return Ok(result);

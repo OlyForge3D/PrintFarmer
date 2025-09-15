@@ -14,12 +14,14 @@ public static class SlicingJobStore
 
     public static SlicingJobDto Add(SlicingJobDto job)
     {
+        ArgumentNullException.ThrowIfNull(job);
         _jobs[job.JobId] = job;
         return job;
     }
 
     public static bool TryGet(string id, out SlicingJobDto? job)
     {
+        ArgumentNullException.ThrowIfNull(id);
         if (_jobs.TryGetValue(id, out var direct))
         {
             job = direct;

@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
 
+// PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
 namespace Farm.Web.Api.Tests;
 
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
@@ -21,6 +22,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     public Mock<ISlicerJobQueue> MockSlicerJobQueue { get; private set; } = null!;
     public Mock<ISlicerFileStorage> MockSlicerFileStorage { get; private set; } = null!;
     public Mock<ISlicerProgressNotifier> MockSlicerProgressNotifier { get; private set; } = null!;
+    public Mock<IModelAnalysisService> MockModelAnalysisService { get; private set; } = null!;
 
     private readonly ConcurrentDictionary<Guid, DistributedSlicingJob> _slicerJobs = new();
 
@@ -50,6 +52,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         MockSlicerJobQueue = new Mock<ISlicerJobQueue>();
         MockSlicerFileStorage = new Mock<ISlicerFileStorage>();
         MockSlicerProgressNotifier = new Mock<ISlicerProgressNotifier>();
+        MockModelAnalysisService = new Mock<IModelAnalysisService>();
 
         // Set up default mock behaviors
         SetupDefaultMockBehaviors();
@@ -132,6 +135,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton(MockPrusaLinkClient.Object);
             services.AddSingleton(MockSdcpClient.Object);
 
+            // Provide a no-op ModelAnalysisService for tests to avoid DI activation failures when
+            // the real analysis service is not desirable in unit/integration tests.
+            services.AddSingleton<IModelAnalysisService>(MockModelAnalysisService.Object);
+
             // Replace temp path provider with test-specific implementation confined to repo
             var existingTemp = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Infrastructure.Temp.ITempPathProvider));
             if (existingTemp != null)
@@ -186,6 +193,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 CameraStreamUrl: null,
                 CameraSnapshotUrl: null
             ));
+
+        // Default analysis behavior: return null (analysis optional) to keep tests deterministic
+        MockModelAnalysisService.Setup(x => x.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ModelAnalysisResult?)null);
         return base.CreateHost(builder);
     }
 
@@ -194,7 +205,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // Set up default discovery behavior to return empty list
         MockNetworkDiscoveryService
             .Setup(x => x.DiscoverPrintersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
+            .ReturnsAsync(new List<DiscoveredPrinterDto>());
     }
 
     private void SetupSlicerServiceMocks()

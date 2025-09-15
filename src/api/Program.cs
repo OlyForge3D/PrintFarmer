@@ -212,14 +212,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                                o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
-            {
-                var cs = builder.Configuration.GetConnectionString("MySql")
-                         ?? builder.Configuration.GetConnectionString("Default")
-                         ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-                var serverVersion = ServerVersion.AutoDetect(cs);
-                options.UseMySql(cs, serverVersion);
-                break;
-            }
+        {
+            var cs = builder.Configuration.GetConnectionString("MySql")
+                     ?? builder.Configuration.GetConnectionString("Default")
+                     ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
+            var serverVersion = ServerVersion.AutoDetect(cs);
+            options.UseMySql(cs, serverVersion);
+            break;
+        }
         default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")
@@ -255,16 +255,12 @@ builder.Services.AddScoped<IPresetService, PresetService>();
 builder.Services.AddScoped<ISpoolmanService, SpoolmanService>();
 builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
-builder.Services.AddScoped<ISignalRSettingsService, SignalRSettingsService>();
 builder.Services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
-// Model analysis and virus scanning services for ModelController
-builder.Services.AddScoped<IModelAnalysisService, ModelAnalysisService>();
-builder.Services.AddScoped<IVirusScanner, ClamAVVirusScanner>();
 // Migration status provider (lightweight introspection without forcing migrations strategy changes)
 // NOTE: Was singleton; changed to Scoped because it directly depends on AppDbContext (scoped) to avoid scoped->singleton injection violation in tests.
 builder.Services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
@@ -329,9 +325,6 @@ builder.Services.AddTransient<Farm.Web.Api.Services.SlicerServices.Process.IProc
 // Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
 builder.Services.AddHostedService<SlicerWorkerHostedService>();
 
-// Network URL rewriting for cross-environment compatibility
-builder.Services.AddSingleton<NetworkUrlRewriteService>();
-
 // Background services
 builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
@@ -381,6 +374,7 @@ if (isMonolithicDeployment)
         catch
         {
             // Safety: if relative path resolution fails (null args, etc.), skip static file mapping to avoid container crash.
+            // no-op; fall through
         }
     });
 }
@@ -890,21 +884,6 @@ app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] Filam
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
 app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
-app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettingsDto body) =>
-{
-    var validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
-    return Results.Ok(new
-    {
-        isValid = validation.IsValid,
-        errors = validation.Errors,
-        warnings = validation.Warnings,
-        suggestions = validation.Suggestions
-    });
-});
-
-// Minimal API for SignalR settings
-app.MapGet("/api/signalr/settings", ([FromServices] ISignalRSettingsService svc) => Results.Ok(svc.GetSettings()));
-app.MapPost("/api/signalr/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] ISignalRSettingsService svc, [FromBody] SignalRSettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
 app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () =>
 {
     // Enumerate local IPv4 addresses and suggest /24 CIDR blocks.

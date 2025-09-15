@@ -57,7 +57,7 @@ public class Manufacturer
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    public ICollection<PrinterModel> Models { get; } = [];
+    public ICollection<PrinterModel> Models { get; } = new List<PrinterModel>();
 }
 
 public class PrinterModel
@@ -70,7 +70,7 @@ public class PrinterModel
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
     public int? DefaultBackend { get; set; } // Default backend for this model: 0=Moonraker, 1=PrusaLink, 2=SDCP
-    public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = [];
+    public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();
 }
 
 public class FilamentType
@@ -80,7 +80,7 @@ public class FilamentType
     public double? DefaultHotendTemp { get; set; }
     public double? DefaultBedTemp { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public ICollection<PrinterModelFilamentType> PrinterModels { get; } = [];
+    public ICollection<PrinterModelFilamentType> PrinterModels { get; } = new List<PrinterModelFilamentType>();
 }
 
 public class PrinterModelFilamentType
@@ -303,7 +303,7 @@ public class SlicerProfile
     public double PrintSpeed { get; set; } = 50; // mm/s
     public int NozzleTemperature { get; set; } = 210; // °C
     public int BedTemperature { get; set; } = 60; // °C
-    public bool EnableSupports { get; set; } = false;
+    public bool EnableSupports { get; set; }
     public string Material { get; set; } = "PLA";
     public ProfileQuality Quality { get; set; } = ProfileQuality.Standard;
 
@@ -311,7 +311,7 @@ public class SlicerProfile
     public string? AdvancedSettings { get; set; } // JSON object with additional slicer-specific settings
 
     // Profile Management
-    public bool IsDefault { get; set; } = false;
+    public bool IsDefault { get; set; }
     public bool IsPublic { get; set; } = true; // Can be used by other users
     public Guid? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
@@ -449,7 +449,7 @@ public class User
     public DateTime UpdatedAt { get; set; }
 
     // Navigation properties
-    public ICollection<UserRole> UserRoles { get; } = [];
+    public ICollection<UserRole> UserRoles { get; } = new List<UserRole>();
 }
 
 public class Role
@@ -464,8 +464,8 @@ public class Role
     public DateTime UpdatedAt { get; set; }
 
     // Navigation properties
-    public ICollection<UserRole> UserRoles { get; } = [];
-    public ICollection<RolePermission> RolePermissions { get; } = [];
+    public ICollection<UserRole> UserRoles { get; } = new List<UserRole>();
+    public ICollection<RolePermission> RolePermissions { get; } = new List<RolePermission>();
 }
 
 public class Resource
@@ -480,7 +480,7 @@ public class Resource
     public DateTime UpdatedAt { get; set; }
 
     // Navigation properties
-    public ICollection<RolePermission> RolePermissions { get; } = [];
+    public ICollection<RolePermission> RolePermissions { get; } = new List<RolePermission>();
 }
 
 public class Action
@@ -493,7 +493,7 @@ public class Action
     public DateTime UpdatedAt { get; set; }
 
     // Navigation properties
-    public ICollection<RolePermission> RolePermissions { get; } = [];
+    public ICollection<RolePermission> RolePermissions { get; } = new List<RolePermission>();
 }
 
 public class RolePermission

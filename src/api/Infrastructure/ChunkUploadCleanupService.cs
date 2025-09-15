@@ -59,7 +59,7 @@ public class ChunkUploadCleanupService : BackgroundService
                     continue;
                 }
                 // Paired .part file
-                var part = meta[..^(".meta.json".Length)];
+                var part = meta.Substring(0, meta.Length - ".meta.json".Length);
                 if (File.Exists(part))
                 {
                     File.Delete(part);

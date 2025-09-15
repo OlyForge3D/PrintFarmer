@@ -1,18 +1,22 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.IO;
+using FluentAssertions;
+using Xunit;
+using Farm.Web.Shared;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
-using Farm.Web.Shared;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
-/// <summary>
-/// Integration tests for QueueController (job queue management)
-/// </summary>
-// DB-backed queue lifecycle tests.
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
+/// <summary>
+/// Integration tests for QueueController (job queue management)
+/// </summary>
 public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
