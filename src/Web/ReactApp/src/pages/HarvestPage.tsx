@@ -172,7 +172,7 @@ export const HarvestPage: React.FC = () => {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">G-code Harvest</h1>
+        <h1 className="text-2xl font-bold text-pf-text-primary">G-code Harvest</h1>
         
         {hasPermission('gcode_harvest', 'create') && (
           <div className="flex flex-col items-end">
@@ -185,7 +185,7 @@ export const HarvestPage: React.FC = () => {
               {startHarvestMutation.isPending ? 'Starting...' : 'Start Harvest'}
             </button>
             {selectedPrinters.length === 0 && !startHarvestMutation.isPending && (
-              <span className="mt-1 text-xs text-gray-500">Select one or more printers below</span>
+              <span className="mt-1 text-xs text-pf-text-tertiary">Select one or more printers below</span>
             )}
           </div>
         )}
@@ -194,10 +194,10 @@ export const HarvestPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Printer Selection */}
         <div className="lg:col-span-1">
-          <div className="bg-white rounded-lg shadow">
-            <div className="p-4 border-b border-gray-200">
-              <h3 className="font-medium text-gray-900">Select Printers</h3>
-              <p className="text-sm text-gray-500 mt-1">
+          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
+            <div className="p-4 border-b border-pf-border">
+              <h3 className="font-medium text-pf-text-primary">Select Printers</h3>
+              <p className="text-sm text-pf-text-secondary mt-1">
                 Choose printers to harvest G-code files from
               </p>
             </div>
@@ -213,11 +213,11 @@ export const HarvestPage: React.FC = () => {
                       setSelectedPrinters(reachablePrinters);
                     }
                   }}
-                  className="text-sm text-blue-600 hover:text-blue-800"
+                  className="text-sm text-pf-link hover:text-pf-accent"
                 >
                   {selectedPrinters.length === printers?.filter((p: Printer) => p.isReachable).length ? 'Deselect All' : 'Select All'}
                 </button>
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-pf-text-tertiary">
                   {selectedPrinters.length} selected
                 </span>
               </div>
@@ -228,8 +228,8 @@ export const HarvestPage: React.FC = () => {
                     key={printer.id}
                     className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${
                       selectedPrinters.includes(printer.id)
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
+                        ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20'
+                        : 'border-pf-border hover:border-pf-border-light'
                     } ${!printer.isReachable ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <input
@@ -248,13 +248,13 @@ export const HarvestPage: React.FC = () => {
                       className="mr-3"
                     />
                     <div className="flex-1">
-                      <div className="font-medium text-gray-900">{printer.name}</div>
-                      <div className="text-sm text-gray-500">
+                      <div className="font-medium text-pf-text-primary">{printer.name}</div>
+                      <div className="text-sm text-pf-text-secondary">
                         {printer.backend} • {printer.isReachable ? 'Online' : 'Offline'}
                       </div>
                     </div>
                     <div className={`w-3 h-3 rounded-full ${
-                      printer.isReachable ? 'bg-green-500' : 'bg-red-500'
+                      printer.isReachable ? 'bg-pf-success' : 'bg-pf-error'
                     }`} />
                   </label>
                 ))}
@@ -263,9 +263,9 @@ export const HarvestPage: React.FC = () => {
           </div>
 
           {/* Harvest Options */}
-          <div className="mt-6 bg-white rounded-lg shadow">
-            <div className="p-4 border-b border-gray-200">
-              <h3 className="font-medium text-gray-900">Harvest Options</h3>
+          <div className="mt-6 bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
+            <div className="p-4 border-b border-pf-border">
+              <h3 className="font-medium text-pf-text-primary">Harvest Options</h3>
             </div>
             
             <div className="p-4 space-y-4">
@@ -283,7 +283,7 @@ export const HarvestPage: React.FC = () => {
               </label>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-pf-text-primary mb-2">
                   File Types
                 </label>
                 <div className="space-y-2">
@@ -314,7 +314,7 @@ export const HarvestPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-pf-text-primary mb-2">
                   Minimum File Size
                 </label>
                 <select
@@ -324,7 +324,7 @@ export const HarvestPage: React.FC = () => {
                     ...prev,
                     minFileSize: parseInt(e.target.value)
                   }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-pf-border rounded-md bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
                 >
                   <option value={0}>No minimum</option>
                   <option value={1024}>1 KB</option>
@@ -335,7 +335,7 @@ export const HarvestPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-pf-text-primary mb-2">
                   Duplicate Handling
                 </label>
                 <select
@@ -345,7 +345,7 @@ export const HarvestPage: React.FC = () => {
                     ...prev,
                     duplicateHandling: e.target.value as 'skip' | 'overwrite' | 'rename'
                   }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-pf-border rounded-md bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
                 >
                   <option value="skip">Skip duplicates</option>
                   <option value="overwrite">Overwrite existing</option>
@@ -360,9 +360,9 @@ export const HarvestPage: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           {/* Active Operations */}
           {activeOperations.length > 0 && (
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-4 border-b border-gray-200">
-                <h3 className="font-medium text-gray-900">Active Operations</h3>
+            <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
+              <div className="p-4 border-b border-pf-border">
+                <h3 className="font-medium text-pf-text-primary">Active Operations</h3>
               </div>
               
               <div className="p-4 space-y-4">
@@ -379,18 +379,18 @@ export const HarvestPage: React.FC = () => {
           )}
 
           {/* Recent Operations */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="font-medium text-gray-900">Recent Operations</h3>
+          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
+            <div className="p-4 border-b border-pf-border flex items-center justify-between">
+              <h3 className="font-medium text-pf-text-primary">Recent Operations</h3>
               
               {hasPermission('gcode_harvest', 'read') && (
-                <Link to="/harvest/history" className="text-sm text-blue-600 hover:text-blue-800">
+                <Link to="/harvest/history" className="text-sm text-pf-link hover:text-pf-accent">
                   View All History
                 </Link>
               )}
             </div>
             
-            <div className="divide-y divide-gray-200">
+            <div className="divide-y divide-pf-border">
               {completedOperations.length > 0 ? (
                 completedOperations.map(operation => (
                   <HarvestOperationCard
@@ -400,7 +400,7 @@ export const HarvestPage: React.FC = () => {
                   />
                 ))
               ) : (
-                <div className="p-8 text-center text-gray-500">
+                <div className="p-8 text-center text-pf-text-tertiary">
                   No harvest operations yet
                 </div>
               )}

@@ -370,17 +370,17 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           <nav className="flex items-center space-x-2 text-sm">
             <button
               onClick={() => setCurrentPath('/')}
-              className="text-blue-600 hover:text-blue-800"
+              className="text-pf-link hover:text-pf-accent"
             >
               Root
             </button>
             
             {breadcrumbs.map((segment, index) => (
               <React.Fragment key={index}>
-                <ChevronRightIcon className="w-4 h-4 text-gray-400" />
+                <ChevronRightIcon className="w-4 h-4 text-pf-text-tertiary" />
                 <button
                   onClick={() => { setCurrentPath('/' + breadcrumbs.slice(0, index + 1).join('/')); setPage(1);} }
-                  className="text-blue-600 hover:text-blue-800"
+                  className="text-pf-link hover:text-pf-accent"
                 >
                   {segment}
                 </button>
@@ -441,17 +441,17 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           {hasPermission('gcode_harvest', 'update') && (
             <button
               onClick={() => setShowSettings(s => !s)}
-              className="px-3 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300"
+              className="px-3 py-1 bg-pf-bg-2 text-sm rounded hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border"
             >{showSettings ? 'Close Settings' : 'Settings'}</button>
           )}
-          <div className="flex border border-gray-300 rounded">
+          <div className="flex border border-pf-border rounded">
             <button
               onClick={() => setViewMode('list')}
-              className={`px-3 py-1 text-sm ${viewMode === 'list' ? 'bg-blue-500 text-white' : 'text-gray-700'}`}
+              className={`px-3 py-1 text-sm ${viewMode === 'list' ? 'bg-pf-accent text-white' : 'text-pf-text-primary bg-pf-bg-1'}`}
             >List</button>
             <button
               onClick={() => setViewMode('grid')}
-              className={`px-3 py-1 text-sm ${viewMode === 'grid' ? 'bg-blue-500 text-white' : 'text-gray-700'}`}
+              className={`px-3 py-1 text-sm ${viewMode === 'grid' ? 'bg-pf-accent text-white' : 'text-pf-text-primary bg-pf-bg-1'}`}
             >Grid</button>
           </div>
         </div>
@@ -468,7 +468,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             aria-label="Search files"
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setPage(1);} }
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-pf-border rounded-md bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
           />
         </div>
         
@@ -478,7 +478,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           aria-label="Sort files by"
           value={sortBy}
           onChange={(e) => { setSortBy(e.target.value as 'name' | 'size' | 'date'); setPage(1);} }
-          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-2 border border-pf-border rounded-md bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
         >
           <option value="name">Sort by Name</option>
           <option value="size">Sort by Size</option>
@@ -487,7 +487,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         
         <button
           onClick={() => { setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); setPage(1);} }
-          className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+          className="px-3 py-2 border border-pf-border rounded-md hover:bg-pf-bg-1 text-pf-text-primary bg-pf-bg-0"
         >
           {sortOrder === 'asc' ? '↑' : '↓'}
         </button>
@@ -509,7 +509,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 uploadMutation.mutate(accepted);
               }
             }}
-            className="border-2 border-dashed border-gray-300 rounded p-6 text-center text-sm text-gray-500 hover:border-blue-400 transition-colors cursor-pointer"
+            className="border-2 border-dashed border-pf-border rounded p-6 text-center text-sm text-pf-text-secondary hover:border-pf-accent transition-colors cursor-pointer"
             onClick={() => {
               const input = document.createElement('input');
               input.type = 'file';
@@ -528,11 +528,11 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           >
             {uploadMutation.isPending ? 'Uploading...' : `Click or drag & drop files (${(settings?.allowedExtensions || ['.gcode','.bgcode']).join(', ')})`}
           </div>
-          <p className="text-xs text-gray-400">Supports multi-file upload. New files will auto-rename on collision.</p>
+          <p className="text-xs text-pf-text-tertiary">Supports multi-file upload. New files will auto-rename on collision.</p>
           {uploadQueue.length > 0 && (
-            <div className="space-y-1 border rounded p-2 bg-white">
+            <div className="space-y-1 border border-pf-border rounded p-2 bg-pf-bg-1">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-gray-600">Uploads</span>
+                <span className="text-xs font-medium text-pf-text-secondary">Uploads</span>
                 <div className="flex gap-2">
                   <button
                     className="text-xs px-2 py-0.5 border rounded hover:bg-gray-50"

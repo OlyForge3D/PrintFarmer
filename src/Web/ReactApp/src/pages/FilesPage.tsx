@@ -10,8 +10,8 @@ export const FilesPage: React.FC = () => {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">G-code Files</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-bold text-pf-text-primary">G-code Files</h1>
+        <p className="mt-1 text-sm text-pf-text-secondary">
           Browse and manage your harvested G-code files
         </p>
       </div>
