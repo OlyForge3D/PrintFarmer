@@ -1,21 +1,5 @@
-import React, { createContext, useState, useCallback } from 'react';
-
-export interface SpoolmanState {
-  enabled: boolean;
-  baseUrl: string | null;
-  version: string | null;
-  lastEndpoint: string | null;
-  lastErrorCategory: string | null;
-  lastErrorMessage: string | null;
-}
-
-interface SpoolmanContextValue extends SpoolmanState {
-  setEnabled: (v: boolean) => void;
-  setBaseUrl: (url: string | null) => void;
-  updateProbeSuccess: (info: { version?: string | null; endpoint?: string | null }) => void;
-  updateProbeFailure: (info: { errorCategory?: string | null; message?: string | null }) => void;
-  clear: () => void;
-}
+import React, { useState, useCallback } from 'react';
+import { SpoolmanState, SpoolmanContextValue, SpoolmanContext } from './SpoolmanTypes';
 
 const defaultState: SpoolmanState = {
   enabled: false,
@@ -25,8 +9,6 @@ const defaultState: SpoolmanState = {
   lastErrorCategory: null,
   lastErrorMessage: null
 };
-
-export const SpoolmanContext = createContext<SpoolmanContextValue | undefined>(undefined);
 
 export const SpoolmanProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<SpoolmanState>(defaultState);

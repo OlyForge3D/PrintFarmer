@@ -222,7 +222,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             }
             throw new Error(await putResp.text() || 'Chunk upload failed');
           }
-          const statusJson = await putResp.json().catch(() => null) as any;
+          const statusJson = await putResp.json().catch(() => null) as { isComplete?: boolean; finalHash?: string; paused?: boolean; completed?: boolean } | null;
           offset += slice.size;
           item.uploadedBytes = offset;
           item.progress = Math.round((offset / item.file.size) * 100);
@@ -290,13 +290,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             }
             results.succeeded++;
           }
-        } catch (err: any) {
-          if (item.cancelRequested || /cancelled/i.test(err?.message || '')) {
+        } catch (err: unknown) {
+          if (item.cancelRequested || /cancelled/i.test((err as Error)?.message || '')) {
             item.status = 'cancelled';
             results.cancelled++;
           } else {
             item.status = 'error';
-            item.error = err?.message || 'Failed';
+            item.error = (err as Error)?.message || 'Failed';
             results.failed++;
           }
         }
@@ -427,8 +427,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     const summary = dupes.map(([hash, arr]) => `${hash.slice(0,8)}… (${arr.length})`).join(', ');
                     toast.info(`Duplicates: ${summary}`);
                   }
-                } catch (e:any) {
-                  toast.error(e?.message || 'Duplicate scan failed');
+                } catch (e: unknown) {
+                  toast.error((e as Error)?.message || 'Duplicate scan failed');
                 }
               }}
               className="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:opacity-50"
@@ -566,7 +566,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     {(() => {
                       const pct = Math.min(100, Math.max(0, item.progress));
                       const even = Math.round(pct / 2) * 2; // snap to 2%
-                      const widthClass = (styles as any)[`w${even}`] || (styles as any).w100 || '';
+                      const widthClass = (styles as Record<string, string>)[`w${even}`] || (styles as Record<string, string>).w100 || '';
                       return (
                         <div
                           className={[
@@ -756,8 +756,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     const fresh = await apiClient.getGcodeUploadSettings();
                     setSettings(fresh);
                     toast.success('Settings updated');
-                  } catch (e:any) {
-                    toast.error(e.message || 'Failed');
+                  } catch (e: unknown) {
+                    toast.error((e as Error).message || 'Failed');
                   }
                 }}
                 className="px-3 py-1 bg-blue-600 text-white rounded text-sm"

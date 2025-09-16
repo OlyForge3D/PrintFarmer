@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { SpoolmanContext } from './SpoolmanContext';
+import { SpoolmanContext } from './SpoolmanTypes';
 
 export function useSpoolman() {
   const ctx = useContext(SpoolmanContext);

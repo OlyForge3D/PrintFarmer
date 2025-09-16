@@ -63,10 +63,6 @@ export function SettingsPage() {
   const [newFilamentType, setNewFilamentType] = useState({ name: '', hotend: 210, bed: 60 });
   const [showAddForm, setShowAddForm] = useState(false);
 
-  useEffect(() => {
-    loadSettings();
-  }, []); // Empty dependency - component mount only
-
   // Sync draft when policy loads
   useEffect(() => {
     if (passwordPolicy && !policyDirty) {
@@ -151,6 +147,11 @@ export function SettingsPage() {
       setLoading(false);
     }
   }, []); // useCallback dependency array - empty since we only use setters
+
+  // Load settings on mount
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   const updatePolicyField = (field: string, value: unknown) => {
     setDraftPolicy(prev => ({ ...prev, [field]: value }));

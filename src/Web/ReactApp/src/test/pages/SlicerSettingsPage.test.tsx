@@ -3,15 +3,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type MockFetch = typeof fetch;
+
 describe('SlicerSettingsPage', () => {
   beforeEach(() => {
     // Reset global fetch mock
-    global.fetch = vi.fn() as any;
+    global.fetch = vi.fn() as MockFetch;
   });
 
   it('loads settings and validates jitter input', async () => {
     const mockGet = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ enabled: true, perEngine: {}, jitterPercent: 15.0 }) });
-    global.fetch = mockGet as any;
+    global.fetch = mockGet as MockFetch;
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -34,7 +36,7 @@ describe('SlicerSettingsPage', () => {
 
     const mockPost = vi.fn().mockResolvedValue({ ok: true, text: async () => '' });
     // next fetch should be POST called by save mutation
-    global.fetch = mockPost as any;
+    global.fetch = mockPost as MockFetch;
 
     const saveButton = screen.getByRole('button', { name: /save settings/i });
     fireEvent.click(saveButton);
