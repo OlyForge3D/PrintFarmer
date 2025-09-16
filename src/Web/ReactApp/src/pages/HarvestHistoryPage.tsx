@@ -44,8 +44,6 @@ export function HarvestHistoryPage() {
 
   const getStatusString = (status: GcodeHarvestStatus): string => {
     switch (status) {
-      case GcodeHarvestStatus.Starting:
-        return 'Starting';
       case GcodeHarvestStatus.Running:
         return 'Running';
       case GcodeHarvestStatus.Completed:

@@ -748,7 +748,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             {
                 homedAxes = ""; // No axes homed
             }
-            logger.LogInformation("TEMP: Using hardcoded homed axes for printer {PrinterId}: '{HomedAxes}'", printerId, homedAxes);
+            logger.LogDebug("TEMP: Using hardcoded homed axes for printer {PrinterId}: '{HomedAxes}'", printerId, homedAxes);
         }
 
         // Display status (progress)
@@ -930,7 +930,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             SpoolInfo: spoolInfo
         );
 
-        logger.LogInformation("Sending status update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HotendTemp={HotendTemp}, HotendTarget={HotendTarget}, BedTemp={BedTemp}, BedTarget={BedTarget}, HomedAxes={HomedAxes}",
+        logger.LogDebug("Sending status update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HotendTemp={HotendTemp}, HotendTarget={HotendTarget}, BedTemp={BedTemp}, BedTarget={BedTarget}, HomedAxes={HomedAxes}",
             printerId, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
         // Track successful status update time

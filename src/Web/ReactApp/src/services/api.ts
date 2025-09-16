@@ -185,17 +185,17 @@ export class ApiClient {
 
   async getModels(manufacturerId?: string): Promise<PrinterModelDto[]> {
     const params = manufacturerId ? { manufacturerId } : {};
-    const response = await this.client.get<PrinterModelDto[]>('/catalog/models', { params });
+    const response = await this.client.get<PrinterModelDto[]>('/catalog/printer-models', { params });
     return response.data;
   }
 
   async createModel(model: Omit<PrinterModelDto, 'id'>): Promise<PrinterModelDto> {
-    const response = await this.client.post<PrinterModelDto>('/catalog/models', model);
+    const response = await this.client.post<PrinterModelDto>('/catalog/printer-models', model);
     return response.data;
   }
 
   async updateModel(id: string, request: UpdateModelRequest): Promise<PrinterModelDto> {
-    const response = await this.client.put<PrinterModelDto>(`/catalog/models/${id}`, request);
+    const response = await this.client.put<PrinterModelDto>(`/catalog/printer-models/${id}`, request);
     return response.data;
   }
 
@@ -204,16 +204,8 @@ export class ApiClient {
     return this.updateModel(id, { name });
   }
 
-  // ============ SignalR / client settings ============
-  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
-    const resp = await this.client.get('/signalr/settings');
-    const raw = resp.data as Record<string, unknown>;
-    const logLevel = (raw['logLevel'] ?? raw['LogLevel']) as string | undefined;
-    const consoleLoggingEnabled = (raw['consoleLoggingEnabled'] ?? raw['ConsoleLoggingEnabled']) as boolean | undefined;
-    return {
-      logLevel: logLevel ?? 'Information',
-      consoleLoggingEnabled: typeof consoleLoggingEnabled === 'boolean' ? consoleLoggingEnabled : true
-    };
+  async deleteModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/printer-models/${id}`);
   }
 
   // ============ Settings API methods ============
@@ -231,6 +223,20 @@ export class ApiClient {
       timeoutMs: payload.timeoutMs,
       maxConcurrentScans: payload.maxConcurrentScans,
       ports: payload.ports
+    });
+  }
+
+  // SignalR settings
+  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
+    const resp = await this.client.get('/signalr/settings');
+    const data = resp.data as { logLevel: string; consoleLoggingEnabled: boolean };
+    return data;
+  }
+
+  async saveSignalRSettings(payload: { logLevel: string; consoleLoggingEnabled: boolean }): Promise<void> {
+    await this.client.post('/signalr/settings', {
+      logLevel: payload.logLevel,
+      consoleLoggingEnabled: payload.consoleLoggingEnabled
     });
   }
 
@@ -316,7 +322,7 @@ export class ApiClient {
       minFileSizeBytes: opts?.minFileSizeBytes,
       duplicateHandling: opts?.duplicateHandling
     };
-    const response = await this.client.post('/api/gcode-harvest/start', payload);
+    const response = await this.client.post('/gcode-harvest/start', payload);
     return response.data as { operationId: string };
   }
 
@@ -342,12 +348,12 @@ export class ApiClient {
     if (limit) params.limit = limit;
     if (offset) params.offset = offset;
     
-    const response = await this.client.get<GcodeHarvestOperation[]>('/api/gcode-harvest/operations', { params });
+    const response = await this.client.get<GcodeHarvestOperation[]>('/gcode-harvest/operations', { params });
     return response.data;
   }
 
   async getHarvestOperation(id: string): Promise<GcodeHarvestOperation> {
-    const response = await this.client.get<GcodeHarvestOperation>(`/api/gcode-harvest/operations/${id}`);
+    const response = await this.client.get<GcodeHarvestOperation>(`/gcode-harvest/operations/${id}`);
     return response.data;
   }
 

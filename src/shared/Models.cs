@@ -1,12 +1,11 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace Farm.Web.Shared;
 
 // This file contains DTOs intended for JSON serialization across client/server.
 // URL-like values are represented as strings by design for transport compatibility.
 #pragma warning disable CA1056 // URI-like properties should not be strings
-
-using System.Text.Json.Serialization;
 
 // Enum Serialization Policy:
 //  - Global Program.cs registers JsonStringEnumConverter (string names in API payloads).
@@ -438,7 +437,7 @@ public record NetworkDiscoverySettingsDto(
     int MaxConcurrentScans = 20,
     List<int> Ports = null!)
 {
-    public NetworkDiscoverySettingsDto() : this(new(), 3000, 20, new() { 7125, 80 })
+    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [7125, 80])
     {
     }
 }
@@ -451,7 +450,7 @@ public record NetworkDiscoverySettingsDto(
 public class HistoryListResponse
 {
     public int Count { get; set; }
-    public HistoryJob[] Jobs { get; set; } = Array.Empty<HistoryJob>();
+    public HistoryJob[] Jobs { get; set; } = [];
 }
 
 /// <summary>
@@ -465,7 +464,7 @@ public class HistoryJob
     public double FilamentUsed { get; set; }
     public string Filename { get; set; } = string.Empty;
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO used for JSON serialization; setter required for deserialization")]
-    public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
+    public Dictionary<string, object> Metadata { get; set; } = [];
     public double PrintDuration { get; set; }
     public string Status { get; set; } = string.Empty;
     public double StartTime { get; set; }
@@ -926,7 +925,7 @@ public class StartGcodeHarvestDto
 public class ImportSelectedGcodeFilesDto
 {
     public Guid HarvestOperationId { get; set; }
-    public Guid[] SelectedFileIds { get; set; } = Array.Empty<Guid>();
+    public Guid[] SelectedFileIds { get; set; } = [];
     public bool AddToLibraryOnly { get; set; } = true; // If false, also create print jobs
     public bool AutoDetectCapabilities { get; set; } = true;
     public string[]? DefaultTags { get; set; }
@@ -1188,7 +1187,7 @@ public class UpdatePrintJobStatusDto
 /// </summary>
 public class ReorderQueueDto
 {
-    public JobOrderDto[] JobOrder { get; set; } = Array.Empty<JobOrderDto>();
+    public JobOrderDto[] JobOrder { get; set; } = [];
 }
 
 /// <summary>
@@ -1238,7 +1237,7 @@ public class CompatiblePrinterDto
     public Guid PrinterId { get; set; }
     public string PrinterName { get; set; } = string.Empty;
     public int CompatibilityScore { get; set; } // 0-100
-    public string[] CompatibilityReasons { get; set; } = Array.Empty<string>();
+    public string[] CompatibilityReasons { get; set; } = [];
     public int CurrentQueueLength { get; set; }
 }
 
@@ -1353,7 +1352,7 @@ public class CreateUserRequest
     public string Password { get; set; } = string.Empty;
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
-    public Guid[] RoleIds { get; set; } = Array.Empty<Guid>();
+    public Guid[] RoleIds { get; set; } = [];
 }
 
 /// <summary>
@@ -1381,7 +1380,7 @@ public class CreateRoleRequest
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public RolePermissionRequestDto[] Permissions { get; set; } = Array.Empty<RolePermissionRequestDto>();
+    public RolePermissionRequestDto[] Permissions { get; set; } = [];
 }
 
 /// <summary>
@@ -1391,7 +1390,7 @@ public class UpdateRoleRequest
 {
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public RolePermissionRequestDto[] Permissions { get; set; } = Array.Empty<RolePermissionRequestDto>();
+    public RolePermissionRequestDto[] Permissions { get; set; } = [];
 }
 
 /// <summary>

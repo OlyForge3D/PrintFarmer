@@ -307,11 +307,10 @@ export interface GcodeFile {
 
 // G-code harvest operations
 export enum GcodeHarvestStatus {
-  Starting = 0,
-  Running = 1,
-  Completed = 2,
-  Failed = 3,
-  Cancelled = 4
+  Running = 'Running',
+  Completed = 'Completed',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled'
 }
 
 export interface HarvestOptions {

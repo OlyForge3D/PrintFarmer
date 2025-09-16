@@ -86,7 +86,7 @@ export const HarvestPage: React.FC = () => {
         id: `optimistic-${pid}-${now.getTime()}`,
         printerId: pid,
         printerName: printer?.name || 'Printer',
-        status: GcodeHarvestStatus.Starting,
+        status: GcodeHarvestStatus.Running,
         filesFound: 0,
         filesProcessed: 0,
         filesAdded: 0,
@@ -116,7 +116,7 @@ export const HarvestPage: React.FC = () => {
   const activeOperations = [
     ...optimisticOps,
     ...((harvestOperations?.filter(op => 
-      op.status === GcodeHarvestStatus.Running || op.status === GcodeHarvestStatus.Starting
+      op.status === GcodeHarvestStatus.Running
     )) || [])
   ];
 

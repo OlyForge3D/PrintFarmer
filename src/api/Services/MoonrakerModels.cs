@@ -625,7 +625,7 @@ namespace Farm.Web.Api.Services
 
     public class MoonrakerFileInfo
     {
-        [JsonPropertyName("path")]
+        [JsonPropertyName("filename")]
         public string Path { get; set; } = string.Empty;
 
         [JsonPropertyName("modified")]
@@ -642,6 +642,9 @@ namespace Farm.Web.Api.Services
     {
         [JsonPropertyName("path")]
         public string Path { get; set; } = string.Empty;
+
+        [JsonPropertyName("dirname")]
+        public string Dirname { get; set; } = string.Empty;
 
         [JsonPropertyName("modified")]
         public double Modified { get; set; }

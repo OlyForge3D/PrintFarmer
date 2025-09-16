@@ -21,7 +21,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
     private readonly IPrusaLinkClient _prusa;
     private readonly ISdcpClient _sdcp;
     private readonly ILogger<GcodeHarvestService> _logger;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly IHarvestQueue _harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
 
@@ -34,7 +34,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
         IPrusaLinkClient prusa,
         ISdcpClient sdcp,
         ILogger<GcodeHarvestService> logger,
-        IServiceProvider serviceProvider,
+        IServiceScopeFactory serviceScopeFactory,
         IHarvestQueue harvestQueue)
     {
         _db = db;
@@ -42,14 +42,16 @@ public partial class GcodeHarvestService : IGcodeHarvestService
         _prusa = prusa;
         _sdcp = sdcp;
         _logger = logger;
-        _serviceProvider = serviceProvider;
+        _serviceScopeFactory = serviceScopeFactory;
         _harvestQueue = harvestQueue;
     }
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
     {
+        _logger.LogInformation("🔥 StartHarvestAsync CALLED for printer ID: {PrinterId}", request?.PrinterId);
         ArgumentNullException.ThrowIfNull(request);
         var printer = await _db.Printers.FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
+        _logger.LogInformation("🔍 Found printer: {PrinterName} (ID: {PrinterId})", printer?.Name ?? "NULL", printer?.Id);
         if (printer == null)
         {
             return new GcodeHarvestResultDto(Guid.Empty, false, "Printer not found");
@@ -91,21 +93,22 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             operation.Id, printer.Name);
 
         // Start file discovery and queueing in background
-        // Using a properly tracked task with error handling and using a new, dedicated cancellation token
+        // Using a properly tracked task with error handling and using CancellationToken.None
+        // to prevent cancellation when HTTP request completes
         var backgroundTask = Task.Run(async () =>
         {
             try
             {
-                _logger.LogInformation("Background task started for operation {OperationId}", operation.Id);
+                _logger.LogInformation("🚀 Background harvest task STARTED for operation {OperationId} on printer {PrinterName}", operation.Id, printer.Name);
                 await DiscoverAndQueueFilesAsync(operation, printer);
-                _logger.LogInformation("Background task completed successfully for operation {OperationId}", operation.Id);
+                _logger.LogInformation("✅ Background harvest task COMPLETED successfully for operation {OperationId}", operation.Id);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Background task failed for operation {OperationId}", operation.Id);
+                _logger.LogError(ex, "❌ Background harvest task FAILED for operation {OperationId}: {ErrorMessage}", operation.Id, ex.Message);
 
                 // Update the operation status to failed
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _serviceScopeFactory.CreateScope();
                 var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var dbOperation = await scopedDb.GcodeHarvestOperations
                     .FirstOrDefaultAsync(o => o.Id == operation.Id);
@@ -115,6 +118,11 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                     dbOperation.ErrorMessage = $"File discovery failed: {ex.Message}";
                     dbOperation.CompletedAt = DateTime.UtcNow;
                     await scopedDb.SaveChangesAsync();
+                    _logger.LogError("💾 Updated operation {OperationId} status to Failed in database", operation.Id);
+                }
+                else
+                {
+                    _logger.LogError("⚠️ Could not find operation {OperationId} in database to mark as failed", operation.Id);
                 }
             }
             finally
@@ -123,7 +131,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                 _activeTasks.TryRemove(operation.Id, out _);
                 _logger.LogDebug("Removed operation {OperationId} from active tasks tracking", operation.Id);
             }
-        }, ct);
+        }, CancellationToken.None);
 
         // Add to active tasks collection for tracking
         _activeTasks[operation.Id] = backgroundTask;
@@ -142,7 +150,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
     /// </summary>
     private async Task DiscoverAndQueueFilesAsync(GcodeHarvestOperation operation, Printer printer)
     {
-        using var scope = _serviceProvider.CreateScope();
+        using var scope = _serviceScopeFactory.CreateScope();
         var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var scopedMoonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
         var scopedPrusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
@@ -185,6 +193,13 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             scopedLogger.LogInformation("Discovered {FileCount} files for operation {OperationId}",
                 fileList.Count, operation.Id);
 
+            // Log sample filenames for debugging
+            if (fileList.Count > 0)
+            {
+                var sampleFiles = fileList.Take(10).Select(f => $"{f.Name} (size: {f.Size})").ToArray();
+                scopedLogger.LogInformation("📄 Sample files: {SampleFiles}", string.Join(", ", sampleFiles));
+            }
+
             // Determine allowed extensions (default to gcode if none specified)
             var allowedExts = (operation.FileExtensions != null && operation.FileExtensions.Length > 0
                 ? operation.FileExtensions
@@ -195,6 +210,8 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             // Apply filtering for extensions & size constraints for preliminary count
             bool PassesInitialFilters(PrinterFileInfo f)
             {
+                scopedLogger.LogDebug("🔍 Filtering file: '{FileName}' (Size: {Size})", f.Name, f.Size);
+                
                 var nameLower = f.Name.ToLowerInvariant();
                 var extOk = false;
                 foreach (var ext in allowedExts)
@@ -202,25 +219,31 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                     if (nameLower.EndsWith(ext))
                     {
                         extOk = true;
+                        scopedLogger.LogDebug("✅ File '{FileName}' matches extension '{Extension}'", f.Name, ext);
                         break;
                     }
                 }
                 if (!extOk)
                 {
+                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: extension doesn't match any of [{AllowedExts}]", f.Name, string.Join(", ", allowedExts));
                     return false;
                 }
                 if (operation.MinFileSizeBytes.HasValue && f.Size < operation.MinFileSizeBytes.Value)
                 {
+                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: size {Size} < minimum {MinSize}", f.Name, f.Size, operation.MinFileSizeBytes.Value);
                     return false;
                 }
                 if (operation.MaxFileSizeBytes.HasValue && f.Size > operation.MaxFileSizeBytes.Value)
                 {
+                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: size {Size} > maximum {MaxSize}", f.Name, f.Size, operation.MaxFileSizeBytes.Value);
                     return false;
                 }
                 if (operation.ModifiedAfter.HasValue && f.ModifiedAt.HasValue && f.ModifiedAt < operation.ModifiedAfter)
                 {
+                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: modified {Modified} < required {ModifiedAfter}", f.Name, f.ModifiedAt, operation.ModifiedAfter);
                     return false;
                 }
+                scopedLogger.LogDebug("✅ File '{FileName}' passed all filters", f.Name);
                 return true;
             }
 
@@ -544,7 +567,8 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                 }
 
                 // Create storage directory if needed
-                var environment = _serviceProvider.GetRequiredService<IWebHostEnvironment>();
+                using var serviceScope = _serviceScopeFactory.CreateScope();
+                var environment = serviceScope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
                 var storageDir = Path.Combine(environment.ContentRootPath, "wwwroot", GcodeStoragePath);
                 Directory.CreateDirectory(storageDir);
 
@@ -797,11 +821,14 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             {
                 var fileCount = directoryInfo.Files?.Length ?? 0;
                 var dirCount = directoryInfo.Dirs?.Length ?? 0;
-                log.LogInformation("Directory has {FileCount} files and {DirCount} subdirectories", fileCount, dirCount);
+                log.LogInformation("🔍 Directory has {FileCount} files and {DirCount} subdirectories", fileCount, dirCount);
+                
+                log.LogInformation("🚀 Starting CollectFilesRecursivelyWithRetryAsync with empty list (current count: {CurrentCount})", files.Count);
                 await CollectFilesRecursivelyWithRetryAsync(files, directoryInfo, "gcodes", serverUrl, client, log);
+                log.LogInformation("✅ Completed CollectFilesRecursivelyWithRetryAsync, list now has {FinalCount} files", files.Count);
             }
 
-            log.LogInformation("Found {FileCount} files in Moonraker at {ServerUrl}", files.Count, serverUrl);
+            log.LogInformation("🏁 Found {FileCount} files in Moonraker at {ServerUrl}", files.Count, serverUrl);
             return files; // List<PrinterFileInfo>
         }
         catch (Exception ex)
@@ -813,30 +840,43 @@ public partial class GcodeHarvestService : IGcodeHarvestService
 
     private static async Task CollectFilesRecursivelyWithRetryAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient client, ILogger log)
     {
+        log.LogInformation("🔍 CollectFilesRecursivelyWithRetryAsync called for {BasePath}, starting with {CurrentFileCount} files", basePath, files.Count);
+        
         // Add files from current directory
         if (directory.Files != null)
         {
+            log.LogInformation("📁 Processing {FileCount} files in directory {BasePath}", directory.Files.Length, basePath);
             foreach (var file in directory.Files)
             {
-                files.Add(new PrinterFileInfo
+                var printerFileInfo = new PrinterFileInfo
                 {
                     Name = System.IO.Path.GetFileName(file.Path),
                     Path = file.Path,
                     Size = file.Size,
                     ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
-                });
+                };
+                files.Add(printerFileInfo);
+                log.LogDebug("➕ Added file: {FileName} (Size: {Size} bytes)", printerFileInfo.Name, printerFileInfo.Size);
             }
+            log.LogInformation("✅ Added {FileCount} files from {BasePath}, total now: {TotalCount}", directory.Files.Length, basePath, files.Count);
+        }
+        else
+        {
+            log.LogInformation("📂 No files in directory {BasePath}", basePath);
         }
 
         // Recursively process subdirectories
-        if (directory.Dirs != null)
+        if (directory.Dirs != null && directory.Dirs.Length > 0)
         {
+            log.LogInformation("📁 Processing {SubdirCount} subdirectories in {BasePath}", directory.Dirs.Length, basePath);
             foreach (var subDir in directory.Dirs)
             {
                 try
                 {
-                    var subDirPath = $"{basePath}/{subDir.Path}";
-                    log.LogDebug("Processing subdirectory {SubDirPath}", subDirPath);
+                    // Use the dirname field from Moonraker response for directory names
+                    var dirName = !string.IsNullOrEmpty(subDir.Dirname) ? subDir.Dirname : System.IO.Path.GetFileName(subDir.Path);
+                    var subDirPath = $"{basePath}/{dirName}";
+                    log.LogInformation("🔍 Processing subdirectory {DirName} -> {SubDirPath}", dirName, subDirPath);
 
                     // Get subdirectory info with retry
                     var subDirInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
@@ -848,14 +888,24 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                     {
                         await CollectFilesRecursivelyWithRetryAsync(files, subDirInfo, subDirPath, serverUrl, client, log);
                     }
+                    else
+                    {
+                        log.LogWarning("⚠️ Subdirectory {SubDirPath} returned null", subDirPath);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    log.LogWarning(ex, "Error processing subdirectory {SubDirPath}", subDir.Path);
+                    log.LogWarning(ex, "❌ Error processing subdirectory {SubDirPath}", subDir.Path);
                     // Continue with next subdirectory
                 }
             }
         }
+        else
+        {
+            log.LogInformation("📂 No subdirectories in {BasePath}", basePath);
+        }
+        
+        log.LogInformation("🏁 CollectFilesRecursivelyWithRetryAsync completed for {BasePath}, total files: {TotalCount}", basePath, files.Count);
     }
 
     // Simple overload kept adjacent for analyzer friendliness
@@ -995,7 +1045,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             operation.Printer?.Name ?? "Unknown",
             operation.StartedAt,
             operation.CompletedAt,
-            (GcodeHarvestStatusDto)operation.Status,
+            MapStatus(operation.Status),
             operation.ErrorMessage,
             operation.FilesFound,
             operation.FilesAdded,
@@ -1005,6 +1055,18 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             operation.IncludeSubdirectories,
             operation.MaxFileSizeBytes,
             operation.ModifiedAfter);
+    }
+
+    private static GcodeHarvestStatusDto MapStatus(GcodeHarvestStatus status)
+    {
+        return status switch
+        {
+            GcodeHarvestStatus.Running => GcodeHarvestStatusDto.Running,
+            GcodeHarvestStatus.Completed => GcodeHarvestStatusDto.Completed,
+            GcodeHarvestStatus.Failed => GcodeHarvestStatusDto.Failed,
+            GcodeHarvestStatus.Cancelled => GcodeHarvestStatusDto.Cancelled,
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown harvest status")
+        };
     }
 
     private static DiscoveredGcodeFileDto MapToDto(DiscoveredGcodeFile file)

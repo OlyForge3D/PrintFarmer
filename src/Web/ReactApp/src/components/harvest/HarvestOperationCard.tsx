@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { 
-  ClockIcon, 
   PlayIcon, 
   CheckCircleIcon, 
   ExclamationCircleIcon, 
@@ -38,7 +37,6 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
   const [showDetails, setShowDetails] = useState(false);
 
   const statusConfig = {
-    [GcodeHarvestStatus.Starting]: { color: 'yellow', icon: ClockIcon, label: 'Starting' },
     [GcodeHarvestStatus.Running]: { color: 'blue', icon: PlayIcon, label: 'Running' },
     [GcodeHarvestStatus.Completed]: { color: 'green', icon: CheckCircleIcon, label: 'Completed' },
     [GcodeHarvestStatus.Failed]: { color: 'red', icon: ExclamationCircleIcon, label: 'Failed' },
