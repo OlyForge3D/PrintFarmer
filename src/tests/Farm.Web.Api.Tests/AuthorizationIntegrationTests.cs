@@ -1,7 +1,4 @@
 ﻿using System.Net;
-using System.Net.Http.Json;
-using FluentAssertions;
-using Xunit;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;

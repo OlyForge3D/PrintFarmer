@@ -1,8 +1,4 @@
-﻿using System.Net.Http.Json;
-using FluentAssertions;
-using Xunit;
-using Farm.Web.Shared;
-using Farm.Web.Api.Data;
+﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

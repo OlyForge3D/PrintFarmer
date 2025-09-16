@@ -5,7 +5,6 @@ using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services;
 
