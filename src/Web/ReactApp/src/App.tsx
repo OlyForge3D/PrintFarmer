@@ -75,6 +75,8 @@ function App() {
 
   const handleSetupComplete = () => {
     setSetupComplete(true);
+    // Force redirect to home page regardless of current URL
+    window.location.href = '/';
   };
 
   // Show loading while checking setup status
