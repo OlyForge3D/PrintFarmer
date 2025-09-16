@@ -154,20 +154,44 @@ export function Layout() {
 
   // (Removed unused prefersReducedMotion calculation to satisfy lint)
 
-  // Hydrate expanded state
+  // Hydrate expanded state and auto-expand for current route
   useEffect(() => {
+    const path = location.pathname;
     try {
       const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      let parsed: Record<string, boolean> = {};
       if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          setExpanded(parsed);
+        const storedData = JSON.parse(raw);
+        if (storedData && typeof storedData === 'object') {
+          parsed = storedData;
         }
       }
+      
+      // Auto-expand groups containing current route during hydration
+      filteredNavigation.forEach(item => {
+        if (item.children) {
+          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+          if (hasActiveChild && !(item.name in parsed)) {
+            parsed[item.name] = true;
+          }
+        }
+      });
+      
+      setExpanded(parsed);
     } catch {
-      // ignore
+      // If parsing fails, at least auto-expand current route
+      const autoExpanded: Record<string, boolean> = {};
+      filteredNavigation.forEach(item => {
+        if (item.children) {
+          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+          if (hasActiveChild) {
+            autoExpanded[item.name] = true;
+          }
+        }
+      });
+      setExpanded(autoExpanded);
     }
-  }, []);
+  }, [filteredNavigation]); // Only run once on mount/nav change
 
   // Persist expanded changes
   useEffect(() => {
@@ -178,20 +202,25 @@ export function Layout() {
     }
   }, [expanded]);
 
-  // Auto-expand groups containing current route
+  // Auto-expand groups containing current route (only if not manually set)
   useEffect(() => {
     const path = location.pathname;
     setExpanded((prev: Record<string, boolean>) => {
       const next = { ...prev };
+      let hasChanges = false;
+      
       filteredNavigation.forEach(item => {
         if (item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-          if (hasActiveChild) {
+          if (hasActiveChild && prev[item.name] === undefined) {
+            // Only auto-expand if user hasn't manually set the state
             next[item.name] = true;
+            hasChanges = true;
           }
         }
       });
-      return next;
+      
+      return hasChanges ? next : prev; // Prevent unnecessary re-renders
     });
   }, [location.pathname, filteredNavigation]);
 
@@ -361,6 +390,7 @@ export function Layout() {
                                       : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                     }`
                                   }
+                                  end={child.href === '/harvest'} // Exact match for parent routes
                                 >
                                   <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
                                   {child.name}
@@ -422,6 +452,7 @@ export function Layout() {
                                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                   }`
                                 }
+                                end={child.href === '/harvest'} // Exact match for parent routes
                               >
                                 <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
                                 {child.name}
