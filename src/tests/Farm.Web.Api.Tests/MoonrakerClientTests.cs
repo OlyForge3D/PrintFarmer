@@ -483,7 +483,7 @@ public class MoonrakerClientTests
         {
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
             req.RequestUri!.Query.Should().Contain("extended=true");
-            return Json(new { result = new[] { new { path = "a.gcode", size = 1, modified = 0 } } });
+            return Json(new { result = new[] { new { filename = "a.gcode", size = 1, modified = 0 } } });
         });
 
         var items = await client.GetDetailedFileListAsync(Base, root: "gcodes", path: "/");
