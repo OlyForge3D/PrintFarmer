@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Cog,
   FileText,
-  Grid3X3,
   Home,
   Layers,
   LogIn,
@@ -17,7 +16,6 @@ import {
   Menu,
   Printer,
   Settings,
-  Table,
   User,
   UserCheck,
   Users,
@@ -40,13 +38,9 @@ const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   {
     name: 'Printers',
-    href: '/printers/dashboard',
+    href: '/printers',
     icon: Printer,
-    requiredPermission: { resource: 'printers', action: 'read' },
-    children: [
-      { name: 'Dashboard', href: '/printers/dashboard', icon: Grid3X3 },
-      { name: 'Table View', href: '/printers/table', icon: Table }
-    ]
+    requiredPermission: { resource: 'printers', action: 'read' }
   },
   {
     name: '3D Models',

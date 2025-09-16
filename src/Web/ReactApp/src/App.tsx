@@ -10,7 +10,7 @@ import { FilesPage } from '@/pages/FilesPage';
 import { HarvestPage } from '@/pages/HarvestPage';
 import { HarvestHistoryPage } from '@/pages/HarvestHistoryPage';
 import { ModelsPage } from '@/pages/ModelsPage';
-import { PrinterTableViewPage } from '@/pages/PrinterTableViewPage';
+import { PrintersPage } from '@/pages/PrintersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
@@ -110,11 +110,7 @@ function App() {
                 <Route path="/" element={<Layout />}>
                   <Route index element={<PrinterDashboard />} />
                   <Route path="dashboard" element={<PrinterDashboard />} />
-                  <Route path="printers">
-                    <Route index element={<Navigate to="dashboard" replace />} />
-                    <Route path="dashboard" element={<PrinterDashboard />} />
-                    <Route path="table" element={<PrinterTableViewPage />} />
-                  </Route>
+                  <Route path="printers" element={<PrintersPage />} />
                   <Route path="models" element={<ModelsPage />} />
                   <Route path="harvest">
                     <Route index element={<HarvestPage />} />
