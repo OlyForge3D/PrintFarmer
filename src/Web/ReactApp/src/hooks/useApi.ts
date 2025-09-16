@@ -396,7 +396,7 @@ export function useHarvestOperation(id: string, options?: UseQueryOptions<GcodeH
 
 export function useStartHarvestOperation() {
   const queryClient = useQueryClient();
-
+  
   return useMutation({
     mutationFn: (printerId: string) => apiClient.startHarvestOperation(printerId),
     onSuccess: (_, printerId) => {
@@ -406,7 +406,16 @@ export function useStartHarvestOperation() {
   });
 }
 
-// ============ Job Queue Hooks ============
+export function useCancelHarvestOperation() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (operationId: string) => apiClient.cancelHarvestOperation(operationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations() });
+    },
+  });
+}// ============ Job Queue Hooks ============
 
 export function useJobQueue(printerId?: string, options?: UseQueryOptions<JobQueuePrintJob[], ApiError>) {
   return useQuery({

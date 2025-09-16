@@ -394,6 +394,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async cancelHarvestOperation(operationId: string): Promise<boolean> {
+    const response = await this.client.post<boolean>(`/gcode-harvest/operations/${operationId}/cancel`);
+    return response.data;
+  }
+
   async getGcodeFilesWithFilter(request: Record<string, unknown>): Promise<GetGcodeFilesResponse> {
     const response = await this.client.get<GetGcodeFilesResponse>('/gcode-files', { params: request });
     return response.data;

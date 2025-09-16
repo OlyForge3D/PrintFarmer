@@ -211,7 +211,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             bool PassesInitialFilters(PrinterFileInfo f)
             {
                 scopedLogger.LogDebug("🔍 Filtering file: '{FileName}' (Size: {Size})", f.Name, f.Size);
-                
+
                 var nameLower = f.Name.ToLowerInvariant();
                 var extOk = false;
                 foreach (var ext in allowedExts)
@@ -822,7 +822,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                 var fileCount = directoryInfo.Files?.Length ?? 0;
                 var dirCount = directoryInfo.Dirs?.Length ?? 0;
                 log.LogInformation("🔍 Directory has {FileCount} files and {DirCount} subdirectories", fileCount, dirCount);
-                
+
                 log.LogInformation("🚀 Starting CollectFilesRecursivelyWithRetryAsync with empty list (current count: {CurrentCount})", files.Count);
                 await CollectFilesRecursivelyWithRetryAsync(files, directoryInfo, "gcodes", serverUrl, client, log);
                 log.LogInformation("✅ Completed CollectFilesRecursivelyWithRetryAsync, list now has {FinalCount} files", files.Count);
@@ -841,7 +841,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
     private static async Task CollectFilesRecursivelyWithRetryAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient client, ILogger log)
     {
         log.LogInformation("🔍 CollectFilesRecursivelyWithRetryAsync called for {BasePath}, starting with {CurrentFileCount} files", basePath, files.Count);
-        
+
         // Add files from current directory
         if (directory.Files != null)
         {
@@ -904,7 +904,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
         {
             log.LogInformation("📂 No subdirectories in {BasePath}", basePath);
         }
-        
+
         log.LogInformation("🏁 CollectFilesRecursivelyWithRetryAsync completed for {BasePath}, total files: {TotalCount}", basePath, files.Count);
     }
 
@@ -1039,6 +1039,9 @@ public partial class GcodeHarvestService : IGcodeHarvestService
 
     private static GcodeHarvestOperationDto MapToDto(GcodeHarvestOperation operation)
     {
+        // Calculate files processed (same logic as HarvestCompletionService)
+        var filesProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
+
         return new GcodeHarvestOperationDto(
             operation.Id,
             operation.PrinterId,
@@ -1048,6 +1051,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             MapStatus(operation.Status),
             operation.ErrorMessage,
             operation.FilesFound,
+            filesProcessed, // Include calculated FilesProcessed
             operation.FilesAdded,
             operation.FilesSkipped,
             operation.FilesErrored,

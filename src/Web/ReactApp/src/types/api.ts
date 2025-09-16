@@ -327,14 +327,14 @@ export interface GcodeHarvestOperation {
   printerName: string;
   status: GcodeHarvestStatus;
   filesFound: number;
-  filesProcessed: number;
+  filesProcessed: number; // Now calculated by backend: FilesAdded + FilesSkipped + FilesErrored
   filesAdded: number;
   filesSkipped: number;
   filesErrored: number;
   duplicatesSkipped: number;
   totalSizeBytes: number;
-  startedAt: Date;
-  completedAt?: Date;
+  startedAt: string; // API returns ISO date string
+  completedAt?: string; // API returns ISO date string
   error?: string;
   options?: HarvestOptions;
   filesPaths?: string[];

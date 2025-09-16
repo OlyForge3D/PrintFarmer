@@ -836,6 +836,7 @@ public record GcodeHarvestOperationDto(
     GcodeHarvestStatusDto Status = GcodeHarvestStatusDto.Running,
     string? ErrorMessage = null,
     int FilesFound = 0,
+    int FilesProcessed = 0, // Calculated as FilesAdded + FilesSkipped + FilesErrored
     int FilesAdded = 0,
     int FilesSkipped = 0,
     int FilesErrored = 0,

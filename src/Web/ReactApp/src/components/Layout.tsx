@@ -240,9 +240,11 @@ export function Layout() {
 
             {/* App logo and name */}
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-8 h-8 bg-pf-accent rounded-md">
-                <Layers className="h-5 w-5 text-white" />
-              </div>
+              <img 
+                src="/printfarmer-logo.svg" 
+                alt="PrintFarmer Logo" 
+                className="w-8 h-8" 
+              />
               <h1 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
             </div>
           </div>

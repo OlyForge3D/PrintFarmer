@@ -16,6 +16,7 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/signalr';
 import { apiClient } from '@/services/api';
 import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
+import { HarvestProgressModal } from '@/components/harvest/HarvestProgressModal';
 import { AccessDenied } from '@/components/common/AccessDenied';
 
 export const HarvestPage: React.FC = () => {
@@ -31,6 +32,7 @@ export const HarvestPage: React.FC = () => {
   });
   // Optimistic operations started on client before server push/update arrives
   const [optimisticOps, setOptimisticOps] = useState<GcodeHarvestOperation[]>([]);
+  const [selectedOperationForModal, setSelectedOperationForModal] = useState<GcodeHarvestOperation | null>(null);
 
   const { data: printers } = usePrinters();
   // Real-time printer status (SignalR)
@@ -50,10 +52,10 @@ export const HarvestPage: React.FC = () => {
       toast.success('Harvest operations started successfully');
       setSelectedPrinters([]);
       // Clear optimistic placeholders once real data expected shortly
-      setTimeout(() => setOptimisticOps([]), 4000);
+      setTimeout(() => setOptimisticOps([]), 2000); // Reduced from 4000 to 2000ms
     },
     onError: (error) => {
-      // Roll back optimistic placeholders
+      // Roll back optimistic placeholders immediately on error
       setOptimisticOps([]);
       toast.error('Failed to start harvest operations');
       console.error('Harvest error:', error);
@@ -72,6 +74,19 @@ export const HarvestPage: React.FC = () => {
       unsubscribe();
     };
   }, [refetchOperations]);
+
+  // Clean up optimistic operations when real operations appear
+  useEffect(() => {
+    if (harvestOperations && optimisticOps.length > 0) {
+      const realRunningOps = harvestOperations.filter(op => op.status === GcodeHarvestStatus.Running);
+      const realPrinterIds = new Set(realRunningOps.map(op => op.printerId));
+      
+      // If we have real operations for any of our optimistic operations, clean up optimistic ones
+      if (optimisticOps.some(op => realPrinterIds.has(op.printerId))) {
+        setOptimisticOps(prev => prev.filter(op => !realPrinterIds.has(op.printerId)));
+      }
+    }
+  }, [harvestOperations, optimisticOps]);
 
   const handleStartHarvest = () => {
     if (selectedPrinters.length === 0) {
@@ -113,12 +128,18 @@ export const HarvestPage: React.FC = () => {
     return <AccessDenied />;
   }
 
-  const activeOperations = [
-    ...optimisticOps,
-    ...((harvestOperations?.filter(op => 
+  const activeOperations = (() => {
+    const realRunningOps = harvestOperations?.filter(op => 
       op.status === GcodeHarvestStatus.Running
-    )) || [])
-  ];
+    ) || [];
+    
+    // If we have real operations, filter out optimistic ones for the same printers
+    const realPrinterIds = new Set(realRunningOps.map(op => op.printerId));
+    const filteredOptimisticOps = optimisticOps.filter(op => !realPrinterIds.has(op.printerId));
+    
+    // Combine filtered optimistic ops with real operations
+    return [...filteredOptimisticOps, ...realRunningOps];
+  })();
 
   const completedOperations = harvestOperations?.filter(op =>
     op.status === GcodeHarvestStatus.Completed || op.status === GcodeHarvestStatus.Failed
@@ -350,6 +371,7 @@ export const HarvestPage: React.FC = () => {
                     key={operation.id}
                     operation={operation}
                     showProgress={true}
+                    onViewDetails={setSelectedOperationForModal}
                   />
                 ))}
               </div>
@@ -386,6 +408,23 @@ export const HarvestPage: React.FC = () => {
           </div>
         </div>
       </div>
+      
+      {/* Harvest Progress Modal */}
+      {selectedOperationForModal && (
+        <HarvestProgressModal
+          isOpen={true}
+          onClose={() => setSelectedOperationForModal(null)}
+          operation={selectedOperationForModal}
+          onOperationUpdate={() => {
+            refetchOperations();
+            // Update the selected operation with latest data
+            const updated = harvestOperations?.find(op => op.id === selectedOperationForModal.id);
+            if (updated) {
+              setSelectedOperationForModal(updated);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

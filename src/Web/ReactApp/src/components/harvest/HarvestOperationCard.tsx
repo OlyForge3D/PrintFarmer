@@ -6,7 +6,8 @@ import {
   CheckCircleIcon, 
   ExclamationCircleIcon, 
   XCircleIcon,
-  ChevronDownIcon 
+  ChevronDownIcon,
+  StopIcon
 } from '@heroicons/react/24/outline';
 
 import { 
@@ -14,10 +15,14 @@ import {
   GcodeHarvestStatus
 } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCancelHarvestOperation } from '@/hooks/useApi';
+import { toast } from 'sonner';
+import { parseApiDateTimeValue, formatDuration } from '@/utils/datetime';
 
 interface HarvestOperationCardProps {
   operation: GcodeHarvestOperation;
   showProgress?: boolean;
+  onViewDetails?: (operation: GcodeHarvestOperation) => void;
 }
 
 // Utility function to format bytes
@@ -31,10 +36,12 @@ const formatBytes = (bytes: number): string => {
 
 export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
   operation,
-  showProgress = false
+  showProgress = false,
+  onViewDetails
 }) => {
   const { hasPermission } = useAuth();
   const [showDetails, setShowDetails] = useState(false);
+  const cancelMutation = useCancelHarvestOperation();
 
   const statusConfig = {
     [GcodeHarvestStatus.Running]: { color: 'blue', icon: PlayIcon, label: 'Running' },
@@ -46,15 +53,19 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
   const config = statusConfig[operation.status];
   const progress = operation.filesProcessed / Math.max(operation.filesFound, 1) * 100;
 
-  const formatDuration = (start: Date, end?: Date) => {
-    const duration = (end || new Date()).getTime() - start.getTime();
-    const seconds = Math.floor(duration / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-
-    if (hours > 0) return `${hours}h ${minutes % 60}m`;
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-    return `${seconds}s`;
+  const handleCancel = () => {
+    if (!window.confirm('Are you sure you want to cancel this harvest operation? This action cannot be undone.')) {
+      return;
+    }
+    
+    cancelMutation.mutate(operation.id, {
+      onSuccess: () => {
+        toast.success('Harvest operation cancelled successfully');
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to cancel harvest operation');
+      }
+    });
   };
 
   return (
@@ -76,7 +87,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
             </div>
             
             <div className="mt-1 text-sm text-gray-500">
-              Started {formatDistanceToNow(operation.startedAt, { addSuffix: true })}
+              Started {formatDistanceToNow(parseApiDateTimeValue(operation.startedAt), { addSuffix: true })}
               {operation.completedAt && (
                 <span> • Duration: {formatDuration(operation.startedAt, operation.completedAt)}</span>
               )}
@@ -92,7 +103,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                 <div className="w-full bg-gray-200 rounded-full h-1.5">
                   <div 
                     className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
+                    style={{ width: `${Math.min(progress, 100)}%` }}
                   />
                 </div>
               </div>
@@ -129,6 +140,15 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          {operation.status === GcodeHarvestStatus.Running && onViewDetails && (
+            <button
+              onClick={() => onViewDetails(operation)}
+              className="text-sm text-blue-600 hover:text-blue-800"
+            >
+              View Details
+            </button>
+          )}
+          
           {operation.status === GcodeHarvestStatus.Completed && hasPermission('gcode_harvest', 'read') && (
             <Link
               to={`/files?harvest=${operation.id}`}
@@ -138,9 +158,31 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
             </Link>
           )}
           
+          {operation.status === GcodeHarvestStatus.Running && hasPermission('gcode_harvest', 'execute') && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelMutation.isPending}
+              className="text-sm text-red-600 hover:text-red-800 disabled:text-red-400 disabled:cursor-not-allowed"
+              title="Cancel harvest operation"
+            >
+              {cancelMutation.isPending ? (
+                <span className="flex items-center">
+                  <StopIcon className="w-4 h-4 mr-1 animate-spin" />
+                  Cancelling...
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  <StopIcon className="w-4 h-4 mr-1" />
+                  Cancel
+                </span>
+              )}
+            </button>
+          )}
+          
           <button
             onClick={() => setShowDetails(!showDetails)}
             className="text-gray-400 hover:text-gray-600"
+            title="Toggle details"
           >
             <ChevronDownIcon className={`w-4 h-4 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
           </button>
