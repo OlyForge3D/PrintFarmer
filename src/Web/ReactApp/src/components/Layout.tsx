@@ -93,14 +93,19 @@ export function Layout() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
 
-  // Filter navigation based on user permissions (memoized to prevent infinite re-renders)
+  // Filter navigation based on user permissions (stable memoization)
   const filteredNavigation = useMemo(() => {
+    if (!isAuthenticated) {
+      // For non-authenticated users, show only public navigation
+      return navigation.filter(item => !item.requiredRole && !item.requiredPermission);
+    }
+    
     return navigation.filter(item => {
       if (item.requiredRole && !hasRole(item.requiredRole)) return false;
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       return true;
     });
-  }, [hasRole, hasPermission]);
+  }, [hasRole, hasPermission, isAuthenticated]); // Include isAuthenticated for stability
 
   const handleLogout = async () => {
     await logout();
@@ -115,15 +120,25 @@ export function Layout() {
 
   const toggleExpand = (name: string) => {
     setExpanded((prev: Record<string, boolean>) => {
-      const nextValue = !prev[name];
+      const currentValue = prev[name];
+      const nextValue = !currentValue;
+      
+      // Only update if value actually changes
+      if (currentValue === nextValue) {
+        return prev; // No change, return same object to prevent re-render
+      }
+      
       const next = { ...prev, [name]: nextValue };
+      
       // Find item to get child count (from filtered list so it's permission-safe)
       const itemDef = filteredNavigation.find(i => i.name === name);
       const childCount = itemDef?.children?.length ?? 0;
       const message = nextValue
         ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
         : `${name} section collapsed.`;
+      
       setAnnouncement(message);
+      
       // Clear previous timer
       if (announcementTimer.current) {
         clearTimeout(announcementTimer.current);
@@ -132,6 +147,7 @@ export function Layout() {
         setAnnouncement('');
         announcementTimer.current = null;
       }, 2500);
+      
       return next;
     });
   };
@@ -148,8 +164,12 @@ export function Layout() {
 
   // (Removed unused prefersReducedMotion calculation to satisfy lint)
 
-  // Hydrate expanded state and auto-expand for current route
+  // Initialize expanded state only once on mount
+  const initializedRef = useRef(false);
+  
   useEffect(() => {
+    if (initializedRef.current) return; // Prevent re-initialization
+    
     const path = location.pathname;
     try {
       const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -161,7 +181,7 @@ export function Layout() {
         }
       }
       
-      // Auto-expand groups containing current route during hydration
+      // Auto-expand groups containing current route during initialization
       filteredNavigation.forEach(item => {
         if (item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
@@ -172,6 +192,7 @@ export function Layout() {
       });
       
       setExpanded(parsed);
+      initializedRef.current = true;
     } catch {
       // If parsing fails, at least auto-expand current route
       const autoExpanded: Record<string, boolean> = {};
@@ -184,11 +205,13 @@ export function Layout() {
         }
       });
       setExpanded(autoExpanded);
+      initializedRef.current = true;
     }
-  }, [filteredNavigation]); // Only run once on mount/nav change
+  }, [filteredNavigation, location.pathname]); // Run when navigation is available
 
   // Persist expanded changes
   useEffect(() => {
+    if (!initializedRef.current) return; // Don't persist until initialized
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(expanded));
     } catch {
@@ -196,8 +219,10 @@ export function Layout() {
     }
   }, [expanded]);
 
-  // Auto-expand groups containing current route (only if not manually set)
+  // Auto-expand groups containing current route on navigation (only after initialization)
   useEffect(() => {
+    if (!initializedRef.current) return; // Don't auto-expand until initialized
+    
     const path = location.pathname;
     setExpanded((prev: Record<string, boolean>) => {
       const next = { ...prev };
