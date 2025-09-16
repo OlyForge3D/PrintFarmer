@@ -232,7 +232,7 @@ export function HarvestHistoryPage() {
                       {new Date(operation.startedAt).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-pf-text-1">
-                      {formatDuration(operation.startedAt, operation.completedAt)}
+                      {formatDuration(new Date(operation.startedAt), operation.completedAt ? new Date(operation.completedAt) : undefined)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-pf-text-1">
                       {operation.filesFound}

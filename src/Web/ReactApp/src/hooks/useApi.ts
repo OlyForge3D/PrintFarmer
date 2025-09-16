@@ -6,6 +6,7 @@ import {
   FilamentPresets,
   GcodeFile,
   GcodeHarvestOperation,
+  GcodeHarvestStatus,
   HistoryJob,
   HistoryListResponse,
   HistoryTotals,
@@ -387,7 +388,7 @@ export function useHarvestOperation(id: string, options?: UseQueryOptions<GcodeH
     enabled: !!id,
     refetchInterval: (query) => {
       const data = query.state.data;
-      return data?.status === 0 ? 5000 : false; // Poll while running
+      return data?.status === GcodeHarvestStatus.Running ? 5000 : false; // Poll while running
     },
     staleTime: 0, // Always fresh for running operations
     ...options,

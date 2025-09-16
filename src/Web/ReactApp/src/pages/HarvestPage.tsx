@@ -109,7 +109,7 @@ export const HarvestPage: React.FC = () => {
         filesErrored: 0,
         duplicatesSkipped: 0,
         totalSizeBytes: 0,
-        startedAt: now,
+        startedAt: now.toISOString(),
         options: harvestOptions
       };
     });
