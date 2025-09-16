@@ -25,22 +25,33 @@ export const SlicerJobStatusPage: React.FC = () => {
     return (
         <div className="space-y-6">
             <div>
-                <h1 className="text-2xl font-bold">Slicer Job Status</h1>
-                <p className="text-gray-500">Query a job to view scheduling and retry metadata.</p>
+                <h1 className="text-2xl font-bold text-pf-text-primary">Slicer Job Status</h1>
+                <p className="text-pf-text-secondary">Query a job to view scheduling and retry metadata.</p>
             </div>
 
-            <div className="bg-white p-4 rounded shadow">
-                <label className="block font-medium mb-2">Job ID</label>
+            <div className="bg-pf-bg-1 p-4 rounded border border-pf-border">
+                <label className="block font-medium mb-2 text-pf-text-primary">Job ID</label>
                 <div className="flex gap-2">
-                    <input value={jobId} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobId(e.target.value)} placeholder="Enter job GUID" className="border rounded px-2 py-1 flex-1" />
-                    <button onClick={fetchStatus} disabled={loading || !jobId} className="px-3 py-1 bg-blue-600 text-white rounded">Fetch</button>
+                    <input 
+                        value={jobId} 
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobId(e.target.value)} 
+                        placeholder="Enter job GUID" 
+                        className="border border-pf-border rounded px-2 py-1 flex-1 bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent" 
+                    />
+                    <button 
+                        onClick={fetchStatus} 
+                        disabled={loading || !jobId} 
+                        className="px-3 py-1 bg-pf-accent text-white rounded hover:bg-pf-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Fetch
+                    </button>
                 </div>
 
-                {loading && <div className="mt-3 text-sm text-gray-500">Loading...</div>}
-                {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
+                {loading && <div className="mt-3 text-sm text-pf-text-secondary">Loading...</div>}
+                {error && <div className="mt-3 text-sm text-pf-error-text">{error}</div>}
 
                 {status && (
-                    <div className="mt-4 bg-gray-50 p-3 rounded">
+                    <div className="mt-4 bg-pf-bg-2 p-3 rounded border border-pf-border text-pf-text-primary">
                         <div><strong>Status:</strong> {status.status}</div>
                         <div><strong>Progress:</strong> {status.progress}%</div>
                         <div><strong>Retry Count:</strong> {status.retryCount}</div>

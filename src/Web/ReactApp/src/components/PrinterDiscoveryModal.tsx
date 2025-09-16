@@ -102,25 +102,25 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     switch (backend) {
       case PrinterBackend.Moonraker: return 'bg-purple-100 text-purple-800';
       case PrinterBackend.PrusaLink: return 'bg-orange-100 text-orange-800';
-      case PrinterBackend.SDCP: return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case PrinterBackend.SDCP: return 'bg-pf-accent text-pf-bg-0';
+      default: return 'bg-pf-bg-2 text-pf-text-primary';
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={onClose} />
+        <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" onClick={onClose} />
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
 
-        <div className="relative inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl">
+        <div className="relative inline-block align-bottom bg-pf-bg-1 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
           <div className="absolute top-0 right-0 pt-4 pr-4">
             <button
               type="button"
               aria-label="Close discovery modal"
               title="Close"
-              className="bg-white rounded-md text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              className="bg-pf-bg-1 rounded-md text-pf-text-secondary hover:text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
               onClick={onClose}
             >
               <X className="h-6 w-6" />
@@ -130,19 +130,19 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           <div className="sm:flex sm:items-start">
             <div className="w-full">
               <div className="text-center sm:text-left">
-                <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+                <h3 className="text-lg leading-6 font-medium text-pf-text-primary mb-4">
                   Discover Printers (Debug: {Math.random().toString(36).substr(2, 5)})
                 </h3>
                 
                 <div className="mb-6">
-                  <p className="text-sm text-gray-600 mb-4">
+                  <p className="text-sm text-pf-text-secondary mb-4">
                     Scan your network for compatible 3D printers (Moonraker, PrusaLink, and SDCP)
                   </p>
                   
-                                    <button
+                  <button
                     onClick={handleStartDiscovery}
                     disabled={startDiscoveryMutation.isPending || !!isActive}
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Search className="h-4 w-4 mr-2" />
                     {isActive ? 'Scanning...' : 'Start Network Scan'}
@@ -166,7 +166,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       return (
                         <div
                           {...ariaProps}
-                          className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar"
+                          className="w-full bg-pf-bg-2 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar border border-pf-border"
                         >
                           {(() => {
                             const pct = Math.min(100, Math.max(0, valueNow));
@@ -177,16 +177,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       );
                     })()}
                     
-                    <p className="text-xs text-gray-500 mb-2">Session: {progress.sessionId}</p>
+                    <p className="text-xs text-pf-text-tertiary mb-2">Session: {progress.sessionId}</p>
                     {progress.networkRanges && progress.networkRanges.length > 0 && (
-                      <p className="text-xs text-gray-500 mb-2">
+                      <p className="text-xs text-pf-text-tertiary mb-2">
                         Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
                       </p>
                     )}
-                    <p className="text-sm text-gray-600 mb-2">
+                    <p className="text-sm text-pf-text-secondary mb-2">
                       Scanning {progress.currentNetwork} - {progress.currentIp}
                     </p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-pf-text-tertiary">
                       {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
                     </p>
                   </div>
@@ -194,8 +194,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 })()}
 
                 {startDiscoveryMutation.error && (
-                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                    <p className="text-sm text-red-800">
+                  <div className="mb-4 p-3 bg-pf-error border border-pf-error-border rounded-md">
+                    <p className="text-sm text-pf-error-text">
                       Failed to start network scan: {startDiscoveryMutation.error.message}
                     </p>
                   </div>
@@ -204,25 +204,24 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 {foundPrinters.length > 0 && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-md font-medium text-gray-900">
+                      <h4 className="text-md font-medium text-pf-text-primary">
                         Found {foundPrinters.length} printer{foundPrinters.length !== 1 ? 's' : ''}
                       </h4>
                       <button
                         onClick={handleSelectAll}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-pf-accent hover:text-pf-accent-hover"
                       >
                         {selectedPrinters.size === foundPrinters.length ? 'Deselect All' : 'Select All'}
                       </button>
                     </div>
 
-                    <div className="max-h-96 overflow-y-auto space-y-2 border rounded-md p-2">
-                      {foundPrinters.map((printer) => (
+                    <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-0">{foundPrinters.map((printer) => (
                         <div
                           key={printer.serverUrl}
                           className={`p-4 border rounded-lg cursor-pointer transition-all ${
                             selectedPrinters.has(printer.serverUrl)
-                              ? 'border-blue-500 bg-blue-50'
-                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                              ? 'border-pf-accent bg-pf-accent-light'
+                              : 'border-pf-border hover:border-pf-border-hover hover:bg-pf-bg-2'
                           }`}
                           onClick={() => handleToggleSelection(printer.serverUrl)}
                         >
@@ -230,7 +229,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                             <div className="flex-1">
                               <div className="flex items-center space-x-2 mb-1">
                                 <span className="text-lg">{getBackendIcon(printer.backend)}</span>
-                                <h5 className="font-medium text-gray-900">
+                                <h5 className="font-medium text-pf-text-primary">
                                   {printer.name || `${printer.manufacturer || 'Unknown'} Printer`}
                                 </h5>
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getBackendColor(printer.backend)}`}>
@@ -238,12 +237,12 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                 </span>
                               </div>
                               
-                              <p className="text-sm text-gray-600 mb-1">
+                              <p className="text-sm text-pf-text-secondary mb-1">
                                 {printer.ipAddress}:{printer.port} • {printer.serverUrl}
                               </p>
                               
                               {(printer.manufacturer || printer.model || printer.firmware) && (
-                                <div className="text-xs text-gray-500 space-y-0.5">
+                                <div className="text-xs text-pf-text-tertiary space-y-0.5">
                                   {printer.manufacturer && <p>Manufacturer: {printer.manufacturer}</p>}
                                   {printer.model && <p>Model: {printer.model}</p>}
                                   {printer.firmware && <p>Firmware: {printer.firmware} {printer.version}</p>}
@@ -258,7 +257,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                 title={`Select printer ${printer.name || printer.serverUrl}`}
                                 checked={selectedPrinters.has(printer.serverUrl)}
                                 onChange={() => handleToggleSelection(printer.serverUrl)}
-                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                className="h-4 w-4 text-pf-accent focus:ring-pf-accent border-pf-border rounded"
                               />
                             </div>
                           </div>
@@ -266,17 +265,17 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       ))}
                     </div>
 
-                    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+                    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-pf-border">
                       <button
                         onClick={onClose}
-                        className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        className="px-4 py-2 border border-pf-border rounded-md text-sm font-medium text-pf-text-primary bg-pf-bg-1 hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleAddSelected}
                         disabled={selectedPrinters.size === 0 || createPrinterMutation.isPending}
-                        className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {createPrinterMutation.isPending 
                           ? 'Adding...' 
@@ -288,7 +287,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 )}
 
                 {!isActive && foundPrinters.length === 0 && !startDiscoveryMutation.error && !sessionId && (
-                  <div className="text-center py-8 text-gray-500">
+                  <div className="text-center py-8 text-pf-text-secondary">
                     Click "Start Network Scan" to search for printers on your network
                   </div>
                 )}
@@ -309,5 +308,5 @@ const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct, step }) =>
       ref.current.style.setProperty('--pf-progress', pct + '%');
     }
   }, [pct]);
-  return <div ref={ref} className={`pf-progress-fill step-${step} bg-blue-600 h-2 rounded-full transition-all duration-300`} aria-hidden="true" />;
+  return <div ref={ref} className={`pf-progress-fill step-${step} bg-pf-accent h-2 rounded-full transition-all duration-300`} aria-hidden="true" />;
 };
