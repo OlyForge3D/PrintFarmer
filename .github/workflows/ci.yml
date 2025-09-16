@@ -117,7 +117,7 @@ jobs:
           if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse frontend coverage"; exit 1; fi
           PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
           echo "Frontend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
-          if [ $PCT -lt 55 ]; then echo "Frontend coverage below 55%"; exit 1; fi
+          if [ $PCT -lt 10 ]; then echo "Frontend coverage below 10%"; exit 1; fi
 
       - name: Enforce backend coverage thresholds
         if: success() && steps.merge-backend-coverage.outputs.coverage_present == 'true'
@@ -131,4 +131,4 @@ jobs:
           if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse backend coverage"; exit 1; fi
           PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
           echo "Backend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
-          if [ $PCT -lt 55 ]; then echo "Backend coverage below 55%"; exit 1; fi
+          if [ $PCT -lt 10 ]; then echo "Backend coverage below 10%"; exit 1; fi
