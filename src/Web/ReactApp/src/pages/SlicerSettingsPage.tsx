@@ -40,8 +40,6 @@ export const SlicerSettingsPage: React.FC = () => {
 
   if (isLoading || !local) return <div>Loading...</div>;
 
-  const engines = Object.keys(local.perEngine).length > 0 ? Object.keys(local.perEngine) : Object.values(SlicerEngineType).filter(v => typeof v === 'string') as string[];
-
   const updateEngineField = (engine: string, field: 'path' | 'argsTemplate', value: string) => {
     setLocal(prev => {
       if (!prev) return prev;

@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info } from 'lucide-react';
-import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanContext';
+import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthContext';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { apiClient } from '@/services/api';
-import type { FilamentTypeDto } from '@/types/api';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -223,7 +222,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         ...defaults.filter(d => !existingNames.has(d)).map<FilamentPresetEditable>(d => ({ name: d, hotend: d === 'PLA' ? 205 : d === 'ABS' ? 230 : d === 'PETG' ? 240 : d === 'ASA' ? 245 : d === 'PC' ? 260 : d === 'PCTG' ? 235 : d === 'TPU' ? 220 : 210, bed: d === 'ABS' || d === 'ASA' ? 100 : d === 'PC' ? 110 : d === 'PETG' ? 85 : d === 'PCTG' ? 80 : d === 'Wood' ? 65 : 60, enabled: true }))
       ].sort((a,b) => a.name.localeCompare(b.name));
       setFilamentPresets(merged);
-    } catch (e) {
+    } catch {
       setPresetError('Failed to load filament presets');
     } finally { setLoadingPresets(false); }
   };

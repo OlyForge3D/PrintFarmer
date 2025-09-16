@@ -80,7 +80,9 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           };
         });
         setUploadQueue(rebuilt);
-      } catch {}
+      } catch {
+        // Ignore localStorage parsing errors
+      }
     }
   }, []);
 
@@ -100,11 +102,12 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
       finalHash: u.finalHash,
       paused: u.paused
     }));
-    try { localStorage.setItem('pf.uploadQueue', JSON.stringify(serializable)); } catch {}
+    try { localStorage.setItem('pf.uploadQueue', JSON.stringify(serializable)); } catch {
+      // Ignore localStorage write errors
+    }
   }, [uploadQueue]);
   const currentXhrRef = useRef<XMLHttpRequest | null>(null);
   const abortAllRef = useRef(false);
-  const xhrRefs = useRef<XMLHttpRequest[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<GcodeUploadSettings | null>(null);
   const [extensionsInput, setExtensionsInput] = useState('');
@@ -186,12 +189,16 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               }
               setUploadQueue(q => [...q]);
             }
-          } catch {}
+          } catch {
+            // Ignore status check errors
+          }
         }
         while (offset < item.file.size) {
           if (item.cancelRequested) {
             // cancel on server
-            try { fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, { method: 'DELETE' }); } catch {}
+            try { fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, { method: 'DELETE' }); } catch {
+              // Ignore cleanup errors
+            }
             throw new Error('Cancelled');
           }
           if (item.paused) { await new Promise(r => setTimeout(r, 250)); continue; }
@@ -208,7 +215,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             }
             if (putResp.status === 423) {
               // Server paused the upload
-              try { const b = await putResp.json(); item.paused = true; } catch { item.paused = true; }
+              try { await putResp.json(); item.paused = true; } catch { item.paused = true; }
               setUploadQueue(q => [...q]);
               await new Promise(r => setTimeout(r, 1000));
               continue;
@@ -400,7 +407,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             <button
               onClick={async () => {
                 // Bulk hash compare: compute & group by hash to find duplicates
-                const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
                 const candidatePaths = files?.files?.filter(f => selectedFiles.includes(f.path) && !f.isDirectory && /\.(gcode|bgcode)$/i.test(f.name)).map(f => f.path) || [];
                 if (candidatePaths.length < 2) { toast.info('Select at least two files'); return; }
                 try {
@@ -604,7 +610,9 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             item.paused = true;
                           }
                           setUploadQueue(q => [...q]);
-                        } catch {}
+                        } catch {
+                          // Ignore pause/resume errors
+                        }
                       }}
                     >{item.paused ? '▶' : 'II'}</button>
                   )}
@@ -756,7 +764,9 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               >Save</button>
               <button
                 onClick={async () => {
-                  try { const fresh = await apiClient.getGcodeUploadSettings(); setSettings(fresh); setExtensionsInput(fresh.allowedExtensions.join(', ')); } catch {}
+                  try { const fresh = await apiClient.getGcodeUploadSettings(); setSettings(fresh); setExtensionsInput(fresh.allowedExtensions.join(', ')); } catch {
+                    // Ignore settings reload errors
+                  }
                 }}
                 className="px-3 py-1 border rounded text-sm"
               >Reset</button>

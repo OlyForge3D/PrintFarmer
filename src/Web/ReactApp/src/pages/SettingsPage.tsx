@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
@@ -53,7 +53,7 @@ export function SettingsPage() {
   const [testOk, setTestOk] = useState<boolean | null>(null);
   const [testMessage, setTestMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const [loadingDynamic, setLoadingDynamic] = useState(false);
+  const [, ] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { data: diagnostics } = useDiagnosticsSummary(45000);
   const { hasRole, isAuthenticated } = useAuth();
@@ -65,7 +65,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
-  }, []);
+  }, []); // Empty dependency - component mount only
 
   // Sync draft when policy loads
   useEffect(() => {
@@ -74,7 +74,7 @@ export function SettingsPage() {
     }
   }, [passwordPolicy, policyDirty]);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
       // Load filament types
@@ -150,12 +150,7 @@ export function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const authHeader = (): Record<string, string> => {
-    const token = localStorage.getItem('auth-token');
-    return token ? { Authorization: `Bearer ${token}` } : {} as Record<string, string>;
-  };
+  }, []); // useCallback dependency array - empty since we only use setters
 
   const updatePolicyField = (field: string, value: unknown) => {
     setDraftPolicy(prev => ({ ...prev, [field]: value }));

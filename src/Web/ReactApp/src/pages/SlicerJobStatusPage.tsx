@@ -1,8 +1,25 @@
 import React, { useState } from 'react';
 
+interface JobStatus {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  createdAt: string;
+  completedAt?: string;
+  scheduledAt?: string;
+  progress?: number;
+  retryCount?: number;
+  workerId?: string;
+  errorMessage?: string;
+  result?: {
+    gcodeUrl: string;
+    printTime: number;
+    filamentUsed: number;
+  };
+}
+
 export const SlicerJobStatusPage: React.FC = () => {
     const [jobId, setJobId] = useState('');
-    const [status, setStatus] = useState<any | null>(null);
+    const [status, setStatus] = useState<JobStatus | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 

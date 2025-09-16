@@ -1,4 +1,4 @@
-import SlicerSettingsPage from '@/pages/SlicerSettingsPage';
+import SlicerSettingsPage from '../../pages/SlicerSettingsPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,12 +6,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 describe('SlicerSettingsPage', () => {
   beforeEach(() => {
     // Reset global fetch mock
-    (global as any).fetch = vi.fn();
+    global.fetch = vi.fn() as any;
   });
 
   it('loads settings and validates jitter input', async () => {
     const mockGet = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ enabled: true, perEngine: {}, jitterPercent: 15.0 }) });
-    (global as any).fetch = mockGet;
+    global.fetch = mockGet as any;
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -34,7 +34,7 @@ describe('SlicerSettingsPage', () => {
 
     const mockPost = vi.fn().mockResolvedValue({ ok: true, text: async () => '' });
     // next fetch should be POST called by save mutation
-    (global as any).fetch = mockPost;
+    global.fetch = mockPost as any;
 
     const saveButton = screen.getByRole('button', { name: /save settings/i });
     fireEvent.click(saveButton);

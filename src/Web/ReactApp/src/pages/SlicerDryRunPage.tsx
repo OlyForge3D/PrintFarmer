@@ -1,9 +1,16 @@
 import React, { useState } from 'react';
 
+interface DryRunResult {
+  rendered: string;
+  issues?: string[];
+  warnings?: string[];
+  samplePlaceholders?: Record<string, unknown>;
+}
+
 export const SlicerDryRunPage: React.FC = () => {
     const [template, setTemplate] = useState<string>('');
     const [engine, setEngine] = useState<string>('OrcaSlicer');
-    const [result, setResult] = useState<any | null>(null);
+    const [result, setResult] = useState<DryRunResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 

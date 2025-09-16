@@ -54,7 +54,7 @@ export function UserManagementPage() {
   type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>('idle');
-  const [availabilityMessage, setAvailabilityMessage] = useState('');
+  const [, setAvailabilityMessage] = useState('');
   const DEBOUNCE_MS = 450;
 
   const passwordMeetsPolicy = () => {
@@ -134,7 +134,7 @@ export function UserManagementPage() {
       clearTimeout(handle);
       ctrl.abort();
     };
-  }, [newUser.username, newUser.email, showCreateModal]);
+  }, [newUser.username, newUser.email, showCreateModal, createErrors.email, createErrors.username, emailStatus, usernameStatus]);
 
   const validateForm = () => {
     const errs: typeof createErrors = {};
@@ -177,43 +177,34 @@ export function UserManagementPage() {
 
       if (!response.ok) {
         let errorMessage = 'Failed to create user';
-        let json: any = null;
+        let json: { message?: string; error?: string; title?: string; errors?: Record<string, string[]> } | null = null;
         try {
           // API may return JSON or plain text
             const contentType = response.headers.get('Content-Type') || '';
             if (contentType.includes('application/json')) {
               json = await response.json();
-              errorMessage = json.error || json.message || json.title || errorMessage;
+              if (json) {
+                errorMessage = json.error || json.message || json.title || errorMessage;
+              }
             } else {
-              const text = await response.text();
-              if (text) errorMessage = text;
+              errorMessage = await response.text() || errorMessage;
             }
-        } catch {
-          // ignore parse errors
+        } catch (e) {
+          console.warn('Failed to parse error response:', e);
         }
-        const fieldErrors: typeof createErrors = {};
-        // Structured ASP.NET Core validation (ProblemDetails with errors)
-        if (json && json.errors && typeof json.errors === 'object') {
-          for (const key of Object.keys(json.errors)) {
-            const mappedKey = key.toLowerCase();
+        
+        // Extract field errors if any
+        if (json?.errors) {
+          const fieldErrors: Record<string, string> = {};
+          for (const key in json.errors) {
             const msgArray = json.errors[key];
-            const firstMsg = Array.isArray(msgArray) ? msgArray[0] : msgArray;
-            if (mappedKey.includes('username')) fieldErrors.username = firstMsg;
-            else if (mappedKey.includes('email')) fieldErrors.email = firstMsg;
-            else if (mappedKey.includes('password')) fieldErrors.password = firstMsg;
-            else if (mappedKey.includes('role')) fieldErrors.roles = firstMsg;
-            else fieldErrors.general = firstMsg;
+            if (Array.isArray(msgArray) && msgArray.length > 0) {
+              fieldErrors[key] = msgArray[0];
+            }
           }
-        } else {
-          // Fallback heuristic
-          const msgLower = errorMessage.toLowerCase();
-          if (msgLower.includes('username') && msgLower.includes('taken')) fieldErrors.username = 'Username already taken';
-          if (msgLower.includes('email') && msgLower.includes('taken')) fieldErrors.email = 'Email already taken';
-          if (msgLower.includes('password')) fieldErrors.password = errorMessage;
-          if (msgLower.includes('role')) fieldErrors.roles = errorMessage;
-          if (Object.keys(fieldErrors).length === 0) fieldErrors.general = errorMessage;
+          setCreateErrors(fieldErrors);
         }
-        setCreateErrors(fieldErrors);
+
         toast.error(errorMessage);
         return;
       }

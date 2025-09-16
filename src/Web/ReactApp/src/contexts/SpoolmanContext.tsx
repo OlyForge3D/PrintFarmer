@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useState, useCallback } from 'react';
 
 export interface SpoolmanState {
   enabled: boolean;
@@ -26,7 +26,7 @@ const defaultState: SpoolmanState = {
   lastErrorMessage: null
 };
 
-const SpoolmanContext = createContext<SpoolmanContextValue | undefined>(undefined);
+export const SpoolmanContext = createContext<SpoolmanContextValue | undefined>(undefined);
 
 export const SpoolmanProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<SpoolmanState>(defaultState);
@@ -65,9 +65,3 @@ export const SpoolmanProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   return <SpoolmanContext.Provider value={value}>{children}</SpoolmanContext.Provider>;
 };
-
-export function useSpoolman() {
-  const ctx = useContext(SpoolmanContext);
-  if (!ctx) throw new Error('useSpoolman must be used within a SpoolmanProvider');
-  return ctx;
-}

@@ -6,23 +6,7 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const onDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    setError(null);
-    const files = e.dataTransfer.files;
-    if (!files || files.length === 0) return;
-    await uploadFile(files[0]);
-  }, []);
-
-  const onSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    setError(null);
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    await uploadFile(files[0]);
-  }, []);
-
-  const uploadFile = async (file: File) => {
+  const uploadFile = useCallback(async (file: File) => {
     try {
       setProgress(0);
       const form = new FormData();
@@ -44,7 +28,23 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
     }
-  };
+  }, [onUploaded]);
+
+  const onDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    setError(null);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    await uploadFile(files[0]);
+  }, [uploadFile]);
+
+  const onSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await uploadFile(files[0]);
+  }, [uploadFile]);
 
   return (
     <div>

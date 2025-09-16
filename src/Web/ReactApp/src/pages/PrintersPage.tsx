@@ -18,8 +18,6 @@ import {
   Pause,
   Search,
   Settings,
-  Grid3X3,
-  Table,
   LayoutGrid,
   List
 } from 'lucide-react';

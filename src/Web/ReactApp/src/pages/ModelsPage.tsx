@@ -11,7 +11,23 @@ const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>
 const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
   () => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer }))
 );
-const SlicerConfigModal = lazyWithPreload<any, React.FC<any>>(
+const SlicerConfigModal = lazyWithPreload<{
+  isOpen: boolean;
+  onClose: () => void;
+  modelFile?: File;
+  modelId?: string;
+  modelName?: string;
+  availablePrinters: { id: string; name: string; backend: string; isReachable: boolean }[];
+  onSliceComplete?: (result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => void;
+}, React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  modelFile?: File;
+  modelId?: string;
+  modelName?: string;
+  availablePrinters: { id: string; name: string; backend: string; isReachable: boolean }[];
+  onSliceComplete?: (result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => void;
+}>>(
   () => import('@/components/slicer/SlicerConfigModal').then(m => ({ default: m.SlicerConfigModal }))
 );
 import { slicerService } from '@/services/slicerService';
@@ -400,7 +416,7 @@ export const ModelsPage: React.FC = () => {
             modelId={slicerModal.modelId}
             modelName={slicerModal.modelName}
             availablePrinters={availablePrinters}
-            onSliceComplete={(result: any) => {
+            onSliceComplete={(result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => {
               console.log('Slicing completed:', result);
               // Could navigate to G-code viewer or print queue
             }}

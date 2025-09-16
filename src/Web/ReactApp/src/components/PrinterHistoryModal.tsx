@@ -9,7 +9,6 @@ import {
   Pause,
   Play,
   User,
-  Thermometer,
   Layers,
   X,
   BarChart3,
