@@ -1,4 +1,5 @@
 ﻿// Global using cleanup handled by project settings; explicit System removed.
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
@@ -17,6 +18,9 @@ using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using StackExchange.Redis;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
@@ -212,14 +216,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                                o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
             break;
         case "MySql":
-            {
-                var cs = builder.Configuration.GetConnectionString("MySql")
-                         ?? builder.Configuration.GetConnectionString("Default")
-                         ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-                var serverVersion = ServerVersion.AutoDetect(cs);
-                options.UseMySql(cs, serverVersion);
-                break;
-            }
+        {
+            var cs = builder.Configuration.GetConnectionString("MySql")
+                     ?? builder.Configuration.GetConnectionString("Default")
+                     ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
+            var serverVersion = ServerVersion.AutoDetect(cs);
+            options.UseMySql(cs, serverVersion);
+            break;
+        }
         default:
             options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
                               ?? builder.Configuration.GetConnectionString("Default")
@@ -233,6 +237,109 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         options.EnableDetailedErrors();
     }
 });
+
+// Configure OpenTelemetry
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource =>
+    {
+        resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
+                .AddAttributes(new[]
+                {
+                    new KeyValuePair<string, object>("farm.environment", builder.Environment.EnvironmentName),
+                    new KeyValuePair<string, object>("farm.database.provider", dbProvider)
+                });
+    })
+    .WithTracing(tracing =>
+    {
+        tracing.AddAspNetCoreInstrumentation(options =>
+        {
+            options.RecordException = true;
+            options.EnrichWithHttpRequest = (activity, httpRequest) =>
+            {
+                activity.SetTag("http.request.method", httpRequest.Method);
+                activity.SetTag("http.request.path", httpRequest.Path);
+                if (httpRequest.QueryString.HasValue)
+                {
+                    activity.SetTag("http.request.query", httpRequest.QueryString.Value);
+                }
+            };
+            options.EnrichWithHttpResponse = (activity, httpResponse) =>
+            {
+                activity.SetTag("http.response.status_code", httpResponse.StatusCode);
+            };
+        })
+        .AddHttpClientInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation(options =>
+        {
+            options.SetDbStatementForStoredProcedure = true;
+            options.SetDbStatementForText = true;
+            options.EnrichWithIDbCommand = (activity, command) =>
+            {
+                activity.SetTag("db.operation", command.CommandText);
+            };
+        })
+        .AddSource("PrintFarmer.*");
+
+        // Add console exporter for development
+        if (builder.Environment.IsDevelopment())
+        {
+            tracing.AddConsoleExporter();
+        }
+
+        // Add OTLP exporter for production observability backends
+        var otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
+        if (!string.IsNullOrEmpty(otlpEndpoint))
+        {
+            tracing.AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                var headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
+                if (!string.IsNullOrEmpty(headers))
+                {
+                    options.Headers = headers;
+                }
+            });
+        }
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics.AddAspNetCoreInstrumentation()
+               .AddHttpClientInstrumentation()
+               .AddRuntimeInstrumentation()
+               .AddMeter("PrintFarmer.*");
+
+        // Add console exporter for development
+        if (builder.Environment.IsDevelopment())
+        {
+            metrics.AddConsoleExporter();
+        }
+
+        // Add OTLP exporter for metrics
+        var otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
+        if (!string.IsNullOrEmpty(otlpEndpoint))
+        {
+            metrics.AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                var headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
+                if (!string.IsNullOrEmpty(headers))
+                {
+                    options.Headers = headers;
+                }
+            });
+        }
+    });
+
+// Create ActivitySource for custom instrumentation
+var activitySource = new ActivitySource("PrintFarmer.API");
+builder.Services.AddSingleton(activitySource);
+
+// Register custom telemetry service
+builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IPrintFarmerTelemetryService, Farm.Web.Api.Services.Telemetry.PrintFarmerTelemetryService>();
+
+// Register unified logging services
+builder.Services.AddScoped<Farm.Web.Api.Services.Telemetry.IUnifiedLoggingService, Farm.Web.Api.Services.Telemetry.UnifiedLoggingService>();
+builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService, Farm.Web.Api.Services.Telemetry.ConsoleRedirectionService>();
 
 // HTTP clients for external APIs
 builder.Services.AddHttpClient<MoonrakerClient>(client =>
@@ -506,6 +613,19 @@ var headlessCreateAdmin = rawArgs.Contains("--create-admin");
 var headlessListUsers = rawArgs.Contains("--list-users");
 
 var app = builder.Build();
+
+// Initialize console redirection for unified logging
+using (var scope = app.Services.CreateScope())
+{
+    var consoleRedirection = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService>();
+    Farm.Web.Api.Services.Telemetry.UnifiedConsole.Initialize(consoleRedirection);
+
+    // Enable console redirection to capture Console.WriteLine calls
+    consoleRedirection.RedirectConsoleOutput();
+
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    logger.LogInformation("[UnifiedLogging] Console redirection initialized - all Console.WriteLine calls will now be captured in OpenTelemetry");
+}
 
 // Early headless commands (no web host run) to support automation:
 // Usage examples:
@@ -803,6 +923,9 @@ catch { /* ignore diagnostics failure */ }
 
 // Global exception handling
 app.UseMiddleware<GlobalExceptionMiddleware>();
+
+// Add telemetry middleware early in the pipeline
+app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {

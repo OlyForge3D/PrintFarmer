@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Tests.Startup
+﻿namespace Farm.Web.Api.Tests.Startup
 {
     /// <summary>
     /// Placeholder helper container. A previous merge accidentally left top-level test fragments

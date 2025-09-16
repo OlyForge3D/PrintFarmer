@@ -1,7 +1,7 @@
-using System.Globalization;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
-using System.Collections.Concurrent;
 using Xunit.Abstractions;
 using Xunit.Sdk;
 

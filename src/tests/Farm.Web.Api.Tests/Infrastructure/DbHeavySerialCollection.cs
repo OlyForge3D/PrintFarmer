@@ -1,6 +1,4 @@
-using Xunit;
-
-namespace Farm.Web.Api.Tests.Infrastructure;
+﻿namespace Farm.Web.Api.Tests.Infrastructure;
 
 /// <summary>
 /// Serializes execution of all database-heavy integration tests to prevent parallel SQLite and

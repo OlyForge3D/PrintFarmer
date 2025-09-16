@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { SpoolmanProvider } from './contexts/SpoolmanContext'
+import { initializeTelemetry } from './telemetry/config'
+
+// Initialize OpenTelemetry as early as possible
+initializeTelemetry();
 
 // Service worker control: allow disabling & forced unregister via build-time flag
 // Set VITE_DISABLE_SW=true to completely unregister and clear caches.

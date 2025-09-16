@@ -1,6 +1,4 @@
-﻿using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
@@ -10,7 +8,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace Farm.Web.Api.Tests;
 

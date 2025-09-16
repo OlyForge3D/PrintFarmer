@@ -1,4 +1,4 @@
-using Farm.Web.Api.Domain;
+﻿using Farm.Web.Api.Domain;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
@@ -18,11 +18,11 @@ public interface IThumbnailGenerationService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if thumbnail was generated successfully, false otherwise</returns>
     Task<bool> GenerateThumbnailAsync(
-        string modelFilePath, 
-        ModelFileFormat fileFormat, 
-        string outputPath, 
-        int width = 256, 
-        int height = 256, 
+        string modelFilePath,
+        ModelFileFormat fileFormat,
+        string outputPath,
+        int width = 256,
+        int height = 256,
         CancellationToken ct = default);
 
     /// <summary>

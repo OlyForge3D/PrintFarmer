@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
@@ -16,7 +16,7 @@ public static class NetworkValidationService
     public static NetworkValidationResult ValidateSettings(NetworkDiscoverySettingsDto settings)
     {
         var result = new NetworkValidationResult();
-        
+
         if (settings.NetworkRanges.Count == 0)
         {
             // No ranges is valid - discovery will be disabled
@@ -25,11 +25,14 @@ public static class NetworkValidationService
 
         // Validate each CIDR range
         var validNetworks = new List<(string cidr, IPAddress network, int prefix)>();
-        
+
         foreach (var cidr in settings.NetworkRanges)
         {
             var trimmed = cidr.Trim();
-            if (string.IsNullOrEmpty(trimmed)) continue;
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                continue;
+            }
 
             var cidrValidation = ValidateCidr(trimmed);
             if (!cidrValidation.IsValid)
@@ -88,33 +91,43 @@ public static class NetworkValidationService
     public static CidrValidationResult ValidateCidr(string cidr)
     {
         if (string.IsNullOrWhiteSpace(cidr))
+        {
             return new CidrValidationResult { IsValid = false, Error = "CIDR cannot be empty" };
+        }
 
         var parts = cidr.Split('/');
         if (parts.Length != 2)
+        {
             return new CidrValidationResult { IsValid = false, Error = "CIDR must be in format IP/prefix (e.g., 192.168.1.0/24)" };
+        }
 
         // Parse IP address
         if (!IPAddress.TryParse(parts[0], out var ipAddress))
+        {
             return new CidrValidationResult { IsValid = false, Error = "Invalid IP address format" };
+        }
 
         if (ipAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
             return new CidrValidationResult { IsValid = false, Error = "Only IPv4 addresses are supported" };
+        }
 
         // Parse prefix length
         if (!int.TryParse(parts[1], out var prefixLength) || prefixLength < 0 || prefixLength > 32)
+        {
             return new CidrValidationResult { IsValid = false, Error = "Prefix length must be 0-32" };
+        }
 
         // Calculate the correct network address
         var networkAddress = GetNetworkAddress(ipAddress, prefixLength);
-        
+
         // Check if the provided IP is actually the network address
         if (!ipAddress.Equals(networkAddress))
         {
             var suggestion = $"{networkAddress}/{prefixLength}";
-            return new CidrValidationResult 
-            { 
-                IsValid = false, 
+            return new CidrValidationResult
+            {
+                IsValid = false,
                 Error = "IP address is not a network address (host bits should be zero)",
                 Suggestion = suggestion,
                 NetworkAddress = networkAddress,
@@ -122,11 +135,11 @@ public static class NetworkValidationService
             };
         }
 
-        return new CidrValidationResult 
-        { 
-            IsValid = true, 
-            NetworkAddress = networkAddress, 
-            PrefixLength = prefixLength 
+        return new CidrValidationResult
+        {
+            IsValid = true,
+            NetworkAddress = networkAddress,
+            PrefixLength = prefixLength
         };
     }
 
@@ -196,11 +209,14 @@ public static class NetworkValidationService
     private static bool IsNetworkInNetwork(IPAddress testNetwork, int testPrefix, IPAddress containerNetwork, int containerPrefix)
     {
         // The container network must have a smaller or equal prefix (larger network)
-        if (containerPrefix > testPrefix) return false;
+        if (containerPrefix > testPrefix)
+        {
+            return false;
+        }
 
         // Calculate network address of test network using container's prefix
         var testNetworkInContainer = GetNetworkAddress(testNetwork, containerPrefix);
-        
+
         return testNetworkInContainer.Equals(containerNetwork);
     }
 }

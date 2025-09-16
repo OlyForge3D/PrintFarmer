@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
@@ -20,41 +20,41 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
     public ThumbnailGenerationService(ILogger<ThumbnailGenerationService> logger, IConfiguration configuration)
     {
         _logger = logger;
-        
+
         // Get Python path from configuration or use default
         _pythonPath = configuration["ThumbnailGeneration:PythonPath"] ?? "python3";
-        
+
         // Script will be stored in the API directory
         var apiDirectory = AppContext.BaseDirectory;
         _scriptPath = Path.Combine(apiDirectory, "Scripts", "generate_thumbnail.py");
-        
+
         // Thumbnails storage path
-        _thumbnailsBasePath = configuration["ThumbnailGeneration:ThumbnailsPath"] 
+        _thumbnailsBasePath = configuration["ThumbnailGeneration:ThumbnailsPath"]
             ?? Path.Combine(Directory.GetCurrentDirectory(), "thumbnails");
-        
+
         // Ensure thumbnails directory exists
         if (!Directory.Exists(_thumbnailsBasePath))
         {
             Directory.CreateDirectory(_thumbnailsBasePath);
         }
-        
+
         // Ensure scripts directory exists
         var scriptsDir = Path.GetDirectoryName(_scriptPath);
         if (scriptsDir != null && !Directory.Exists(scriptsDir))
         {
             Directory.CreateDirectory(scriptsDir);
         }
-        
+
         // Create the Python script if it doesn't exist
         EnsurePythonScriptExists();
     }
 
     public async Task<bool> GenerateThumbnailAsync(
-        string modelFilePath, 
-        ModelFileFormat fileFormat, 
-        string outputPath, 
-        int width = 256, 
-        int height = 256, 
+        string modelFilePath,
+        ModelFileFormat fileFormat,
+        string outputPath,
+        int width = 256,
+        int height = 256,
         CancellationToken ct = default)
     {
         if (!IsFormatSupported(fileFormat))
@@ -100,7 +100,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 }
             };
 
-            _logger.LogDebug("Starting thumbnail generation: {FileName} {Arguments}", 
+            _logger.LogDebug("Starting thumbnail generation: {FileName} {Arguments}",
                 _pythonPath, arguments.ToString());
 
             process.Start();
@@ -137,7 +137,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             }
             else
             {
-                _logger.LogWarning("Thumbnail generation failed. Exit code: {ExitCode}, Error: {Error}, Output: {Output}", 
+                _logger.LogWarning("Thumbnail generation failed. Exit code: {ExitCode}, Error: {Error}, Output: {Output}",
                     process.ExitCode, error, output);
                 return false;
             }
@@ -277,7 +277,7 @@ if __name__ == ""__main__"":
         {
             File.WriteAllText(_scriptPath, scriptContent, Encoding.UTF8);
             _logger.LogInformation("Created thumbnail generation Python script at: {ScriptPath}", _scriptPath);
-            
+
             // Make script executable on Unix systems
             if (!OperatingSystem.IsWindows())
             {

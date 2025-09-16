@@ -1,12 +1,7 @@
-﻿using System.Net;
-using System.Net.Http.Json;
-using FluentAssertions;
-using Xunit;
-using Farm.Web.Shared;
-using System.IO;
+﻿using System.Net.Http.Headers;
 using System.Text;
+using Farm.Web.Shared;
 using Moq;
-using System.Net.Http.Headers;
 
 namespace Farm.Web.Api.Tests;
 

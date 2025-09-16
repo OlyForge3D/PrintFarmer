@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Farm.Web.Api.Services;
 
@@ -10,7 +10,7 @@ public class NetworkUrlRewriteService
 {
     private readonly ILogger<NetworkUrlRewriteService> _logger;
     private readonly IConfiguration _configuration;
-    
+
     public NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, IConfiguration configuration)
     {
         _logger = logger;
@@ -26,38 +26,40 @@ public class NetworkUrlRewriteService
     public string RewriteUrl(string originalUrl, string? serviceName = null)
     {
         if (string.IsNullOrEmpty(originalUrl))
+        {
             return originalUrl;
+        }
 
         try
         {
             var uri = new Uri(originalUrl);
-            var rewrittenUrl = RewriteUri(uri, serviceName);
-            
+            var rewrittenUrl = RewriteUri(uri);
+
             if (rewrittenUrl != originalUrl)
             {
-                _logger.LogDebug("URL rewritten for {ServiceName}: {OriginalUrl} -> {RewrittenUrl}", 
+                _logger.LogDebug("URL rewritten for {ServiceName}: {OriginalUrl} -> {RewrittenUrl}",
                     serviceName ?? "unknown service", originalUrl, rewrittenUrl);
             }
-            
+
             return rewrittenUrl;
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning("Invalid URL format, returning unchanged: {Url}. Error: {Error}", 
+            _logger.LogWarning("Invalid URL format, returning unchanged: {Url}. Error: {Error}",
                 originalUrl, ex.Message);
             return originalUrl;
         }
     }
 
-    private string RewriteUri(Uri uri, string? serviceName)
+    private string RewriteUri(Uri uri)
     {
         var environment = DetectEnvironment();
-        
+
         // Check for explicit environment variable overrides first
         var envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
         if (!string.IsNullOrEmpty(envOverride))
         {
-            _logger.LogDebug("Using environment override for {Host}:{Port} -> {Override}", 
+            _logger.LogDebug("Using environment override for {Host}:{Port} -> {Override}",
                 uri.Host, uri.Port, envOverride);
             return ReplaceHostPort(uri, envOverride).ToString();
         }
@@ -82,11 +84,11 @@ public class NetworkUrlRewriteService
             if (IsDockerDesktop())
             {
                 var hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
-                _logger.LogDebug("Docker Desktop detected, rewriting to host.docker.internal: {Url}", 
+                _logger.LogDebug("Docker Desktop detected, rewriting to host.docker.internal: {Url}",
                     hostDockerInternalUrl);
                 return hostDockerInternalUrl.ToString();
             }
-            
+
             // Option 2: Use host network gateway (Linux Docker)
             var gatewayOverride = _configuration["Docker:HostGateway"];
             if (!string.IsNullOrEmpty(gatewayOverride))
@@ -96,7 +98,7 @@ public class NetworkUrlRewriteService
                 return gatewayUrl.ToString();
             }
         }
-        
+
         return uri.ToString();
     }
 
@@ -131,12 +133,12 @@ public class NetworkUrlRewriteService
         {
             return RuntimeEnvironment.WindowsNative;
         }
-        
+
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
             return RuntimeEnvironment.MacOSNative;
         }
-        
+
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             return RuntimeEnvironment.LinuxNative;
@@ -167,7 +169,7 @@ public class NetworkUrlRewriteService
         if (System.Net.IPAddress.TryParse(host, out var ipAddress))
         {
             var bytes = ipAddress.GetAddressBytes();
-            
+
             // Check for private IP ranges (RFC 1918)
             return bytes.Length == 4 && (
                 // 10.0.0.0/8
@@ -189,7 +191,7 @@ public class NetworkUrlRewriteService
     private Uri ReplaceHostPort(Uri originalUri, string newHostPort)
     {
         var builder = new UriBuilder(originalUri);
-        
+
         if (newHostPort.Contains(':'))
         {
             var parts = newHostPort.Split(':', 2);
@@ -203,7 +205,7 @@ public class NetworkUrlRewriteService
         {
             builder.Host = newHostPort;
         }
-        
+
         return builder.Uri;
     }
 

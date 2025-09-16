@@ -5,6 +5,7 @@ import { PrinterDashboard } from '@/components/PrinterDashboard';
 import { SetupWizard } from '@/components/SetupWizard';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { useUnifiedLogging } from '@/hooks/useUnifiedLogging';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { FilesPage } from '@/pages/FilesPage';
 import { HarvestPage } from '@/pages/HarvestPage';
@@ -49,20 +50,37 @@ const queryClient = new QueryClient({
 function App() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
+  
+  // Initialize unified logging for the main App component
+  const { logger } = useUnifiedLogging({ 
+    component: 'App', 
+    logLifecycle: true 
+  });
 
   useEffect(() => {
     const checkSetupStatus = async () => {
+      logger.info('Checking setup status');
+      
       try {
         const response = await fetch('/api/setup/status');
         if (response.ok) {
           const data = await response.json();
           setSetupComplete(!data.needsSetup);
+          logger.info('Setup status retrieved', { 
+            needsSetup: data.needsSetup, 
+            setupComplete: !data.needsSetup 
+          });
         } else {
           // If we can't check setup status, assume setup is needed
           setSetupComplete(false);
+          logger.warn('Setup status check failed - assuming setup needed', { 
+            status: response.status 
+          });
         }
       } catch (error) {
-        console.error('Error checking setup status:', error);
+        logger.error('Error checking setup status', { 
+          error: error instanceof Error ? error.message : String(error) 
+        });
         // If there's an error, assume setup is needed
         setSetupComplete(false);
       } finally {
@@ -71,7 +89,7 @@ function App() {
     };
 
     checkSetupStatus();
-  }, []);
+  }, [logger]);
 
   const handleSetupComplete = () => {
     setSetupComplete(true);

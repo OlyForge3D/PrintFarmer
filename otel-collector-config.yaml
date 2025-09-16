@@ -1,0 +1,81 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:3000"
+            - "http://localhost:3001"
+            - "https://localhost:3000"
+            - "https://localhost:3001"
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    limit_mib: 512
+  
+  resourcedetection:
+    detectors: [env, system]
+  
+  attributes:
+    actions:
+      - key: environment
+        value: development
+        action: insert
+      - key: service.namespace
+        value: printfarmer
+        action: insert
+
+exporters:
+  # Jaeger for distributed tracing
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+  # Prometheus for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    namespace: printfarmer
+    const_labels:
+      environment: development
+
+  # Console output for debugging
+  logging:
+    loglevel: debug
+
+  # OTLP HTTP for external observability platforms
+  otlphttp:
+    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+    headers:
+      Authorization: ${OTEL_EXPORTER_OTLP_HEADERS}
+    compression: gzip
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes, batch]
+      exporters: [jaeger, logging]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes, batch]
+      exporters: [prometheus, logging]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes, batch]
+      exporters: [logging]
+
+  extensions: [health_check]
+  
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

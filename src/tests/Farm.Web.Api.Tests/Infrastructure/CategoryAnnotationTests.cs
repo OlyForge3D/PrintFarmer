@@ -1,9 +1,4 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
-using Xunit;
+﻿using System.Text.RegularExpressions;
 
 namespace Farm.Web.Api.Tests.Infrastructure
 {

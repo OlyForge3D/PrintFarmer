@@ -227,7 +227,7 @@ public class ModelController : ControllerBase
                 {
                     var thumbnailFileName = $"{modelId}_thumbnail{_thumbnailService.ThumbnailFileExtension}";
                     var thumbnailPath = Path.Combine(_modelsPath, "thumbnails", thumbnailFileName);
-                    
+
                     // Ensure thumbnails directory exists
                     var thumbnailDir = Path.GetDirectoryName(thumbnailPath);
                     if (thumbnailDir != null && !Directory.Exists(thumbnailDir))

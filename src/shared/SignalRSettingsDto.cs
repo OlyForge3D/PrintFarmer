@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared;
+﻿namespace Farm.Web.Shared;
 
 /// <summary>
 /// Configuration settings for SignalR logging and connection behavior
