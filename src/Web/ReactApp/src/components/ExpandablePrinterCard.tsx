@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
+import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { 
   ChevronDown, 
   ExternalLink,
@@ -27,6 +28,7 @@ interface ExpandablePrinterCardProps {
 export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [step, setStep] = useState(10);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
   const [bedTemp, setBedTemp] = useState<number | ''>('');
@@ -348,8 +350,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   };
 
   const handleViewHistory = () => {
-    // TODO: Implement history modal or navigation
-    alert(`Print history for ${printer.name} - Feature coming soon!`);
+    setShowHistory(true);
   };
 
   if (!isExpanded) {
@@ -456,6 +457,13 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             {isShutdown ? 'Restart' : 'Stop'}
           </button>
         </div>
+
+        {/* History Modal */}
+        <PrinterHistoryModal
+          isOpen={showHistory}
+          onClose={() => setShowHistory(false)}
+          printer={printer}
+        />
       </div>
     );
   }
@@ -859,6 +867,13 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </div>
         </div>
       </div>
+
+      {/* History Modal */}
+      <PrinterHistoryModal
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        printer={printer}
+      />
     </div>
   );
 }

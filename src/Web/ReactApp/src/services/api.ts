@@ -11,6 +11,9 @@ import {
   GcodeHarvestOperation,
   GetGcodeFilesResponse,
   HealthStatus,
+  HistoryJob,
+  HistoryListResponse,
+  HistoryTotals,
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
@@ -159,6 +162,39 @@ export class ApiClient {
 
   async firmwareRestart(printerId: string): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(`/printers/${printerId}/firmware-restart`);
+    return response.data;
+  }
+
+  // ============ Printer History API methods ============
+
+  async getPrinterHistory(
+    printerId: string, 
+    options?: {
+      limit?: number;
+      start?: number;
+      since?: Date;
+      before?: Date;
+      order?: string;
+    }
+  ): Promise<HistoryListResponse> {
+    const params: Record<string, string | number> = {};
+    if (options?.limit) params.limit = options.limit;
+    if (options?.start) params.start = options.start;
+    if (options?.since) params.since = options.since.toISOString();
+    if (options?.before) params.before = options.before.toISOString();
+    if (options?.order) params.order = options.order;
+
+    const response = await this.client.get<HistoryListResponse>(`/printers/${printerId}/history`, { params });
+    return response.data;
+  }
+
+  async getPrinterHistoryJob(printerId: string, jobId: string): Promise<HistoryJob> {
+    const response = await this.client.get<HistoryJob>(`/printers/${printerId}/history/${jobId}`);
+    return response.data;
+  }
+
+  async getPrinterHistoryTotals(printerId: string): Promise<HistoryTotals> {
+    const response = await this.client.get<HistoryTotals>(`/printers/${printerId}/history/totals`);
     return response.data;
   }
 

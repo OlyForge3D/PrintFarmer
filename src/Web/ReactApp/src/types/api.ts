@@ -579,3 +579,54 @@ export interface MultiUploadResponse {
   succeededCount: number;
   failedCount: number;
 }
+
+// Printer History Types
+export interface HistoryListResponse {
+  count: number;
+  jobs: HistoryJob[];
+}
+
+export interface HistoryJob {
+  jobId: string;
+  exists: boolean;
+  endTime?: number;
+  filamentUsed: number;
+  filename: string;
+  metadata: Record<string, unknown>;
+  printDuration: number;
+  status: string;
+  startTime: number;
+  totalDuration: number;
+  user: string;
+  auxiliaryData?: AuxiliaryData[];
+  thumbnailUrl?: string;
+}
+
+export interface AuxiliaryData {
+  provider: string;
+  name: string;
+  value: unknown;
+  description: string;
+  units?: string;
+}
+
+export interface HistoryTotals {
+  jobTotals: JobTotals;
+  auxiliaryTotals?: AuxiliaryTotals[];
+}
+
+export interface JobTotals {
+  totalJobs: number;
+  totalPrintTime: number;
+  totalFilament: number;
+  longestJob: number;
+  longestPrint: number;
+}
+
+export interface AuxiliaryTotals {
+  provider: string;
+  name: string;
+  totalValue: number;
+  description: string;
+  units?: string;
+}

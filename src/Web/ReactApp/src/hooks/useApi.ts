@@ -6,6 +6,9 @@ import {
   FilamentPresets,
   GcodeFile,
   GcodeHarvestOperation,
+  HistoryJob,
+  HistoryListResponse,
+  HistoryTotals,
   JobQueuePrintJob,
   ManufacturerDto,
   PrinterModelDto,
@@ -22,6 +25,10 @@ export const queryKeys = {
   printers: ['printers'] as const,
   printer: (id: string) => ['printers', id] as const,
   printerDetails: (id: string) => ['printers', id, 'details'] as const,
+  printerHistory: (id: string, options?: { limit?: number; start?: number; since?: Date; before?: Date; order?: string }) => 
+    ['printers', id, 'history', options] as const,
+  printerHistoryJob: (printerId: string, jobId: string) => ['printers', printerId, 'history', jobId] as const,
+  printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
   manufacturers: ['manufacturers'] as const,
   models: (manufacturerId?: string) => ['models', manufacturerId] as const,
   filamentPresets: ['presets', 'filament'] as const,
@@ -583,5 +590,54 @@ export function useBasicHealth(options?: UseQueryOptions<BasicHealthStatus, ApiE
     },
     staleTime: 10000,
     ...options,
+  });
+}
+
+// ============ Printer History Hooks ============
+
+export function usePrinterHistory(
+  printerId: string, 
+  options?: {
+    limit?: number;
+    start?: number;
+    since?: Date;
+    before?: Date;
+    order?: string;
+  },
+  queryOptions?: UseQueryOptions<HistoryListResponse, ApiError>
+) {
+  return useQuery({
+    queryKey: queryKeys.printerHistory(printerId, options),
+    queryFn: () => apiClient.getPrinterHistory(printerId, options),
+    staleTime: 30000,
+    enabled: !!printerId,
+    ...queryOptions,
+  });
+}
+
+export function usePrinterHistoryJob(
+  printerId: string, 
+  jobId: string, 
+  queryOptions?: UseQueryOptions<HistoryJob, ApiError>
+) {
+  return useQuery({
+    queryKey: queryKeys.printerHistoryJob(printerId, jobId),
+    queryFn: () => apiClient.getPrinterHistoryJob(printerId, jobId),
+    staleTime: 300000, // History jobs don't change often
+    enabled: !!printerId && !!jobId,
+    ...queryOptions,
+  });
+}
+
+export function usePrinterHistoryTotals(
+  printerId: string,
+  queryOptions?: UseQueryOptions<HistoryTotals, ApiError>
+) {
+  return useQuery({
+    queryKey: queryKeys.printerHistoryTotals(printerId),
+    queryFn: () => apiClient.getPrinterHistoryTotals(printerId),
+    staleTime: 300000, // History totals don't change often
+    enabled: !!printerId,
+    ...queryOptions,
   });
 }
