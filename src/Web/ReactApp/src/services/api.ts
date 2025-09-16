@@ -14,11 +14,11 @@ import {
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
-  PrinterModelDto,
   MoveRequest,
   MultiUploadResponse,
   Printer,
   PrinterDetails,
+  PrinterModelDto,
   RegisterRequest,
   ResolveHostnameRequest,
   ResolveHostnameResponse,
@@ -204,6 +204,7 @@ export class ApiClient {
     return this.updateModel(id, { name });
   }
 
+  // Delete a model by id
   async deleteModel(id: string): Promise<void> {
     await this.client.delete(`/catalog/printer-models/${id}`);
   }

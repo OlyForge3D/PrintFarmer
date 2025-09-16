@@ -7,6 +7,13 @@
   <NoWarn>$(NoWarn);S2699</NoWarn>
   </PropertyGroup>
 
+  <!-- Enable deterministic per-project coverlet outputs (lcov) so CI can merge them predictably -->
+  <PropertyGroup>
+    <CollectCoverage>true</CollectCoverage>
+    <CoverletOutput>$(MSBuildProjectDirectory)/../coverage/$(MSBuildProjectName).info</CoverletOutput>
+    <CoverletOutputFormat>lcov</CoverletOutputFormat>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.8" />
@@ -20,9 +27,8 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.collector" Version="6.0.4">
+    <PackageReference Include="coverlet.msbuild" Version="3.1.2">
       <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <!-- Additional packages for slicer services testing -->
     <PackageReference Include="StackExchange.Redis" Version="2.9.17" />

@@ -48,21 +48,12 @@ jobs:
         run: |
           dotnet test ./farm-web.sln -c Debug --no-build --logger trx --results-directory TestResults \
             --filter "Category!=DbHeavy&Category!=Docker" \
-            /p:CollectCoverage=true /p:CoverletOutput=../coverage/ /p:CoverletOutputFormat=lcov
+            /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
 
-      - name: Install ReportGenerator
-        run: dotnet tool install --global dotnet-reportgenerator-globaltool
-      - name: Generate HTML coverage report
+      - name: "Merge backend coverage (strict merge: combine SF blocks)"
+        id: merge-backend-coverage
         run: |
-          export PATH="$PATH:$HOME/.dotnet/tools"
-          reportgenerator -reports:src/coverage/coverage.info -targetdir:src/coverage/report -reporttypes:HtmlInline_AzurePipelines;TextSummary
-          cat src/coverage/report/Summary.txt || true
-      - name: Upload .NET HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dotnet-coverage-html
-          path: src/coverage/report
+          bash ./.github/scripts/merge-lcov.sh
 
       - name: Upload .NET coverage artifact
         if: always()
@@ -129,14 +120,14 @@ jobs:
           if [ $PCT -lt 55 ]; then echo "Frontend coverage below 55%"; exit 1; fi
 
       - name: Enforce backend coverage thresholds
-        if: success()
+        if: success() && steps.merge-backend-coverage.outputs.coverage_present == 'true'
         run: |
+          # Use the single canonical merged backend coverage file created by reportgenerator
           BACKEND_LCOV=src/coverage/coverage.info
-          if [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov"; exit 1; fi
+          if [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov at $BACKEND_LCOV"; exit 1; fi
           LINES=$(grep -c '^DA:' "$BACKEND_LCOV")
-          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{split($2,a,":"); if ($2 ~ /,/) {} }')
-          # Simplistic: count DA lines with execution >0
-          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{split($2,a,":"); if ($2>0) c++} END {print c+0}')
+          # Count DA lines with execution > 0
+          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{ if ($2+0>0) c++ } END {print c+0}')
           if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse backend coverage"; exit 1; fi
           PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
           echo "Backend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
