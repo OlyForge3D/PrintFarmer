@@ -18,6 +18,16 @@ vi.mock('@/hooks/useApi', async () => ({
   useManufacturers: vi.fn(() => ({ data: [] })),
   useModels: vi.fn(() => ({ data: [] })),
   useUpdatePrinter: () => ({ mutateAsync: vi.fn() }),
+  usePrinterHistory: vi.fn(() => ({ 
+    data: { jobs: [], total: 0 }, 
+    isLoading: false, 
+    error: null, 
+    refetch: vi.fn() 
+  })),
+  usePrinterHistoryTotals: vi.fn(() => ({ 
+    data: { totalJobs: 0, totalPrintTime: 0, successfulJobs: 0 }, 
+    isLoading: false 
+  })),
 }));
 
 vi.mock('@/hooks/useSignalR', () => ({
