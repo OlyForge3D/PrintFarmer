@@ -66,7 +66,28 @@ class SlicerService {
     formData.append('printerId', request.printerId);
     formData.append('profile', JSON.stringify(request.profile));
 
-    const response = await fetch(`${this.getBaseUrl()}/3d-models`, {
+    const response = await fetch(`${this.getBaseUrl()}/slicer/slice`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Slicing failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async sliceUploadedModel(modelId: string, slicerEngine: 'prusaslicer' | 'orcaslicer', printerId: string, profile: SlicerProfile): Promise<SliceResult> {
+    const formData = new FormData();
+    formData.append('slicerEngine', slicerEngine);
+    formData.append('printerId', printerId);
+    formData.append('profile', JSON.stringify(profile));
+
+    const response = await fetch(`${this.getBaseUrl()}/slicer/slice-model/${modelId}`, {
       method: 'POST',
       body: formData,
       headers: {

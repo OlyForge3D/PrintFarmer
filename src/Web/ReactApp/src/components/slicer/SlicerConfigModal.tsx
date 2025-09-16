@@ -19,7 +19,10 @@ interface SliceCompleteResult {
 interface SlicerConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
-  modelFile: File;
+  // Either a file to upload and slice, or an uploaded model to slice
+  modelFile?: File;
+  modelId?: string;
+  modelName?: string;
   availablePrinters: AvailablePrinter[];
   onSliceComplete?: (result: SliceCompleteResult) => void;
 }
@@ -61,6 +64,8 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
   isOpen,
   onClose,
   modelFile,
+  modelId,
+  modelName,
   availablePrinters,
   onSliceComplete
 }) => {
@@ -96,15 +101,28 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
     setSlicingProgress({ jobId: '', progress: 0, status: 'queued' });
 
     try {
-      // Start slicing
-      const sliceRequest: SliceRequest = {
-        modelFile,
-        slicerEngine: selectedSlicer,
-        printerId: selectedPrinter.id,
-        profile
-      };
+      let result;
       
-      const result = await slicerService.sliceModel(sliceRequest);
+      if (modelFile) {
+        // Slice a new file upload
+        const sliceRequest: SliceRequest = {
+          modelFile,
+          slicerEngine: selectedSlicer,
+          printerId: selectedPrinter.id,
+          profile
+        };
+        result = await slicerService.sliceModel(sliceRequest);
+      } else if (modelId) {
+        // Slice an already uploaded model
+        result = await slicerService.sliceUploadedModel(
+          modelId,
+          selectedSlicer,
+          selectedPrinter.id,
+          profile
+        );
+      } else {
+        throw new Error('No model file or model ID provided');
+      }
 
       // Subscribe to progress updates
       const progressSource = slicerService.subscribeToSlicingProgress(
@@ -165,11 +183,15 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="text-gray-600">File:</span>
-                <span className="ml-2 font-medium">{modelFile.name}</span>
+                <span className="ml-2 font-medium">
+                  {modelFile ? modelFile.name : (modelName || 'Unknown Model')}
+                </span>
               </div>
               <div>
                 <span className="text-gray-600">Size:</span>
-                <span className="ml-2 font-medium">{(modelFile.size / 1024 / 1024).toFixed(1)} MB</span>
+                <span className="ml-2 font-medium">
+                  {modelFile ? `${(modelFile.size / 1024 / 1024).toFixed(1)} MB` : 'Unknown'}
+                </span>
               </div>
             </div>
             

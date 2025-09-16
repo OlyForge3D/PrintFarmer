@@ -42,9 +42,13 @@ export const ModelsPage: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
-  const [slicerModal, setSlicerModal] = useState<{ isOpen: boolean; model: File | null }>({
-    isOpen: false,
-    model: null
+  const [slicerModal, setSlicerModal] = useState<{ 
+    isOpen: boolean; 
+    modelFile?: File; 
+    modelId?: string; 
+    modelName?: string; 
+  }>({
+    isOpen: false
   });
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   
@@ -314,7 +318,8 @@ export const ModelsPage: React.FC = () => {
                   onFocus={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
                   onClick={() => setSlicerModal({ 
                     isOpen: true, 
-                    model: new File([], model.fileName || `${model.name}.stl`) // Simplified placeholder
+                    modelId: model.id,
+                    modelName: model.name
                   })}
                   className="flex-1 px-3 py-2 bg-pf-accent-bg bg-opacity-20 text-pf-accent rounded hover:bg-pf-accent-bg hover:bg-opacity-30 text-sm font-medium border border-pf-accent"
                 >
@@ -390,8 +395,10 @@ export const ModelsPage: React.FC = () => {
         <Suspense fallback={<div>Loading slicer...</div>}>
           <SlicerConfigModal
             isOpen={slicerModal.isOpen}
-            onClose={() => setSlicerModal({ isOpen: false, model: null })}
-            modelFile={slicerModal.model!}
+            onClose={() => setSlicerModal({ isOpen: false })}
+            modelFile={slicerModal.modelFile}
+            modelId={slicerModal.modelId}
+            modelName={slicerModal.modelName}
             availablePrinters={availablePrinters}
             onSliceComplete={(result: any) => {
               console.log('Slicing completed:', result);

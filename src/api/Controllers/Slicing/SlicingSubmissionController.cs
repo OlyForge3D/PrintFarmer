@@ -1,7 +1,9 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using Farm.Web.Shared;
+using Farm.Web.Api.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
 
@@ -15,8 +17,9 @@ public class SlicingSubmissionController : ControllerBase
     private readonly ILogger<SlicingSubmissionController> _logger;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
+    private readonly AppDbContext _context;
 
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env)
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env, AppDbContext context)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(tempPathProvider);
@@ -27,6 +30,7 @@ public class SlicingSubmissionController : ControllerBase
         Directory.CreateDirectory(tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _env = env ?? throw new ArgumentNullException(nameof(env));
+        _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
     [HttpPost("slice")]
@@ -199,6 +203,156 @@ public class SlicingSubmissionController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to enqueue slicing job");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
+        }
+    }
+
+    [HttpPost("slice-model/{modelId}")]
+    [ProducesResponseType(typeof(SlicingJobResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SliceUploadedModelAsync(
+        Guid modelId,
+        [FromForm(Name = "slicerEngine")] string? slicerEngine,
+        [FromForm(Name = "printerId")] string? printerId,
+        [FromForm(Name = "profile")] string? profileRaw,
+        [FromForm(Name = "priority")] string? priorityRaw)
+    {
+        // Find the uploaded model
+        var model = await _context.Models3D.FirstOrDefaultAsync(m => m.Id == modelId);
+        if (model == null)
+        {
+            return NotFound($"Model with ID {modelId} not found");
+        }
+
+        // Validate that the model file exists on disk
+        if (!System.IO.File.Exists(model.FilePath))
+        {
+            _logger.LogError("Model file not found on disk: {FilePath} for model {ModelId}", model.FilePath, modelId);
+            return NotFound("Model file not found on disk");
+        }
+
+        // Validate parameters
+        if (string.IsNullOrWhiteSpace(slicerEngine) || !AllowedEngines.Contains(slicerEngine))
+        {
+            return BadRequest("Valid slicer engine is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out var printerGuid))
+        {
+            return BadRequest("Valid printer ID is required");
+        }
+
+        if (string.IsNullOrEmpty(profileRaw))
+        {
+            return BadRequest("Valid slicer profile is required");
+        }
+
+        SlicerProfileDto? profile;
+        try
+        {
+            profile = JsonSerializer.Deserialize<SlicerProfileDto>(profileRaw);
+        }
+        catch
+        {
+            return BadRequest("Invalid slicer profile format");
+        }
+
+        if (!string.IsNullOrWhiteSpace(priorityRaw) && !Enum.TryParse(priorityRaw, true, out SlicingJobPriority _))
+        {
+            return BadRequest($"Invalid priority: {priorityRaw}. Supported priorities: {string.Join(", ", Enum.GetNames<SlicingJobPriority>())}");
+        }
+
+        if (!Enum.TryParse<SlicerEngineType>(slicerEngine, true, out _))
+        {
+            return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
+        }
+
+        try
+        {
+            // Upload the model file to the slicer storage
+            var fileKey = $"models/{Guid.NewGuid()}/{model.OriginalFileName}";
+            string modelFileUrl;
+            using (var fileStream = new FileStream(model.FilePath, FileMode.Open, FileAccess.Read))
+            {
+                modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, fileStream, "application/octet-stream");
+            }
+
+            // Determine authenticated user
+            var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+            Guid userId;
+            if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
+            {
+                if (_env.IsEnvironment("Testing"))
+                {
+                    userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+                }
+                else
+                {
+                    return Unauthorized("Authenticated user is required to submit slicing jobs");
+                }
+            }
+
+            var request = new Farm.Web.Shared.SlicingJobRequest
+            {
+                UserId = userId,
+                PrinterId = printerGuid,
+                ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
+                ModelFileName = model.OriginalFileName,
+                SlicerEngine = Enum.Parse<Farm.Web.Shared.SlicerEngineType>(slicerEngine, true),
+                SlicerProfile = profile!
+            };
+
+            var response = await _orchestrator.SubmitJobAsync(request);
+
+            var sliceResult = new SliceResultDto
+            {
+                JobId = response.JobId.ToString(),
+                Status = response.Status.ToString(),
+                Progress = 0,
+                PrintTime = 0,
+                FilamentUsed = 0,
+                LayerCount = 0,
+                GcodeUrl = string.Empty,
+                Metadata = new SliceMetadataDto
+                {
+                    SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
+                    ProfileUsed = profile!.Quality + " - " + profile.Material,
+                    EstimatedCost = 0
+                }
+            };
+
+            // In Testing environment register the job in the in-memory SlicingJobStore as Queued
+            if (_env.IsEnvironment("Testing"))
+            {
+                var jobId = response.JobId.ToString();
+                sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode";
+                sliceResult.Status = SlicingJobStatus.Queued.ToString();
+                sliceResult.Progress = 0;
+
+                var storeJob = new SlicingJobDto
+                {
+                    JobId = jobId,
+                    Status = SlicingJobStatus.Queued,
+                    Progress = 0,
+                    SlicerEngine = slicerEngine,
+                    PrinterId = printerGuid,
+                    ModelFilePath = modelFileUrl,
+                    GcodeFilePath = null,
+                    Profile = profile,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                SlicingJobStore.Add(storeJob);
+            }
+
+            _logger.LogInformation("Slicing job submitted for uploaded model {ModelId} ({OriginalFileName})", modelId, model.OriginalFileName);
+
+            return Accepted(sliceResult);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to enqueue slicing job for uploaded model {ModelId}", modelId);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }
