@@ -35,7 +35,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [networkRanges, setNetworkRanges] = useState<string[]>([]);
   const [discoveryTimeout, setDiscoveryTimeout] = useState(5000);
   const [maxConcurrentScans, setMaxConcurrentScans] = useState(20);
-  const [scanPorts, setScanPorts] = useState<number[]>([7125, 80]);
+  const [scanPorts, setScanPorts] = useState<number[]>([80]);
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
 
   // Step: Spoolman
@@ -382,7 +382,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
         <div>
           <label htmlFor="nw-ports" className="block text-xs mb-1">Ports (comma separated)</label>
-          <input id="nw-ports" name="nw-ports" type="text" value={scanPorts.join(',')} placeholder="7125,80" onChange={e => setScanPorts(e.target.value.split(',').map(p => Number(p.trim())).filter(n => !isNaN(n)))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
+          <input id="nw-ports" name="nw-ports" type="text" value={scanPorts.join(',')} placeholder="80" onChange={e => setScanPorts(e.target.value.split(',').map(p => Number(p.trim())).filter(n => !isNaN(n)))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
         </div>
       </div>
       <div className="flex justify-between">

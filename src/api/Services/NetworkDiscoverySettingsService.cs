@@ -41,7 +41,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         }
 
         // If no user settings exist, return empty settings - user must configure ranges
-        // Derive default ports; allow override via environment variable DISCOVERY_PORTS (e.g. "80,7125,7912")
+        // Derive default ports; allow override via environment variable DISCOVERY_PORTS (e.g. "80,7912")
         var envPorts = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
         List<int> defaultPorts;
         if (!string.IsNullOrWhiteSpace(envPorts))
@@ -54,13 +54,13 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
                 .ToList();
             if (defaultPorts.Count == 0)
             {
-                defaultPorts = new List<int> { 7125, 80 }; // Fallback if parsing failed
+                defaultPorts = new List<int> { 80 }; // Fallback if parsing failed
             }
         }
         else
         {
-            // Default discovery ports: Moonraker (7125) and HTTP (80)
-            defaultPorts = new List<int> { 7125, 80 };
+            // Default discovery ports: HTTP (80)
+            defaultPorts = new List<int> { 80 };
         }
 
         return new NetworkDiscoverySettingsDto(
@@ -74,10 +74,10 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
     public void SaveSettings(NetworkDiscoverySettingsDto settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        
+
         // Validate settings before saving
         var validation = NetworkValidationService.ValidateSettings(settings);
-        
+
         if (!validation.IsValid)
         {
             var errors = string.Join("; ", validation.Errors);
@@ -98,7 +98,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             var json = JsonSerializer.Serialize(_settings, s_writeOptions);
             File.WriteAllText(_path, json);
             _logger.LogInformation("Saved network discovery settings to {Path} - {RangeCount} ranges, {PortCount} ports", _path, settings.NetworkRanges.Count, settings.Ports.Count);
-            
+
             // Log suggestions if any
             if (validation.Suggestions.Count > 0)
             {

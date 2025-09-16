@@ -33,7 +33,7 @@ export function SettingsPage() {
   const [networkValidation, setNetworkValidation] = useState<NetworkValidationState>({ ranges: [], overlapping: [], hasErrors: false });
   const [discoveryTimeout, setDiscoveryTimeout] = useState(5000);
   const [maxConcurrentScans, setMaxConcurrentScans] = useState(20);
-  const [scanPorts, setScanPorts] = useState<number[]>([80, 7125]);
+  const [scanPorts, setScanPorts] = useState<number[]>([80]);
   const [filamentTypes, setFilamentTypes] = useState<FilamentType[]>([]);
   // Password policy via React Query
   const { data: passwordPolicy, savePolicy, saving, reset: resetPolicy } = usePasswordPolicy();
