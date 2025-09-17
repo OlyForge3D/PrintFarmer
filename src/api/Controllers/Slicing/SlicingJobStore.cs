@@ -22,13 +22,13 @@ public static class SlicingJobStore
     public static bool TryGet(string id, out SlicingJobDto? job)
     {
         ArgumentNullException.ThrowIfNull(id);
-        if (_jobs.TryGetValue(id, out var direct))
+        if (_jobs.TryGetValue(id, out SlicingJobDto? direct))
         {
             job = direct;
             return true;
         }
-        var compact = id.Replace("-", string.Empty, StringComparison.Ordinal);
-        if (compact != id && _jobs.TryGetValue(compact, out var alt))
+        string compact = id.Replace("-", string.Empty, StringComparison.Ordinal);
+        if (compact != id && _jobs.TryGetValue(compact, out SlicingJobDto? alt))
         {
             job = alt;
             return true;

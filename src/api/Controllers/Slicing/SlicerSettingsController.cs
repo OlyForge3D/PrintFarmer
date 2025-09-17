@@ -17,7 +17,7 @@ public class SlicerSettingsController : ControllerBase
     [HttpGet]
     public ActionResult<SlicerSettingsDto> Get()
     {
-        var s = _settingsService.GetSettings();
+        SlicerSettingsDto s = _settingsService.GetSettings();
         return Ok(s);
     }
 

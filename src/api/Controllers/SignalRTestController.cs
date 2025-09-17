@@ -64,8 +64,8 @@ public class SignalRTestController(
         ArgumentNullException.ThrowIfNull(request);
         try
         {
-            var sessionId = request.SessionId ?? Guid.NewGuid().ToString();
-            var groupName = $"discovery-{sessionId}";
+            string sessionId = request.SessionId ?? Guid.NewGuid().ToString();
+            string groupName = $"discovery-{sessionId}";
 
             // Send a series of discovery progress messages
             var testMessages = new[]

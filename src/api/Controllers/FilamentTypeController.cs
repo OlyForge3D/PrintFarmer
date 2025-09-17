@@ -1,5 +1,6 @@
 ﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Services.Startup;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Filament Types")]
-public class FilamentTypeController(AppDbContext db) : ControllerBase
+public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus) : ControllerBase
 {
     /// <summary>
     /// Gets all available filament types.
@@ -22,9 +23,16 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
     /// <response code="200">Returns the list of filament types</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
+    [ProducesResponseType(503)]
     public async Task<ActionResult<IEnumerable<FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
     {
-        var list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
+        // Ensure initialization is complete to prevent race conditions during startup
+        if (!startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        List<FilamentTypeDto> list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
             .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
             .ToListAsync(ct);
         return Ok(list);
@@ -38,9 +46,16 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
     /// <response code="200">Returns the filament presets dictionary</response>
     [HttpGet("presets")]
     [ProducesResponseType(typeof(FilamentPresetsDto), 200)]
+    [ProducesResponseType(503)]
     public async Task<ActionResult<FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
     {
-        var filamentTypes = await db.FilamentTypes.AsNoTracking()
+        // Ensure initialization is complete to prevent race conditions during startup
+        if (!startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        Dictionary<string, TempTargets> filamentTypes = await db.FilamentTypes.AsNoTracking()
             .ToDictionaryAsync(f => f.Name.ToLowerInvariant(), f => new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), ct);
         return Ok(new FilamentPresetsDto(filamentTypes));
     }
@@ -65,14 +80,14 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
             return BadRequest("Name is required");
         }
 
-        var trimmed = request.Name.Trim();
-        var existing = await db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(f => f.Name == trimmed, ct);
+        string trimmed = request.Name.Trim();
+        FilamentType? existing = await db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(f => f.Name == trimmed, ct);
         if (existing is not null)
         {
             return Conflict(new FilamentTypeDto(existing.Id, existing.Name, new TempTargets(existing.DefaultHotendTemp, existing.DefaultBedTemp)));
         }
 
-        var filamentType = new FilamentType
+        FilamentType filamentType = new()
         {
             Id = Guid.NewGuid(),
             Name = trimmed,
@@ -109,7 +124,7 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
             return BadRequest("Request body is required");
         }
 
-        var filamentType = await db.FilamentTypes.FindAsync([id], ct);
+        FilamentType? filamentType = await db.FilamentTypes.FindAsync([id], ct);
         if (filamentType is null)
         {
             return NotFound();
@@ -140,7 +155,7 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteFilamentTypeAsync(Guid id, CancellationToken ct)
     {
-        var filamentType = await db.FilamentTypes.FindAsync([id], ct);
+        FilamentType? filamentType = await db.FilamentTypes.FindAsync([id], ct);
         if (filamentType is null)
         {
             return NotFound();
@@ -169,10 +184,10 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
             return BadRequest("Presets are required");
         }
 
-        foreach (var preset in presets.Presets)
+        foreach (KeyValuePair<string, TempTargets> preset in presets.Presets)
         {
-            var name = preset.Key.Trim();
-            var existing = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
+            string name = preset.Key.Trim();
+            FilamentType? existing = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
 
             if (existing != null)
             {
@@ -181,7 +196,7 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
             }
             else
             {
-                var newType = new FilamentType
+                FilamentType newType = new()
                 {
                     Id = Guid.NewGuid(),
                     Name = name,

@@ -16,8 +16,8 @@ public class PresetService : IPresetService
         {
             if (File.Exists(_path))
             {
-                var json = File.ReadAllText(_path);
-                var cfg = JsonSerializer.Deserialize<FilamentPresetsDto>(json);
+                string json = File.ReadAllText(_path);
+                FilamentPresetsDto? cfg = JsonSerializer.Deserialize<FilamentPresetsDto>(json);
                 if (cfg is not null)
                 {
                     _presets = cfg;
@@ -34,7 +34,7 @@ public class PresetService : IPresetService
         _presets = presets;
         try
         {
-            var json = JsonSerializer.Serialize(_presets, s_writeOptions);
+            string json = JsonSerializer.Serialize(_presets, s_writeOptions);
             File.WriteAllText(_path, json);
         }
         catch { /* ignore */ }

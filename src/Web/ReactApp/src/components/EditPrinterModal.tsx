@@ -35,7 +35,23 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         newModelName: undefined,
         dateAcquired: printerDetails.dateAcquired ? new Date(printerDetails.dateAcquired) : undefined,
         backend: printerDetails.backend,
-        apiKey: printerDetails.apiKey
+        apiKey: printerDetails.apiKey,
+        // Printer capabilities
+        nozzleDiameter: printerDetails.capabilities?.nozzleDiameter,
+        supportedMaterials: printerDetails.capabilities?.supportedMaterials,
+        maxBuildVolumeX: printerDetails.capabilities?.maxBuildVolumeX || printerDetails.modelMaxX,
+        maxBuildVolumeY: printerDetails.capabilities?.maxBuildVolumeY || printerDetails.modelMaxY,
+        maxBuildVolumeZ: printerDetails.capabilities?.maxBuildVolumeZ || printerDetails.modelMaxZ,
+        hasHeatedBed: printerDetails.capabilities?.hasHeatedBed,
+        hasEnclosure: printerDetails.capabilities?.hasEnclosure,
+        multiMaterial: printerDetails.capabilities?.multiMaterial,
+        numberOfExtruders: printerDetails.capabilities?.numberOfExtruders,
+        minHotendTemp: printerDetails.capabilities?.minHotendTemp,
+        maxHotendTemp: printerDetails.capabilities?.maxHotendTemp,
+        minBedTemp: printerDetails.capabilities?.minBedTemp,
+        maxBedTemp: printerDetails.capabilities?.maxBedTemp,
+        supportsAutoLeveling: printerDetails.capabilities?.supportsAutoLeveling,
+        maxPrintSpeed: printerDetails.capabilities?.maxPrintSpeed,
       });
       setSelectedManufacturer(printerDetails.manufacturerId);
     }
@@ -199,6 +215,209 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 />
               </div>
             )}
+
+            {/* Printer Type & Build Volume Section */}
+            <div className="border-t pt-5 mt-5">
+              <h4 className="text-lg font-medium text-pf-text-primary mb-4">Printer Type & Build Volume</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Printer Type</label>
+                  <div className="text-sm text-pf-text-tertiary mb-1">{printerDetails?.modelName && `Model: ${printerDetails.modelName}`}</div>
+                  <div className="px-3 py-2 rounded-lg bg-pf-bg-2 border border-pf-border text-pf-text-secondary">
+                    {printerDetails?.modelType !== undefined 
+                      ? ['Cartesian', 'CoreXY', 'Delta', 'Unknown'][printerDetails.modelType] || 'Unknown'
+                      : 'Not specified'}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max X (mm)</label>
+                    <input
+                      type="number"
+                      value={formData.maxBuildVolumeX || ''}
+                      onChange={e => handleInputChange('maxBuildVolumeX', parseFloat(e.target.value) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder={printerDetails?.modelMaxX?.toString() || '220'}
+                      title="Maximum X axis travel"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Y (mm)</label>
+                    <input
+                      type="number"
+                      value={formData.maxBuildVolumeY || ''}
+                      onChange={e => handleInputChange('maxBuildVolumeY', parseFloat(e.target.value) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder={printerDetails?.modelMaxY?.toString() || '220'}
+                      title="Maximum Y axis travel"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Z (mm)</label>
+                    <input
+                      type="number"
+                      value={formData.maxBuildVolumeZ || ''}
+                      onChange={e => handleInputChange('maxBuildVolumeZ', parseFloat(e.target.value) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder={printerDetails?.modelMaxZ?.toString() || '250'}
+                      title="Maximum Z axis travel"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Printer Capabilities Section */}
+            <div className="border-t pt-5 mt-5">
+              <h4 className="text-lg font-medium text-pf-text-primary mb-4">Printer Capabilities</h4>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-pf-text-secondary mb-1">Nozzle Diameter (mm)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={formData.nozzleDiameter || ''}
+                      onChange={e => handleInputChange('nozzleDiameter', parseFloat(e.target.value) || undefined)}
+                      className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder="0.4"
+                      title="Nozzle diameter"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-pf-text-secondary mb-1">Number of Extruders</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={formData.numberOfExtruders || 1}
+                      onChange={e => handleInputChange('numberOfExtruders', parseInt(e.target.value, 10) || 1)}
+                      className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      title="Number of extruders"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Supported Materials</label>
+                  <input
+                    type="text"
+                    value={formData.supportedMaterials?.join(', ') || ''}
+                    onChange={e => handleInputChange('supportedMaterials', e.target.value.split(',').map(s => s.trim()).filter(s => s))}
+                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                    placeholder="PLA, PETG, ABS, ASA"
+                    title="Supported materials (comma-separated)"
+                  />
+                  <p className="text-xs text-pf-text-tertiary mt-1">Enter materials separated by commas</p>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Min Hotend °C</label>
+                    <input
+                      type="number"
+                      value={formData.minHotendTemp || ''}
+                      onChange={e => handleInputChange('minHotendTemp', parseInt(e.target.value, 10) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder="180"
+                      title="Minimum hotend temperature"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Hotend °C</label>
+                    <input
+                      type="number"
+                      value={formData.maxHotendTemp || ''}
+                      onChange={e => handleInputChange('maxHotendTemp', parseInt(e.target.value, 10) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder="300"
+                      title="Maximum hotend temperature"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Min Bed °C</label>
+                    <input
+                      type="number"
+                      value={formData.minBedTemp || ''}
+                      onChange={e => handleInputChange('minBedTemp', parseInt(e.target.value, 10) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder="0"
+                      title="Minimum bed temperature"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Bed °C</label>
+                    <input
+                      type="number"
+                      value={formData.maxBedTemp || ''}
+                      onChange={e => handleInputChange('maxBedTemp', parseInt(e.target.value, 10) || undefined)}
+                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                      placeholder="120"
+                      title="Maximum bed temperature"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="hasHeatedBed"
+                        checked={formData.hasHeatedBed ?? true}
+                        onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
+                        className="mr-2"
+                      />
+                      <label htmlFor="hasHeatedBed" className="text-sm text-pf-text-primary">Heated bed</label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="hasEnclosure"
+                        checked={formData.hasEnclosure ?? false}
+                        onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
+                        className="mr-2"
+                      />
+                      <label htmlFor="hasEnclosure" className="text-sm text-pf-text-primary">Enclosure</label>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="multiMaterial"
+                        checked={formData.multiMaterial ?? false}
+                        onChange={e => handleInputChange('multiMaterial', e.target.checked)}
+                        className="mr-2"
+                      />
+                      <label htmlFor="multiMaterial" className="text-sm text-pf-text-primary">Multi-material</label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="supportsAutoLeveling"
+                        checked={formData.supportsAutoLeveling ?? false}
+                        onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
+                        className="mr-2"
+                      />
+                      <label htmlFor="supportsAutoLeveling" className="text-sm text-pf-text-primary">Auto-leveling</label>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Max Print Speed (mm/s)</label>
+                  <input
+                    type="number"
+                    value={formData.maxPrintSpeed || ''}
+                    onChange={e => handleInputChange('maxPrintSpeed', parseInt(e.target.value, 10) || undefined)}
+                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                    placeholder="150"
+                    title="Maximum print speed"
+                  />
+                </div>
+              </div>
+            </div>
             <div className="flex items-center justify-end space-x-3 pt-2">
               <button type="button" onClick={handleClose} className="px-4 py-2 text-sm rounded-lg bg-pf-text-tertiary hover:bg-pf-text-secondary text-white transition-colors">Cancel</button>
               <button type="submit" disabled={updateMutation.status === 'pending'} className="px-4 py-2 text-sm rounded-lg bg-pf-accent hover:bg-pf-accent-hover text-white flex items-center transition-colors disabled:opacity-50">

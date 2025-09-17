@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Farm.Web.Api.Infrastructure.Authorization;
 
@@ -31,7 +32,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<RequirePermis
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(requirement);
 
-        var user = context.User;
+        ClaimsPrincipal user = context.User;
 
         if (!user.Identity?.IsAuthenticated ?? true)
         {
@@ -49,7 +50,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<RequirePermis
         }
 
         // Check specific permission
-        var permissionClaim = $"{requirement.Resource}:{requirement.Action}";
+        string permissionClaim = $"{requirement.Resource}:{requirement.Action}";
         if (user.HasClaim("permission", permissionClaim))
         {
             _logger.LogDebug("Authorization succeeded: User has permission {Permission}", permissionClaim);

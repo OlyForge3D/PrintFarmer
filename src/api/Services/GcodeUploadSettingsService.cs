@@ -15,11 +15,11 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
     public InMemoryGcodeUploadSettings()
     {
         // Seed from environment variable or defaults
-        var env = Environment.GetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS");
-        var list = string.IsNullOrWhiteSpace(env) ? [".gcode", ".bgcode"] : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var e in list)
+        string? env = Environment.GetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS");
+        string[] list = string.IsNullOrWhiteSpace(env) ? [".gcode", ".bgcode"] : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (string e in list)
         {
-            var norm = e.StartsWith('.') ? e : "." + e;
+            string norm = e.StartsWith('.') ? e : "." + e;
             _extensions.TryAdd(norm, 0);
         }
     }
@@ -28,14 +28,14 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
 
     public void UpdateAllowedExtensions(IEnumerable<string> extensions)
     {
-        var cleaned = extensions
+        List<string> cleaned = extensions
             .Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e.Trim())
             .Select(e => e.StartsWith('.') ? e : "." + e)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         _extensions.Clear();
-        foreach (var e in cleaned)
+        foreach (string? e in cleaned)
         {
             _extensions.TryAdd(e, 0);
         }
@@ -60,11 +60,11 @@ public class InMemoryGcodeUploadQuotaService : IGcodeUploadQuotaService
     public bool TryAddUsage(string userId, long bytes, out long usedBytes, out long limitBytes)
     {
         limitBytes = _dailyLimitBytes;
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var key = string.IsNullOrWhiteSpace(userId) ? "anonymous" : userId;
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        string key = string.IsNullOrWhiteSpace(userId) ? "anonymous" : userId;
         while (true)
         {
-            var current = _usage.GetOrAdd(key, _ => (today, 0));
+            (DateOnly day, long bytes) current = _usage.GetOrAdd(key, _ => (today, 0));
             if (current.day != today)
             {
                 if (_usage.TryUpdate(key, (today, bytes), current))
@@ -74,7 +74,7 @@ public class InMemoryGcodeUploadQuotaService : IGcodeUploadQuotaService
                 }
                 continue;
             }
-            var newTotal = current.bytes + bytes;
+            long newTotal = current.bytes + bytes;
             if (_usage.TryUpdate(key, (today, newTotal), current))
             {
                 usedBytes = newTotal;

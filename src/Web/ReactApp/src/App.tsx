@@ -1,6 +1,7 @@
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Layout } from '@/components/Layout';
+import { ObservabilityDashboard } from '@/components/ObservabilityDashboard';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 import { SetupWizard } from '@/components/SetupWizard';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -112,7 +113,9 @@ function App() {
       <ErrorBoundary>
         <ThemeProvider>
           <AuthProvider>
-            <SetupWizard onComplete={handleSetupComplete} />
+            <QueryClientProvider client={queryClient}>
+              <SetupWizard onComplete={handleSetupComplete} />
+            </QueryClientProvider>
           </AuthProvider>
         </ThemeProvider>
       </ErrorBoundary>
@@ -145,6 +148,14 @@ function App() {
                     element={
                       <ProtectedRoute requiredRole="farm_admin">
                         <UserManagementPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/observability"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <ObservabilityDashboard />
                       </ProtectedRoute>
                     }
                   />

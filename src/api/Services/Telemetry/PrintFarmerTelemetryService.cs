@@ -79,7 +79,7 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
 
     public void RecordApiCall(string endpoint, string method, int statusCode, TimeSpan duration)
     {
-        var tags = new[]
+        KeyValuePair<string, object?>[] tags = new[]
         {
             new KeyValuePair<string, object?>("endpoint", endpoint),
             new KeyValuePair<string, object?>("method", method),
@@ -93,7 +93,7 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
 
     public void RecordPrinterOperation(string operation, string printerId, bool success)
     {
-        var tags = new[]
+        KeyValuePair<string, object?>[] tags = new[]
         {
             new KeyValuePair<string, object?>("operation", operation),
             new KeyValuePair<string, object?>("printer_id", printerId),
@@ -105,7 +105,7 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
 
     public void RecordSlicerOperation(string operation, string engine, bool success, TimeSpan? duration = null)
     {
-        var tags = new[]
+        KeyValuePair<string, object?>[] tags = new[]
         {
             new KeyValuePair<string, object?>("operation", operation),
             new KeyValuePair<string, object?>("engine", engine),
@@ -122,7 +122,7 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
 
     public void RecordFileOperation(string operation, string fileType, long? fileSize = null)
     {
-        var tags = new[]
+        KeyValuePair<string, object?>[] tags = new[]
         {
             new KeyValuePair<string, object?>("operation", operation),
             new KeyValuePair<string, object?>("file_type", fileType)
@@ -138,7 +138,7 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
 
     public void RecordDatabaseOperation(string table, string operation, int recordCount)
     {
-        var tags = new[]
+        KeyValuePair<string, object?>[] tags = new[]
         {
             new KeyValuePair<string, object?>("table", table),
             new KeyValuePair<string, object?>("operation", operation)

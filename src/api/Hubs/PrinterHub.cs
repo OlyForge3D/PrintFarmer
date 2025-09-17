@@ -1,4 +1,5 @@
 ﻿using Farm.Web.Api.Services;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Hubs;
@@ -14,9 +15,9 @@ public class PrinterHub(IDiscoveryProgressCache progressCache) : Hub
         // After joining, replay latest cached progress if available. There is a narrow race where the
         // controller returns the session id before the discovery service has published & cached the
         // initial progress snapshot. To mitigate, perform a brief bounded retry.
-        for (var i = 0; i < 5; i++)
+        for (int i = 0; i < 5; i++)
         {
-            if (progressCache.TryGet(sessionId, out var progress) && progress != null)
+            if (progressCache.TryGet(sessionId, out DiscoveryProgressDto? progress) && progress != null)
             {
                 await Clients.Caller.SendAsync("DiscoveryProgress", progress);
                 break;

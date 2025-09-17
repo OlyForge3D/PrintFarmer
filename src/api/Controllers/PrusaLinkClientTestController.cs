@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -41,7 +42,7 @@ public class PrusaLinkClientTestController : ControllerBase
         try
         {
             _logger.LogInformation("Testing PrusaLinkClient.GetStatusAsync with serverUrl={ServerUrl}", serverUrl);
-            var status = await _prusaLinkClient.GetStatusAsync(serverUrl, apiKey, ct);
+            PrusaStatus status = await _prusaLinkClient.GetStatusAsync(serverUrl, apiKey, ct);
             return Ok(new { success = true, result = status });
         }
         catch (Exception ex)
@@ -71,7 +72,7 @@ public class PrusaLinkClientTestController : ControllerBase
         try
         {
             _logger.LogInformation("Testing PrusaLinkClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
-            var files = await _prusaLinkClient.GetFileListAsync(serverUrl, apiKey, ct);
+            string[] files = await _prusaLinkClient.GetFileListAsync(serverUrl, apiKey, ct);
             return Ok(new { success = true, files, count = files.Length });
         }
         catch (Exception ex)

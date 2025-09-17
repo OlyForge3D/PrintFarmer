@@ -76,6 +76,13 @@ export class SignalRService {
     // Use environment variable for SignalR URL, fallback to relative path for monolithic deployment
     const signalrUrl = import.meta.env.VITE_SIGNALR_URL || '/hubs/printers';
     
+    console.info('[SignalR] Building connection with URL:', signalrUrl);
+    console.info('[SignalR] Environment variables:', { 
+      VITE_SIGNALR_URL: import.meta.env.VITE_SIGNALR_URL,
+      MODE: import.meta.env.MODE,
+      DEV: import.meta.env.DEV
+    });
+    
     this.connection = new HubConnectionBuilder()
       .withUrl(signalrUrl)
       .withAutomaticReconnect({

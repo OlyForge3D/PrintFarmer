@@ -13,8 +13,8 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
     public DefaultTempPathProvider(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        var configured = configuration["TempStorage:Path"];
-        var env = Environment.GetEnvironmentVariable("PRINTFARM_TEMP_ROOT");
+        string? configured = configuration["TempStorage:Path"];
+        string? env = Environment.GetEnvironmentVariable("PRINTFARM_TEMP_ROOT");
         _tempRoot = !string.IsNullOrWhiteSpace(configured)
             ? configured!
             : !string.IsNullOrWhiteSpace(env)
@@ -28,7 +28,7 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
         catch
         {
             // Fallback to process temp if creation fails (last resort)
-            var fallback = Path.GetTempPath();
+            string fallback = Path.GetTempPath();
             try
             {
                 Directory.CreateDirectory(fallback);

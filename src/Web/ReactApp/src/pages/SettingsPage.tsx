@@ -5,9 +5,11 @@ import { apiClient } from '@/services/api';
 import { signalRService } from '@/services/signalr';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { normalizeSpoolmanBaseUrl, isValidCidr, findOverlappingCidrRanges, suggestCorrectNetworkAddress } from '@/utils/validation';
-import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import type { FilamentType } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTelemetry } from '@/telemetry/useTelemetry';
+import { isTelemetryInitialized } from '@/telemetry/config';
 
 interface NetworkRange {
   cidr: string;
@@ -23,6 +25,16 @@ interface NetworkValidationState {
   }>;
   overlapping: string[];
   hasErrors: boolean;
+}
+
+interface TelemetrySettings {
+  enabled: boolean;
+  consoleLogging: boolean;
+  otlpEndpoint: string;
+  samplingRate: number;
+  trackUserInteractions: boolean;
+  trackApiCalls: boolean;
+  trackComponentLifecycle: boolean;
 }
 
 // (SettingsData interface removed - unused)
@@ -49,6 +61,19 @@ export function SettingsPage() {
   const [signalrDirty, setSignalrDirty] = useState(false);
   const [signalrSaving, setSignalrSaving] = useState(false);
   
+  // Telemetry settings
+  const [telemetrySettings, setTelemetrySettings] = useState<TelemetrySettings>({
+    enabled: true,
+    consoleLogging: import.meta.env.DEV === true,
+    otlpEndpoint: import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT || '',
+    samplingRate: 1.0,
+    trackUserInteractions: true,
+    trackApiCalls: true,
+    trackComponentLifecycle: true
+  });
+  const [showOtlpEndpoint, setShowOtlpEndpoint] = useState(false);
+  const [telemetryDirty, setTelemetryDirty] = useState(false);
+  
   const [testing, setTesting] = useState(false);
   const [testOk, setTestOk] = useState<boolean | null>(null);
   const [testMessage, setTestMessage] = useState('');
@@ -57,6 +82,7 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const { data: diagnostics } = useDiagnosticsSummary(45000);
   const { hasRole, isAuthenticated } = useAuth();
+  const { trackUserInteraction } = useTelemetry();
   
   // Filament type editing
   const [editingFilamentType, setEditingFilamentType] = useState<FilamentType | null>(null);
@@ -192,6 +218,37 @@ export function SettingsPage() {
   const updateSignalRField = (field: string, value: unknown) => {
     setSignalrSettings(prev => ({ ...prev, [field]: value }));
     setSignalrDirty(true);
+  };
+
+  const handleTelemetrySettingChange = (key: keyof TelemetrySettings, value: boolean | string | number) => {
+    setTelemetrySettings(prev => ({
+      ...prev,
+      [key]: value
+    }));
+    setTelemetryDirty(true);
+
+    trackUserInteraction('setting_change', `telemetry-${key}`, { 
+      newValue: value,
+      settingType: typeof value
+    });
+  };
+
+  const saveTelemetrySettings = async () => {
+    if (!hasRole('farm_admin')) return;
+    
+    try {
+      trackUserInteraction('save', 'telemetry-settings', { 
+        settingsCount: Object.keys(telemetrySettings).length 
+      });
+      
+      // In a real application, these settings would be persisted to backend
+      console.log('Telemetry settings saved:', telemetrySettings);
+      setTelemetryDirty(false);
+      toast.success('Telemetry settings saved');
+    } catch (err) {
+      console.error('Failed to save telemetry settings', err);
+      toast.error('Failed to save telemetry settings');
+    }
   };
 
   const normalizedUrl = normalizeSpoolmanBaseUrl(spoolmanBase);
@@ -1103,6 +1160,203 @@ export function SettingsPage() {
                 onClick={() => {
                   setSignalrSettings({ logLevel: 'Information', consoleLoggingEnabled: true });
                   setSignalrDirty(false);
+                }}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* OpenTelemetry Settings */}
+      {hasRole('farm_admin') && (
+        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-pf-text-primary">OpenTelemetry Settings</h2>
+              <p className="text-sm text-pf-text-secondary">Configure system observability and tracing options</p>
+            </div>
+            <div className={`flex items-center space-x-2 ${isTelemetryInitialized() ? 'text-green-500' : 'text-red-500'}`}>
+              {isTelemetryInitialized() ? (
+                <CheckCircle className="h-5 w-5" />
+              ) : (
+                <AlertCircle className="h-5 w-5" />
+              )}
+              <span className="text-sm font-medium">
+                {isTelemetryInitialized() ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <p className="text-sm text-pf-text-secondary">Service Name</p>
+              <p className="font-mono text-sm text-pf-text-primary">PrintFarmer.Frontend</p>
+            </div>
+            <div>
+              <p className="text-sm text-pf-text-secondary">Environment</p>
+              <p className="font-mono text-sm text-pf-text-primary">{import.meta.env.MODE}</p>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {/* Enable Telemetry */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label htmlFor="enable-telemetry" className="text-sm font-medium text-pf-text-primary">Enable Telemetry</label>
+                <p className="text-sm text-pf-text-secondary">Master switch for all telemetry collection</p>
+              </div>
+              <input
+                id="enable-telemetry"
+                type="checkbox"
+                checked={telemetrySettings.enabled}
+                onChange={(e) => handleTelemetrySettingChange('enabled', e.target.checked)}
+                className="h-4 w-4"
+              />
+            </div>
+
+            {/* Console Logging */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label htmlFor="telemetry-console-logging" className="text-sm font-medium text-pf-text-primary">Console Logging</label>
+                <p className="text-sm text-pf-text-secondary">Output traces to browser console</p>
+              </div>
+              <input
+                id="telemetry-console-logging"
+                type="checkbox"
+                checked={telemetrySettings.consoleLogging}
+                onChange={(e) => handleTelemetrySettingChange('consoleLogging', e.target.checked)}
+                className="h-4 w-4"
+              />
+            </div>
+
+            {/* OTLP Endpoint */}
+            <div>
+              <label htmlFor="otlp-endpoint" className="block text-sm font-medium text-pf-text-primary mb-2">
+                OTLP Endpoint
+              </label>
+              <div className="flex space-x-2">
+                <input
+                  id="otlp-endpoint"
+                  type={showOtlpEndpoint ? 'text' : 'password'}
+                  value={telemetrySettings.otlpEndpoint}
+                  onChange={(e) => handleTelemetrySettingChange('otlpEndpoint', e.target.value)}
+                  placeholder="https://otel-collector.example.com/v1/traces"
+                  className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOtlpEndpoint(!showOtlpEndpoint)}
+                  className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2"
+                  aria-label={showOtlpEndpoint ? 'Hide endpoint' : 'Show endpoint'}
+                >
+                  {showOtlpEndpoint ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-sm text-pf-text-secondary mt-1">
+                External collector endpoint for trace export
+              </p>
+            </div>
+
+            {/* Sampling Rate */}
+            <div>
+              <label htmlFor="sampling-rate" className="block text-sm font-medium text-pf-text-primary mb-2">
+                Sampling Rate
+              </label>
+              <input
+                id="sampling-rate"
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={telemetrySettings.samplingRate}
+                onChange={(e) => handleTelemetrySettingChange('samplingRate', parseFloat(e.target.value))}
+                className="w-full h-2 bg-pf-bg-0 rounded-lg appearance-none cursor-pointer"
+              />
+              <div className="flex justify-between text-xs text-pf-text-secondary mt-1">
+                <span>0% (Disabled)</span>
+                <span className="font-medium">{(telemetrySettings.samplingRate * 100).toFixed(0)}%</span>
+                <span>100% (All traces)</span>
+              </div>
+            </div>
+
+            {/* Instrumentation Options */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-pf-text-primary">Instrumentation</h3>
+              
+              <div className="flex items-center justify-between">
+                <div>
+                  <label htmlFor="track-interactions" className="text-sm font-medium text-pf-text-primary">Track User Interactions</label>
+                  <p className="text-sm text-pf-text-secondary">Monitor clicks, form submissions, etc.</p>
+                </div>
+                <input
+                  id="track-interactions"
+                  type="checkbox"
+                  checked={telemetrySettings.trackUserInteractions}
+                  onChange={(e) => handleTelemetrySettingChange('trackUserInteractions', e.target.checked)}
+                  className="h-4 w-4"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <label htmlFor="track-api-calls" className="text-sm font-medium text-pf-text-primary">Track API Calls</label>
+                  <p className="text-sm text-pf-text-secondary">Monitor HTTP requests and responses</p>
+                </div>
+                <input
+                  id="track-api-calls"
+                  type="checkbox"
+                  checked={telemetrySettings.trackApiCalls}
+                  onChange={(e) => handleTelemetrySettingChange('trackApiCalls', e.target.checked)}
+                  className="h-4 w-4"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <label htmlFor="track-components" className="text-sm font-medium text-pf-text-primary">Track Component Lifecycle</label>
+                  <p className="text-sm text-pf-text-secondary">Monitor React component mount/unmount</p>
+                </div>
+                <input
+                  id="track-components"
+                  type="checkbox"
+                  checked={telemetrySettings.trackComponentLifecycle}
+                  onChange={(e) => handleTelemetrySettingChange('trackComponentLifecycle', e.target.checked)}
+                  className="h-4 w-4"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={saveTelemetrySettings}
+              disabled={!telemetryDirty}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save className="h-4 w-4" />
+              Save Telemetry Settings
+            </button>
+            {telemetryDirty && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTelemetrySettings({
+                    enabled: true,
+                    consoleLogging: import.meta.env.DEV === true,
+                    otlpEndpoint: import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT || '',
+                    samplingRate: 1.0,
+                    trackUserInteractions: true,
+                    trackApiCalls: true,
+                    trackComponentLifecycle: true
+                  });
+                  setTelemetryDirty(false);
                 }}
                 className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
               >

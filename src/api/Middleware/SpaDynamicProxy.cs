@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Headers;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -11,7 +12,7 @@ public sealed class SpaProxyActivationState
     public SpaProxyActivationState(string devServerUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(devServerUrl);
-        if (!Uri.TryCreate(devServerUrl.TrimEnd('/'), UriKind.Absolute, out var uri))
+        if (!Uri.TryCreate(devServerUrl.TrimEnd('/'), UriKind.Absolute, out Uri? uri))
         {
             throw new ArgumentException("Invalid SPA dev server URL", nameof(devServerUrl));
         }
@@ -44,9 +45,9 @@ public sealed class SpaDevServerWatcher : BackgroundService
         {
             try
             {
-                var client = _httpClientFactory.CreateClient("SpaProxy");
+                HttpClient client = _httpClientFactory.CreateClient("SpaProxy");
                 client.Timeout = TimeSpan.FromMilliseconds(750);
-                var resp = await client.GetAsync(_state.DevServerUrl, stoppingToken);
+                HttpResponseMessage resp = await client.GetAsync(_state.DevServerUrl, stoppingToken);
                 if (resp.IsSuccessStatusCode)
                 {
                     _state.Activate();
@@ -90,20 +91,20 @@ public sealed class SpaDynamicProxyMiddleware
         ArgumentNullException.ThrowIfNull(context);
         if (_state.Active && HttpMethods.IsGet(context.Request.Method) && !IsApiOrStatic(context.Request.Path))
         {
-            var target = new Uri(_state.DevServerUrl, context.Request.Path + context.Request.QueryString);
+            Uri target = new(_state.DevServerUrl, context.Request.Path + context.Request.QueryString);
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Get, target);
+                using HttpRequestMessage req = new(HttpMethod.Get, target);
                 CopyHeaders(context, req);
-                var resp = await s_client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+                HttpResponseMessage resp = await s_client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
                 if (IsHtml(resp))
                 {
                     context.Response.StatusCode = (int)resp.StatusCode;
-                    foreach (var h in resp.Headers)
+                    foreach (KeyValuePair<string, IEnumerable<string>> h in resp.Headers)
                     {
                         context.Response.Headers[h.Key] = h.Value.ToArray();
                     }
-                    foreach (var h in resp.Content.Headers)
+                    foreach (KeyValuePair<string, IEnumerable<string>> h in resp.Content.Headers)
                     {
                         context.Response.Headers[h.Key] = h.Value.ToArray();
                     }
@@ -133,7 +134,7 @@ public sealed class SpaDynamicProxyMiddleware
 
     private static void CopyHeaders(HttpContext ctx, HttpRequestMessage req)
     {
-        foreach (var header in ctx.Request.Headers)
+        foreach (KeyValuePair<string, StringValues> header in ctx.Request.Headers)
         {
             // Skip certain hop-by-hop headers
             if (header.Key.Equals("Host", StringComparison.OrdinalIgnoreCase))

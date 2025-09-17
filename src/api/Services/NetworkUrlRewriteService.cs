@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Net;
+using System.Runtime.InteropServices;
 
 namespace Farm.Web.Api.Services;
 
@@ -32,8 +33,8 @@ public class NetworkUrlRewriteService
 
         try
         {
-            var uri = new Uri(originalUrl);
-            var rewrittenUrl = RewriteUri(uri);
+            Uri uri = new(originalUrl);
+            string rewrittenUrl = RewriteUri(uri);
 
             if (rewrittenUrl != originalUrl)
             {
@@ -53,10 +54,10 @@ public class NetworkUrlRewriteService
 
     private string RewriteUri(Uri uri)
     {
-        var environment = DetectEnvironment();
+        RuntimeEnvironment environment = DetectEnvironment();
 
         // Check for explicit environment variable overrides first
-        var envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
+        string? envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
         if (!string.IsNullOrEmpty(envOverride))
         {
             _logger.LogDebug("Using environment override for {Host}:{Port} -> {Override}",
@@ -83,17 +84,17 @@ public class NetworkUrlRewriteService
             // Option 1: Try to use host.docker.internal (works on Windows/macOS Docker Desktop)
             if (IsDockerDesktop())
             {
-                var hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
+                Uri hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
                 _logger.LogDebug("Docker Desktop detected, rewriting to host.docker.internal: {Url}",
                     hostDockerInternalUrl);
                 return hostDockerInternalUrl.ToString();
             }
 
             // Option 2: Use host network gateway (Linux Docker)
-            var gatewayOverride = _configuration["Docker:HostGateway"];
+            string? gatewayOverride = _configuration["Docker:HostGateway"];
             if (!string.IsNullOrEmpty(gatewayOverride))
             {
-                var gatewayUrl = ReplaceHostPort(uri, $"{gatewayOverride}:{uri.Port}");
+                Uri gatewayUrl = ReplaceHostPort(uri, $"{gatewayOverride}:{uri.Port}");
                 _logger.LogDebug("Using Docker host gateway: {Url}", gatewayUrl);
                 return gatewayUrl.ToString();
             }
@@ -102,25 +103,25 @@ public class NetworkUrlRewriteService
         return uri.ToString();
     }
 
-    private string RewriteForWindowsNative(Uri uri)
+    private static string RewriteForWindowsNative(Uri uri)
     {
         // Native Windows execution - URLs should work as-is for local network
         return uri.ToString();
     }
 
-    private string RewriteForMacOSNative(Uri uri)
+    private static string RewriteForMacOSNative(Uri uri)
     {
         // Native macOS execution - URLs should work as-is for local network
         return uri.ToString();
     }
 
-    private string RewriteForLinuxNative(Uri uri)
+    private static string RewriteForLinuxNative(Uri uri)
     {
         // Native Linux execution - URLs should work as-is for local network
         return uri.ToString();
     }
 
-    private RuntimeEnvironment DetectEnvironment()
+    private static RuntimeEnvironment DetectEnvironment()
     {
         // Check if running in Docker container
         if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true")
@@ -147,11 +148,11 @@ public class NetworkUrlRewriteService
         return RuntimeEnvironment.Unknown;
     }
 
-    private bool IsDockerDesktop()
+    private static bool IsDockerDesktop()
     {
         // Docker Desktop is typically used on Windows and macOS
         // Check for Docker Desktop specific environment variables or characteristics
-        var dockerDesktopIndicators = new[]
+        bool[] dockerDesktopIndicators = new[]
         {
             Environment.GetEnvironmentVariable("DOCKER_DESKTOP") == "true",
             // Docker Desktop typically uses these internal networks
@@ -163,12 +164,12 @@ public class NetworkUrlRewriteService
         return dockerDesktopIndicators.Any(indicator => indicator);
     }
 
-    private bool IsLocalNetworkAddress(string host)
+    private static bool IsLocalNetworkAddress(string host)
     {
         // Check if the host is a private IP address
-        if (System.Net.IPAddress.TryParse(host, out var ipAddress))
+        if (System.Net.IPAddress.TryParse(host, out IPAddress? ipAddress))
         {
-            var bytes = ipAddress.GetAddressBytes();
+            byte[] bytes = ipAddress.GetAddressBytes();
 
             // Check for private IP ranges (RFC 1918)
             return bytes.Length == 4 && (
@@ -184,19 +185,19 @@ public class NetworkUrlRewriteService
         }
 
         // Check for common local hostnames
-        var localHostnames = new[] { "localhost", "host.docker.internal" };
+        string[] localHostnames = new[] { "localhost", "host.docker.internal" };
         return localHostnames.Contains(host.ToLowerInvariant());
     }
 
-    private Uri ReplaceHostPort(Uri originalUri, string newHostPort)
+    private static Uri ReplaceHostPort(Uri originalUri, string newHostPort)
     {
-        var builder = new UriBuilder(originalUri);
+        UriBuilder builder = new(originalUri);
 
         if (newHostPort.Contains(':'))
         {
-            var parts = newHostPort.Split(':', 2);
+            string[] parts = newHostPort.Split(':', 2);
             builder.Host = parts[0];
-            if (int.TryParse(parts[1], out var port))
+            if (int.TryParse(parts[1], out int port))
             {
                 builder.Port = port;
             }

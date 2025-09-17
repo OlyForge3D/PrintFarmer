@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
@@ -36,14 +37,14 @@ public partial class HarvestWorkerService : BackgroundService
         _logger.LogInformation("HarvestWorkerService started with {MaxWorkers} concurrent workers", MaxConcurrentWorkers);
 
         // List to track running tasks
-        var runningTasks = new List<Task>();
+        List<Task> runningTasks = new();
 
         try
         {
-            await foreach (var job in _queue.DequeueAsync(stoppingToken))
+            await foreach (HarvestFileJob job in _queue.DequeueAsync(stoppingToken))
             {
                 // Process jobs with limited concurrency
-                var processTask = Task.Run(async () =>
+                Task processTask = Task.Run(async () =>
                 {
                     await _workerSemaphore.WaitAsync(stoppingToken);
                     try
@@ -97,18 +98,18 @@ public partial class HarvestWorkerService : BackgroundService
 
     private async Task ProcessFileJobAsync(HarvestFileJob job, CancellationToken ct)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var moonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
-        var prusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
-        var sdcp = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
+        using IServiceScope scope = _serviceProvider.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IMoonrakerClient moonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
+        IPrusaLinkClient prusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
+        ISdcpClient sdcp = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
 
         _logger.LogDebug("Processing file job: {Job}", job);
 
         try
         {
             // Check if operation is still active
-            var operation = await db.GcodeHarvestOperations
+            GcodeHarvestOperation? operation = await db.GcodeHarvestOperations
                 .FirstOrDefaultAsync(o => o.Id == job.OperationId, ct);
 
             if (operation == null)
@@ -126,7 +127,7 @@ public partial class HarvestWorkerService : BackgroundService
             }
 
             // Check if this file is already in the discovered files table
-            var existingDiscoveredFile = await db.DiscoveredGcodeFiles
+            DiscoveredGcodeFile? existingDiscoveredFile = await db.DiscoveredGcodeFiles
                 .FirstOrDefaultAsync(d => d.HarvestOperationId == job.OperationId &&
                                           d.PrinterPath == job.FilePath, ct);
 
@@ -138,7 +139,7 @@ public partial class HarvestWorkerService : BackgroundService
             }
 
             // Get printer info
-            var printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == job.PrinterId, ct);
+            Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == job.PrinterId, ct);
             if (printer == null)
             {
                 _logger.LogWarning("Printer {PrinterId} not found for job {FileName}",
@@ -156,7 +157,7 @@ public partial class HarvestWorkerService : BackgroundService
             }
 
             // Create discovered file record
-            var discoveredFile = new DiscoveredGcodeFile
+            DiscoveredGcodeFile discoveredFile = new()
             {
                 Id = Guid.NewGuid(),
                 HarvestOperationId = job.OperationId,
@@ -171,8 +172,8 @@ public partial class HarvestWorkerService : BackgroundService
                 job.FileName, discoveredFile.Id);
 
             // Download and process file
-            var backend = (PrinterBackend)printer.Backend;
-            using var fileContent = await DownloadFileAsync(backend, printer, job.FilePath, moonraker, prusa, sdcp);
+            PrinterBackend backend = (PrinterBackend)printer.Backend;
+            using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, moonraker, prusa, sdcp);
 
             if (fileContent != null)
             {
@@ -184,19 +185,19 @@ public partial class HarvestWorkerService : BackgroundService
                 discoveredFile.FileHash = await CalculateFileHashAsync(fileContent);
 
                 // Check if already in library
-                var existingFile = await db.GcodeFiles
+                GcodeFile? existingFile = await db.GcodeFiles
                     .FirstOrDefaultAsync(f => f.FileHash == discoveredFile.FileHash, ct);
 
                 if (existingFile != null)
                 {
-                    var handling = operation.DuplicateHandling?.ToLowerInvariant() ?? "skip";
+                    string handling = operation.DuplicateHandling?.ToLowerInvariant() ?? "skip";
                     switch (handling)
                     {
                         case "overwrite":
                             _logger.LogInformation("Overwriting duplicate file {FileName} (Existing ID {ExistingId}) per policy", job.FileName, existingFile.Id);
                             // Treat as added (new metadata snapshot) but reference existing file id
                             fileContent.Position = 0;
-                            var overwriteMeta = await ExtractMetadataAsync(fileContent);
+                            GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
                             ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
                             discoveredFile.AlreadyInLibrary = false;
                             discoveredFile.ExistingLibraryFileId = existingFile.Id;
@@ -205,8 +206,8 @@ public partial class HarvestWorkerService : BackgroundService
                         case "rename":
                             _logger.LogInformation("Renaming duplicate file {FileName} per policy", job.FileName);
                             // Generate a new unique name with -copy suffix (in discovered scope)
-                            var baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
-                            var ext = System.IO.Path.GetExtension(discoveredFile.FileName);
+                            string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
+                            string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
                             int copyIndex = 1;
                             string candidate;
                             do
@@ -216,7 +217,7 @@ public partial class HarvestWorkerService : BackgroundService
                             } while (await db.DiscoveredGcodeFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
                             discoveredFile.FileName = candidate;
                             fileContent.Position = 0;
-                            var renameMeta = await ExtractMetadataAsync(fileContent);
+                            GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
                             ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
                             await IncrementAddedCountAsync(db, operation);
                             break;
@@ -232,7 +233,7 @@ public partial class HarvestWorkerService : BackgroundService
                 {
                     // Extract metadata
                     fileContent.Position = 0;
-                    var metadata = await ExtractMetadataAsync(fileContent);
+                    GcodeMetadataDto metadata = await ExtractMetadataAsync(fileContent);
                     ApplyMetadataToDiscoveredFile(discoveredFile, metadata);
                     await IncrementAddedCountAsync(db, operation);
 
@@ -259,7 +260,7 @@ public partial class HarvestWorkerService : BackgroundService
                 job.FileName, job.OperationId);
 
             // Verify the file was actually saved
-            var savedFile = await db.DiscoveredGcodeFiles
+            DiscoveredGcodeFile? savedFile = await db.DiscoveredGcodeFiles
                 .FirstOrDefaultAsync(d => d.Id == discoveredFile.Id, ct);
 
             if (savedFile != null)
@@ -327,7 +328,7 @@ public partial class HarvestWorkerService : BackgroundService
     {
         try
         {
-            var bytes = await moonraker.DownloadFileAsync(serverUrl, filePath);
+            byte[]? bytes = await moonraker.DownloadFileAsync(serverUrl, filePath);
             if (bytes != null)
             {
                 return new MemoryStream(bytes);
@@ -393,20 +394,20 @@ public partial class HarvestWorkerService : BackgroundService
 
     private static async Task<string> CalculateFileHashAsync(Stream stream)
     {
-        using var sha256 = SHA256.Create();
-        var hashBytes = await sha256.ComputeHashAsync(stream);
+        using SHA256 sha256 = SHA256.Create();
+        byte[] hashBytes = await sha256.ComputeHashAsync(stream);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
     private static async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream stream)
     {
-        var metadata = new GcodeMetadataDto();
+        GcodeMetadataDto metadata = new();
 
         stream.Position = 0;
-        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        using StreamReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
 
-        var linesRead = 0;
-        var maxLinesToRead = 100; // Limit header scanning
+        int linesRead = 0;
+        int maxLinesToRead = 100; // Limit header scanning
 
         while (linesRead < maxLinesToRead && await reader.ReadLineAsync() is { } line)
         {
@@ -430,12 +431,12 @@ public partial class HarvestWorkerService : BackgroundService
             return metadata;
         }
 
-        var content = line.Substring(1).Trim();
+        string content = line.Substring(1).Trim();
 
         // PrusaSlicer patterns
         if (content.StartsWith("Generated by PrusaSlicer"))
         {
-            var versionMatch = MyRegex().Match(content);
+            Match versionMatch = MyRegex().Match(content);
             if (versionMatch.Success)
             {
                 metadata = metadata with { SlicerName = "PrusaSlicer", SlicerVersion = versionMatch.Groups[1].Value };
@@ -445,7 +446,7 @@ public partial class HarvestWorkerService : BackgroundService
         // Cura patterns
         if (content.StartsWith("Generated with Cura"))
         {
-            var versionMatch = System.Text.RegularExpressions.Regex.Match(content, @"Cura_SteamEngine (\S+)");
+            Match versionMatch = System.Text.RegularExpressions.Regex.Match(content, @"Cura_SteamEngine (\S+)");
             if (versionMatch.Success)
             {
                 metadata = metadata with { SlicerName = "Cura", SlicerVersion = versionMatch.Groups[1].Value };
@@ -455,11 +456,11 @@ public partial class HarvestWorkerService : BackgroundService
         // Extract common parameters (simplified for now)
         if (content.Contains("printing time") && content.Contains('h') && content.Contains('m'))
         {
-            var timeMatch = System.Text.RegularExpressions.Regex.Match(content, @"(\d+)h (\d+)m");
+            Match timeMatch = System.Text.RegularExpressions.Regex.Match(content, @"(\d+)h (\d+)m");
             if (timeMatch.Success)
             {
-                var hours = int.Parse(timeMatch.Groups[1].Value);
-                var minutes = int.Parse(timeMatch.Groups[2].Value);
+                int hours = int.Parse(timeMatch.Groups[1].Value);
+                int minutes = int.Parse(timeMatch.Groups[2].Value);
                 metadata = metadata with { PrintTimeMinutes = hours * 60 + minutes };
             }
         }
@@ -501,7 +502,7 @@ public partial class HarvestWorkerService : BackgroundService
     {
         _ = fileName;
         _ = errorMessage;
-        var operation = await db.GcodeHarvestOperations.FirstOrDefaultAsync(o => o.Id == operationId);
+        GcodeHarvestOperation? operation = await db.GcodeHarvestOperations.FirstOrDefaultAsync(o => o.Id == operationId);
         if (operation != null)
         {
             operation.FilesErrored++;

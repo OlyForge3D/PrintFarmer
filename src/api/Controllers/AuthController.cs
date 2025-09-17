@@ -29,7 +29,7 @@ public class AuthController : ControllerBase
             return BadRequest(new AuthenticationResult(false, Error: "Username and password are required"));
         }
 
-        var result = await _authService.AuthenticateAsync(request.Username, request.Password);
+        AuthenticationResult result = await _authService.AuthenticateAsync(request.Username, request.Password);
 
         if (result.Success)
         {
@@ -56,7 +56,7 @@ public class AuthController : ControllerBase
             return BadRequest(new AuthenticationResult(false, Error: "Password must be at least 6 characters long"));
         }
 
-        var result = await _authService.RegisterAsync(request);
+        AuthenticationResult result = await _authService.RegisterAsync(request);
 
         if (result.Success)
         {
@@ -90,13 +90,13 @@ public class AuthController : ControllerBase
     [Authorize]
     public async Task<ActionResult<UserDto>> GetCurrentUserAsync()
     {
-        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out Guid userId))
         {
             return Unauthorized();
         }
 
-        var user = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+        UserDto? user = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
         if (user == null)
         {
             return NotFound();
@@ -110,8 +110,8 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ChangePasswordAsync([FromBody] ChangePasswordRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out Guid userId))
         {
             return Unauthorized();
         }
@@ -126,7 +126,7 @@ public class AuthController : ControllerBase
             return BadRequest(new { error = "New password must be at least 6 characters long" });
         }
 
-        var success = await _authService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword);
+        bool success = await _authService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword);
         if (!success)
         {
             return BadRequest(new { error = "Current password is incorrect" });

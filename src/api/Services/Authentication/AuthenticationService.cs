@@ -32,7 +32,7 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-            var user = await GetUserByUsernameAsync(username);
+            User? user = await GetUserByUsernameAsync(username);
             if (user == null)
             {
                 _logger.LogWarning("Authentication failed for username: {Username} - user not found", username);
@@ -56,8 +56,8 @@ public class AuthenticationService : IAuthenticationService
             user.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            var token = await GenerateJwtTokenAsync(user);
-            var userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
+            string token = await GenerateJwtTokenAsync(user);
+            UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
 
             _logger.LogInformation("User {Username} authenticated successfully", username);
 
@@ -82,11 +82,11 @@ public class AuthenticationService : IAuthenticationService
         {
             // If a user with the same username AND email already exists and the password matches,
             // treat registration as idempotent and return a valid authentication result.
-            var existingExact = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Email == request.Email);
+            User? existingExact = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Email == request.Email);
             if (existingExact != null && _passwordHashing.VerifyPassword(request.Password, existingExact.PasswordHash))
             {
-                var tokenExisting = await GenerateJwtTokenAsync(existingExact);
-                var userDtoExisting = await GetUserWithRolesAndPermissionsAsync(existingExact.Id);
+                string tokenExisting = await GenerateJwtTokenAsync(existingExact);
+                UserDto? userDtoExisting = await GetUserWithRolesAndPermissionsAsync(existingExact.Id);
                 return new AuthenticationResult(true, tokenExisting, DateTime.UtcNow.AddDays(7), userDtoExisting);
             }
 
@@ -102,7 +102,7 @@ public class AuthenticationService : IAuthenticationService
                 return new AuthenticationResult(false, Error: "Email is already registered");
             }
 
-            var user = new User
+            User user = new()
             {
                 Id = Guid.NewGuid(),
                 Username = request.Username,
@@ -119,12 +119,12 @@ public class AuthenticationService : IAuthenticationService
             _context.Users.Add(user);
 
             // Assign default "farm_user" role
-            var defaultRole = await _context.Roles
+            Role? defaultRole = await _context.Roles
                 .FirstOrDefaultAsync(r => r.Name == "farm_user" && r.IsSystemRole);
 
             if (defaultRole != null)
             {
-                var userRole = new UserRole
+                UserRole userRole = new()
                 {
                     Id = Guid.NewGuid(),
                     UserId = user.Id,
@@ -138,8 +138,8 @@ public class AuthenticationService : IAuthenticationService
 
             await _context.SaveChangesAsync();
 
-            var token = await GenerateJwtTokenAsync(user);
-            var userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
+            string token = await GenerateJwtTokenAsync(user);
+            UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
 
             _logger.LogInformation("User {Username} registered successfully", request.Username);
 
@@ -160,19 +160,19 @@ public class AuthenticationService : IAuthenticationService
     public async Task<string> GenerateJwtTokenAsync(User user)
     {
         ArgumentNullException.ThrowIfNull(user);
-        var rawKey = _configuration["Jwt:Key"];
+        string? rawKey = _configuration["Jwt:Key"];
         if (string.IsNullOrWhiteSpace(rawKey) || rawKey.Length < 32)
         {
             _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
             throw new InvalidOperationException("Secure JWT key not configured");
         }
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(rawKey));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(rawKey));
+        SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
 
-        var roles = await GetUserRolesAsync(user.Id);
-        var permissions = await GetUserPermissionsAsync(user.Id);
+        List<string> roles = await GetUserRolesAsync(user.Id);
+        List<(string Resource, string Action)> permissions = await GetUserPermissionsAsync(user.Id);
 
-        var claims = new List<Claim>
+        List<Claim> claims = new()
         {
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.Username),
@@ -187,7 +187,7 @@ public class AuthenticationService : IAuthenticationService
         // Add permission claims
         claims.AddRange(permissions.Select(perm => new Claim("permission", $"{perm.Resource}:{perm.Action}")));
 
-        var token = new JwtSecurityToken(
+        JwtSecurityToken token = new(
             issuer: _configuration["Jwt:Issuer"],
             audience: _configuration["Jwt:Audience"],
             claims: claims,
@@ -202,16 +202,16 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var rawKey = _configuration["Jwt:Key"];
+            JwtSecurityTokenHandler tokenHandler = new();
+            string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
                 return Task.FromResult(false);
             }
 
-            var key = Encoding.UTF8.GetBytes(rawKey);
+            byte[] key = Encoding.UTF8.GetBytes(rawKey);
 
-            var validationParameters = new TokenValidationParameters
+            TokenValidationParameters validationParameters = new()
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
@@ -236,16 +236,16 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var rawKey = _configuration["Jwt:Key"];
+            JwtSecurityTokenHandler tokenHandler = new();
+            string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
                 return Task.FromResult<ClaimsPrincipal?>(null);
             }
 
-            var key = Encoding.UTF8.GetBytes(rawKey);
+            byte[] key = Encoding.UTF8.GetBytes(rawKey);
 
-            var validationParameters = new TokenValidationParameters
+            TokenValidationParameters validationParameters = new()
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
@@ -257,7 +257,7 @@ public class AuthenticationService : IAuthenticationService
                 ClockSkew = TimeSpan.Zero
             };
 
-            var principal = tokenHandler.ValidateToken(token, validationParameters, out var securityToken);
+            ClaimsPrincipal principal = tokenHandler.ValidateToken(token, validationParameters, out SecurityToken? securityToken);
 
             // Additional defense-in-depth: ensure token not expired (redundant with ValidateLifetime=true but explicit for clarity)
             if (securityToken is JwtSecurityToken jwt && jwt.ValidTo < DateTime.UtcNow)
@@ -275,7 +275,7 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<UserDto?> GetUserWithRolesAndPermissionsAsync(Guid userId)
     {
-        var user = await _context.Users
+        User? user = await _context.Users
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                     .ThenInclude(r => r.RolePermissions)
@@ -291,12 +291,12 @@ public class AuthenticationService : IAuthenticationService
             return null;
         }
 
-        var roles = user.UserRoles
+        string[] roles = user.UserRoles
             .Where(ur => ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .Select(ur => ur.Role.Name)
             .ToArray();
 
-        var permissions = user.UserRoles
+        string[] permissions = user.UserRoles
             .Where(ur => ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .SelectMany(ur => ur.Role.RolePermissions)
             .Where(rp => rp.Granted)
@@ -342,7 +342,7 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         if (user == null)
         {
             return false;

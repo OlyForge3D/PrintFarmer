@@ -1,35 +1,46 @@
 ﻿// Global using cleanup handled by project settings; explicit System removed.
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Caching;
+using Farm.Web.Api.Infrastructure.Database;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Services.Startup;
+using Farm.Web.Api.Services.Telemetry;
 using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using StackExchange.Redis;
+using Swashbuckle.AspNetCore.Swagger;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
 try
 {
-    var potentialShared = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "wwwroot"));
+    string potentialShared = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "wwwroot"));
     if (Directory.Exists(potentialShared))
     {
         builder.Environment.WebRootPath = potentialShared;
@@ -62,8 +73,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
     // Include XML documentation if generated (for enriched Swagger docs)
-    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
+    string xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    string xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
     if (System.IO.File.Exists(xmlPath))
     {
         options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
@@ -79,13 +90,13 @@ builder.Services.AddCors(options =>
     {
         // Get allowed origins from environment variable or use defaults.
         // Support both legacy CORS__AllowedOrigins and current ALLOWED_ORIGINS for backward compatibility.
-        var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+        string allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
             ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
             ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001"; // include React dev server defaults
 
         // Check if wildcard network access is enabled
-        var allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
-        var networkRanges = Environment.GetEnvironmentVariable("ALLOWED_NETWORK_RANGES")
+        bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
+        string networkRanges = Environment.GetEnvironmentVariable("ALLOWED_NETWORK_RANGES")
                            ?? "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12";
 
         // IMPORTANT: We previously used AllowAnyOrigin() when ALLOW_LOCAL_NETWORK=true, which resulted in
@@ -102,7 +113,7 @@ builder.Services.AddCors(options =>
                 return true;
             }
 
-            var configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
                                                    .Select(o => o.Trim())
                                                    .ToArray();
 
@@ -112,7 +123,7 @@ builder.Services.AddCors(options =>
             }
 
             // Check if origin matches allowed network ranges (ip-based origin like http://192.168.x.x:port)
-            if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            if (Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri))
             {
                 return IsIpInAllowedRanges(uri.Host, networkRanges);
             }
@@ -129,23 +140,23 @@ static bool IsIpInAllowedRanges(string host, string networkRanges)
 {
     try
     {
-        if (!System.Net.IPAddress.TryParse(host, out var ipAddress))
+        if (!System.Net.IPAddress.TryParse(host, out IPAddress? ipAddress))
         {
             return false;
         }
 
-        var ranges = networkRanges.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        string[] ranges = networkRanges.Split(',', StringSplitOptions.RemoveEmptyEntries);
 
-        foreach (var range in ranges)
+        foreach (string range in ranges)
         {
-            var parts = range.Trim().Split('/');
+            string[] parts = range.Trim().Split('/');
             if (parts.Length != 2)
             {
                 continue;
             }
 
-            if (System.Net.IPAddress.TryParse(parts[0], out var networkAddress) &&
-                int.TryParse(parts[1], out var prefixLength) &&
+            if (System.Net.IPAddress.TryParse(parts[0], out IPAddress? networkAddress) &&
+                int.TryParse(parts[1], out int prefixLength) &&
                 IsIpInNetwork(ipAddress, networkAddress, prefixLength))
             {
                 return true;
@@ -163,16 +174,16 @@ static bool IsIpInAllowedRanges(string host, string networkRanges)
 // Helper method to check if IP is in network range
 static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress networkAddress, int prefixLength)
 {
-    var ipBytes = ipAddress.GetAddressBytes();
-    var networkBytes = networkAddress.GetAddressBytes();
+    byte[] ipBytes = ipAddress.GetAddressBytes();
+    byte[] networkBytes = networkAddress.GetAddressBytes();
 
     if (ipBytes.Length != networkBytes.Length)
     {
         return false;
     }
 
-    var bytesToCheck = prefixLength / 8;
-    var bitsToCheck = prefixLength % 8;
+    int bytesToCheck = prefixLength / 8;
+    int bitsToCheck = prefixLength % 8;
 
     for (int i = 0; i < bytesToCheck; i++)
     {
@@ -184,7 +195,7 @@ static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress n
 
     if (bitsToCheck > 0 && bytesToCheck < ipBytes.Length)
     {
-        var mask = (byte)(0xFF << (8 - bitsToCheck));
+        byte mask = (byte)(0xFF << (8 - bitsToCheck));
         if ((ipBytes[bytesToCheck] & mask) != (networkBytes[bytesToCheck] & mask))
         {
             return false;
@@ -195,7 +206,7 @@ static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress n
 }
 
 // Database provider selection: Sqlite (default), SqlServer, Postgres, MySql
-var dbProvider = builder.Configuration["Db:Provider"]
+string dbProvider = builder.Configuration["Db:Provider"]
                ?? Environment.GetEnvironmentVariable("DB_PROVIDER")
                ?? "Sqlite";
 
@@ -217,10 +228,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
             break;
         case "MySql":
         {
-            var cs = builder.Configuration.GetConnectionString("MySql")
+            string cs = builder.Configuration.GetConnectionString("MySql")
                      ?? builder.Configuration.GetConnectionString("Default")
                      ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-            var serverVersion = ServerVersion.AutoDetect(cs);
+            ServerVersion serverVersion = ServerVersion.AutoDetect(cs);
             options.UseMySql(cs, serverVersion);
             break;
         }
@@ -287,13 +298,13 @@ builder.Services.AddOpenTelemetry()
         }
 
         // Add OTLP exporter for production observability backends
-        var otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
+        string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
         if (!string.IsNullOrEmpty(otlpEndpoint))
         {
             tracing.AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
-                var headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
+                string? headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
                 if (!string.IsNullOrEmpty(headers))
                 {
                     options.Headers = headers;
@@ -315,13 +326,13 @@ builder.Services.AddOpenTelemetry()
         }
 
         // Add OTLP exporter for metrics
-        var otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
+        string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
         if (!string.IsNullOrEmpty(otlpEndpoint))
         {
             metrics.AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
-                var headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
+                string? headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
                 if (!string.IsNullOrEmpty(headers))
                 {
                     options.Headers = headers;
@@ -331,7 +342,7 @@ builder.Services.AddOpenTelemetry()
     });
 
 // Create ActivitySource for custom instrumentation
-var activitySource = new ActivitySource("PrintFarmer.API");
+ActivitySource activitySource = new("PrintFarmer.API");
 builder.Services.AddSingleton(activitySource);
 
 // Register custom telemetry service
@@ -364,7 +375,10 @@ builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
 builder.Services.AddScoped<ISignalRSettingsService, SignalRSettingsService>();
 builder.Services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
+builder.Services.AddScoped<IPrinterCapabilityDiscoveryService, PrinterCapabilityDiscoveryService>();
+builder.Services.AddHostedService<PrinterCapabilityUpdateService>();
 builder.Services.AddScoped<DatabaseSeeder>();
+builder.Services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
 builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
@@ -390,8 +404,8 @@ builder.Services.AddScoped<GcodeHarvestService>();
 builder.Services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
 builder.Services.AddSingleton<IGcodeUploadQuotaService>(sp =>
 {
-    var limitEnv = Environment.GetEnvironmentVariable("GCODE_DAILY_UPLOAD_LIMIT_BYTES");
-    if (long.TryParse(limitEnv, out var limit) && limit > 0)
+    string? limitEnv = Environment.GetEnvironmentVariable("GCODE_DAILY_UPLOAD_LIMIT_BYTES");
+    if (long.TryParse(limitEnv, out long limit) && limit > 0)
     {
         return new InMemoryGcodeUploadQuotaService(limit);
     }
@@ -414,8 +428,8 @@ builder.Services.Configure<LocalFileStorageOptions>(builder.Configuration.GetSec
 // Add Redis connection for slicer job queue
 builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
 {
-    var configuration = provider.GetService<IConfiguration>();
-    var connectionString = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
+    IConfiguration? configuration = provider.GetService<IConfiguration>();
+    string connectionString = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
     return ConnectionMultiplexer.Connect(connectionString);
 });
 
@@ -429,6 +443,7 @@ builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 // Register slicer runtime settings store (DB-backed)
 builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>();
 builder.Services.AddSingleton<Farm.Web.Api.Services.Startup.StartupStatus>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.StartupInitializationHostedService>();
 
 // Ensure SlicerExecutableManager can consult runtime admin settings
 builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
@@ -461,19 +476,19 @@ builder.Services.AddHealthChecks()
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // SPA services (only for monolithic deployments)
-var isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)
 {
     builder.Services.AddSpaStaticFiles(configuration =>
     {
         // Use relative path from content root to unified shared web root so SPA static files (prod) resolve.
-        var shared = builder.Environment.WebRootPath;
+        string shared = builder.Environment.WebRootPath;
         try
         {
             if (string.IsNullOrWhiteSpace(shared) || !Directory.Exists(shared))
             {
                 // Fallback: look for a local wwwroot under content root (publish scenario)
-                var fallback = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
+                string fallback = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
                 if (Directory.Exists(fallback))
                 {
                     shared = fallback;
@@ -484,7 +499,7 @@ if (isMonolithicDeployment)
                     return; // leaves configuration.RootPath unset -> no static file serving attempt
                 }
             }
-            var relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
+            string relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
             configuration.RootPath = relative; // e.g. ../../wwwroot or wwwroot
         }
         catch
@@ -498,7 +513,7 @@ if (isMonolithicDeployment)
 if (isMonolithicDeployment && builder.Environment.IsDevelopment())
 {
     // Default dev server URL (configurable via SPA_DEV_URL); using widely adopted Vite default.
-    var devUrl = builder.Configuration.GetValue<string>("SPA_DEV_URL");
+    string? devUrl = builder.Configuration.GetValue<string>("SPA_DEV_URL");
     if (string.IsNullOrWhiteSpace(devUrl))
     {
         devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
@@ -524,11 +539,11 @@ builder.Services.AddAuthentication("Bearer")
                 OnMessageReceived = context =>
                 {
                     // Simple diagnostics: confirm Authorization header is seen
-                    var auth = context.Request.Headers["Authorization"].ToString();
+                    string auth = context.Request.Headers["Authorization"].ToString();
                     string snippet = "";
                     if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                     {
-                        var tok = auth.Substring("Bearer ".Length).Trim();
+                        string tok = auth.Substring("Bearer ".Length).Trim();
                         snippet = tok.Length > 12 ? tok[..12] + "..." : tok;
                         // Ensure token is provided to the handler when we override this event
                         if (!string.IsNullOrEmpty(tok))
@@ -546,8 +561,8 @@ builder.Services.AddAuthentication("Bearer")
                 },
                 OnTokenValidated = context =>
                 {
-                    var sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
-                    var roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
+                    string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
+                    string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
                     System.Console.WriteLine($"[JWT][OnTokenValidated] user: {sub}, roles: [{roles}]");
                     return Task.CompletedTask;
                 },
@@ -564,15 +579,15 @@ builder.Services.AddAuthentication("Bearer")
             options.RequireHttpsMetadata = false;
         }
 
-        var key = builder.Configuration["Jwt:Key"];
+        string? key = builder.Configuration["Jwt:Key"];
         if (string.IsNullOrWhiteSpace(key))
         {
             throw new InvalidOperationException("JWT Key not configured. Provide a 32+ character secret via environment variable Jwt__Key or user-secrets in development.");
         }
-        var issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
-        var audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
+        string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
+        string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
 
-        var tvp = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        TokenValidationParameters tvp = new()
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(key)),
@@ -609,13 +624,15 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Farm.Web.Api.Infrastructure.Authorization.PermissionAuthorizationHandler>();
 
 // Extract raw args for potential headless commands (do not remove from hosting args beyond our flags)
-var rawArgs = args.ToList();
-var headlessCreateAdmin = rawArgs.Contains("--create-admin");
-var headlessListUsers = rawArgs.Contains("--list-users");
+List<string> rawArgs = args.ToList();
+bool headlessCreateAdmin = rawArgs.Contains("--create-admin");
+bool headlessListUsers = rawArgs.Contains("--list-users");
 
 // Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
+#pragma warning disable S1075 // URIs should not be hardcoded
 builder.WebHost.UseUrls("http://0.0.0.0:5245");
-var app = builder.Build();
+#pragma warning restore S1075 // URIs should not be hardcoded
+WebApplication app = builder.Build();
 
 // Early liveness endpoint (process up) + readiness separate
 app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
@@ -623,24 +640,24 @@ app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
 // Deferred console redirection (avoids blocking early host binding). Enable via ENABLE_CONSOLE_REDIRECTION=true
 if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION"), "true", StringComparison.OrdinalIgnoreCase))
 {
-    var lifetime = app.Lifetime; // IHostApplicationLifetime
+    IHostApplicationLifetime lifetime = app.Lifetime; // IHostApplicationLifetime
     lifetime.ApplicationStarted.Register(() =>
     {
         try
         {
-            using var scope = app.Services.CreateScope();
-            var consoleRedirection = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService>();
+            using IServiceScope scope = app.Services.CreateScope();
+            IConsoleRedirectionService consoleRedirection = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService>();
             Farm.Web.Api.Services.Telemetry.UnifiedConsole.Initialize(consoleRedirection);
             consoleRedirection.RedirectConsoleOutput();
-            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            ILogger<Program> logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("[UnifiedLogging] Console redirection initialized (deferred) - Console output now captured in OpenTelemetry");
         }
         catch (Exception ex)
         {
             try
             {
-                using var innerScope = app.Services.CreateScope();
-                var failLogger = innerScope.ServiceProvider.GetService<ILogger<Program>>();
+                using IServiceScope innerScope = app.Services.CreateScope();
+                ILogger<Program>? failLogger = innerScope.ServiceProvider.GetService<ILogger<Program>>();
                 failLogger?.LogWarning(ex, "[UnifiedLogging] Deferred console redirection failed");
             }
             catch
@@ -658,12 +675,12 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
 //   dotnet run --project src/api/Farm.Web.Api.csproj -- --create-admin --username admin --email admin@example.com --password "VeryStrongPassw0rd!" --first Alice --last Admin
 if (headlessCreateAdmin || headlessListUsers)
 {
-    using var scope = app.Services.CreateScope();
+    using IServiceScope scope = app.Services.CreateScope();
     // Ensure database is initialized before any headless operations
     try
     {
         // Minimal initialization for CLI: Ensure database exists & auth seed only (skip catalog for speed)
-        var cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        AppDbContext cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await cliDb.Database.EnsureCreatedAsync();
         await Farm.Web.Api.Data.Seed.AuthenticationDataSeeder.SeedAsync(cliDb);
     }
@@ -672,14 +689,14 @@ if (headlessCreateAdmin || headlessListUsers)
         await Console.Error.WriteLineAsync($"[CLI] Database initialization failed: {ex.Message}");
         return;
     }
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     if (headlessListUsers)
     {
-        var users = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).ToListAsync();
+        List<User> users = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).ToListAsync();
         Console.WriteLine($"Users ({users.Count}):");
-        foreach (var u in users)
+        foreach (User? u in users)
         {
-            var roles = string.Join(',', u.UserRoles.Where(r => r.IsActive).Select(r => r.Role.Name));
+            string roles = string.Join(',', u.UserRoles.Where(r => r.IsActive).Select(r => r.Role.Name));
             Console.WriteLine($" - {u.Username} <{u.Email}> Roles=[{roles}] Active={u.IsActive}");
         }
         return; // exit app
@@ -688,26 +705,26 @@ if (headlessCreateAdmin || headlessListUsers)
     {
         string GetArg(string name)
         {
-            var idx = rawArgs.IndexOf(name);
+            int idx = rawArgs.IndexOf(name);
             if (idx >= 0 && idx + 1 < rawArgs.Count)
             {
                 return rawArgs[idx + 1];
             }
             return string.Empty;
         }
-        var username = GetArg("--username");
-        var email = GetArg("--email");
-        var password = GetArg("--password");
-        var first = GetArg("--first");
-        var last = GetArg("--last");
+        string username = GetArg("--username");
+        string email = GetArg("--email");
+        string password = GetArg("--password");
+        string first = GetArg("--first");
+        string last = GetArg("--last");
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             await Console.Error.WriteLineAsync("Missing required arguments. Usage: --create-admin --username <u> --email <e> --password <p> [--first First] [--last Last]");
             return;
         }
         // Dynamic password policy
-        var policy = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync();
-        var minLength = policy?.MinLength ?? 12;
+        PasswordPolicy? policy = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync();
+        int minLength = policy?.MinLength ?? 12;
         if (password.Length < minLength)
         {
             await Console.Error.WriteLineAsync($"Password must be at least {minLength} characters.");
@@ -737,30 +754,30 @@ if (headlessCreateAdmin || headlessListUsers)
             }
         }
         // Ensure seed ran (roles etc.) already handled above.
-        var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
-        var authSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
-        var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+        IPasswordHashingService hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
+        IAuthenticationService authSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
+        Farm.Web.Api.Domain.Role? adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole == null)
         {
             await Console.Error.WriteLineAsync("Admin role not found; seeding failure.");
             return;
         }
         // Idempotent check
-        var existing = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+        User? existing = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Username == username || u.Email == email);
         if (existing != null)
         {
-            var hasAdmin = existing.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive);
+            bool hasAdmin = existing.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive);
             if (hasAdmin && scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>().VerifyPassword(password, existing.PasswordHash))
             {
-                var tokenExisting = await authSvc.GenerateJwtTokenAsync(existing);
+                string tokenExisting = await authSvc.GenerateJwtTokenAsync(existing);
                 Console.WriteLine($"Existing admin '{existing.Username}' detected. Reusing credentials. JWT={tokenExisting.Substring(0, Math.Min(32, tokenExisting.Length))}... (truncated)");
                 return;
             }
             await Console.Error.WriteLineAsync("User with same username or email already exists (not matching provided password for idempotency). Aborting.");
             return;
         }
-        var user = new Farm.Web.Api.Domain.User
+        User user = new()
         {
             Id = Guid.NewGuid(),
             Username = username,
@@ -783,7 +800,7 @@ if (headlessCreateAdmin || headlessListUsers)
             IsActive = true
         });
         await db.SaveChangesAsync();
-        var token = await authSvc.GenerateJwtTokenAsync(user);
+        string token = await authSvc.GenerateJwtTokenAsync(user);
         Console.WriteLine($"Created admin user '{username}' ({email}). JWT={token.Substring(0, Math.Min(32, token.Length))}... (truncated)");
         return;
     }
@@ -794,10 +811,10 @@ if (headlessCreateAdmin || headlessListUsers)
 // Log effective temp root (non-production) for diagnostics
 try
 {
-    var env = app.Services.GetRequiredService<IHostEnvironment>();
+    IHostEnvironment env = app.Services.GetRequiredService<IHostEnvironment>();
     if (!env.IsProduction())
     {
-        var tempProvider = app.Services.GetRequiredService<ITempPathProvider>();
+        ITempPathProvider tempProvider = app.Services.GetRequiredService<ITempPathProvider>();
         app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
     }
 }
@@ -821,8 +838,8 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider adp) =>
 {
     // Delegate to internal swagger generator service
-    var provider = app.Services.GetRequiredService<Swashbuckle.AspNetCore.Swagger.ISwaggerProvider>();
-    var doc = provider.GetSwagger("v1");
+    ISwaggerProvider provider = app.Services.GetRequiredService<Swashbuckle.AspNetCore.Swagger.ISwaggerProvider>();
+    OpenApiDocument doc = provider.GetSwagger("v1");
     return Results.Json(doc);
 });
 
@@ -843,8 +860,8 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json";
-        var startup = context.RequestServices.GetService<Farm.Web.Api.Services.Startup.StartupStatus>();
-        var result = JsonSerializer.Serialize(
+        StartupStatus? startup = context.RequestServices.GetService<Farm.Web.Api.Services.Startup.StartupStatus>();
+        string result = JsonSerializer.Serialize(
             new
             {
                 Status = report.Status.ToString(),
@@ -882,8 +899,8 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json";
-        var startup = context.RequestServices.GetService<Farm.Web.Api.Services.Startup.StartupStatus>();
-        var result = JsonSerializer.Serialize(
+        StartupStatus? startup = context.RequestServices.GetService<Farm.Web.Api.Services.Startup.StartupStatus>();
+        string result = JsonSerializer.Serialize(
             new
             {
                 Status = report.Status.ToString(),
@@ -924,7 +941,7 @@ app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoveryS
 app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
 app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettingsDto body) =>
 {
-    var validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
+    NetworkValidationResult validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
     return Results.Ok(new
     {
         isValid = validation.IsValid,
@@ -940,17 +957,17 @@ app.MapPost("/api/signalr/settings", [Microsoft.AspNetCore.Authorization.Authori
 app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () =>
 {
     // Enumerate local IPv4 addresses and suggest /24 CIDR blocks.
-    var suggestions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    HashSet<string> suggestions = new(StringComparer.OrdinalIgnoreCase);
     try
     {
-        foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        foreach (System.Net.NetworkInformation.NetworkInterface ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
         {
             if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up)
             {
                 continue;
             }
-            var props = ni.GetIPProperties();
-            foreach (var ua in props.UnicastAddresses)
+            IPInterfaceProperties props = ni.GetIPProperties();
+            foreach (UnicastIPAddressInformation ua in props.UnicastAddresses)
             {
                 if (ua.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                 {
@@ -958,9 +975,9 @@ app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authoriz
                     int prefix = 24;
                     if (ua.IPv4Mask is not null)
                     {
-                        var maskBytes = ua.IPv4Mask.GetAddressBytes();
-                        var ones = 0;
-                        foreach (var b in maskBytes)
+                        byte[] maskBytes = ua.IPv4Mask.GetAddressBytes();
+                        int ones = 0;
+                        foreach (byte b in maskBytes)
                         {
                             byte v = b;
                             while (v != 0)
@@ -974,7 +991,7 @@ app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authoriz
                             prefix = ones;
                         }
                     }
-                    var networkBytes = ua.Address.GetAddressBytes();
+                    byte[] networkBytes = ua.Address.GetAddressBytes();
                     if (prefix <= 32 && prefix >= 8)
                     {
                         // Zero remaining host bits for canonical network base
@@ -996,7 +1013,7 @@ app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authoriz
                                 networkBytes[i] = 0;
                             }
                         }
-                        var networkBase = new System.Net.IPAddress(networkBytes);
+                        IPAddress networkBase = new(networkBytes);
                         suggestions.Add($"{networkBase}/{prefix}");
                     }
                 }
@@ -1009,9 +1026,9 @@ app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authoriz
 app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc) =>
 {
     // Allows re-applying environment driven defaults from DISCOVERY_RANGES / DISCOVERY_PORTS
-    var rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");
-    var portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
-    var current = svc.GetSettings();
+    string? rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");
+    string? portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
+    NetworkDiscoverySettingsDto current = svc.GetSettings();
     List<string> ranges = current.NetworkRanges;
     if (!string.IsNullOrWhiteSpace(rangesEnv))
     {
@@ -1021,7 +1038,7 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
     if (!string.IsNullOrWhiteSpace(portsEnv))
     {
         ports = [.. portsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(p => int.TryParse(p, out var v) ? v : -1)
+            .Select(p => int.TryParse(p, out int v) ? v : -1)
             .Where(v => v > 0 && v < 65536)
             .Distinct()];
         if (ports.Count == 0)
@@ -1029,7 +1046,7 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
             ports = current.Ports;
         }
     }
-    var updated = new NetworkDiscoverySettingsDto(ranges, current.TimeoutMs, current.MaxConcurrentScans, ports);
+    NetworkDiscoverySettingsDto updated = new(ranges, current.TimeoutMs, current.MaxConcurrentScans, ports);
     svc.SaveSettings(updated);
     return Results.Ok(updated);
 });
@@ -1048,8 +1065,8 @@ app.MapGet("/diagnostics/temp-root", (Microsoft.AspNetCore.Hosting.IWebHostEnvir
 // Combined diagnostics (non-sensitive) for UI consumption
 app.MapGet("/api/diagnostics/summary", ([FromServices] SpoolmanService spoolmanSvc, [FromServices] INetworkDiscoverySettingsService discoverySvc) =>
 {
-    var spoolCfg = spoolmanSvc.GetConfig();
-    var discovery = discoverySvc.GetSettings();
+    SpoolmanConfigDto? spoolCfg = spoolmanSvc.GetConfig();
+    NetworkDiscoverySettingsDto discovery = discoverySvc.GetSettings();
     return Results.Ok(new
     {
         spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
@@ -1075,14 +1092,14 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
     [Microsoft.AspNetCore.Mvc.FromServices] Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider migrationStatusProvider,
     CancellationToken ct) =>
 {
-    var toggle = (Environment.GetEnvironmentVariable("DEBUG_DB_INFO") ?? config["DEBUG_DB_INFO"])?.Trim();
-    var allow = env.IsDevelopment() || (toggle != null && toggle.Equals("true", StringComparison.OrdinalIgnoreCase));
+    string? toggle = (Environment.GetEnvironmentVariable("DEBUG_DB_INFO") ?? config["DEBUG_DB_INFO"])?.Trim();
+    bool allow = env.IsDevelopment() || (toggle != null && toggle.Equals("true", StringComparison.OrdinalIgnoreCase));
     if (!allow)
     {
         return Results.NotFound();
     }
 
-    var provider = db.Database.ProviderName ?? "unknown";
+    string provider = db.Database.ProviderName ?? "unknown";
     string databaseName;
     try
     {
@@ -1093,7 +1110,7 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
         databaseName = "unknown";
     }
 
-    var entities = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+    Dictionary<string, int> entities = new(StringComparer.OrdinalIgnoreCase)
     {
         [nameof(db.Printers)] = await db.Printers.CountAsync(ct),
         [nameof(db.Spools)] = await db.Spools.CountAsync(ct),
@@ -1122,11 +1139,11 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
     {
         try
         {
-            var cs = db.Database.GetConnectionString() ?? string.Empty;
+            string cs = db.Database.GetConnectionString() ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(cs))
             {
-                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(cs);
-                var dataSource = builder.DataSource;
+                SqliteConnectionStringBuilder builder = new(cs);
+                string dataSource = builder.DataSource;
                 if (!Path.IsPathRooted(dataSource))
                 {
                     dataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dataSource));
@@ -1140,7 +1157,7 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
         catch { }
     }
 
-    var migration = migrationStatusProvider.GetStatus();
+    MigrationStatus migration = migrationStatusProvider.GetStatus();
 
     return Results.Ok(new
     {
@@ -1158,7 +1175,7 @@ if (isMonolithicDeployment)
 {
     // Only enable static file / SPA pipeline if a web root actually exists (prebuilt assets). In container builds
     // using DEPLOYMENT_MODE=monolithic we expect /wwwroot to be present; if it's missing we skip to avoid crashes.
-    var staticRoot = app.Environment.WebRootPath;
+    string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
         app.UseStaticFiles();

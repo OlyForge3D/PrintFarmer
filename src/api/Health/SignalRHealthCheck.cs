@@ -13,9 +13,9 @@ public class SignalRHealthCheck(
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
-        var checks = new Dictionary<string, object>();
-        var overallHealthy = true;
-        var issues = new List<string>();
+        Dictionary<string, object> checks = new();
+        bool overallHealthy = true;
+        List<string> issues = new();
 
         // Test SignalR Hub Context
         try
@@ -30,7 +30,7 @@ public class SignalRHealthCheck(
             else
             {
                 // Try to send a test message to a non-existent group (should not fail)
-                var testGroupName = $"health-check-{Guid.NewGuid()}";
+                string testGroupName = $"health-check-{Guid.NewGuid()}";
                 await hubContext.Clients.Group(testGroupName).SendAsync("HealthCheck", new
                 {
                     Timestamp = DateTime.UtcNow,
@@ -59,8 +59,8 @@ public class SignalRHealthCheck(
         {
             if (hubContext != null)
             {
-                var testSessionId = Guid.NewGuid().ToString();
-                var discoveryGroupName = $"discovery-{testSessionId}";
+                string testSessionId = Guid.NewGuid().ToString();
+                string discoveryGroupName = $"discovery-{testSessionId}";
 
                 // Test sending discovery messages
                 await hubContext.Clients.Group(discoveryGroupName).SendAsync("DiscoveryProgress", new
@@ -93,7 +93,7 @@ public class SignalRHealthCheck(
             checks["DiscoveryGroups"] = new { Status = "Unhealthy", Error = ex.Message };
         }
 
-        var result = new HealthCheckResult(
+        HealthCheckResult result = new(
             overallHealthy ? HealthStatus.Healthy : HealthStatus.Unhealthy,
             description: overallHealthy ? "SignalR fully operational" : string.Join("; ", issues),
             data: checks

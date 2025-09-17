@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield, User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthContext';
+import { useHealthStatus } from '@/hooks/useApi';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { apiClient } from '@/services/api';
 
@@ -10,6 +11,7 @@ interface SetupWizardProps {
 }
 
 export function SetupWizard({ onComplete }: SetupWizardProps) {
+  const [initializing, setInitializing] = useState(true);
   const [loading, setLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -18,6 +20,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const { login } = useAuth();
   const [step, setStep] = useState(0); // 0 Account, 1 Network, 2 Spoolman, 3 Filament Presets, 4 Summary
   const [adminCreated, setAdminCreated] = useState(false);
+
+  // Check initialization status
+  const { data: healthStatus, isLoading: healthLoading, refetch: refetchHealth } = useHealthStatus();
 
   // Step: Account
   const [formData, setFormData] = useState({
@@ -34,7 +39,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [networkRanges, setNetworkRanges] = useState<string[]>([]);
   const [discoveryTimeout, setDiscoveryTimeout] = useState(5000);
   const [maxConcurrentScans, setMaxConcurrentScans] = useState(20);
-  const [scanPorts, setScanPorts] = useState<number[]>([80]);
+  const [scanPorts, setScanPorts] = useState<number[]>([80, 7125]); // Include both HTTP and Moonraker ports
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
 
   // Step: Spoolman
@@ -71,6 +76,28 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [presetError, setPresetError] = useState<string | null>(null);
 
   useEffect(() => { checkSetupStatus(); }, []);
+
+  // Monitor initialization status
+  useEffect(() => {
+    if (!healthLoading && healthStatus) {
+      if (healthStatus.kind === 'detailed' && healthStatus.startup) {
+        const { ready, failed, phase } = healthStatus.startup;
+        
+        if (failed) {
+          setGlobalError(`System initialization failed: ${healthStatus.startup.failureMessage || 'Unknown error'}`);
+          setInitializing(false);
+        } else if (ready) {
+          setInitializing(false);
+        } else {
+          // Still initializing, continue polling
+          setTimeout(() => refetchHealth(), 1000);
+        }
+      } else {
+        // Basic health status or no startup info, assume ready
+        setInitializing(false);
+      }
+    }
+  }, [healthStatus, healthLoading, refetchHealth]);
 
   // Load filament types when entering presets step first time
   useEffect(() => {
@@ -209,7 +236,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   // Filament presets
-  const loadFilamentTypes = async () => {
+  const loadFilamentTypes = async (retryCount = 0) => {
     setLoadingPresets(true);
     setPresetError(null);
     try {
@@ -222,9 +249,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         ...defaults.filter(d => !existingNames.has(d)).map<FilamentPresetEditable>(d => ({ name: d, hotend: d === 'PLA' ? 205 : d === 'ABS' ? 230 : d === 'PETG' ? 240 : d === 'ASA' ? 245 : d === 'PC' ? 260 : d === 'PCTG' ? 235 : d === 'TPU' ? 220 : 210, bed: d === 'ABS' || d === 'ASA' ? 100 : d === 'PC' ? 110 : d === 'PETG' ? 85 : d === 'PCTG' ? 80 : d === 'Wood' ? 65 : 60, enabled: true }))
       ].sort((a,b) => a.name.localeCompare(b.name));
       setFilamentPresets(merged);
-    } catch {
+    } catch (error) {
+      // Handle 503 Service Unavailable (system still initializing) with retry
+      if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 503 && retryCount < 3) {
+        setPresetError('System is initializing, retrying...');
+        setTimeout(() => loadFilamentTypes(retryCount + 1), 2000); // Retry after 2 seconds
+        return;
+      }
       setPresetError('Failed to load filament presets');
-    } finally { setLoadingPresets(false); }
+    } finally { 
+      if (retryCount === 0) setLoadingPresets(false); // Only stop loading indicator on final attempt
+    }
   };
 
   const togglePreset = (name: string) => setFilamentPresets(p => p.map(f => f.name === name ? { ...f, enabled: !f.enabled } : f));
@@ -381,7 +416,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
         <div>
           <label htmlFor="nw-ports" className="block text-xs mb-1">Ports (comma separated)</label>
-          <input id="nw-ports" name="nw-ports" type="text" value={scanPorts.join(',')} placeholder="80" onChange={e => setScanPorts(e.target.value.split(',').map(p => Number(p.trim())).filter(n => !isNaN(n)))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
+          <input id="nw-ports" name="nw-ports" type="text" value={scanPorts.join(',')} placeholder="80,7125" onChange={e => setScanPorts(e.target.value.split(',').map(p => Number(p.trim())).filter(n => !isNaN(n)))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
+          <p className="text-xs text-pf-text-tertiary mt-1">80=HTTP, 7125=Moonraker</p>
         </div>
       </div>
       <div className="flex justify-between">
@@ -520,27 +556,58 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   return (
     <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-pf-bg-1 border border-pf-border shadow-xl rounded-xl p-8">
-        <div className="flex items-center gap-4 mb-6">
-          <div className="flex items-center justify-center w-14 h-14 bg-pf-accent bg-opacity-15 rounded-full">
-            <Shield className="h-7 w-7 text-pf-accent" />
+        {initializing ? (
+          // Show initialization spinner
+          <div className="text-center py-16">
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <div className="flex items-center justify-center w-14 h-14 bg-pf-accent bg-opacity-15 rounded-full">
+                <Shield className="h-7 w-7 text-pf-accent" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
+                <p className="text-pf-text-secondary text-sm">Initializing system...</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <div className="pf-animate-spin h-6 w-6 border-b-2 border-pf-accent rounded-full"></div>
+              <span className="text-pf-text-secondary">
+                {healthStatus?.kind === 'detailed' && healthStatus.startup 
+                  ? `Phase: ${healthStatus.startup.phase}` 
+                  : 'Starting up...'}
+              </span>
+            </div>
+            {globalError && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="text-sm text-red-600">{globalError}</div>
+              </div>
+            )}
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
-            <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>
-          </div>
-        </div>
-        <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
-          {['Account','Network','Spoolman','Filament','Summary'].map((label, idx) => (
-            <div key={label} className={`px-2 py-1 rounded ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
-          ))}
-        </div>
-        {globalError && step !== 4 && <div className="mb-4 text-sm text-red-500" role="alert">{globalError}</div>}
-        {step === 0 && renderAccountStep()}
-        {step === 1 && renderNetworkStep()}
-        {step === 2 && renderSpoolmanStep()}
-        {step === 3 && renderFilamentStep()}
-        {step === 4 && renderSummaryStep()}
-        <div className="mt-6 text-center text-xs text-pf-text-tertiary">You can change these settings later in the Settings page.</div>
+        ) : (
+          // Show setup wizard once initialized
+          <>
+            <div className="flex items-center gap-4 mb-6">
+              <div className="flex items-center justify-center w-14 h-14 bg-pf-accent bg-opacity-15 rounded-full">
+                <Shield className="h-7 w-7 text-pf-accent" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
+                <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>
+              </div>
+            </div>
+            <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
+              {['Account','Network','Spoolman','Filament','Summary'].map((label, idx) => (
+                <div key={label} className={`px-2 py-1 rounded ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
+              ))}
+            </div>
+            {globalError && step !== 4 && <div className="mb-4 text-sm text-red-500" role="alert">{globalError}</div>}
+            {step === 0 && renderAccountStep()}
+            {step === 1 && renderNetworkStep()}
+            {step === 2 && renderSpoolmanStep()}
+            {step === 3 && renderFilamentStep()}
+            {step === 4 && renderSummaryStep()}
+            <div className="mt-6 text-center text-xs text-pf-text-tertiary">You can change these settings later in the Settings page.</div>
+          </>
+        )}
       </div>
     </div>
   );

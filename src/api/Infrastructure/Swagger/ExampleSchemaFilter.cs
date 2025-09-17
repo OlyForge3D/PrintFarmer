@@ -14,7 +14,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(context);
-        var t = context.Type;
+        Type t = context.Type;
 
         if (t == typeof(CreatePrinterDto))
         {
@@ -246,7 +246,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
         else if (t == typeof(SlicerQueueStats))
         {
             // Ensure nullable TimeSpan? shows as nullable with descriptive example
-            if (schema.Properties.TryGetValue("estimatedWaitTime", out var prop))
+            if (schema.Properties.TryGetValue("estimatedWaitTime", out OpenApiSchema? prop))
             {
                 prop.Nullable = true; // Explicitly mark nullable for clarity in UI
                 prop.Description = (prop.Description is null
@@ -258,7 +258,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
         }
         else if (t == typeof(SlicerEngineInfo))
         {
-            if (schema.Properties.TryGetValue("estimatedWaitTime", out var prop))
+            if (schema.Properties.TryGetValue("estimatedWaitTime", out OpenApiSchema? prop))
             {
                 prop.Nullable = true;
                 prop.Description = (prop.Description is null

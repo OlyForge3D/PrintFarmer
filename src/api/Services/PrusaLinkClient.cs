@@ -23,8 +23,8 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
-            var job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
 
             return new PrusaCompositeStatus(
                 status?.Printer != null,
@@ -54,7 +54,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
             return new PrusaStatus(status?.Printer != null, status?.Printer?.State);
         }
         catch (Exception ex)
@@ -74,7 +74,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
             if (job == null)
             {
                 return null;
@@ -111,7 +111,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
             ArgumentNullException.ThrowIfNull(fileContent);
 
             // Build a rooted path using Uri to avoid manual separators
-            var filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
+            string filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
             return await _apiClient.UploadFileAsync(baseUrl, "/local", filePath, fileContent, apiKey, printAfterUpload: false, overwrite: true, ct);
         }
         catch (Exception ex)
@@ -134,7 +134,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
             ArgumentNullException.ThrowIfNull(fileName);
 
             // Build a rooted path using Uri to avoid manual separators
-            var filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
+            string filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
             return await _apiClient.StartPrintAsync(baseUrl, "/local", filePath, apiKey, ct);
         }
         catch (Exception ex)
@@ -154,7 +154,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries; FolderInfo.Children is an array so prefer Length checks
@@ -186,7 +186,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
             if (job == null)
             {
                 return null;
@@ -213,7 +213,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            StatusInfo status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
 
             return new SimplePrinterStatus
             {
@@ -241,7 +241,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            StatusInfo status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
             return string.Equals(status.Printer.State, PrinterStates.Printing, StringComparison.OrdinalIgnoreCase);
         }
         catch
@@ -254,7 +254,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
             if (job?.Id != null)
             {
                 return await _apiClient.PauseJobAsync(baseUrl, job.Id, apiKey, ct);
@@ -271,7 +271,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
             if (job?.Id != null)
             {
                 return await _apiClient.ResumeJobAsync(baseUrl, job.Id, apiKey, ct);
@@ -288,7 +288,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
             if (job?.Id != null)
             {
                 return await _apiClient.StopJobAsync(baseUrl, job.Id, apiKey, ct);
@@ -305,8 +305,8 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var info = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
-            var version = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
+            PrinterInfo info = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
+            VersionInfo version = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
 
             return new PrinterInformation
             {
@@ -322,8 +322,8 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
                 HasMmu = info.Mmu,
                 SdCardReady = info.SdReady,
                 HasActiveCamera = info.ActiveCamera,
-                SupportsUploadByPut = version.Capabilities.TryGetValue("upload-by-put", out var flagObj)
-                    && bool.TryParse(Convert.ToString(flagObj, System.Globalization.CultureInfo.InvariantCulture), out var flag)
+                SupportsUploadByPut = version.Capabilities.TryGetValue("upload-by-put", out object? flagObj)
+                    && bool.TryParse(Convert.ToString(flagObj, System.Globalization.CultureInfo.InvariantCulture), out bool flag)
                     && flag
             };
         }
@@ -337,7 +337,7 @@ public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger =
     {
         try
         {
-            var storageList = await _apiClient.GetStorageAsync(baseUrl, apiKey, ct: ct);
+            StorageListResponse storageList = await _apiClient.GetStorageAsync(baseUrl, apiKey, ct: ct);
             return storageList.StorageList.Select(s => new StorageInformation
             {
                 Name = s.Name,

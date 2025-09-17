@@ -69,23 +69,23 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
     {
         logger.LogInformation("Validating application configuration...");
 
-        var validationErrors = new List<string>();
+        List<string> validationErrors = new();
 
         // Validate app settings
-        var appConfig = appSettings.Value;
+        AppSettings appConfig = appSettings.Value;
         if (appConfig.Port < 1 || appConfig.Port > 65535)
         {
             validationErrors.Add($"Invalid port: {appConfig.Port}. Must be between 1-65535");
         }
 
-        if (!Uri.TryCreate(appConfig.BaseUrl, UriKind.Absolute, out var baseUri))
+        if (!Uri.TryCreate(appConfig.BaseUrl, UriKind.Absolute, out Uri? baseUri))
         {
             validationErrors.Add($"Invalid BaseUrl: {appConfig.BaseUrl}");
         }
 
         // Validate database settings
-        var dbConfig = dbSettings.Value;
-        var validProviders = new[] { "SqlServer", "Postgres", "MySql", "Sqlite" };
+        DatabaseSettings dbConfig = dbSettings.Value;
+        string[] validProviders = new[] { "SqlServer", "Postgres", "MySql", "Sqlite" };
         if (!validProviders.Contains(dbConfig.Provider))
         {
             validationErrors.Add($"Invalid database provider: {dbConfig.Provider}. Must be one of: {string.Join(", ", validProviders)}");
@@ -117,7 +117,7 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
 
         if (validationErrors.Count > 0)
         {
-            var errorMessage = $"Configuration validation failed:\n{string.Join("\n", validationErrors)}";
+            string errorMessage = $"Configuration validation failed:\n{string.Join("\n", validationErrors)}";
             logger.LogCritical("Configuration validation failed: {Errors}", errorMessage);
             throw new InvalidOperationException(errorMessage);
         }

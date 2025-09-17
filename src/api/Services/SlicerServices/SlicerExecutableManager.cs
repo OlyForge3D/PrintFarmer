@@ -1,4 +1,5 @@
-﻿using Farm.Web.Shared;
+﻿using System.Diagnostics;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -26,8 +27,8 @@ public class SlicerExecutableManager : ISlicerExecutableManager
         // Check runtime settings first (admin UI persisted values)
         if (_settingsService != null)
         {
-            var runtime = _settingsService.GetSettings();
-            if (runtime != null && runtime.PerEngine.TryGetValue(engine, out var eSetting) && !string.IsNullOrWhiteSpace(eSetting.Path))
+            SlicerSettingsDto runtime = _settingsService.GetSettings();
+            if (runtime != null && runtime.PerEngine.TryGetValue(engine, out PerEngineSlicerSetting? eSetting) && !string.IsNullOrWhiteSpace(eSetting.Path))
             {
                 executablePath = eSetting.Path;
                 argsTemplate = eSetting.ArgsTemplate;
@@ -35,7 +36,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
             }
         }
 
-        var section = _config.GetSection($"SlicerExecutables:{engine}");
+        IConfigurationSection section = _config.GetSection($"SlicerExecutables:{engine}");
         executablePath = section["Path"];
         argsTemplate = section["ArgsTemplate"];
 
@@ -57,7 +58,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
 
     public async Task<bool> ValidateSlicerInstallationAsync(SlicerEngineType engine, CancellationToken cancellationToken = default)
     {
-        if (!TryGetExecutable(engine, out var exe, out var _))
+        if (!TryGetExecutable(engine, out string? exe, out string? _))
         {
             _logger.LogWarning("No configured executable found for slicer engine {Engine}", engine);
             return false;
@@ -65,7 +66,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
 
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
+            ProcessStartInfo psi = new()
             {
                 FileName = exe,
                 Arguments = "--version",
@@ -74,7 +75,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            using var proc = System.Diagnostics.Process.Start(psi);
+            using System.Diagnostics.Process? proc = System.Diagnostics.Process.Start(psi);
             if (proc == null)
             {
                 return false;
@@ -92,13 +93,13 @@ public class SlicerExecutableManager : ISlicerExecutableManager
 
     private static string? FindOnPath(string linuxName, string windowsName)
     {
-        var name = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? windowsName : linuxName;
-        var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-        foreach (var p in paths)
+        string name = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? windowsName : linuxName;
+        string[] paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+        foreach (string p in paths)
         {
             try
             {
-                var candidate = Path.Combine(p, name);
+                string candidate = Path.Combine(p, name);
                 if (File.Exists(candidate))
                 {
                     return candidate;

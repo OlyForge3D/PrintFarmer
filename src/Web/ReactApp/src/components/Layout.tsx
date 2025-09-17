@@ -74,6 +74,7 @@ const navigation: NavigationItem[] = [
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Spools', href: '/spools', icon: Box },
       { name: 'User Management', href: '/admin/users', icon: Users },
+      { name: 'Observability', href: '/admin/observability', icon: Cog },
       { name: 'Slicer Dry Run', href: '/admin/slicer/dry-run', icon: FileText },
       { name: 'Slicer Job Status', href: '/admin/slicer/job-status', icon: FileText }
     ]
@@ -105,7 +106,7 @@ export function Layout() {
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       return true;
     });
-  }, [hasRole, hasPermission, isAuthenticated]); // Include isAuthenticated for stability
+  }, [isAuthenticated, user]); // Use user instead of hasRole/hasPermission functions
 
   const handleLogout = async () => {
     await logout();
@@ -182,32 +183,32 @@ export function Layout() {
       }
       
       // Auto-expand groups containing current route during initialization
-      filteredNavigation.forEach(item => {
+      for (const item of filteredNavigation) {
         if (item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild && !(item.name in parsed)) {
             parsed[item.name] = true;
           }
         }
-      });
+      }
       
       setExpanded(parsed);
       initializedRef.current = true;
     } catch {
       // If parsing fails, at least auto-expand current route
       const autoExpanded: Record<string, boolean> = {};
-      filteredNavigation.forEach(item => {
+      for (const item of filteredNavigation) {
         if (item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild) {
             autoExpanded[item.name] = true;
           }
         }
-      });
+      }
       setExpanded(autoExpanded);
       initializedRef.current = true;
     }
-  }, [filteredNavigation, location.pathname]); // Run when navigation is available
+  }, [isAuthenticated]); // Only run when authentication state changes
 
   // Persist expanded changes
   useEffect(() => {
@@ -225,10 +226,11 @@ export function Layout() {
     
     const path = location.pathname;
     setExpanded((prev: Record<string, boolean>) => {
-      const next = { ...prev };
       let hasChanges = false;
+      const next = { ...prev };
       
-      filteredNavigation.forEach(item => {
+      // Only process navigation items that have children
+      for (const item of filteredNavigation) {
         if (item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild && prev[item.name] === undefined) {
@@ -237,11 +239,11 @@ export function Layout() {
             hasChanges = true;
           }
         }
-      });
+      }
       
       return hasChanges ? next : prev; // Prevent unnecessary re-renders
     });
-  }, [location.pathname, filteredNavigation]);
+  }, [location.pathname]); // Remove filteredNavigation dependency to prevent loops
 
   return (
     <div className="min-h-screen bg-pf-bg-0 flex flex-col">

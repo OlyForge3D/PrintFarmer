@@ -26,7 +26,7 @@ public class ClamAVVirusScanner : IVirusScanner
 
         try
         {
-            var psi = new ProcessStartInfo
+            ProcessStartInfo psi = new()
             {
                 FileName = _scannerExecutable,
                 RedirectStandardOutput = true,
@@ -36,7 +36,7 @@ public class ClamAVVirusScanner : IVirusScanner
             };
 
             // Build arguments depending on chosen scanner
-            var exeName = Path.GetFileName(_scannerExecutable);
+            string exeName = Path.GetFileName(_scannerExecutable);
             if (exeName.Equals("clamdscan", System.StringComparison.OrdinalIgnoreCase))
             {
                 psi.Arguments = $"--fdpass --no-summary \"{filePath}\"";
@@ -47,7 +47,7 @@ public class ClamAVVirusScanner : IVirusScanner
                 psi.Arguments = $"--no-summary --stdout \"{filePath}\"";
             }
 
-            using var proc = Process.Start(psi);
+            using Process? proc = Process.Start(psi);
             if (proc == null)
             {
                 return Task.FromResult(VirusScanResult.Unknown);
@@ -55,7 +55,7 @@ public class ClamAVVirusScanner : IVirusScanner
 
             // Wait for exit (honoring cancellation)
             proc.WaitForExit();
-            var exit = proc.ExitCode;
+            int exit = proc.ExitCode;
 
             // clamscan/clamdscan: exit code 0 = no virus, 1 = virus found, >1 = error
             if (exit == 0)
@@ -77,10 +77,10 @@ public class ClamAVVirusScanner : IVirusScanner
     private static string? FindScannerExecutable()
     {
         // Look for clamdscan first, then clamscan
-        var names = new[] { "clamdscan", "clamscan" };
-        foreach (var n in names)
+        string[] names = new[] { "clamdscan", "clamscan" };
+        foreach (string? n in names)
         {
-            var path = Which(n);
+            string? path = Which(n);
             if (!string.IsNullOrEmpty(path))
             {
                 return path;
@@ -92,10 +92,10 @@ public class ClamAVVirusScanner : IVirusScanner
         {
             try
             {
-                var paths = System.Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-                foreach (var p in paths)
+                string[] paths = System.Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+                foreach (string p in paths)
                 {
-                    var candidate = Path.Combine(p, name + (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? ".exe" : string.Empty));
+                    string candidate = Path.Combine(p, name + (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? ".exe" : string.Empty));
                     if (File.Exists(candidate))
                     {
                         return candidate;

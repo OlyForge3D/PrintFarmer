@@ -30,7 +30,7 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
         // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
         {
-            var correlationId = context.TraceIdentifier;
+            string correlationId = context.TraceIdentifier;
 
             LogUnhandledException(logger, ex, context.Request.Method, context.Request.Path, correlationId);
 
@@ -42,7 +42,7 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
     {
         context.Response.ContentType = "application/json";
 
-        var (statusCode, message, details) = MapExceptionToResponse(ex);
+        (HttpStatusCode statusCode, string? message, string? details) = MapExceptionToResponse(ex);
 
         context.Response.StatusCode = (int)statusCode;
 
@@ -55,7 +55,7 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
             Path = context.Request.Path.ToString()
         };
 
-        var jsonResponse = JsonSerializer.Serialize(response, s_jsonOptions);
+        string jsonResponse = JsonSerializer.Serialize(response, s_jsonOptions);
 
         await context.Response.WriteAsync(jsonResponse);
     }

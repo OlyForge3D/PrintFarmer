@@ -15,14 +15,14 @@ public class Printer
     [NotMapped]
     public Uri? ServerUri
     {
-        get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+        get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
         set => ServerUrl = value?.ToString() ?? string.Empty;
     }
 
     [NotMapped]
     public Uri? OriginalServerUri
     {
-        get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out var u) ? u : null);
+        get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
         set => OriginalServerUrl = value?.ToString();
     }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
@@ -33,9 +33,9 @@ public class Printer
     public string? ApiKey { get; set; } // For PrusaLink
 
     // Metadata
-    public Guid? ManufacturerId { get; set; }
+    public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer
     public Manufacturer? Manufacturer { get; set; }
-    public Guid? ModelId { get; set; }
+    public Guid ModelId { get; set; } // No longer nullable - uses default "Unknown Model"
     public PrinterModel? Model { get; set; }
     public DateTime? DateAcquired { get; set; }
 
@@ -66,6 +66,7 @@ public class PrinterModel
     public string Name { get; set; } = string.Empty;
     public Guid ManufacturerId { get; set; }
     public Manufacturer? Manufacturer { get; set; }
+    public int? Type { get; set; } // PrinterType enum: 0=Cartesian, 1=CoreXY, 2=Delta, 3=Polar, 4=SCARA, 99=Unknown
     public double? MaxX { get; set; }
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
@@ -100,7 +101,7 @@ public class SpoolmanConfig
     [NotMapped]
     public Uri? BaseUri
     {
-        get => Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null;
+        get => Uri.TryCreate(BaseUrl, UriKind.Absolute, out Uri? u) ? u : null;
         set => BaseUrl = value?.ToString() ?? string.Empty;
     }
 }

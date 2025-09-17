@@ -29,7 +29,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     {
         try
         {
-            var query = db.GcodeFiles
+            IQueryable<GcodeFile> query = db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.TargetPrinter)
                 .Include(g => g.TargetModel)
@@ -50,7 +50,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
 
             if (nozzleDiameter.HasValue)
             {
-                var nd = nozzleDiameter.Value;
+                double nd = nozzleDiameter.Value;
                 query = query.Where(g => g.RequiredNozzleDiameter != null && Math.Abs(g.RequiredNozzleDiameter.Value - nd) < 0.001);
             }
 
@@ -59,7 +59,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
                 query = query.Where(g => g.TargetPrinterId == targetPrinterId.Value);
             }
 
-            var files = await query
+            List<GcodeFile> files = await query
                 .OrderByDescending(g => g.UploadedAt)
                 .ToListAsync();
 
@@ -112,7 +112,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     {
         try
         {
-            var file = await db.GcodeFiles
+            GcodeFile? file = await db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.TargetPrinter)
                 .Include(g => g.TargetModel)
@@ -189,41 +189,41 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
 
             // Calculate hash for deduplication
             string hash;
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             {
-                using var sha256 = SHA256.Create();
-                var hashBytes = await sha256.ComputeHashAsync(stream);
+                using SHA256 sha256 = SHA256.Create();
+                byte[] hashBytes = await sha256.ComputeHashAsync(stream);
                 hash = Convert.ToHexString(hashBytes);
             }
 
             // Check for duplicate
-            var existing = await db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash);
+            GcodeFile? existing = await db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash);
             if (existing != null)
             {
                 return Conflict($"File already exists in library: {existing.DisplayName}");
             }
 
             // Ensure directory exists
-            var libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
-            var libraryRootFull = Path.GetFullPath(libraryPath);
+            string libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
+            string libraryRootFull = Path.GetFullPath(libraryPath);
             Directory.CreateDirectory(libraryRootFull);
 
             // Save file
             // Extension is validated above to be .gcode; avoid using tainted filename-derived values
-            var fileName = $"{Guid.NewGuid()}.gcode";
-            var filePathFull = Path.GetFullPath(Path.Combine(libraryRootFull, fileName));
+            string fileName = $"{Guid.NewGuid()}.gcode";
+            string filePathFull = Path.GetFullPath(Path.Combine(libraryRootFull, fileName));
             if (!filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal))
             {
                 return BadRequest("Invalid file path");
             }
 
-            using (var stream = System.IO.File.Create(filePathFull))
+            using (FileStream stream = System.IO.File.Create(filePathFull))
             {
                 await file.CopyToAsync(stream);
             }
 
             // Create database entry
-            var gcodeFile = new GcodeFile
+            GcodeFile gcodeFile = new()
             {
                 Id = Guid.NewGuid(),
                 OriginalFileName = file.FileName,
@@ -316,7 +316,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             {
                 return BadRequest("Request body is required");
             }
-            var file = await db.GcodeFiles
+            GcodeFile? file = await db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.TargetPrinter)
                 .Include(g => g.TargetModel)
@@ -430,14 +430,14 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     {
         try
         {
-            var file = await db.GcodeFiles.FindAsync(id);
+            GcodeFile? file = await db.GcodeFiles.FindAsync(id);
             if (file == null)
             {
                 return NotFound($"G-code file with ID {id} not found");
             }
 
             // Check if file is being used in any queued jobs
-            var activeJobs = await db.PrintJobs
+            int activeJobs = await db.PrintJobs
                 .Where(j => j.GcodeFileId == id &&
                            (j.Status == PrintJobStatus.Queued ||
                             j.Status == PrintJobStatus.Assigned ||
@@ -451,9 +451,9 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             }
 
             // Delete physical file (within library root only)
-            var libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
-            var libraryRootFull = Path.GetFullPath(libraryPath);
-            var filePathFull = Path.GetFullPath(file.FilePath);
+            string libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
+            string libraryRootFull = Path.GetFullPath(libraryPath);
+            string filePathFull = Path.GetFullPath(file.FilePath);
 #pragma warning disable CA3003 // Paths are validated to stay under known library root
             if (filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal) && System.IO.File.Exists(filePathFull))
             {
@@ -463,7 +463,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             // Delete thumbnail if exists
             if (!string.IsNullOrEmpty(file.ThumbnailPath))
             {
-                var thumbFull = Path.GetFullPath(file.ThumbnailPath);
+                string thumbFull = Path.GetFullPath(file.ThumbnailPath);
                 if (thumbFull.StartsWith(libraryRootFull, StringComparison.Ordinal) && System.IO.File.Exists(thumbFull))
                 {
                     System.IO.File.Delete(thumbFull);
@@ -494,22 +494,22 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
     {
         try
         {
-            var file = await db.GcodeFiles.FindAsync(id);
+            GcodeFile? file = await db.GcodeFiles.FindAsync(id);
             if (file == null)
             {
                 return NotFound($"G-code file with ID {id} not found");
             }
 
-            var libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
-            var libraryRootFull = Path.GetFullPath(libraryPath);
-            var filePathFull = Path.GetFullPath(file.FilePath);
+            string libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
+            string libraryRootFull = Path.GetFullPath(libraryPath);
+            string filePathFull = Path.GetFullPath(file.FilePath);
 #pragma warning disable CA3003 // Paths are validated to stay under known library root
             if (!filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal) || !System.IO.File.Exists(filePathFull))
             {
                 return NotFound("Physical file not found on disk");
             }
 
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(filePathFull);
+            byte[] fileBytes = await System.IO.File.ReadAllBytesAsync(filePathFull);
 #pragma warning restore CA3003
             return File(fileBytes, "application/octet-stream", file.OriginalFileName);
         }

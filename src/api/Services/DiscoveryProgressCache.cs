@@ -21,7 +21,7 @@ public class DiscoveryProgressCache : IDiscoveryProgressCache
 
     public bool TryGet(string sessionId, out DiscoveryProgressDto? progress)
     {
-        var found = _cache.TryGetValue(sessionId, out var value);
+        bool found = _cache.TryGetValue(sessionId, out DiscoveryProgressDto? value);
         progress = value;
         return found;
     }

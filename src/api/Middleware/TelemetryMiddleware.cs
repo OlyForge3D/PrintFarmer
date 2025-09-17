@@ -17,18 +17,18 @@ public class TelemetryMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         // Skip telemetry for health checks and static files to reduce noise
-        var path = context.Request.Path.Value?.ToLower();
+        string? path = context.Request.Path.Value?.ToLower();
         if (path != null && (path.StartsWith("/health") || path.StartsWith("/swagger") || path.StartsWith("/openapi") || path.Contains(".")))
         {
             await _next(context);
             return;
         }
 
-        var stopwatch = Stopwatch.StartNew();
-        var endpoint = context.Request.Path.Value ?? "unknown";
-        var method = context.Request.Method;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string endpoint = context.Request.Path.Value ?? "unknown";
+        string method = context.Request.Method;
 
-        using var activity = _telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
+        using Activity? activity = _telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
         activity?.SetTag("http.method", method);
         activity?.SetTag("http.route", endpoint);
         activity?.SetTag("http.scheme", context.Request.Scheme);
@@ -38,7 +38,7 @@ public class TelemetryMiddleware
             await _next(context);
 
             stopwatch.Stop();
-            var statusCode = context.Response.StatusCode;
+            int statusCode = context.Response.StatusCode;
             activity?.SetTag("http.status_code", statusCode);
 
             _telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);

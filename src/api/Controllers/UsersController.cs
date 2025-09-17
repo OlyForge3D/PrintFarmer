@@ -43,7 +43,7 @@ public class UsersController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetUsersAsync(CancellationToken ct)
     {
-        var users = await _db.Users
+        List<UserDto> users = await _db.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .AsNoTracking()
@@ -74,7 +74,7 @@ public class UsersController : ControllerBase
     [HttpGet("{id:guid}", Name = "GetUserById")]
     public async Task<ActionResult<UserDto>> GetUserAsync(Guid id, CancellationToken ct)
     {
-        var user = await _authService.GetUserWithRolesAndPermissionsAsync(id);
+        UserDto? user = await _authService.GetUserWithRolesAndPermissionsAsync(id);
         if (user == null)
         {
             return NotFound();
@@ -102,7 +102,7 @@ public class UsersController : ControllerBase
         }
 
         // Check if username or email already exists
-        var existingUser = await _db.Users
+        bool existingUser = await _db.Users
             .AnyAsync(u => u.Username == request.Username || u.Email == request.Email, ct);
 
         if (existingUser)
@@ -110,7 +110,7 @@ public class UsersController : ControllerBase
             return BadRequest("Username or email is already taken");
         }
 
-        var user = new User
+        User user = new()
         {
             Id = Guid.NewGuid(),
             Username = request.Username,
@@ -129,9 +129,9 @@ public class UsersController : ControllerBase
         // Assign roles if provided
         if (request.RoleIds is { Length: > 0 })
         {
-            foreach (var roleId in request.RoleIds)
+            foreach (Guid roleId in request.RoleIds)
             {
-                var role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
+                Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
                     _db.UserRoles.Add(new UserRole
@@ -148,12 +148,12 @@ public class UsersController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation("User {UserId} created new user {NewUserId} ({Username})",
             currentUserId, user.Id, user.Username);
 
         // Return the created user with roles and permissions
-        var createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
+        UserDto? createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
         return CreatedAtRoute("GetUserById", new { id = user.Id }, createdUser);
     }
 
@@ -169,7 +169,7 @@ public class UsersController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
+        User? user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (user == null)
         {
             return NotFound();
@@ -196,13 +196,13 @@ public class UsersController : ControllerBase
         if (request.RoleIds != null)
         {
             // Remove existing roles
-            var existingRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
+            List<UserRole> existingRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
             _db.UserRoles.RemoveRange(existingRoles);
 
             // Add new roles
-            foreach (var roleId in request.RoleIds)
+            foreach (Guid roleId in request.RoleIds)
             {
-                var role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
+                Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
                     _db.UserRoles.Add(new UserRole
@@ -219,12 +219,12 @@ public class UsersController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation("User {UserId} updated user {UpdatedUserId} ({Username})",
             currentUserId, user.Id, user.Username);
 
         // Return the updated user with roles and permissions
-        var updatedUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
+        UserDto? updatedUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
         return Ok(updatedUser);
     }
 
@@ -237,20 +237,20 @@ public class UsersController : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteUserAsync(Guid id, CancellationToken ct)
     {
-        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (currentUserId != null && Guid.Parse(currentUserId) == id)
         {
             return BadRequest("Cannot delete your own account");
         }
 
-        var user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
+        User? user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
         if (user == null)
         {
             return NotFound();
         }
 
         // Remove user roles first
-        var userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
+        List<UserRole> userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
         _db.UserRoles.RemoveRange(userRoles);
 
         // Remove the user
@@ -271,7 +271,7 @@ public class UsersController : ControllerBase
     [HttpGet("roles")]
     public async Task<ActionResult<IEnumerable<RoleDto>>> GetRolesAsync(CancellationToken ct)
     {
-        var roles = await _db.Roles
+        List<RoleDto> roles = await _db.Roles
             .Include(r => r.RolePermissions)
             .ThenInclude(rp => rp.Resource)
             .Include(r => r.RolePermissions)
@@ -320,12 +320,12 @@ public class UsersController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(username))
         {
-            var u = username.Trim();
+            string u = username.Trim();
             usernameExists = await _db.Users.AnyAsync(x => x.Username == u, ct);
         }
         if (!string.IsNullOrWhiteSpace(email))
         {
-            var e = email.Trim();
+            string e = email.Trim();
             emailExists = await _db.Users.AnyAsync(x => x.Email == e, ct);
         }
 

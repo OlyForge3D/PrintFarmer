@@ -5,6 +5,7 @@ using Farm.Web.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Services.Telemetry;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
@@ -116,7 +117,10 @@ public class SlicerWorkerHostedServiceTests
 
         var logger = sp.GetRequiredService<ILogger<SlicerWorkerHostedService>>();
         var settingsSvc = sp.GetRequiredService<ISlicerSettingsService>();
-        var worker = new SlicerWorkerHostedService(scopeFactory, sp.GetRequiredService<ISlicerExecutableManager>(), sp.GetRequiredService<ITempPathProvider>(), logger, cfg, settingsSvc, sp.GetRequiredService<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner>());
+    services.AddSingleton<IPrintFarmerTelemetryService, NoopTelemetry>();
+    var sp2 = services.BuildServiceProvider();
+    var scopeFactory2 = sp2.GetRequiredService<IServiceScopeFactory>();
+    var worker = new SlicerWorkerHostedService(scopeFactory2, sp2.GetRequiredService<ISlicerExecutableManager>(), sp2.GetRequiredService<ITempPathProvider>(), logger, cfg, settingsSvc, sp2.GetRequiredService<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner>(), sp2.GetRequiredService<IPrintFarmerTelemetryService>());
 
         // Create a job that refers to a model (download will return small bytes)
         var job = new DistributedSlicingJob
@@ -225,7 +229,10 @@ public class SlicerWorkerHostedServiceTests
 
         var logger = sp.GetRequiredService<ILogger<SlicerWorkerHostedService>>();
         var settingsSvc = sp.GetRequiredService<ISlicerSettingsService>();
-        var worker = new SlicerWorkerHostedService(scopeFactory, sp.GetRequiredService<ISlicerExecutableManager>(), sp.GetRequiredService<ITempPathProvider>(), logger, cfg, settingsSvc, sp.GetRequiredService<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner>());
+    services.AddSingleton<IPrintFarmerTelemetryService, NoopTelemetry>();
+    var sp2 = services.BuildServiceProvider();
+    var scopeFactory2 = sp2.GetRequiredService<IServiceScopeFactory>();
+    var worker = new SlicerWorkerHostedService(scopeFactory2, sp2.GetRequiredService<ISlicerExecutableManager>(), sp2.GetRequiredService<ITempPathProvider>(), logger, cfg, settingsSvc, sp2.GetRequiredService<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner>(), sp2.GetRequiredService<IPrintFarmerTelemetryService>());
 
         // Create a job that refers to a model
         var job = new DistributedSlicingJob
@@ -274,4 +281,14 @@ public class SlicerWorkerHostedServiceTests
         }
         public void Kill() { }
     }
+}
+
+internal sealed class NoopTelemetry : IPrintFarmerTelemetryService
+{
+    public System.Diagnostics.Activity? StartActivity(string name, System.Diagnostics.ActivityKind kind = System.Diagnostics.ActivityKind.Internal) => null;
+    public void RecordApiCall(string endpoint, string method, int statusCode, TimeSpan duration) { }
+    public void RecordPrinterOperation(string operation, string printerId, bool success) { }
+    public void RecordSlicerOperation(string operation, string engine, bool success, TimeSpan? duration = null) { }
+    public void RecordFileOperation(string operation, string fileType, long? fileSize = null) { }
+    public void RecordDatabaseOperation(string table, string operation, int recordCount) { }
 }

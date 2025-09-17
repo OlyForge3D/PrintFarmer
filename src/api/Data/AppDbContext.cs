@@ -1,5 +1,7 @@
 ﻿using Farm.Web.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Farm.Web.Api.Data;
 
@@ -60,8 +62,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Manufacturer>(b =>
         {
             b.HasKey(m => m.Id);
-            var isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
-            var nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
+            bool isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+            PropertyBuilder<string> nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
             if (isSqlite)
             {
                 nameProp.UseCollation("NOCASE");
@@ -78,8 +80,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<PrinterModel>(b =>
         {
             b.HasKey(m => m.Id);
-            var isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
-            var nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
+            bool isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+            PropertyBuilder<string> nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
             if (isSqlite)
             {
                 nameProp.UseCollation("NOCASE");
@@ -94,6 +96,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(128)
                 .IsRequired();
             b.HasIndex(nameof(PrinterModel.ManufacturerId), "NameLowered").IsUnique();
+            b.Property(m => m.Type); // PrinterType enum stored as int
             b.Property(m => m.MaxX);
             b.Property(m => m.MaxY);
             b.Property(m => m.MaxZ);
@@ -102,8 +105,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<FilamentType>(b =>
         {
             b.HasKey(f => f.Id);
-            var isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
-            var nameProp = b.Property(f => f.Name).IsRequired().HasMaxLength(64);
+            bool isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+            PropertyBuilder<string> nameProp = b.Property(f => f.Name).IsRequired().HasMaxLength(64);
             if (isSqlite)
             {
                 nameProp.UseCollation("NOCASE");
@@ -521,19 +524,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     private void PopulateCaseInsensitiveShadowColumns()
     {
-        foreach (var entry in ChangeTracker.Entries<Manufacturer>())
+        foreach (EntityEntry<Manufacturer> entry in ChangeTracker.Entries<Manufacturer>())
         {
             if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
             {
-                var name = entry.Entity.Name ?? string.Empty;
+                string name = entry.Entity.Name ?? string.Empty;
                 entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
             }
         }
-        foreach (var entry in ChangeTracker.Entries<PrinterModel>())
+        foreach (EntityEntry<PrinterModel> entry in ChangeTracker.Entries<PrinterModel>())
         {
             if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
             {
-                var name = entry.Entity.Name ?? string.Empty;
+                string name = entry.Entity.Name ?? string.Empty;
                 entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
             }
         }

@@ -50,38 +50,17 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)] // 100MB limit
     [SuppressMessage("Security", "CA3003", Justification = "File name is GUID-based and path validated via IsSafePath; no user-controlled traversal.")]
-    public async Task<IActionResult> UploadModelAsync()
+    public async Task<IActionResult> UploadModelAsync([FromForm] IFormFile modelFile)
     {
-        IFormFile? modelFile = null;
-        try
-        {
-            if (!Request.HasFormContentType)
-            {
-                return BadRequest("Model file is required");
-            }
-            var form = await Request.ReadFormAsync();
-            // Analyzer S6932 suppressed: manual multipart parsing needed for custom duplicate-detection logic & test-aligned error messages
-            // ReSharper disable once AccessToDisposedClosure
-            if (form.Files.Count > 0)
-            {
-                modelFile = form.Files[0];
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse multipart form for model upload");
-            return BadRequest("Model file is required");
-        }
-
         if (modelFile == null || modelFile.Length == 0)
         {
             return BadRequest("Model file is required");
         }
 
         // Validate file extension
-        var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
-        var originalName = modelFile.FileName ?? string.Empty;
-        var fileExtension = Path.GetExtension(originalName).ToLowerInvariant();
+        string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
+        string originalName = modelFile.FileName ?? string.Empty;
+        string fileExtension = Path.GetExtension(originalName).ToLowerInvariant();
 
         if (!allowedExtensions.Contains(fileExtension))
         {
@@ -89,9 +68,9 @@ public class ModelController : ControllerBase
         }
 
         // Generate unique filename and calculate hash
-        var modelId = Guid.NewGuid();
-        var fileName = $"{modelId}{fileExtension}";
-        var filePath = Path.Combine(_modelsPath, fileName);
+        Guid modelId = Guid.NewGuid();
+        string fileName = $"{modelId}{fileExtension}";
+        string filePath = Path.Combine(_modelsPath, fileName);
         if (!IsSafePath(filePath, _modelsPath))
         {
             return BadRequest("Unsafe file path generated");
@@ -101,15 +80,15 @@ public class ModelController : ControllerBase
         {
             // Calculate file hash while saving
             string fileHash;
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            using (FileStream stream = new(filePath, FileMode.Create))
             {
-                using var memoryStream = new MemoryStream();
+                using MemoryStream memoryStream = new();
                 await modelFile.CopyToAsync(memoryStream);
                 memoryStream.Position = 0;
 
                 // Calculate hash
                 // Use static HashData API (CA1850)
-                var hashBytes = await SHA256.HashDataAsync(memoryStream);
+                byte[] hashBytes = await SHA256.HashDataAsync(memoryStream);
                 fileHash = Convert.ToHexString(hashBytes);
 
                 // Write to file
@@ -120,7 +99,7 @@ public class ModelController : ControllerBase
             // Run virus scan (best-effort). If infected, delete file and reject upload.
             try
             {
-                var scanResult = await _virusScanner.ScanFileAsync(filePath, CancellationToken.None);
+                VirusScanResult scanResult = await _virusScanner.ScanFileAsync(filePath, CancellationToken.None);
                 if (scanResult == VirusScanResult.Infected)
                 {
                     // Clean up infected file
@@ -156,18 +135,18 @@ public class ModelController : ControllerBase
             //   * For other cases (different extension OR different non-duplicate-prefixed names) store as new model
             //     even if content hash collides. To satisfy DB unique constraint on FileHash we derive a
             //     secondary hash incorporating the original filename when forcing uniqueness.
-            var existingModel = await _context.Models3D
+            Model3D? existingModel = await _context.Models3D
                 .FirstOrDefaultAsync(m => m.FileHash == fileHash);
-            var baseName = Path.GetFileNameWithoutExtension(originalName);
+            string baseName = Path.GetFileNameWithoutExtension(originalName);
             if (existingModel != null)
             {
-                var existingBaseName = Path.GetFileNameWithoutExtension(existingModel.OriginalFileName);
-                var existingExt = Path.GetExtension(existingModel.OriginalFileName).ToLowerInvariant();
-                var isSameExtension = existingExt == fileExtension;
-                var bothDuplicatePrefix = existingBaseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase)
+                string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.OriginalFileName);
+                string existingExt = Path.GetExtension(existingModel.OriginalFileName).ToLowerInvariant();
+                bool isSameExtension = existingExt == fileExtension;
+                bool bothDuplicatePrefix = existingBaseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase)
                     && baseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase);
-                var baseNamesMatch = string.Equals(existingBaseName, baseName, StringComparison.OrdinalIgnoreCase);
-                var treatAsDuplicate = isSameExtension && (baseNamesMatch || bothDuplicatePrefix);
+                bool baseNamesMatch = string.Equals(existingBaseName, baseName, StringComparison.OrdinalIgnoreCase);
+                bool treatAsDuplicate = isSameExtension && (baseNamesMatch || bothDuplicatePrefix);
 
                 if (treatAsDuplicate)
                 {
@@ -177,7 +156,7 @@ public class ModelController : ControllerBase
                         System.IO.File.Delete(filePath);
                     }
 
-                    var existingResult = new Model3DUploadResultDto
+                    Model3DUploadResultDto existingResult = new()
                     {
                         Id = existingModel.Id,
                         Name = existingModel.DisplayName,
@@ -191,13 +170,13 @@ public class ModelController : ControllerBase
                 }
 
                 // Force uniqueness: derive a new hash incorporating original name + extension
-                var composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName.ToLowerInvariant());
-                var newHashBytes = SHA256.HashData(composite);
+                byte[] composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName.ToLowerInvariant());
+                byte[] newHashBytes = SHA256.HashData(composite);
                 fileHash = Convert.ToHexString(newHashBytes);
             }
 
             // Create database entity
-            var model = new Model3D
+            Model3D model = new()
             {
                 Id = modelId,
                 OriginalFileName = originalName,
@@ -225,17 +204,17 @@ public class ModelController : ControllerBase
             {
                 try
                 {
-                    var thumbnailFileName = $"{modelId}_thumbnail{_thumbnailService.ThumbnailFileExtension}";
-                    var thumbnailPath = Path.Combine(_modelsPath, "thumbnails", thumbnailFileName);
+                    string thumbnailFileName = $"{modelId}_thumbnail{_thumbnailService.ThumbnailFileExtension}";
+                    string thumbnailPath = Path.Combine(_modelsPath, "thumbnails", thumbnailFileName);
 
                     // Ensure thumbnails directory exists
-                    var thumbnailDir = Path.GetDirectoryName(thumbnailPath);
+                    string? thumbnailDir = Path.GetDirectoryName(thumbnailPath);
                     if (thumbnailDir != null && !Directory.Exists(thumbnailDir))
                     {
                         Directory.CreateDirectory(thumbnailDir);
                     }
 
-                    var thumbnailGenerated = await _thumbnailService.GenerateThumbnailAsync(
+                    bool thumbnailGenerated = await _thumbnailService.GenerateThumbnailAsync(
                         filePath,
                         model.FileFormat,
                         thumbnailPath,
@@ -262,7 +241,7 @@ public class ModelController : ControllerBase
             }
 
             // Create result
-            var result = new Model3DUploadResultDto
+            Model3DUploadResultDto result = new()
             {
                 Id = modelId,
                 Name = model.DisplayName,
@@ -303,7 +282,7 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var models = await _context.Models3D
+            List<Model3DDto> models = await _context.Models3D
                 .Where(m => m.IsValid)
                 .OrderByDescending(m => m.UploadedAt)
                 .Select(m => new Model3DDto
@@ -338,7 +317,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelAsync(Guid id)
     {
-        var model = await _context.Models3D
+        Model3D? model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id && m.IsValid);
 
         if (model == null)
@@ -346,7 +325,7 @@ public class ModelController : ControllerBase
             return NotFound();
         }
 
-        var modelDto = new Model3DDto
+        Model3DDto modelDto = new()
         {
             Id = model.Id,
             Name = model.DisplayName,
@@ -371,7 +350,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelFileAsync(Guid id)
     {
-        var model = await _context.Models3D
+        Model3D? model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id && m.IsValid);
 
         if (model == null)
@@ -384,8 +363,8 @@ public class ModelController : ControllerBase
             return NotFound();
         }
 
-        var fileExtension = Path.GetExtension(model.FilePath);
-        var contentType = fileExtension.ToLowerInvariant() switch
+        string fileExtension = Path.GetExtension(model.FilePath);
+        string contentType = fileExtension.ToLowerInvariant() switch
         {
             ".stl" => "application/vnd.ms-pki.stl",
             ".3mf" => "model/3mf",
@@ -407,7 +386,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
     {
-        var model = await _context.Models3D
+        Model3D? model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id && m.IsValid);
 
         if (model == null)
@@ -425,7 +404,7 @@ public class ModelController : ControllerBase
             return NotFound();
         }
 
-        var contentType = "image/png"; // Thumbnails are generated as PNG
+        string contentType = "image/png"; // Thumbnails are generated as PNG
         return PhysicalFile(model.ThumbnailPath, contentType);
     }
 
@@ -439,7 +418,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteModelAsync(Guid id)
     {
-        var model = await _context.Models3D
+        Model3D? model = await _context.Models3D
             .FirstOrDefaultAsync(m => m.Id == id);
 
         if (model == null)
@@ -490,11 +469,11 @@ public class ModelController : ControllerBase
             return BadRequest("Model file is required");
         }
 
-        var issues = new List<string>();
-        var fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
+        List<string> issues = new();
+        string fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
 
         // Check file extension
-        var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
+        string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
         if (!allowedExtensions.Contains(fileExtension))
         {
             issues.Add($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
@@ -509,7 +488,7 @@ public class ModelController : ControllerBase
         // Basic content validation could be added here
         // For now, we'll just check if it's not empty and has correct extension
 
-        var result = new Model3DValidationResultDto
+        Model3DValidationResultDto result = new()
         {
             Valid = issues.Count == 0,
             Issues = issues.Count > 0 ? [.. issues] : null
@@ -522,8 +501,8 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var fullRoot = Path.GetFullPath(root);
-            var fullCandidate = Path.GetFullPath(candidatePath);
+            string fullRoot = Path.GetFullPath(root);
+            string fullCandidate = Path.GetFullPath(candidatePath);
             return fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
         }
         catch

@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
@@ -12,7 +13,7 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DbSlicerSettingsService> _logger;
-    private readonly JsonSerializerOptions _serializerOptions = new JsonSerializerOptions
+    private readonly JsonSerializerOptions _serializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
@@ -30,13 +31,13 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
 
     public SlicerSettingsDto GetSettings()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
         _logger.LogDebug("[SlicerSettings] Retrieving settings record");
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         SlicerSettings? entity = null;
-        var tableReady = true;
+        bool tableReady = true;
         try
         {
             entity = db.SlicerSettings.FirstOrDefault(s => s.Id == 1);
@@ -108,10 +109,10 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
     public void SaveSettings(SlicerSettingsDto settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var entity = db.SlicerSettings.FirstOrDefault(s => s.Id == 1);
+        SlicerSettings? entity = db.SlicerSettings.FirstOrDefault(s => s.Id == 1);
         if (entity == null)
         {
             entity = new SlicerSettings { Id = 1 };

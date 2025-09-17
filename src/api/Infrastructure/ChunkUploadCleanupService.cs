@@ -35,31 +35,31 @@ public class ChunkUploadCleanupService : BackgroundService
 
     private void RunCleanup()
     {
-        var root = _env.WebRootPath;
+        string root = _env.WebRootPath;
         if (string.IsNullOrWhiteSpace(root))
         {
             return;
         }
 
-        var libraryRoot = Path.Combine(root, "gcode-library");
+        string libraryRoot = Path.Combine(root, "gcode-library");
         if (!Directory.Exists(libraryRoot))
         {
             return;
         }
 
-        var now = DateTime.UtcNow;
+        DateTime now = DateTime.UtcNow;
         int removed = 0;
-        foreach (var meta in Directory.EnumerateFiles(libraryRoot, "*.part.meta.json", SearchOption.AllDirectories))
+        foreach (string meta in Directory.EnumerateFiles(libraryRoot, "*.part.meta.json", SearchOption.AllDirectories))
         {
             try
             {
-                var fi = new FileInfo(meta);
+                FileInfo fi = new(meta);
                 if (now - fi.LastWriteTimeUtc < _ttl)
                 {
                     continue;
                 }
                 // Paired .part file
-                var part = meta.Substring(0, meta.Length - ".meta.json".Length);
+                string part = meta.Substring(0, meta.Length - ".meta.json".Length);
                 if (File.Exists(part))
                 {
                     File.Delete(part);

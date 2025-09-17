@@ -133,15 +133,15 @@ public static class AuthenticationDataSeeder
         await context.SaveChangesAsync();
 
         // Get the admin role - admins get all permissions
-        var adminRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+        Role? adminRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole != null)
         {
-            var allResources = await context.Resources.ToListAsync();
-            var adminAction = await context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
+            List<Resource> allResources = await context.Resources.ToListAsync();
+            Domain.Action? adminAction = await context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
 
             if (adminAction != null)
             {
-                foreach (var resource in allResources)
+                foreach (Resource? resource in allResources)
                 {
                     if (!await context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == adminRole.Id && rp.ResourceId == resource.Id && rp.ActionId == adminAction.Id))
@@ -161,10 +161,10 @@ public static class AuthenticationDataSeeder
         }
 
         // Get the user role - users get read access to most resources
-        var userRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_user");
+        Role? userRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_user");
         if (userRole != null)
         {
-            var userPermissions = new[]
+            (string, string)[] userPermissions = new[]
             {
                 ("printers", "read"),
                 ("printers", "execute"), // Can control printers
@@ -175,10 +175,10 @@ public static class AuthenticationDataSeeder
                 ("spoolman", "read")
             };
 
-            foreach (var (resourceName, actionName) in userPermissions)
+            foreach ((string? resourceName, string? actionName) in userPermissions)
             {
-                var resource = await context.Resources.FirstOrDefaultAsync(r => r.Name == resourceName);
-                var action = await context.Actions.FirstOrDefaultAsync(a => a.Name == actionName);
+                Resource? resource = await context.Resources.FirstOrDefaultAsync(r => r.Name == resourceName);
+                Domain.Action? action = await context.Actions.FirstOrDefaultAsync(a => a.Name == actionName);
 
                 if (resource != null && action != null)
                 {

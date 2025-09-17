@@ -1,4 +1,5 @@
-﻿using Farm.Web.Shared;
+﻿using System.Text.RegularExpressions;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;
@@ -15,13 +16,13 @@ public partial class SlicerAdminController : ControllerBase
             return BadRequest("Empty request");
         }
 
-        var template = request.Template ?? string.Empty;
-        var engine = request.Engine;
+        string template = request.Template ?? string.Empty;
+        SlicerEngineType engine = request.Engine;
 
         // Find placeholders
-        var rx = MyRegex();
-        var matches = rx.Matches(template);
-        var placeholders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Regex rx = MyRegex();
+        MatchCollection matches = rx.Matches(template);
+        HashSet<string> placeholders = new(StringComparer.OrdinalIgnoreCase);
         foreach (System.Text.RegularExpressions.Match m in matches)
         {
             if (m.Success && m.Groups.Count > 1)
@@ -30,13 +31,13 @@ public partial class SlicerAdminController : ControllerBase
             }
         }
 
-        var result = new DryRunResult();
+        DryRunResult result = new();
 
         // Known placeholders we support
-        var known = new[] { "input", "output", "config", "profile" };
+        string[] known = new[] { "input", "output", "config", "profile" };
 
         // Prepare sample replacements
-        var samples = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, string> samples = new(StringComparer.OrdinalIgnoreCase)
         {
             ["input"] = "/tmp/model.stl",
             ["output"] = "/tmp/output.gcode",
@@ -44,7 +45,7 @@ public partial class SlicerAdminController : ControllerBase
             ["profile"] = "default"
         };
 
-        foreach (var ph in placeholders)
+        foreach (string ph in placeholders)
         {
             if (!known.Contains(ph, StringComparer.OrdinalIgnoreCase))
             {
@@ -63,10 +64,10 @@ public partial class SlicerAdminController : ControllerBase
         }
 
         // Do a safe render using sample values
-        var rendered = rx.Replace(template, m =>
+        string rendered = rx.Replace(template, m =>
         {
-            var key = m.Groups[1].Value;
-            return samples.TryGetValue(key, out var val) ? val : m.Value;
+            string key = m.Groups[1].Value;
+            return samples.TryGetValue(key, out string? val) ? val : m.Value;
         });
 
         // Safety checks on rendered args

@@ -33,8 +33,8 @@ public class GracefulShutdownService : IHostedService
 
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var harvestService = scope.ServiceProvider.GetRequiredService<IGcodeHarvestService>();
+            using IServiceScope scope = _serviceProvider.CreateScope();
+            IGcodeHarvestService harvestService = scope.ServiceProvider.GetRequiredService<IGcodeHarvestService>();
 
             // Wait up to 30 seconds for tasks to complete
             await harvestService.WaitForAllTasksAsync(TimeSpan.FromSeconds(30));

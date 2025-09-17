@@ -39,7 +39,15 @@ export class ApiClient {
 
   constructor() {
     // Use environment variable for API base URL, fallback to relative path for monolithic deployment
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+    // If a full origin is provided (e.g., http://localhost:5245), ensure it includes the '/api' prefix.
+    const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    const apiBaseUrl = (() => {
+      if (!rawBase || rawBase.trim() === '') return '/api';
+      const trimmed = rawBase.replace(/\/$/, ''); // drop trailing slash
+      // If it already ends with '/api' or contains '/api/' path segment, keep as-is
+      if (/\/(api)(\/|$)/.test(trimmed)) return trimmed;
+      return `${trimmed}/api`;
+    })();
 
     this.client = axios.create({
       baseURL: apiBaseUrl,

@@ -40,7 +40,7 @@ public class CatalogController : ControllerBase
     [ProducesResponseType(304)]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync([FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
     {
-        var (list, etag) = await _catalogCache.GetManufacturersAsync(ct);
+        (IReadOnlyList<ManufacturerDto>? list, string? etag) = await _catalogCache.GetManufacturersAsync(ct);
         if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Split(',').Select(s => s.Trim()).Contains(etag, StringComparer.Ordinal))
         {
             Response.Headers["ETag"] = etag;
@@ -55,7 +55,7 @@ public class CatalogController : ControllerBase
     [ProducesResponseType(404)]
     public async Task<ActionResult<ManufacturerDto>> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
     {
-        var m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (m is null)
         {
             return NotFound();
@@ -84,8 +84,8 @@ public class CatalogController : ControllerBase
             return BadRequest("Name is required");
         }
         // Normalize via shared helper for consistent rule across API & seeding
-        var original = request.Name; // already validated not null/whitespace
-        var normalized = CatalogNameNormalizer.NormalizeManufacturer(original);
+        string original = request.Name; // already validated not null/whitespace
+        string normalized = CatalogNameNormalizer.NormalizeManufacturer(original);
         _normLogger.Log("Manufacturer", original, normalized, "create");
 
         // Case-insensitive uniqueness check (small table => safe to load into memory once)
@@ -104,7 +104,8 @@ public class CatalogController : ControllerBase
                 $"A manufacturer with the normalized name '{existing.Name}' already exists.");
         }
 
-        var mfg = new Manufacturer { Id = Guid.NewGuid(), Name = normalized };
+        Manufacturer mfg = new()
+        { Id = Guid.NewGuid(), Name = normalized };
         _db.Manufacturers.Add(mfg);
         try
         {
@@ -113,7 +114,7 @@ public class CatalogController : ControllerBase
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
             // Race: another request inserted same name (case-insensitive). Surface existing via exception.
-            var existingNow = await _db.Manufacturers.AsNoTracking()
+            Manufacturer existingNow = await _db.Manufacturers.AsNoTracking()
                 .FirstOrDefaultAsync(m => m.Name == normalized, ct) ?? new Manufacturer { Id = mfg.Id, Name = normalized };
             throw new DuplicateEntityException("Manufacturer", new ManufacturerDto(existingNow.Id, existingNow.Name), null,
                 $"A manufacturer with the normalized name '{existingNow.Name}' already exists.");
@@ -133,10 +134,10 @@ public class CatalogController : ControllerBase
     [ProducesResponseType(304)]
     public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, [FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
     {
-        var (list, etag) = await _catalogCache.GetModelsAsync(manufacturerId, ct);
+        (IReadOnlyList<PrinterModelDto>? list, string? etag) = await _catalogCache.GetModelsAsync(manufacturerId, ct);
         if (!string.IsNullOrEmpty(ifNoneMatch))
         {
-            var clientEtags = ifNoneMatch.Split(',').Select(s => s.Trim()).ToHashSet(StringComparer.Ordinal);
+            HashSet<string> clientEtags = ifNoneMatch.Split(',').Select(s => s.Trim()).ToHashSet(StringComparer.Ordinal);
             if (clientEtags.Contains(etag))
             {
                 Response.Headers["ETag"] = etag;
@@ -164,13 +165,13 @@ public class CatalogController : ControllerBase
     [ProducesResponseType(404)]
     public async Task<ActionResult<PrinterModelDto>> GetPrinterModelByIdAsync(Guid id, CancellationToken ct)
     {
-        var model = await _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+        PrinterModel? model = await _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
             .FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null)
         {
             return NotFound();
         }
-        return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+        return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.Type.HasValue ? (PrinterType)model.Type.Value : (PrinterType?)null, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
             [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)]));
     }
@@ -192,11 +193,11 @@ public class CatalogController : ControllerBase
         {
             return BadRequest("Name is required");
         }
-        var originalModelName = req.Name; // validated earlier
-        var normalizedName = CatalogNameNormalizer.NormalizeModel(originalModelName);
+        string originalModelName = req.Name; // validated earlier
+        string normalizedName = CatalogNameNormalizer.NormalizeModel(originalModelName);
         _normLogger.Log("Model", originalModelName, normalizedName, "create");
         // Ensure the manufacturer exists to avoid FK violations
-        var mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
+        bool mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
         if (!mfgExists)
         {
             return NotFound("Manufacturer not found");
@@ -209,7 +210,7 @@ public class CatalogController : ControllerBase
         // normalized column or a case-insensitive unique index at the database layer.
         var candidateNames = await _db.Models.AsNoTracking()
             .Where(m => m.ManufacturerId == req.ManufacturerId)
-            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
+            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.Type, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
             .ToListAsync(ct);
         var existing = candidateNames.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
@@ -219,16 +220,17 @@ public class CatalogController : ControllerBase
             {
                 headerName = existing.Name;
             }
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MaxX, existing.MaxY, existing.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.Type.HasValue ? (PrinterType)existing.Type.Value : (PrinterType?)null, existing.MaxX, existing.MaxY, existing.MaxZ,
                 existing.DefaultBackend.HasValue ? (PrinterBackend)existing.DefaultBackend.Value : (PrinterBackend?)null), headerName,
                 $"A model with the normalized name '{existing.Name}' already exists for this manufacturer.");
         }
 
-        var model = new PrinterModel
+        PrinterModel model = new()
         {
             Id = Guid.NewGuid(),
             ManufacturerId = req.ManufacturerId,
             Name = normalizedName,
+            Type = req.Type.HasValue ? (int)req.Type.Value : (int?)null,
             MaxX = req.MaxX,
             MaxY = req.MaxY,
             MaxZ = req.MaxZ,
@@ -239,12 +241,12 @@ public class CatalogController : ControllerBase
         // Add supported filament types if provided
         if (req.SupportedFilamentTypeIds?.Length > 0)
         {
-            var validFilamentTypeIds = await _db.FilamentTypes.AsNoTracking()
+            List<Guid> validFilamentTypeIds = await _db.FilamentTypes.AsNoTracking()
                 .Where(f => req.SupportedFilamentTypeIds.Contains(f.Id))
                 .Select(f => f.Id)
                 .ToListAsync(ct);
 
-            foreach (var filamentTypeId in validFilamentTypeIds)
+            foreach (Guid filamentTypeId in validFilamentTypeIds)
             {
                 _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                 {
@@ -260,15 +262,15 @@ public class CatalogController : ControllerBase
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
-            var existingNow = await _db.Models.AsNoTracking()
+            PrinterModel existingNow = await _db.Models.AsNoTracking()
                 .FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == normalizedName, ct) ?? new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.Type.HasValue ? (PrinterType)existingNow.Type.Value : (PrinterType?)null, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
                 existingNow.DefaultBackend.HasValue ? (PrinterBackend)existingNow.DefaultBackend.Value : (PrinterBackend?)null), null,
                 $"A model with the normalized name '{existingNow.Name}' already exists for this manufacturer.");
         }
 
         // Load the model with filament types for response
-        var createdModel = await _db.Models.AsNoTracking()
+        PrinterModel? createdModel = await _db.Models.AsNoTracking()
             .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
             .FirstOrDefaultAsync(m => m.Id == model.Id, ct);
         if (!string.Equals(originalModelName, model.Name, StringComparison.Ordinal))
@@ -276,7 +278,7 @@ public class CatalogController : ControllerBase
             Response.Headers["X-Normalized-Name"] = model.Name;
         }
         _catalogCache.InvalidateModels(model.ManufacturerId);
-        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.Type.HasValue ? (PrinterType)model.Type.Value : (PrinterType?)null, model.MaxX, model.MaxY, model.MaxZ,
                     model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
                     createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
     }
@@ -288,7 +290,7 @@ public class CatalogController : ControllerBase
     public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(req);
-        var model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
+        PrinterModel? model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null)
         {
             return NotFound();
@@ -296,8 +298,8 @@ public class CatalogController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(req.Name))
         {
-            var before = model.Name;
-            var after = CatalogNameNormalizer.NormalizeModel(req.Name);
+            string before = model.Name;
+            string after = CatalogNameNormalizer.NormalizeModel(req.Name);
             model.Name = after;
             _normLogger.Log("Model", before, after, "update");
             if (!string.Equals(before, after, StringComparison.Ordinal))
@@ -306,6 +308,7 @@ public class CatalogController : ControllerBase
             }
         }
 
+        model.Type = req.Type.HasValue ? (int)req.Type.Value : (int?)null;
         model.MaxX = req.MaxX;
         model.MaxY = req.MaxY;
         model.MaxZ = req.MaxZ;
@@ -320,12 +323,12 @@ public class CatalogController : ControllerBase
             // Add new relationships
             if (req.SupportedFilamentTypeIds.Length > 0)
             {
-                var validFilamentTypeIds = await _db.FilamentTypes.AsNoTracking()
+                List<Guid> validFilamentTypeIds = await _db.FilamentTypes.AsNoTracking()
                     .Where(f => req.SupportedFilamentTypeIds.Contains(f.Id))
                     .Select(f => f.Id)
                     .ToListAsync(ct);
 
-                foreach (var filamentTypeId in validFilamentTypeIds)
+                foreach (Guid filamentTypeId in validFilamentTypeIds)
                 {
                     _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                     {
@@ -352,7 +355,7 @@ public class CatalogController : ControllerBase
 #if NET8_0_OR_GREATER
         if (ex.InnerException is System.Data.Common.DbException dbx)
         {
-            var typeName = dbx.GetType().FullName ?? string.Empty;
+            string typeName = dbx.GetType().FullName ?? string.Empty;
             if (typeName.Contains("SqlException", StringComparison.OrdinalIgnoreCase) && dbx.ErrorCode is 2601 or 2627)
             {
                 return true; // SQL Server duplicate key (unique index or constraint)
@@ -370,7 +373,7 @@ public class CatalogController : ControllerBase
             return true;
         }
         // Fallback: inspect message text for our known index names
-        var msg = ex.InnerException?.Message ?? ex.Message;
+        string msg = ex.InnerException?.Message ?? ex.Message;
         if (!string.IsNullOrEmpty(msg) && (msg.Contains("NameLowered", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("IX_Manufacturers_NameLowered", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("IX_Models_ManufacturerId_NameLowered", StringComparison.OrdinalIgnoreCase)))

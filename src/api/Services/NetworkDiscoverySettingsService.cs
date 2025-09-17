@@ -19,8 +19,8 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         {
             if (File.Exists(_path))
             {
-                var json = File.ReadAllText(_path);
-                var cfg = JsonSerializer.Deserialize<NetworkDiscoverySettingsDto>(json);
+                string json = File.ReadAllText(_path);
+                NetworkDiscoverySettingsDto? cfg = JsonSerializer.Deserialize<NetworkDiscoverySettingsDto>(json);
                 if (cfg is not null)
                 {
                     _settings = cfg;
@@ -42,13 +42,13 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
 
         // If no user settings exist, return empty settings - user must configure ranges
         // Derive default ports; allow override via environment variable DISCOVERY_PORTS (e.g. "80,7912")
-        var envPorts = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
+        string? envPorts = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
         List<int> defaultPorts;
         if (!string.IsNullOrWhiteSpace(envPorts))
         {
             defaultPorts = envPorts
                 .Split(PortSeparators, StringSplitOptions.RemoveEmptyEntries)
-                .Select(s => int.TryParse(s.Trim(), out var p) ? p : -1)
+                .Select(s => int.TryParse(s.Trim(), out int p) ? p : -1)
                 .Where(p => p > 0 && p < 65536)
                 .Distinct()
                 .ToList();
@@ -76,11 +76,11 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         ArgumentNullException.ThrowIfNull(settings);
 
         // Validate settings before saving
-        var validation = NetworkValidationService.ValidateSettings(settings);
+        NetworkValidationResult validation = NetworkValidationService.ValidateSettings(settings);
 
         if (!validation.IsValid)
         {
-            var errors = string.Join("; ", validation.Errors);
+            string errors = string.Join("; ", validation.Errors);
             _logger.LogWarning("Network discovery settings validation failed: {Errors}", errors);
             throw new ArgumentException($"Invalid network discovery settings: {errors}");
         }
@@ -88,21 +88,21 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
         // Log warnings if any
         if (validation.Warnings.Count > 0)
         {
-            var warnings = string.Join("; ", validation.Warnings);
+            string warnings = string.Join("; ", validation.Warnings);
             _logger.LogWarning("Network discovery settings saved with warnings: {Warnings}", warnings);
         }
 
         _settings = settings;
         try
         {
-            var json = JsonSerializer.Serialize(_settings, s_writeOptions);
+            string json = JsonSerializer.Serialize(_settings, s_writeOptions);
             File.WriteAllText(_path, json);
             _logger.LogInformation("Saved network discovery settings to {Path} - {RangeCount} ranges, {PortCount} ports", _path, settings.NetworkRanges.Count, settings.Ports.Count);
 
             // Log suggestions if any
             if (validation.Suggestions.Count > 0)
             {
-                var suggestions = string.Join("; ", validation.Suggestions);
+                string suggestions = string.Join("; ", validation.Suggestions);
                 _logger.LogInformation("Network discovery settings suggestions: {Suggestions}", suggestions);
             }
         }

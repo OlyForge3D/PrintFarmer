@@ -18,7 +18,7 @@ public sealed class DuplicateConflictExceptionFilter : IExceptionFilter
             return;
         }
 
-        var problem = new ProblemDetails
+        ProblemDetails problem = new()
         {
             Title = $"{dup.EntityType} already exists",
             Detail = dup.Message,

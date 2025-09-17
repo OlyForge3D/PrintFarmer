@@ -15,7 +15,7 @@ public static class NetworkValidationService
     /// <returns>Validation result with any errors found</returns>
     public static NetworkValidationResult ValidateSettings(NetworkDiscoverySettingsDto settings)
     {
-        var result = new NetworkValidationResult();
+        NetworkValidationResult result = new();
 
         if (settings.NetworkRanges.Count == 0)
         {
@@ -24,17 +24,17 @@ public static class NetworkValidationService
         }
 
         // Validate each CIDR range
-        var validNetworks = new List<(string cidr, IPAddress network, int prefix)>();
+        List<(string cidr, IPAddress network, int prefix)> validNetworks = new();
 
-        foreach (var cidr in settings.NetworkRanges)
+        foreach (string cidr in settings.NetworkRanges)
         {
-            var trimmed = cidr.Trim();
+            string trimmed = cidr.Trim();
             if (string.IsNullOrEmpty(trimmed))
             {
                 continue;
             }
 
-            var cidrValidation = ValidateCidr(trimmed);
+            CidrValidationResult cidrValidation = ValidateCidr(trimmed);
             if (!cidrValidation.IsValid)
             {
                 result.Errors.Add($"Invalid CIDR format: {trimmed} - {cidrValidation.Error}");
@@ -50,8 +50,8 @@ public static class NetworkValidationService
         }
 
         // Check for overlapping networks
-        var overlaps = FindOverlappingNetworks(validNetworks);
-        foreach (var overlap in overlaps)
+        List<(string cidr1, string cidr2)> overlaps = FindOverlappingNetworks(validNetworks);
+        foreach ((string cidr1, string cidr2) overlap in overlaps)
         {
             result.Warnings.Add($"Network ranges overlap: {overlap.cidr1} and {overlap.cidr2}");
         }
@@ -72,7 +72,7 @@ public static class NetworkValidationService
             result.Errors.Add("At least one port is required when network ranges are configured");
         }
 
-        foreach (var port in settings.Ports)
+        foreach (int port in settings.Ports)
         {
             if (port < 1 || port > 65535)
             {
@@ -95,14 +95,14 @@ public static class NetworkValidationService
             return new CidrValidationResult { IsValid = false, Error = "CIDR cannot be empty" };
         }
 
-        var parts = cidr.Split('/');
+        string[] parts = cidr.Split('/');
         if (parts.Length != 2)
         {
             return new CidrValidationResult { IsValid = false, Error = "CIDR must be in format IP/prefix (e.g., 192.168.1.0/24)" };
         }
 
         // Parse IP address
-        if (!IPAddress.TryParse(parts[0], out var ipAddress))
+        if (!IPAddress.TryParse(parts[0], out IPAddress? ipAddress))
         {
             return new CidrValidationResult { IsValid = false, Error = "Invalid IP address format" };
         }
@@ -113,18 +113,18 @@ public static class NetworkValidationService
         }
 
         // Parse prefix length
-        if (!int.TryParse(parts[1], out var prefixLength) || prefixLength < 0 || prefixLength > 32)
+        if (!int.TryParse(parts[1], out int prefixLength) || prefixLength < 0 || prefixLength > 32)
         {
             return new CidrValidationResult { IsValid = false, Error = "Prefix length must be 0-32" };
         }
 
         // Calculate the correct network address
-        var networkAddress = GetNetworkAddress(ipAddress, prefixLength);
+        IPAddress networkAddress = GetNetworkAddress(ipAddress, prefixLength);
 
         // Check if the provided IP is actually the network address
         if (!ipAddress.Equals(networkAddress))
         {
-            var suggestion = $"{networkAddress}/{prefixLength}";
+            string suggestion = $"{networkAddress}/{prefixLength}";
             return new CidrValidationResult
             {
                 IsValid = false,
@@ -148,12 +148,12 @@ public static class NetworkValidationService
     /// </summary>
     private static IPAddress GetNetworkAddress(IPAddress ipAddress, int prefixLength)
     {
-        var ipBytes = ipAddress.GetAddressBytes();
-        var hostBits = 32 - prefixLength;
+        byte[] ipBytes = ipAddress.GetAddressBytes();
+        int hostBits = 32 - prefixLength;
 
         // Calculate how many complete bytes to zero out
-        var bytesToZero = hostBits / 8;
-        var bitsToMask = hostBits % 8;
+        int bytesToZero = hostBits / 8;
+        int bitsToMask = hostBits % 8;
 
         // Zero out complete host bytes
         for (int i = ipBytes.Length - bytesToZero; i < ipBytes.Length; i++)
@@ -164,8 +164,8 @@ public static class NetworkValidationService
         // Mask partial byte if needed
         if (bitsToMask > 0)
         {
-            var byteIndex = ipBytes.Length - bytesToZero - 1;
-            var mask = (byte)(0xFF << bitsToMask);
+            int byteIndex = ipBytes.Length - bytesToZero - 1;
+            byte mask = (byte)(0xFF << bitsToMask);
             ipBytes[byteIndex] = (byte)(ipBytes[byteIndex] & mask);
         }
 
@@ -177,7 +177,7 @@ public static class NetworkValidationService
     /// </summary>
     private static List<(string cidr1, string cidr2)> FindOverlappingNetworks(List<(string cidr, IPAddress network, int prefix)> networks)
     {
-        var overlaps = new List<(string, string)>();
+        List<(string, string)> overlaps = new();
 
         for (int i = 0; i < networks.Count; i++)
         {
@@ -215,7 +215,7 @@ public static class NetworkValidationService
         }
 
         // Calculate network address of test network using container's prefix
-        var testNetworkInContainer = GetNetworkAddress(testNetwork, containerPrefix);
+        IPAddress testNetworkInContainer = GetNetworkAddress(testNetwork, containerPrefix);
 
         return testNetworkInContainer.Equals(containerNetwork);
     }

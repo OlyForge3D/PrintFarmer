@@ -35,6 +35,13 @@ export enum PrinterBackend {
   SDCP = 2
 }
 
+export enum PrinterType {
+  Cartesian = 0,
+  CoreXY = 1,
+  Delta = 2,
+  Unknown = 99
+}
+
 export interface PrinterSpoolInfo {
   id?: number;
   filament?: FilamentInfo;
@@ -143,6 +150,22 @@ export interface UpdatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  // Printer capabilities
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+  maxBuildVolumeX?: number;
+  maxBuildVolumeY?: number;
+  maxBuildVolumeZ?: number;
+  hasHeatedBed?: boolean;
+  hasEnclosure?: boolean;
+  multiMaterial?: boolean;
+  numberOfExtruders?: number;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  supportsAutoLeveling?: boolean;
+  maxPrintSpeed?: number;
 }
 
 export interface ManufacturerDto {
@@ -154,11 +177,38 @@ export interface PrinterModelDto {
   id: string;
   name: string;
   manufacturerId: string;
+  type?: PrinterType;
   maxX?: number;
   maxY?: number;
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypes?: string[];
+}
+
+// Printer capabilities interface
+export interface PrinterCapabilitiesDto {
+  id: string;
+  printerId: string;
+  printerName: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+  maxBuildVolumeX?: number;
+  maxBuildVolumeY?: number;
+  maxBuildVolumeZ?: number;
+  hasHeatedBed: boolean;
+  hasEnclosure: boolean;
+  multiMaterial: boolean;
+  numberOfExtruders: number;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  currentMaterial?: string;
+  currentSpoolId?: number;
+  isAvailable: boolean;
+  supportsAutoLeveling: boolean;
+  maxPrintSpeed?: number;
+  lastUpdated: Date;
 }
 
 // Printer details for edit page
@@ -171,6 +221,7 @@ export interface PrinterDetails {
   manufacturerName?: string;
   modelId?: string;
   modelName?: string;
+  modelType?: PrinterType;
   modelMaxX?: number;
   modelMaxY?: number;
   modelMaxZ?: number;
@@ -179,6 +230,7 @@ export interface PrinterDetails {
   apiKey?: string;
   originalServerUrl?: string;
   ipAddress?: string;
+  capabilities?: PrinterCapabilitiesDto;
 }
 
 // Temperature targets
@@ -209,16 +261,28 @@ export interface BasicHealthStatus {
 // Detailed health (/health, /api/health) produced by ASP.NET Core health checks writer
 // Property names are camelCased by System.Text.Json (see Program.HealthJsonOptions)
 export interface DetailedHealthStatusEntry {
-  status: string;            // Healthy | Degraded | Unhealthy | etc.
-  duration?: string;         // e.g. 00:00:00.0423123
-  description?: string;      // optional description
-  data?: Record<string, unknown>; // additional payload from health check
+  status: string;
+  duration: string;
+  description?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface StartupStatus {
+  phase: string;
+  ready: boolean;
+  failed: boolean;
+  failureMessage?: string;
+  failureStackTrace?: string;
+  initStartedUtc?: string;
+  initCompletedUtc?: string;
+  initDurationMs?: number;
 }
 
 export interface DetailedHealthStatus {
   kind: 'detailed';
   status: string;                 // Overall status
   totalChecksDuration: string;    // Overall duration
+  startup?: StartupStatus;        // Startup initialization status
   results: Record<string, DetailedHealthStatusEntry>;
 }
 
@@ -254,6 +318,7 @@ export interface UpdateFilamentTypeRequest {
 
 export interface UpdateModelRequest {
   name: string;
+  type?: PrinterType;
   maxX?: number;
   maxY?: number;
   maxZ?: number;

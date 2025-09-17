@@ -23,17 +23,17 @@ public class SpoolmanService : ISpoolmanService
 
     public SpoolmanConfigDto? GetConfig()
     {
-        var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
         if (row is null)
         {
             // One-time migration from legacy JSON file if present
             try
             {
-                var legacyPath = Path.Combine(AppContext.BaseDirectory, "spoolman.config.json");
+                string legacyPath = Path.Combine(AppContext.BaseDirectory, "spoolman.config.json");
                 if (File.Exists(legacyPath))
                 {
-                    var text = File.ReadAllText(legacyPath);
-                    var cfg = JsonSerializer.Deserialize<SpoolmanConfigDto>(text);
+                    string text = File.ReadAllText(legacyPath);
+                    SpoolmanConfigDto? cfg = JsonSerializer.Deserialize<SpoolmanConfigDto>(text);
                     if (cfg is not null && !string.IsNullOrWhiteSpace(cfg.BaseUrl))
                     {
                         SetConfig(cfg);
@@ -49,8 +49,8 @@ public class SpoolmanService : ISpoolmanService
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        var baseUrl = NormalizeBaseUrl(config.BaseUrl);
-        var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+        string? baseUrl = NormalizeBaseUrl(config.BaseUrl);
+        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
         if (row is null)
         {
             row = new SpoolmanConfig { Id = 1, BaseUrl = baseUrl ?? string.Empty };
@@ -66,7 +66,7 @@ public class SpoolmanService : ISpoolmanService
 
     public void ClearConfig()
     {
-        var row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
+        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
         if (row is not null)
         {
             db.SpoolmanConfigs.Remove(row);
@@ -81,7 +81,7 @@ public class SpoolmanService : ISpoolmanService
             return url; // allow null/empty to propagate (controller returns 200 with success=false)
         }
 
-        var t = url.Trim();
+        string t = url.Trim();
         if (!t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !t.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
@@ -92,14 +92,14 @@ public class SpoolmanService : ISpoolmanService
 
     public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
     {
-        var cfg = GetConfig();
+        SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
             logger.LogDebug("Spoolman not configured – returning empty spool list");
             return [];
         }
 
-        var baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
 
         // Candidate endpoints (some deployments may expose plural or require trailing slash)
         string[] candidates =
@@ -110,12 +110,12 @@ public class SpoolmanService : ISpoolmanService
             "/api/v1/spools/"
         ];
 
-        foreach (var ep in candidates)
+        foreach (string ep in candidates)
         {
-            var full = baseUrl + ep;
+            string full = baseUrl + ep;
             try
             {
-                var result = await FetchAllPagesAsync(full, ct);
+                PageFetchResult result = await FetchAllPagesAsync(full, ct);
                 if (result.Items.Count > 0)
                 {
                     if (result.AttemptedPages > 1)
@@ -153,7 +153,7 @@ public class SpoolmanService : ISpoolmanService
 
     private async Task<PageFetchResult> FetchAllPagesAsync(string initialUrl, CancellationToken ct)
     {
-        var collected = new List<SpoolmanSpoolDto>();
+        List<SpoolmanSpoolDto> collected = new();
         string? nextUrl = initialUrl;
         int page = 0;
         HttpStatusCode? lastStatus = null;
@@ -163,9 +163,9 @@ public class SpoolmanService : ISpoolmanService
         while (!string.IsNullOrWhiteSpace(nextUrl) && page < MAX_PAGES)
         {
             page++;
-            using var req = new HttpRequestMessage(HttpMethod.Get, nextUrl);
+            using HttpRequestMessage req = new(HttpMethod.Get, nextUrl);
             req.Headers.Accept.ParseAdd("application/json");
-            using var resp = await http.SendAsync(req, ct);
+            using HttpResponseMessage resp = await http.SendAsync(req, ct);
             lastStatus = resp.StatusCode;
             if (!resp.IsSuccessStatusCode)
             {
@@ -174,23 +174,23 @@ public class SpoolmanService : ISpoolmanService
             }
             anySuccess = true;
 
-            var mediaType = resp.Content.Headers.ContentType?.MediaType;
+            string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogDebug("Spoolman page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
                 break;
             }
 
-            using var doc = await TryParseJsonAsync(resp.Content, ct);
+            using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
             if (doc is null)
             {
                 logger.LogDebug("Spoolman page {Page} invalid JSON; aborting", page);
                 break;
             }
 
-            var root = doc.RootElement;
+            JsonElement root = doc.RootElement;
             int before = collected.Count;
-            foreach (var item in EnumerateItems(root, ct))
+            foreach (JsonElement item in EnumerateItems(root, ct))
             {
                 collected.Add(ParseSpool(item));
             }
@@ -200,9 +200,9 @@ public class SpoolmanService : ISpoolmanService
 
             // Pagination detection: common DRF style { "next": "url or null" }
             string? next = null;
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("next", out var nextProp) && nextProp.ValueKind == JsonValueKind.String)
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("next", out JsonElement nextProp) && nextProp.ValueKind == JsonValueKind.String)
             {
-                var n = nextProp.GetString();
+                string? n = nextProp.GetString();
                 if (!string.IsNullOrWhiteSpace(n))
                 {
                     next = n;
@@ -215,11 +215,11 @@ public class SpoolmanService : ISpoolmanService
             }
 
             // If relative, build absolute
-            if (!Uri.TryCreate(next, UriKind.Absolute, out var nextAbs) && Uri.TryCreate(initialUrl, UriKind.Absolute, out var baseAbs))
+            if (!Uri.TryCreate(next, UriKind.Absolute, out Uri? nextAbs) && Uri.TryCreate(initialUrl, UriKind.Absolute, out Uri? baseAbs))
             {
                 try
                 {
-                    var baseRoot = $"{baseAbs.Scheme}://{baseAbs.Authority}";
+                    string baseRoot = $"{baseAbs.Scheme}://{baseAbs.Authority}";
                     nextUrl = baseRoot.TrimEnd('/') + (next.StartsWith('/') ? next : "/" + next);
                 }
                 catch
@@ -238,33 +238,33 @@ public class SpoolmanService : ISpoolmanService
 
     public async Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct)
     {
-        var cfg = GetConfig();
+        SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
             return null;
         }
 
         // Official Spoolman endpoint for getting a specific spool
-        var baseUrl = cfg.BaseUrl.TrimEnd('/');
-        var url = $"{baseUrl}/api/v1/spool/{spoolId}";
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string url = $"{baseUrl}/api/v1/spool/{spoolId}";
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            using HttpRequestMessage req = new(HttpMethod.Get, url);
             req.Headers.Accept.ParseAdd("application/json");
-            using var resp = await http.SendAsync(req, ct);
+            using HttpResponseMessage resp = await http.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
             // Skip clearly-non-JSON payloads
-            var mediaType = resp.Content.Headers.ContentType?.MediaType;
+            string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
 
-            using var doc = await TryParseJsonAsync(resp.Content, ct);
+            using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
             if (doc is null)
             {
                 return null;
@@ -282,7 +282,7 @@ public class SpoolmanService : ISpoolmanService
     {
         try
         {
-            await using var s = await content.ReadAsStreamAsync(ct);
+            await using Stream s = await content.ReadAsStreamAsync(ct);
             return await JsonDocument.ParseAsync(s, cancellationToken: ct);
         }
         catch
@@ -290,7 +290,7 @@ public class SpoolmanService : ISpoolmanService
             // fall back to string sniffing
             try
             {
-                var text = await content.ReadAsStringAsync(ct);
+                string text = await content.ReadAsStringAsync(ct);
                 if (!string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith('<'))
                 {
                     return null; // HTML, not JSON
@@ -306,7 +306,7 @@ public class SpoolmanService : ISpoolmanService
         // If the root is an array, return items directly
         if (root.ValueKind == JsonValueKind.Array)
         {
-            foreach (var el in root.EnumerateArray())
+            foreach (JsonElement el in root.EnumerateArray())
             {
                 ct.ThrowIfCancellationRequested();
                 yield return el;
@@ -315,9 +315,9 @@ public class SpoolmanService : ISpoolmanService
 
         // If it's an object, try common list containers
         if (root.ValueKind == JsonValueKind.Object &&
-            TryGetArray(root, out var arr, "results", "spools", "items", "data"))
+            TryGetArray(root, out JsonElement arr, "results", "spools", "items", "data"))
         {
-            foreach (var el in arr.EnumerateArray())
+            foreach (JsonElement el in arr.EnumerateArray())
             {
                 ct.ThrowIfCancellationRequested();
                 yield return el;
@@ -333,18 +333,18 @@ public class SpoolmanService : ISpoolmanService
             return false;
         }
 
-        foreach (var name in names)
+        foreach (string name in names)
         {
-            if (obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Array)
+            if (obj.TryGetProperty(name, out JsonElement el) && el.ValueKind == JsonValueKind.Array)
             {
                 arrayEl = el;
                 return true;
             }
         }
         // case-insensitive scan
-        foreach (var prop in obj.EnumerateObject())
+        foreach (JsonProperty prop in obj.EnumerateObject())
         {
-            foreach (var name in names)
+            foreach (string name in names)
             {
                 if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.Array)
                 {
@@ -358,11 +358,11 @@ public class SpoolmanService : ISpoolmanService
 
     private static SpoolmanSpoolDto ParseSpool(JsonElement el)
     {
-        var id = TryGetInt(el, "id", "spool_id");
-        var name = TryGetString(el, "name", "display_name") ?? (id != 0 ? $"Spool {id}" : "Spool");
+        int id = TryGetInt(el, "id", "spool_id");
+        string name = TryGetString(el, "name", "display_name") ?? (id != 0 ? $"Spool {id}" : "Spool");
 
         // Material can be a string or nested inside an object
-        var material = TryGetString(el, "material")
+        string material = TryGetString(el, "material")
                       ?? TryGetStringFromObject(el, ["material"], ["name", "material", "material_name", "material__name"])
                       ?? TryGetStringFromObject(el, ["filament", "profile"], ["material", "material_name", "material__name"])
                       ?? string.Empty;
@@ -371,14 +371,14 @@ public class SpoolmanService : ISpoolmanService
         double? remaining = TryGetDoubleNullable(el, "remaining_weight_g", "remaining_weight", "remaining_weight_grams", "mass_remaining_g", "weight_remaining_g");
 
         // Color may be direct or nested under filament/profile
-        var color = TryGetString(el, "color_hex", "color")
+        string? color = TryGetString(el, "color_hex", "color")
             ?? TryGetStringFromObject(el, ["filament", "profile"], ["color_hex", "hex_color", "color"]);
         color = NormalizeHexColor(color);
 
         // Filament name and vendor/manufacturer
-        var filamentName = TryGetString(el, "filament_name")
+        string? filamentName = TryGetString(el, "filament_name")
                    ?? TryGetStringFromObject(el, ["filament", "profile"], ["name", "filament_name", "display_name"]);
-        var vendor =
+        string? vendor =
             // Preferred path per Spoolman: filament.vendor.name
             TryGetStringAtPath(el, "filament", "vendor", "name")
             // Common alternative: profile.vendor.name
@@ -388,11 +388,11 @@ public class SpoolmanService : ISpoolmanService
             ?? TryGetString(el, "vendor", "manufacturer");
 
         // In-use/active detection
-        var inUse = TryGetBool(el, "in_use", "is_active", "active", "selected");
+        bool? inUse = TryGetBool(el, "in_use", "is_active", "active", "selected");
         if (!inUse.HasValue)
         {
             // Some schemas use archived=false to indicate active
-            var archived = TryGetBool(el, "archived");
+            bool? archived = TryGetBool(el, "archived");
             if (archived.HasValue)
             {
                 inUse = !archived.Value;
@@ -400,21 +400,21 @@ public class SpoolmanService : ISpoolmanService
         }
 
         // Extended numeric fields (weight/length)
-        var initialWeight = TryGetDoubleNullable(el, "initial_weight", "initial_weight_g", "initial_weight_grams");
-        var usedWeight = TryGetDoubleNullable(el, "used_weight", "used_weight_g", "used_weight_grams");
-        var spoolWeight = TryGetDoubleNullable(el, "spool_weight", "empty_spool_weight");
-        var remainingLength = TryGetDoubleNullable(el, "remaining_length", "remaining_length_mm");
-        var usedLength = TryGetDoubleNullable(el, "used_length", "used_length_mm");
+        double? initialWeight = TryGetDoubleNullable(el, "initial_weight", "initial_weight_g", "initial_weight_grams");
+        double? usedWeight = TryGetDoubleNullable(el, "used_weight", "used_weight_g", "used_weight_grams");
+        double? spoolWeight = TryGetDoubleNullable(el, "spool_weight", "empty_spool_weight");
+        double? remainingLength = TryGetDoubleNullable(el, "remaining_length", "remaining_length_mm");
+        double? usedLength = TryGetDoubleNullable(el, "used_length", "used_length_mm");
 
         // Location, lot/batch and archived
-        var location = TryGetString(el, "location", "storage_location");
-        var lotNumber = TryGetString(el, "lot_nr", "lot", "batch", "batch_nr");
-        var archivedFlag = TryGetBool(el, "archived");
+        string? location = TryGetString(el, "location", "storage_location");
+        string? lotNumber = TryGetString(el, "lot_nr", "lot", "batch", "batch_nr");
+        bool? archivedFlag = TryGetBool(el, "archived");
 
         // Dates: registered, first used, last used (tolerant to various names and formats)
-        var registeredAt = TryGetDateTime(el, "registered");
-        var firstUsedAt = TryGetDateTime(el, "first_used");
-        var lastUsedAt = TryGetDateTime(el, "last_used");
+        DateTime? registeredAt = TryGetDateTime(el, "registered");
+        DateTime? firstUsedAt = TryGetDateTime(el, "first_used");
+        DateTime? lastUsedAt = TryGetDateTime(el, "last_used");
 
         return new SpoolmanSpoolDto(
             Id: id,
@@ -440,9 +440,9 @@ public class SpoolmanService : ISpoolmanService
 
     private static int TryGetInt(JsonElement el, params string[] names)
     {
-        foreach (var n in names)
+        foreach (string n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i))
+            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int i))
             {
                 return i;
             }
@@ -450,11 +450,11 @@ public class SpoolmanService : ISpoolmanService
         // case-insensitive
         if (el.ValueKind == JsonValueKind.Object)
         {
-            foreach (var p in el.EnumerateObject())
+            foreach (JsonProperty p in el.EnumerateObject())
             {
-                foreach (var n in names)
+                foreach (string n in names)
                 {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out var i))
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out int i))
                     {
                         return i;
                     }
@@ -466,20 +466,20 @@ public class SpoolmanService : ISpoolmanService
 
     private static double? TryGetDoubleNullable(JsonElement el, params string[] names)
     {
-        foreach (var n in names)
+        foreach (string n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d))
+            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out double d))
             {
                 return d;
             }
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
-            foreach (var p in el.EnumerateObject())
+            foreach (JsonProperty p in el.EnumerateObject())
             {
-                foreach (var n in names)
+                foreach (string n in names)
                 {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var d))
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out double d))
                     {
                         return d;
                     }
@@ -496,7 +496,7 @@ public class SpoolmanService : ISpoolmanService
             return null;
         }
 
-        var s = raw.Trim();
+        string s = raw.Trim();
         if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
             s = s[2..];
@@ -532,18 +532,18 @@ public class SpoolmanService : ISpoolmanService
 
     private static string? TryGetString(JsonElement el, params string[] names)
     {
-        foreach (var n in names)
+        foreach (string n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String)
+            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.String)
             {
                 return v.GetString();
             }
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
-            foreach (var p in el.EnumerateObject())
+            foreach (JsonProperty p in el.EnumerateObject())
             {
-                foreach (var n in names)
+                foreach (string n in names)
                 {
                     if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.String)
                     {
@@ -558,11 +558,11 @@ public class SpoolmanService : ISpoolmanService
     private static string? TryGetStringFromObject(JsonElement el, string[] objPathCandidates, string[] fieldCandidates)
     {
         // Look for nested objects using any of the candidate names, then extract a string from candidate fields
-        foreach (var objName in objPathCandidates)
+        foreach (string objName in objPathCandidates)
         {
-            if (TryGetObject(el, out var nested, objName))
+            if (TryGetObject(el, out JsonElement nested, objName))
             {
-                var s = TryGetString(nested, fieldCandidates);
+                string? s = TryGetString(nested, fieldCandidates);
                 if (!string.IsNullOrEmpty(s))
                 {
                     return s;
@@ -587,7 +587,7 @@ public class SpoolmanService : ISpoolmanService
                 return null;
             }
 
-            if (!TryGetPropertyCaseInsensitive(current, path[i], out var next))
+            if (!TryGetPropertyCaseInsensitive(current, path[i], out JsonElement next))
             {
                 return null;
             }
@@ -609,7 +609,7 @@ public class SpoolmanService : ISpoolmanService
             return false;
         }
 
-        foreach (var p in obj.EnumerateObject())
+        foreach (JsonProperty p in obj.EnumerateObject())
         {
             if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
             {
@@ -623,9 +623,9 @@ public class SpoolmanService : ISpoolmanService
     private static bool TryGetObject(JsonElement el, out JsonElement found, params string[] names)
     {
         found = default;
-        foreach (var n in names)
+        foreach (string n in names)
         {
-            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Object)
+            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Object)
             {
                 found = v;
                 return true;
@@ -633,9 +633,9 @@ public class SpoolmanService : ISpoolmanService
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
-            foreach (var p in el.EnumerateObject())
+            foreach (JsonProperty p in el.EnumerateObject())
             {
-                foreach (var n in names)
+                foreach (string n in names)
                 {
                     if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Object)
                     {
@@ -650,18 +650,18 @@ public class SpoolmanService : ISpoolmanService
 
     private static bool? TryGetBool(JsonElement el, params string[] names)
     {
-        foreach (var n in names)
+        foreach (string n in names)
         {
-            if (el.TryGetProperty(n, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False))
+            if (el.TryGetProperty(n, out JsonElement v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False))
             {
                 return v.GetBoolean();
             }
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
-            foreach (var p in el.EnumerateObject())
+            foreach (JsonProperty p in el.EnumerateObject())
             {
-                foreach (var n in names)
+                foreach (string n in names)
                 {
                     if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && (p.Value.ValueKind == JsonValueKind.True || p.Value.ValueKind == JsonValueKind.False))
                     {
@@ -676,11 +676,11 @@ public class SpoolmanService : ISpoolmanService
     private static DateTime? TryGetDateTime(JsonElement el, params string[] names)
     {
         // Try string ISO formats
-        foreach (var n in names)
+        foreach (string n in names)
         {
-            if (el.TryGetProperty(n, out var v))
+            if (el.TryGetProperty(n, out JsonElement v))
             {
-                var dt = FromJsonElementToDateTime(v);
+                DateTime? dt = FromJsonElementToDateTime(v);
                 if (dt.HasValue)
                 {
                     return dt;
@@ -689,13 +689,13 @@ public class SpoolmanService : ISpoolmanService
         }
         if (el.ValueKind == JsonValueKind.Object)
         {
-            foreach (var p in el.EnumerateObject())
+            foreach (JsonProperty p in el.EnumerateObject())
             {
-                foreach (var n in names)
+                foreach (string n in names)
                 {
                     if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase))
                     {
-                        var dt = FromJsonElementToDateTime(p.Value);
+                        DateTime? dt = FromJsonElementToDateTime(p.Value);
                         if (dt.HasValue)
                         {
                             return dt;
@@ -713,15 +713,15 @@ public class SpoolmanService : ISpoolmanService
         {
             if (v.ValueKind == JsonValueKind.String)
             {
-                var s = v.GetString();
-                if (!string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+                string? s = v.GetString();
+                if (!string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsed))
                 {
                     return DateTime.SpecifyKind(parsed, parsed.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : parsed.Kind);
                 }
             }
             else if (v.ValueKind == JsonValueKind.Number)
             {
-                if (v.TryGetInt64(out var num))
+                if (v.TryGetInt64(out long num))
                 {
                     // Heuristic: epoch seconds vs milliseconds
                     // >= 1e12 -> milliseconds, >= 1e9 -> seconds
@@ -735,9 +735,9 @@ public class SpoolmanService : ISpoolmanService
                         return DateTimeOffset.FromUnixTimeSeconds(num).UtcDateTime;
                     }
                 }
-                else if (v.TryGetDouble(out var dnum))
+                else if (v.TryGetDouble(out double dnum))
                 {
-                    var ln = (long)dnum;
+                    long ln = (long)dnum;
                     if (ln >= 1_000_000_000_000)
                     {
                         return DateTimeOffset.FromUnixTimeMilliseconds(ln).UtcDateTime;

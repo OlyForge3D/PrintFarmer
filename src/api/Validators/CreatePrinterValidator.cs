@@ -45,7 +45,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
 
         try
         {
-            var uri = new Uri(url);
+            Uri uri = new(url);
             return uri.Scheme is "http" or "https";
         }
         catch
@@ -61,7 +61,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
             return true;
         }
 
-        var dangerousPatterns = new[]
+        string[] dangerousPatterns = new[]
         {
             "script", "javascript:", "vbscript:", "onload", "onerror",
             "drop table", "select *", "insert into", "delete from",
