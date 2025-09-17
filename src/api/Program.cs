@@ -443,6 +443,7 @@ builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 // Register slicer runtime settings store (DB-backed)
 builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>();
 builder.Services.AddSingleton<Farm.Web.Api.Services.Startup.StartupStatus>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.StartupInitializationHostedService>();
 
 // Ensure SlicerExecutableManager can consult runtime admin settings
 builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
