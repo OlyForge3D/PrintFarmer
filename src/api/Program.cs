@@ -431,6 +431,7 @@ builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
 
 // Register slicer runtime settings store (DB-backed)
 builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>();
+builder.Services.AddSingleton<Farm.Web.Api.Services.Startup.StartupStatus>();
 
 // Ensure SlicerExecutableManager can consult runtime admin settings
 builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
@@ -615,19 +616,43 @@ var rawArgs = args.ToList();
 var headlessCreateAdmin = rawArgs.Contains("--create-admin");
 var headlessListUsers = rawArgs.Contains("--list-users");
 
+// Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
+builder.WebHost.UseUrls("http://0.0.0.0:5245");
 var app = builder.Build();
 
-// Initialize console redirection for unified logging
-using (var scope = app.Services.CreateScope())
+// Early liveness endpoint (process up) + readiness separate
+app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
+
+// Deferred console redirection (avoids blocking early host binding). Enable via ENABLE_CONSOLE_REDIRECTION=true
+if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION"), "true", StringComparison.OrdinalIgnoreCase))
 {
-    var consoleRedirection = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService>();
-    Farm.Web.Api.Services.Telemetry.UnifiedConsole.Initialize(consoleRedirection);
-
-    // Enable console redirection to capture Console.WriteLine calls
-    consoleRedirection.RedirectConsoleOutput();
-
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation("[UnifiedLogging] Console redirection initialized - all Console.WriteLine calls will now be captured in OpenTelemetry");
+    var lifetime = app.Lifetime; // IHostApplicationLifetime
+    lifetime.ApplicationStarted.Register(() =>
+    {
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var consoleRedirection = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService>();
+            Farm.Web.Api.Services.Telemetry.UnifiedConsole.Initialize(consoleRedirection);
+            consoleRedirection.RedirectConsoleOutput();
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            logger.LogInformation("[UnifiedLogging] Console redirection initialized (deferred) - Console output now captured in OpenTelemetry");
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                using var innerScope = app.Services.CreateScope();
+                var failLogger = innerScope.ServiceProvider.GetService<ILogger<Program>>();
+                failLogger?.LogWarning(ex, "[UnifiedLogging] Deferred console redirection failed");
+            }
+            catch
+            {
+                // Last resort fallback to stderr so failure is visible if logging pipeline itself is broken.
+                Console.Error.WriteLine($"[UnifiedLogging][FALLBACK] Deferred console redirection failed: {ex.Message}");
+            }
+        }
+    });
 }
 
 // Early headless commands (no web host run) to support automation:
@@ -767,148 +792,7 @@ if (headlessCreateAdmin || headlessListUsers)
     }
 }
 
-// Database initialization with retry logic for resilient startup
-using (var scope = app.Services.CreateScope())
-{
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    var dbInitializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
-
-    // Get retry configuration from environment variables (lower defaults for development)
-    var retryCount = int.TryParse(app.Configuration["DB_CONNECTION_RETRY_COUNT"], out var rc) ? rc : 3;
-    var retryDelay = int.TryParse(app.Configuration["DB_CONNECTION_RETRY_DELAY"], out var rd) ? rd : 2;
-
-    try
-    {
-        await dbInitializer.InitializeAsync(dbProvider, retryCount, retryDelay);
-    }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "[DB] Failed to initialize database after all retry attempts. Application cannot start.");
-        if (dbProvider != "Sqlite")
-        {
-            logger.LogInformation("[DB] If using external database (SQL Server, PostgreSQL, MySQL), ensure:");
-            logger.LogInformation("[DB] 1. Database server is running and accessible");
-            logger.LogInformation("[DB] 2. Connection string is correct");
-            logger.LogInformation("[DB] 3. Database server is ready to accept connections");
-            logger.LogInformation("[DB] 4. Network connectivity allows database access");
-        }
-        throw;
-    }
-
-    // EF-based seeding for catalog data (idempotent)
-    var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
-    await seeder.SeedAllAsync();
-
-    // Seed authentication data (idempotent)
-    await Farm.Web.Api.Data.Seed.AuthenticationDataSeeder.SeedAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>());
-
-    // Validate configuration after services are built
-    try
-    {
-        var configValidator = scope.ServiceProvider.GetRequiredService<ConfigurationValidator>();
-        configValidator.ValidateConfiguration();
-    }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "Application startup failed due to configuration validation errors");
-        throw;
-    }
-
-    // Optional: Seed Spoolman configuration from environment (one-time if user provided during deploy script)
-    try
-    {
-        var spoolmanBase = Environment.GetEnvironmentVariable("SPOOLMAN_BASE_URL");
-        var spoolmanEnabled = Environment.GetEnvironmentVariable("SPOOLMAN_ENABLED");
-        if (!string.IsNullOrWhiteSpace(spoolmanBase) && string.Equals(spoolmanEnabled, "yes", StringComparison.OrdinalIgnoreCase))
-        {
-            var spoolmanSvc = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
-            var existing = spoolmanSvc.GetConfig();
-            if (existing is null || string.IsNullOrWhiteSpace(existing.BaseUrl))
-            {
-                spoolmanSvc.SetConfig(new Farm.Web.Shared.SpoolmanConfigDto(spoolmanBase));
-                logger.LogInformation("[Startup] Seeded Spoolman configuration from SPOOLMAN_BASE_URL env var: {Url}", spoolmanBase);
-            }
-            else
-            {
-                logger.LogDebug("[Startup] Spoolman configuration already present; skipping env seed");
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Failed to seed Spoolman configuration from environment");
-    }
-
-    // Optional unattended initial admin bootstrap (deprecated default). Now requires explicit ENABLE_ADMIN_BOOTSTRAP=true.
-    try
-    {
-        var enableBootstrap = Environment.GetEnvironmentVariable("ENABLE_ADMIN_BOOTSTRAP");
-        if (string.Equals(enableBootstrap, "true", StringComparison.OrdinalIgnoreCase))
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var hasAdmin = await db.Users.AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive));
-            if (!hasAdmin)
-            {
-                var adminUser = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
-                var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
-                if (!string.IsNullOrWhiteSpace(adminUser) && !string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword) && adminPassword.Length >= 12)
-                {
-                    var hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
-                    var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
-                    if (adminRole != null)
-                    {
-                        var user = new Farm.Web.Api.Domain.User
-                        {
-                            Id = Guid.NewGuid(),
-                            Username = adminUser,
-                            Email = adminEmail,
-                            FirstName = "Admin",
-                            LastName = "Bootstrap",
-                            PasswordHash = hashing.HashPassword(adminPassword),
-                            IsActive = true,
-                            EmailConfirmed = true,
-                            CreatedAt = DateTime.UtcNow,
-                            UpdatedAt = DateTime.UtcNow
-                        };
-                        db.Users.Add(user);
-                        db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
-                        {
-                            Id = Guid.NewGuid(),
-                            UserId = user.Id,
-                            RoleId = adminRole.Id,
-                            AssignedAt = DateTime.UtcNow,
-                            IsActive = true
-                        });
-                        await db.SaveChangesAsync();
-                        logger.LogInformation("[Startup] Created initial admin user from environment (USERNAME={Username}, EMAIL={Email})", adminUser, adminEmail);
-                    }
-                    else
-                    {
-                        logger.LogWarning("[Startup] Cannot create admin user from environment because farm_admin role not found.");
-                    }
-                }
-                else
-                {
-                    logger.LogWarning("[Startup] ENABLE_ADMIN_BOOTSTRAP=true but ADMIN_* variables missing or password policy not met (>=12 chars). Skipping.");
-                }
-            }
-            else
-            {
-                logger.LogDebug("[Startup] ENABLE_ADMIN_BOOTSTRAP=true but admin already exists; no action taken.");
-            }
-        }
-        else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ADMIN_USERNAME")))
-        {
-            logger.LogWarning("[Startup] ADMIN_* variables detected but ENABLE_ADMIN_BOOTSTRAP!=true. Bootstrap skipped by design.");
-        }
-    }
-    catch (Exception ex)
-    {
-        var logger2 = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger2.LogWarning(ex, "[Startup] Admin bootstrap attempt failed (non-fatal)");
-    }
-}
+// (Removed synchronous DB + seeding + admin bootstrap block; now handled asynchronously by StartupInitializationHostedService.)
 
 // Log effective temp root (non-production) for diagnostics
 try
@@ -962,11 +846,23 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json";
+        var startup = context.RequestServices.GetService<Farm.Web.Api.Services.Startup.StartupStatus>();
         var result = JsonSerializer.Serialize(
             new
             {
                 Status = report.Status.ToString(),
                 TotalChecksDuration = report.TotalDuration,
+                Startup = startup == null ? null : new
+                {
+                    phase = startup.Phase.ToString(),
+                    ready = startup.IsReady,
+                    failed = startup.IsFailed,
+                    failureMessage = startup.FailureException?.Message,
+                    failureStackTrace = (startup.FailureException != null && context.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment()) ? startup.FailureException.StackTrace : null,
+                    initStartedUtc = startup.InitializationStartedUtc,
+                    initCompletedUtc = startup.InitializationCompletedUtc,
+                    initDurationMs = startup.InitializationDuration?.TotalMilliseconds
+                },
                 Results = report.Entries.ToDictionary(
                     kvp => kvp.Key,
                     kvp => new
@@ -989,11 +885,23 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json";
+        var startup = context.RequestServices.GetService<Farm.Web.Api.Services.Startup.StartupStatus>();
         var result = JsonSerializer.Serialize(
             new
             {
                 Status = report.Status.ToString(),
                 TotalChecksDuration = report.TotalDuration,
+                Startup = startup == null ? null : new
+                {
+                    phase = startup.Phase.ToString(),
+                    ready = startup.IsReady,
+                    failed = startup.IsFailed,
+                    failureMessage = startup.FailureException?.Message,
+                    failureStackTrace = (startup.FailureException != null && context.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment()) ? startup.FailureException.StackTrace : null,
+                    initStartedUtc = startup.InitializationStartedUtc,
+                    initCompletedUtc = startup.InitializationCompletedUtc,
+                    initDurationMs = startup.InitializationDuration?.TotalMilliseconds
+                },
                 Results = report.Entries.ToDictionary(
                     kvp => kvp.Key,
                     kvp => new
@@ -1160,6 +1068,9 @@ app.MapGet("/api/diagnostics/summary", ([FromServices] SpoolmanService spoolmanS
 // Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
 app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
+// Final log just before entering host run loop (diagnostic)
+app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");
+
 // Database info endpoint (dev or DEBUG_DB_INFO=true) with migration status integration.
 app.MapGet("/api/debug/db-info", async (AppDbContext db,
     IWebHostEnvironment env,
@@ -1284,6 +1195,7 @@ if (isMonolithicDeployment)
     }
 }
 
+// Enter host run loop
 await app.RunAsync();
 
 // Expose Program for WebApplicationFactory in tests
