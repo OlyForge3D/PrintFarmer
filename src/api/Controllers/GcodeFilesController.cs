@@ -5,8 +5,11 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services; // added for IGcodeUploadSettings & quota services
+using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -76,10 +79,10 @@ public class GcodeFilesController(
         try
         {
             // Use existing secure resolver on the parent directory, then combine sanitized filename
-            var parentVirtual = Path.GetDirectoryName(path) ?? "/";
-            var fileName = Path.GetFileName(path);
-            var (_, parentFull, _) = ResolveAndValidatePath(parentVirtual);
-            var fullPath = Path.GetFullPath(Path.Combine(parentFull, fileName));
+            string parentVirtual = Path.GetDirectoryName(path) ?? "/";
+            string fileName = Path.GetFileName(path);
+            (string _, string? parentFull, string _) = ResolveAndValidatePath(parentVirtual);
+            string fullPath = Path.GetFullPath(Path.Combine(parentFull, fileName));
             if (!fullPath.StartsWith(parentFull, StringComparison.Ordinal))
             {
                 return NotFound();
@@ -93,9 +96,9 @@ public class GcodeFilesController(
             {
                 return BadRequest("Only .gcode or .bgcode files supported");
             }
-            using var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using FileStream fs = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             IncrementalHash hasher = algorithm == "sha1" ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[81920];
+            byte[] buffer = new byte[81920];
             int read;
             long total = 0;
             while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
@@ -103,7 +106,7 @@ public class GcodeFilesController(
                 hasher.AppendData(buffer, 0, read);
                 total += read;
             }
-            var hex = ToHex(hasher.GetHashAndReset());
+            string hex = ToHex(hasher.GetHashAndReset());
             return Ok(new GcodeFileHashResponse(fileName, total, algorithm, hex));
         }
         catch (Exception ex)
@@ -143,18 +146,18 @@ public class GcodeFilesController(
             {
                 pageSize = 500; // hard cap to avoid huge payloads
             }
-            var (_, requestedDirFullPath, virtualPathNormalized) = ResolveAndValidatePath(path);
+            (string _, string? requestedDirFullPath, string? virtualPathNormalized) = ResolveAndValidatePath(path);
             if (!Directory.Exists(requestedDirFullPath))
             {
                 return NotFound($"Directory '{virtualPathNormalized}' not found");
             }
 
             // Gather directory & file entries (only immediate children)
-            var dirInfo = new System.IO.DirectoryInfo(requestedDirFullPath);
-            var entries = new List<GcodeFileEntryDto>();
+            System.IO.DirectoryInfo dirInfo = new(requestedDirFullPath);
+            List<GcodeFileEntryDto> entries = new();
 
             // Directories
-            foreach (var dir in dirInfo.EnumerateDirectories())
+            foreach (System.IO.DirectoryInfo dir in dirInfo.EnumerateDirectories())
             {
                 if (dir.Name.StartsWith('.'))
                 {
@@ -164,7 +167,7 @@ public class GcodeFilesController(
                 {
                     continue;
                 }
-                var childVirtual = CombineVirtual(virtualPathNormalized, dir.Name);
+                string childVirtual = CombineVirtual(virtualPathNormalized, dir.Name);
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
                     Name: dir.Name,
@@ -175,24 +178,24 @@ public class GcodeFilesController(
             }
 
             // Files (.gcode + .bgcode)
-            foreach (var pattern in new[] { "*.gcode", "*.bgcode" })
+            foreach (string? pattern in new[] { "*.gcode", "*.bgcode" })
             {
-                foreach (var file in dirInfo.EnumerateFiles(pattern))
+                foreach (System.IO.FileInfo file in dirInfo.EnumerateFiles(pattern))
                 {
                     if (!IsMatch(file.Name, search))
                     {
                         continue;
                     }
-                    var childVirtual = CombineVirtual(virtualPathNormalized, file.Name);
+                    string childVirtual = CombineVirtual(virtualPathNormalized, file.Name);
 
                     // Attempt to correlate with DB entry for potential future harvest association.
                     Guid? harvestOpId = null;
                     try
                     {
-                        var dbEntry = db.GcodeFiles.FirstOrDefault(g => g.FilePath == file.FullName);
+                        GcodeFile? dbEntry = db.GcodeFiles.FirstOrDefault(g => g.FilePath == file.FullName);
                         if (dbEntry != null && dbEntry.SourcePrinterId != null)
                         {
-                            var op = db.GcodeHarvestOperations
+                            GcodeHarvestOperation? op = db.GcodeHarvestOperations
                                 .Where(o => o.PrinterId == dbEntry.SourcePrinterId)
                                 .OrderByDescending(o => o.StartedAt)
                                 .FirstOrDefault();
@@ -226,14 +229,14 @@ public class GcodeFilesController(
                 _ => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
             };
 
-            var totalFiles = entries.Count(e => !e.IsDirectory);
-            var totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
+            int totalFiles = entries.Count(e => !e.IsDirectory);
+            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
 
             // Apply pagination AFTER computing totals so client can derive total pages.
-            var skip = (page - 1) * pageSize;
+            int skip = (page - 1) * pageSize;
             IReadOnlyList<GcodeFileEntryDto> pagedEntries = skip >= entries.Count ? Array.Empty<GcodeFileEntryDto>() : entries.Skip(skip).Take(pageSize).ToList();
-            var totalItems = entries.Count; // directories + files for pagination context
-            var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
+            int totalItems = entries.Count; // directories + files for pagination context
+            int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
             return Ok(new GcodeFileListResponse(
                 Files: pagedEntries,
                 TotalFiles: totalFiles,
@@ -261,26 +264,26 @@ public class GcodeFilesController(
         {
             return BadRequest("fileName and positive size required");
         }
-        var ext = Path.GetExtension(req.FileName) ?? string.Empty;
+        string ext = Path.GetExtension(req.FileName) ?? string.Empty;
         if (!AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest($"Invalid file type '{ext}'. Allowed: {string.Join(", ", AllowedExtensions)}");
         }
         try
         {
-            var (_, targetDirFullPath, virtualDir) = ResolveAndValidatePath(req.Path ?? "/");
+            (string _, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(req.Path ?? "/");
             if (!Directory.Exists(targetDirFullPath))
             {
                 Directory.CreateDirectory(targetDirFullPath);
             }
             // Sanitize filename & collision resolution (reserve final name now so user sees stable name)
-            var originalName = Path.GetFileName(req.FileName);
+            string originalName = Path.GetFileName(req.FileName);
             if (string.IsNullOrWhiteSpace(originalName))
             {
                 originalName = "upload" + ext;
             }
-            var safeName = originalName;
-            foreach (var c in Path.GetInvalidFileNameChars())
+            string safeName = originalName;
+            foreach (char c in Path.GetInvalidFileNameChars())
             {
                 safeName = safeName.Replace(c, '_');
             }
@@ -289,15 +292,15 @@ public class GcodeFilesController(
                 safeName += ext;
             }
 
-            var destinationPath = Path.Combine(targetDirFullPath, safeName);
-            var fullTarget = Path.GetFullPath(destinationPath);
+            string destinationPath = Path.Combine(targetDirFullPath, safeName);
+            string fullTarget = Path.GetFullPath(destinationPath);
             if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
             {
                 return BadRequest("Unsafe target path");
             }
             if (System.IO.File.Exists(fullTarget))
             {
-                var baseName = Path.GetFileNameWithoutExtension(safeName);
+                string baseName = Path.GetFileNameWithoutExtension(safeName);
                 int counter = 1;
                 string candidate;
                 do
@@ -308,21 +311,21 @@ public class GcodeFilesController(
                 safeName = Path.GetFileName(fullTarget);
             }
             // Create temp part file path (unique by GUID) to avoid partial naming collisions
-            var uploadId = Guid.NewGuid().ToString("N");
-            var tempFilePath = Path.Combine(targetDirFullPath, safeName + "." + uploadId + ".part");
-            var metaFilePath = tempFilePath + ".meta.json";
+            string uploadId = Guid.NewGuid().ToString("N");
+            string tempFilePath = Path.Combine(targetDirFullPath, safeName + "." + uploadId + ".part");
+            string metaFilePath = tempFilePath + ".meta.json";
             using (System.IO.File.Create(tempFilePath))
             {
                 // create empty temp file
             }
-            var userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+            string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
             // Optional hashing (sha256 default if provided "sha256" or "sha1")
             IncrementalHash? hasher = null;
             string? hashAlgo = null;
             string? expectedHash = null;
             if (!string.IsNullOrWhiteSpace(req.HashAlgorithm))
             {
-                var algo = req.HashAlgorithm.Trim().ToLowerInvariant();
+                string algo = req.HashAlgorithm.Trim().ToLowerInvariant();
                 if (algo is not ("sha256" or "sha1"))
                 {
                     return BadRequest("Unsupported hashAlgorithm. Allowed: sha256, sha1");
@@ -335,7 +338,7 @@ public class GcodeFilesController(
                     _ => IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
                 };
             }
-            var state = new ChunkUploadState
+            ChunkUploadState state = new()
             {
                 Id = uploadId,
                 UserId = userId,
@@ -355,7 +358,7 @@ public class GcodeFilesController(
                 return Problem("Failed to initialize upload", statusCode: 500);
             }
             PersistChunkState(state, logger);
-            var virtualFilePath = CombineVirtual(virtualDir, safeName);
+            string virtualFilePath = CombineVirtual(virtualDir, safeName);
             return Ok(new ChunkInitResponse(uploadId, safeName, virtualFilePath, 0, req.Size, DefaultChunkSize, hashAlgo));
         }
         catch (Exception ex)
@@ -377,7 +380,7 @@ public class GcodeFilesController(
         {
             return NotFound();
         }
-        if (!_chunkStates.TryGetValue(uploadId, out var state))
+        if (!_chunkStates.TryGetValue(uploadId, out ChunkUploadState? state))
         {
             return NotFound();
         }
@@ -397,42 +400,42 @@ public class GcodeFilesController(
         try
         {
             // Read body stream fully into buffer (could stream append but we need size for quota)
-            await using var ms = new MemoryStream();
+            await using MemoryStream ms = new();
             await Request.Body.CopyToAsync(ms);
-            var chunkBytes = ms.ToArray();
+            byte[] chunkBytes = ms.ToArray();
             if (chunkBytes.Length == 0)
             {
                 return BadRequest("Empty chunk");
             }
-            var remaining = state.TotalSize - state.UploadedBytes;
+            long remaining = state.TotalSize - state.UploadedBytes;
             if (chunkBytes.Length > remaining)
             {
                 return BadRequest("Chunk exceeds remaining size");
             }
-            var userId = state.UserId;
-            if (!quotaService.TryAddUsage(userId, chunkBytes.Length, out var used, out var limit))
+            string userId = state.UserId;
+            if (!quotaService.TryAddUsage(userId, chunkBytes.Length, out long used, out long limit))
             {
                 Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
                 Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
                 return StatusCode(429, "Daily upload quota exceeded");
             }
             await System.IO.File.AppendAllTextAsync(state.TempFilePath, string.Empty); // ensure exists
-            await using (var fs = new FileStream(state.TempFilePath, FileMode.Append, FileAccess.Write, FileShare.None))
+            await using (FileStream fs = new(state.TempFilePath, FileMode.Append, FileAccess.Write, FileShare.None))
             {
                 await fs.WriteAsync(new ReadOnlyMemory<byte>(chunkBytes), CancellationToken.None);
             }
             state.UploadedBytes += chunkBytes.Length;
             state.Hasher?.AppendData(chunkBytes);
-            var completed = state.UploadedBytes == state.TotalSize;
+            bool completed = state.UploadedBytes == state.TotalSize;
             if (completed)
             {
                 // Finalize: move temp file to final destination name
-                var finalFull = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
+                string finalFull = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
                 if (System.IO.File.Exists(finalFull))
                 {
                     // Extremely rare: file created after init; collision resolve again
-                    var ext = Path.GetExtension(state.FinalSafeName);
-                    var baseName = Path.GetFileNameWithoutExtension(state.FinalSafeName);
+                    string ext = Path.GetExtension(state.FinalSafeName);
+                    string baseName = Path.GetFileNameWithoutExtension(state.FinalSafeName);
                     int counter = 1;
                     string candidate;
                     string newFull;
@@ -446,8 +449,8 @@ public class GcodeFilesController(
                 }
                 if (state.Hasher != null)
                 {
-                    var hashBytes = state.Hasher.GetHashAndReset();
-                    var hex = ToHex(hashBytes);
+                    byte[] hashBytes = state.Hasher.GetHashAndReset();
+                    string hex = ToHex(hashBytes);
                     state.FinalHash = hex;
                     if (state.ExpectedHash != null && !hex.Equals(state.ExpectedHash, StringComparison.OrdinalIgnoreCase))
                     {
@@ -498,30 +501,30 @@ public class GcodeFilesController(
         {
             return NotFound();
         }
-        if (_chunkStates.TryGetValue(uploadId, out var existing))
+        if (_chunkStates.TryGetValue(uploadId, out ChunkUploadState? existing))
         {
             return Ok(new ChunkStatusResponse(existing.Id, existing.FinalSafeName, existing.UploadedBytes, existing.TotalSize, existing.UploadedBytes == existing.TotalSize, existing.FinalHash, existing.Paused));
         }
         // Attempt rehydrate by searching known temp roots (current web root gcode-library)
         try
         {
-            var (root, _, _) = ResolveAndValidatePath("/");
-            var metas = Directory.EnumerateFiles(root, $"*.{uploadId}.part.meta.json", SearchOption.AllDirectories).Take(1).ToList();
+            (string? root, string _, string _) = ResolveAndValidatePath("/");
+            List<string> metas = Directory.EnumerateFiles(root, $"*.{uploadId}.part.meta.json", SearchOption.AllDirectories).Take(1).ToList();
             if (metas.Count == 0)
             {
                 return NotFound();
             }
-            var metaFile = metas[0];
-            var json = System.IO.File.ReadAllText(metaFile);
-            var doc = JsonDocument.Parse(json);
-            var totalSize = doc.RootElement.GetProperty("TotalSize").GetInt64();
-            var uploadedBytes = doc.RootElement.GetProperty("UploadedBytes").GetInt64();
-            var finalSafeName = doc.RootElement.GetProperty("FinalSafeName").GetString() ?? "unknown";
-            var targetDir = doc.RootElement.GetProperty("TargetDirectoryFullPath").GetString() ?? Path.GetDirectoryName(metaFile)!;
-            var tempPath = doc.RootElement.GetProperty("TempFilePath").GetString() ?? Path.Combine(targetDir, finalSafeName + "." + uploadId + ".part");
-            string? hashAlgo = doc.RootElement.TryGetProperty("HashAlgorithm", out var ha) ? ha.GetString() : null;
-            string? expectedHash = doc.RootElement.TryGetProperty("ExpectedHash", out var eh) ? eh.GetString() : null;
-            bool paused = doc.RootElement.TryGetProperty("Paused", out var pEl) && pEl.GetBoolean();
+            string metaFile = metas[0];
+            string json = System.IO.File.ReadAllText(metaFile);
+            JsonDocument doc = JsonDocument.Parse(json);
+            long totalSize = doc.RootElement.GetProperty("TotalSize").GetInt64();
+            long uploadedBytes = doc.RootElement.GetProperty("UploadedBytes").GetInt64();
+            string finalSafeName = doc.RootElement.GetProperty("FinalSafeName").GetString() ?? "unknown";
+            string targetDir = doc.RootElement.GetProperty("TargetDirectoryFullPath").GetString() ?? Path.GetDirectoryName(metaFile)!;
+            string tempPath = doc.RootElement.GetProperty("TempFilePath").GetString() ?? Path.Combine(targetDir, finalSafeName + "." + uploadId + ".part");
+            string? hashAlgo = doc.RootElement.TryGetProperty("HashAlgorithm", out JsonElement ha) ? ha.GetString() : null;
+            string? expectedHash = doc.RootElement.TryGetProperty("ExpectedHash", out JsonElement eh) ? eh.GetString() : null;
+            bool paused = doc.RootElement.TryGetProperty("Paused", out JsonElement pEl) && pEl.GetBoolean();
             // Recreate IncrementalHash cannot continue (need bytes). Without full rehash we only allow resume if no hash specified.
             IncrementalHash? hasher = null;
             if (!string.IsNullOrWhiteSpace(hashAlgo) && uploadedBytes > 0)
@@ -530,8 +533,8 @@ public class GcodeFilesController(
                 try
                 {
                     hasher = hashAlgo == "sha1" ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    using var fs = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    var buffer = new byte[81920];
+                    using FileStream fs = new(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    byte[] buffer = new byte[81920];
                     int read;
                     while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
                     {
@@ -540,7 +543,7 @@ public class GcodeFilesController(
                 }
                 catch { hasher = null; }
             }
-            var state = new ChunkUploadState
+            ChunkUploadState state = new()
             {
                 Id = uploadId,
                 UserId = "anonymous", // Unknown after restart; treat quota via new requests only
@@ -570,7 +573,7 @@ public class GcodeFilesController(
     [ProducesResponseType(404)]
     public ActionResult<ChunkStatusResponse> PauseChunkUpload([FromRoute] string uploadId)
     {
-        if (string.IsNullOrWhiteSpace(uploadId) || !_chunkStates.TryGetValue(uploadId, out var state))
+        if (string.IsNullOrWhiteSpace(uploadId) || !_chunkStates.TryGetValue(uploadId, out ChunkUploadState? state))
         {
             return NotFound();
         }
@@ -589,7 +592,7 @@ public class GcodeFilesController(
     [ProducesResponseType(404)]
     public ActionResult<ChunkStatusResponse> ResumeChunkUpload([FromRoute] string uploadId)
     {
-        if (string.IsNullOrWhiteSpace(uploadId) || !_chunkStates.TryGetValue(uploadId, out var state))
+        if (string.IsNullOrWhiteSpace(uploadId) || !_chunkStates.TryGetValue(uploadId, out ChunkUploadState? state))
         {
             return NotFound();
         }
@@ -611,7 +614,7 @@ public class GcodeFilesController(
         {
             return NoContent();
         }
-        if (_chunkStates.TryRemove(uploadId, out var state))
+        if (_chunkStates.TryRemove(uploadId, out ChunkUploadState? state))
         {
             try
             {
@@ -645,18 +648,18 @@ public class GcodeFilesController(
             return BadRequest("filePaths is required");
         }
 
-        var (rootFullPath, _, _) = ResolveAndValidatePath("/");
+        (string? rootFullPath, string _, string _) = ResolveAndValidatePath("/");
         int deleted = 0;
-        var deletedFiles = new List<string>();
-        var skipped = new List<string>();
-        var failed = new List<string>();
-        var directoriesRequested = new List<string>();
+        List<string> deletedFiles = new();
+        List<string> skipped = new();
+        List<string> failed = new();
+        List<string> directoriesRequested = new();
         // Pre-scan to identify directories (unsupported) but defer decision to allow partial success semantics.
-        foreach (var virtualPath in request.FilePaths)
+        foreach (string virtualPath in request.FilePaths)
         {
             try
             {
-                var (_, fullCandidatePath, _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
+                (string _, string? fullCandidatePath, string _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
                 if (Directory.Exists(fullCandidatePath))
                 {
                     directoriesRequested.Add(virtualPath);
@@ -673,11 +676,11 @@ public class GcodeFilesController(
             // Retain legacy behavior: if ONLY directories were requested treat as a hard failure.
             return BadRequest($"Cannot delete directories ({string.Join(", ", directoriesRequested)}) – directory deletion is not supported");
         }
-        foreach (var virtualPath in request.FilePaths)
+        foreach (string virtualPath in request.FilePaths)
         {
             try
             {
-                var (_, fullFilePath, _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
+                (string _, string? fullFilePath, string _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
                 if (Directory.Exists(fullFilePath))
                 {
                     if (recursive)
@@ -742,35 +745,35 @@ public class GcodeFilesController(
     {
         try
         {
-            var (_, fullFilePath, virtualNorm) = ResolveAndValidatePath(path, treatAsFile: true);
+            (string _, string? fullFilePath, string? virtualNorm) = ResolveAndValidatePath(path, treatAsFile: true);
             if (!System.IO.File.Exists(fullFilePath))
             {
                 return NotFound();
             }
 
-            var info = new System.IO.FileInfo(fullFilePath);
-            var lastWriteUtc = info.LastWriteTimeUtc;
+            System.IO.FileInfo info = new(fullFilePath);
+            DateTime lastWriteUtc = info.LastWriteTimeUtc;
             // Allow opting into weak ETags via env var (set GCODE_WEAK_ETAGS=1) so upstream caches can do
             // semantic equivalence while still letting us change representation details later.
-            var useWeak = Environment.GetEnvironmentVariable("GCODE_WEAK_ETAGS") == "1";
-            var etag = GenerateEtag(info, useWeak); // uniqueness: mtime + size (sufficient for local FS scenarios)
+            bool useWeak = Environment.GetEnvironmentVariable("GCODE_WEAK_ETAGS") == "1";
+            string etag = GenerateEtag(info, useWeak); // uniqueness: mtime + size (sufficient for local FS scenarios)
 
             // Conditional ETag handling
-            var typedHeaders = Request.GetTypedHeaders();
-            var ifNoneMatch = typedHeaders.IfNoneMatch;
+            RequestHeaders typedHeaders = Request.GetTypedHeaders();
+            IList<EntityTagHeaderValue> ifNoneMatch = typedHeaders.IfNoneMatch;
             if (ifNoneMatch != null && ifNoneMatch.Any(t => string.Equals(t.Tag.ToString(), etag, StringComparison.Ordinal)))
             {
                 Response.Headers["ETag"] = etag;
                 Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
                 return StatusCode(304);
             }
-            var ifModifiedSince = typedHeaders.IfModifiedSince;
+            DateTimeOffset? ifModifiedSince = typedHeaders.IfModifiedSince;
             if (ifModifiedSince.HasValue)
             {
                 // Browsers (and HttpClient) serialize Last-Modified with second-level precision (RFC1123).
                 // Our filesystem mtime (ticks) may have higher precision so a direct <= comparison can fail
                 // even though no modification occurred. Allow a 1s tolerance window.
-                var ims = ifModifiedSince.Value.UtcDateTime;
+                DateTime ims = ifModifiedSince.Value.UtcDateTime;
                 if (lastWriteUtc <= ims || (lastWriteUtc - ims) < TimeSpan.FromSeconds(1))
                 {
                     Response.Headers["ETag"] = etag;
@@ -789,8 +792,8 @@ public class GcodeFilesController(
                 return new StatusCodeResult(200);
             }
 
-            var bytes = System.IO.File.ReadAllBytes(fullFilePath);
-            var fileName = Path.GetFileName(virtualNorm);
+            byte[] bytes = System.IO.File.ReadAllBytes(fullFilePath);
+            string fileName = Path.GetFileName(virtualNorm);
             return File(bytes, "application/octet-stream", fileName);
         }
         catch (Exception ex)
@@ -817,7 +820,7 @@ public class GcodeFilesController(
             return BadRequest("File is required");
         }
 
-        var ext = Path.GetExtension(file.FileName) ?? string.Empty;
+        string ext = Path.GetExtension(file.FileName) ?? string.Empty;
         if (!AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest($"Invalid file type '{ext}'. Allowed: {string.Join(", ", AllowedExtensions)}");
@@ -825,20 +828,20 @@ public class GcodeFilesController(
 
         try
         {
-            var (_, targetDirFullPath, virtualDir) = ResolveAndValidatePath(path);
+            (string _, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
             if (!Directory.Exists(targetDirFullPath))
             {
                 Directory.CreateDirectory(targetDirFullPath);
             }
 
             // Sanitize filename (basic) - strip path separators
-            var originalName = Path.GetFileName(file.FileName);
+            string originalName = Path.GetFileName(file.FileName);
             if (string.IsNullOrWhiteSpace(originalName))
             {
                 originalName = "upload.gcode";
             }
-            var safeName = originalName;
-            foreach (var c in Path.GetInvalidFileNameChars())
+            string safeName = originalName;
+            foreach (char c in Path.GetInvalidFileNameChars())
             {
                 safeName = safeName.Replace(c, '_');
             }
@@ -847,9 +850,9 @@ public class GcodeFilesController(
                 safeName += ext; // enforce extension if somehow dropped
             }
 
-            var destinationPath = Path.Combine(targetDirFullPath, safeName);
+            string destinationPath = Path.Combine(targetDirFullPath, safeName);
             // Prevent escape (re-evaluate after combine) and enforce directory root
-            var fullTarget = Path.GetFullPath(destinationPath);
+            string fullTarget = Path.GetFullPath(destinationPath);
             if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
             {
                 return BadRequest("Unsafe target path");
@@ -858,7 +861,7 @@ public class GcodeFilesController(
             // Collision handling: append (1), (2), ... before extension
             if (System.IO.File.Exists(fullTarget))
             {
-                var baseName = Path.GetFileNameWithoutExtension(safeName);
+                string baseName = Path.GetFileNameWithoutExtension(safeName);
                 int counter = 1;
                 string candidate;
                 do
@@ -870,19 +873,19 @@ public class GcodeFilesController(
             }
 
             // Quota check before writing
-            var userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-            if (!quotaService.TryAddUsage(userId, file.Length, out var used, out var limit))
+            string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+            if (!quotaService.TryAddUsage(userId, file.Length, out long used, out long limit))
             {
                 Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
                 Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
                 return StatusCode(429, $"Daily upload quota exceeded ({used}/{limit} bytes)");
             }
-            await using var fs = new FileStream(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await file.CopyToAsync(fs);
 
-            var info = new System.IO.FileInfo(fullTarget);
-            var virtualFilePath = CombineVirtual(virtualDir, safeName);
-            var dto = new GcodeFileEntryDto(
+            System.IO.FileInfo info = new(fullTarget);
+            string virtualFilePath = CombineVirtual(virtualDir, safeName);
+            GcodeFileEntryDto dto = new(
                 Path: virtualFilePath,
                 Name: safeName,
                 Size: info.Length,
@@ -915,16 +918,16 @@ public class GcodeFilesController(
         {
             return BadRequest("At least one file is required");
         }
-        var created = new List<GcodeFileEntryDto>();
-        var failed = new List<MultiUploadFailure>();
+        List<GcodeFileEntryDto> created = new();
+        List<MultiUploadFailure> failed = new();
         try
         {
-            var (_, targetDirFullPath, virtualDir) = ResolveAndValidatePath(path);
+            (string _, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
             if (!Directory.Exists(targetDirFullPath))
             {
                 Directory.CreateDirectory(targetDirFullPath);
             }
-            foreach (var f in files)
+            foreach (IFormFile? f in files)
             {
                 try
                 {
@@ -933,22 +936,22 @@ public class GcodeFilesController(
                         failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), "Empty file"));
                         continue;
                     }
-                    var ext = Path.GetExtension(f.FileName) ?? string.Empty;
+                    string ext = Path.GetExtension(f.FileName) ?? string.Empty;
                     if (!AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
                     {
                         failed.Add(new MultiUploadFailure(SafeOriginalName(f.FileName), $"Invalid file type '{ext}'"));
                         continue;
                     }
                     // Quota per file (aggregate effect). If exceeds, mark failed.
-                    var userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-                    if (!quotaService.TryAddUsage(userId, f.Length, out var used, out var limit))
+                    string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+                    if (!quotaService.TryAddUsage(userId, f.Length, out long used, out long limit))
                     {
                         failed.Add(new MultiUploadFailure(SafeOriginalName(f.FileName), $"Quota exceeded ({used}/{limit})"));
                         continue;
                     }
-                    var (fullTarget, safeName) = await SaveUploadedFileAsync(f, targetDirFullPath);
-                    var info = new System.IO.FileInfo(fullTarget);
-                    var virtualFilePath = CombineVirtual(virtualDir, safeName);
+                    (string? fullTarget, string? safeName) = await SaveUploadedFileAsync(f, targetDirFullPath);
+                    System.IO.FileInfo info = new(fullTarget);
+                    string virtualFilePath = CombineVirtual(virtualDir, safeName);
                     created.Add(new GcodeFileEntryDto(
                         Path: virtualFilePath,
                         Name: safeName,
@@ -963,7 +966,7 @@ public class GcodeFilesController(
                     failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), exFile.Message));
                 }
             }
-            var response = new MultiUploadResponse(created, failed, created.Count, failed.Count);
+            MultiUploadResponse response = new(created, failed, created.Count, failed.Count);
             // 201 Created referencing directory listing location
             return Created($"/api/gcode-files?path={Uri.EscapeDataString(virtualDir)}", response);
         }
@@ -996,12 +999,12 @@ public class GcodeFilesController(
         }
         try
         {
-            var (_, parentDirFullPath, virtualParent) = ResolveAndValidatePath(path);
+            (string _, string? parentDirFullPath, string? virtualParent) = ResolveAndValidatePath(path);
             if (!Directory.Exists(parentDirFullPath))
             {
                 return NotFound("Parent directory does not exist");
             }
-            var newDirFullPath = Path.GetFullPath(Path.Combine(parentDirFullPath, name));
+            string newDirFullPath = Path.GetFullPath(Path.Combine(parentDirFullPath, name));
             if (!newDirFullPath.StartsWith(parentDirFullPath, StringComparison.Ordinal))
             {
                 return BadRequest("Unsafe directory target");
@@ -1011,7 +1014,7 @@ public class GcodeFilesController(
                 return Conflict("Directory already exists");
             }
             Directory.CreateDirectory(newDirFullPath);
-            var dto = new GcodeFileEntryDto(
+            GcodeFileEntryDto dto = new(
                 Path: CombineVirtual(virtualParent, name),
                 Name: name,
                 Size: 0,
@@ -1039,7 +1042,7 @@ public class GcodeFilesController(
         bool treatAsFile = false)
     {
         // Allow explicit override via environment variable (useful for integration tests)
-        var envOverride = Environment.GetEnvironmentVariable("GCODE_LIBRARY_ROOT");
+        string? envOverride = Environment.GetEnvironmentVariable("GCODE_LIBRARY_ROOT");
         string baseRoot;
         if (!string.IsNullOrWhiteSpace(envOverride))
         {
@@ -1059,21 +1062,21 @@ public class GcodeFilesController(
         }
         // Ensure the resolved base root exists (idempotent) so later code relying on its presence succeeds.
         Directory.CreateDirectory(baseRoot);
-        var root = rootFullPathOverride ?? Path.GetFullPath(Path.Combine(baseRoot, "gcode-library"));
+        string root = rootFullPathOverride ?? Path.GetFullPath(Path.Combine(baseRoot, "gcode-library"));
         Directory.CreateDirectory(root); // ensure exists
 
         // Normalize incoming virtual path
-        var vPath = string.IsNullOrWhiteSpace(virtualPath) ? "/" : virtualPath.Trim();
+        string vPath = string.IsNullOrWhiteSpace(virtualPath) ? "/" : virtualPath.Trim();
         if (!vPath.StartsWith('/'))
         {
             vPath = "/" + vPath;
         }
         // Collapse .. segments
-        var segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+        string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(s => s != "." && s != "..")
             .ToArray();
-        var safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
-        var candidate = Path.GetFullPath(Path.Combine(root, safeRel));
+        string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
+        string candidate = Path.GetFullPath(Path.Combine(root, safeRel));
         if (!candidate.StartsWith(root, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Path escapes library root");
@@ -1100,7 +1103,7 @@ public class GcodeFilesController(
     }
     private static string GenerateEtag(System.IO.FileInfo info, bool weak = false)
     {
-        var core = $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}";
+        string core = $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}";
         return weak ? $"W/\"{core}\"" : $"\"{core}\"";
     }
 
@@ -1109,14 +1112,14 @@ public class GcodeFilesController(
 
     private static async Task<(string fullTargetPath, string safeName)> SaveUploadedFileAsync(IFormFile file, string targetDirFullPath)
     {
-        var ext = Path.GetExtension(file.FileName) ?? string.Empty;
-        var originalName = Path.GetFileName(file.FileName);
+        string ext = Path.GetExtension(file.FileName) ?? string.Empty;
+        string originalName = Path.GetFileName(file.FileName);
         if (string.IsNullOrWhiteSpace(originalName))
         {
             originalName = "upload" + ext;
         }
-        var safeName = originalName;
-        foreach (var c in Path.GetInvalidFileNameChars())
+        string safeName = originalName;
+        foreach (char c in Path.GetInvalidFileNameChars())
         {
             safeName = safeName.Replace(c, '_');
         }
@@ -1124,15 +1127,15 @@ public class GcodeFilesController(
         {
             safeName += ext;
         }
-        var destinationPath = Path.Combine(targetDirFullPath, safeName);
-        var fullTarget = Path.GetFullPath(destinationPath);
+        string destinationPath = Path.Combine(targetDirFullPath, safeName);
+        string fullTarget = Path.GetFullPath(destinationPath);
         if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Unsafe target path");
         }
         if (System.IO.File.Exists(fullTarget))
         {
-            var baseName = Path.GetFileNameWithoutExtension(safeName);
+            string baseName = Path.GetFileNameWithoutExtension(safeName);
             int counter = 1;
             string candidate;
             do
@@ -1142,7 +1145,7 @@ public class GcodeFilesController(
             } while (System.IO.File.Exists(fullTarget));
             safeName = Path.GetFileName(fullTarget);
         }
-        await using var fs = new FileStream(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await file.CopyToAsync(fs);
         return (fullTarget, safeName);
     }
@@ -1166,7 +1169,7 @@ public class GcodeFilesController(
                 state.FinalHash,
                 state.Paused
             };
-            var json = JsonSerializer.Serialize(model);
+            string json = JsonSerializer.Serialize(model);
             System.IO.File.WriteAllText(state.MetaFilePath, json);
         }
         catch (Exception ex)
@@ -1177,9 +1180,9 @@ public class GcodeFilesController(
 
     private static string ToHex(byte[] bytes)
     {
-        var c = new char[bytes.Length * 2];
+        char[] c = new char[bytes.Length * 2];
         int i = 0;
-        foreach (var b in bytes)
+        foreach (byte b in bytes)
         {
             c[i++] = (char)(b >> 4 < 10 ? '0' + (b >> 4) : 'a' + (b >> 4) - 10);
             c[i++] = (char)((b & 0xF) < 10 ? '0' + (b & 0xF) : 'a' + (b & 0xF) - 10);
@@ -1192,8 +1195,8 @@ public class GcodeFilesController(
     [ProducesResponseType(typeof(GcodeUploadSettingsResponse), 200)]
     public ActionResult<GcodeUploadSettingsResponse> GetSettings()
     {
-        var userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-        quotaService.TryAddUsage(userId, 0, out var used, out var limit); // peek usage
+        string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+        quotaService.TryAddUsage(userId, 0, out long used, out long limit); // peek usage
         return Ok(new GcodeUploadSettingsResponse(AllowedExtensions, limit, used));
     }
 
@@ -1224,15 +1227,15 @@ public class GcodeFilesController(
         }
         try
         {
-            var (root, sourceFull, _) = ResolveAndValidatePath(request.SourcePath, treatAsFile: true);
-            var (_, destFull, destVirtual) = ResolveAndValidatePath(request.DestinationPath, rootFullPathOverride: root, treatAsFile: true);
+            (string? root, string? sourceFull, string _) = ResolveAndValidatePath(request.SourcePath, treatAsFile: true);
+            (string _, string? destFull, string? destVirtual) = ResolveAndValidatePath(request.DestinationPath, rootFullPathOverride: root, treatAsFile: true);
             if (!System.IO.File.Exists(sourceFull) && !Directory.Exists(sourceFull))
             {
                 return NotFound("Source not found");
             }
-            var isDirectory = Directory.Exists(sourceFull);
-            var destExistsFile = System.IO.File.Exists(destFull);
-            var destExistsDir = Directory.Exists(destFull);
+            bool isDirectory = Directory.Exists(sourceFull);
+            bool destExistsFile = System.IO.File.Exists(destFull);
+            bool destExistsDir = Directory.Exists(destFull);
             if ((destExistsFile || destExistsDir) && !request.Overwrite)
             {
                 return Conflict("Destination already exists");

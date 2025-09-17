@@ -77,26 +77,26 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "printer/info");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "printer/info");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return new PrinterStatus(false, null);
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
             string? state = null;
-            var root = doc.RootElement;
-            if (root.TryGetProperty("state", out var s1) && s1.ValueKind == JsonValueKind.String)
+            JsonElement root = doc.RootElement;
+            if (root.TryGetProperty("state", out JsonElement s1) && s1.ValueKind == JsonValueKind.String)
             {
                 state = s1.GetString();
             }
-            else if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object &&
-                     result.TryGetProperty("state", out var s2) && s2.ValueKind == JsonValueKind.String)
+            else if (root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object &&
+                     result.TryGetProperty("state", out JsonElement s2) && s2.ValueKind == JsonValueKind.String)
             {
                 state = s2.GetString();
             }
@@ -134,23 +134,23 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "printer/info");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "printer/info");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
-            var root = doc.RootElement;
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
 
             // Handle both direct response and wrapped response
-            var infoElement = root;
-            if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object)
+            JsonElement infoElement = root;
+            if (root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object)
             {
                 infoElement = result;
             }
@@ -188,30 +188,30 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "printer/objects/query?print_stats&display_status&job_queue");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "printer/objects/query?print_stats&display_status&job_queue");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
-            var root = doc.RootElement;
-            if (!root.TryGetProperty("result", out var result))
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
+            if (!root.TryGetProperty("result", out JsonElement result))
             {
                 return null;
             }
 
             string? state = null;
-            if (result.TryGetProperty("status", out var statusNode) &&
+            if (result.TryGetProperty("status", out JsonElement statusNode) &&
                 statusNode.ValueKind == JsonValueKind.Object &&
-                statusNode.TryGetProperty("print_stats", out var psNode) &&
+                statusNode.TryGetProperty("print_stats", out JsonElement psNode) &&
                 psNode.ValueKind == JsonValueKind.Object &&
-                psNode.TryGetProperty("state", out var stNode) &&
+                psNode.TryGetProperty("state", out JsonElement stNode) &&
                 stNode.ValueKind == JsonValueKind.String)
             {
                 state = stNode.GetString();
@@ -226,10 +226,10 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string? jobName = null;
             string? thumb = null;
 
-            if (result.TryGetProperty("status", out var statusEl))
+            if (result.TryGetProperty("status", out JsonElement statusEl))
             {
-                if (statusEl.TryGetProperty("display_status", out var display) &&
-                    display.TryGetProperty("progress", out var prog))
+                if (statusEl.TryGetProperty("display_status", out JsonElement display) &&
+                    display.TryGetProperty("progress", out JsonElement prog))
                 {
                     double pv = 0;
                     try
@@ -241,23 +241,23 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                     }
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
-                if (statusEl.TryGetProperty("print_stats", out var ps) &&
-                    ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
+                if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
+                    ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
                 {
                     jobName = fn.GetString();
                 }
             }
 
             // Try Klipper job queue for thumbnail path
-            if (result.TryGetProperty("job_queue", out var jq) && jq.ValueKind == JsonValueKind.Object &&
-                jq.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
+            if (result.TryGetProperty("job_queue", out JsonElement jq) && jq.ValueKind == JsonValueKind.Object &&
+                jq.TryGetProperty("thumbnails", out JsonElement thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
             {
-                var first = thumbs[0];
-                if (first.TryGetProperty("relative_path", out var rp) && rp.ValueKind == JsonValueKind.String)
+                JsonElement first = thumbs[0];
+                if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
                 {
-                    var baseUri2 = new Uri(NormalizeBaseUrl(baseUrl));
-                    var relPath = Uri.EscapeDataString(rp.GetString()!);
-                    var thumbUri = new Uri(baseUri2, $"server/files/gcodes/{relPath}");
+                    Uri baseUri2 = new(NormalizeBaseUrl(baseUrl));
+                    string relPath = Uri.EscapeDataString(rp.GetString()!);
+                    Uri thumbUri = new(baseUri2, $"server/files/gcodes/{relPath}");
                     thumb = thumbUri.ToString();
                 }
             }
@@ -267,23 +267,23 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             {
                 try
                 {
-                    var baseUri3 = new Uri(NormalizeBaseUrl(baseUrl));
-                    var metaUri = new Uri(baseUri3, $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
-                    using var mresp = await http.GetAsync(metaUri, cts.Token);
+                    Uri baseUri3 = new(NormalizeBaseUrl(baseUrl));
+                    Uri metaUri = new(baseUri3, $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
+                    using HttpResponseMessage mresp = await http.GetAsync(metaUri, cts.Token);
                     if (mresp.IsSuccessStatusCode)
                     {
-                        await using var mstream = await mresp.Content.ReadAsStreamAsync(cts.Token);
-                        using var mdoc = await JsonDocument.ParseAsync(mstream, cancellationToken: cts.Token);
-                        var mroot = mdoc.RootElement;
-                        if (mroot.TryGetProperty("result", out var mres) &&
-                            mres.TryGetProperty("thumbnails", out var mthumbs) &&
+                        await using Stream mstream = await mresp.Content.ReadAsStreamAsync(cts.Token);
+                        using JsonDocument mdoc = await JsonDocument.ParseAsync(mstream, cancellationToken: cts.Token);
+                        JsonElement mroot = mdoc.RootElement;
+                        if (mroot.TryGetProperty("result", out JsonElement mres) &&
+                            mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
                             mthumbs.ValueKind == JsonValueKind.Array && mthumbs.GetArrayLength() > 0)
                         {
-                            var first = mthumbs[0];
-                            if (first.TryGetProperty("relative_path", out var rp) && rp.ValueKind == JsonValueKind.String)
+                            JsonElement first = mthumbs[0];
+                            if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
                             {
-                                var baseUriX = new Uri(NormalizeBaseUrl(baseUrl));
-                                var thumbUri2 = new Uri(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
+                                Uri baseUriX = new(NormalizeBaseUrl(baseUrl));
+                                Uri thumbUri2 = new(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
                                 thumb = thumbUri2.ToString();
                             }
                         }
@@ -304,27 +304,27 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var listUri = new Uri(baseUri, "server/webcams/list");
-            using var resp = await http.GetAsync(listUri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri listUri = new(baseUri, "server/webcams/list");
+            using HttpResponseMessage resp = await http.GetAsync(listUri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
-            var root = doc.RootElement;
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
             JsonElement cams;
             if ((root.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array) ||
-                (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array))
+                (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array))
             {
-                foreach (var cam in cams.EnumerateArray())
+                foreach (JsonElement cam in cams.EnumerateArray())
                 {
                     bool enabled = true;
-                    if (cam.TryGetProperty("enabled", out var en))
+                    if (cam.TryGetProperty("enabled", out JsonElement en))
                     {
                         if (en.ValueKind == JsonValueKind.False)
                         {
@@ -341,53 +341,53 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                     }
 
                     // Try direct snapshot_url from listing
-                    if (cam.TryGetProperty("snapshot_url", out var sn) && sn.ValueKind == JsonValueKind.String)
+                    if (cam.TryGetProperty("snapshot_url", out JsonElement sn) && sn.ValueKind == JsonValueKind.String)
                     {
-                        var s = sn.GetString();
+                        string? s = sn.GetString();
                         if (!string.IsNullOrWhiteSpace(s))
                         {
-                            var baseNormSnap = NormalizeBaseUrl(baseUrl);
+                            string baseNormSnap = NormalizeBaseUrl(baseUrl);
                             return NormalizeCameraUrl(s, baseNormSnap);
                         }
                     }
 
                     // Prefer resolved URLs via /server/webcams/test using uid or name
                     string? uid = null;
-                    if (cam.TryGetProperty("uid", out var uidEl) && uidEl.ValueKind == JsonValueKind.String)
+                    if (cam.TryGetProperty("uid", out JsonElement uidEl) && uidEl.ValueKind == JsonValueKind.String)
                     {
                         uid = uidEl.GetString();
                     }
 
                     string? name = null;
-                    if (cam.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String)
+                    if (cam.TryGetProperty("name", out JsonElement nmEl) && nmEl.ValueKind == JsonValueKind.String)
                     {
                         name = nmEl.GetString();
                     }
 
-                    var testUri = uid is not null
+                    Uri? testUri = uid is not null
                         ? new Uri(new Uri(NormalizeBaseUrl(baseUrl)), $"server/webcams/test?uid={Uri.EscapeDataString(uid)}")
                         : (name is not null ? new Uri(new Uri(NormalizeBaseUrl(baseUrl)), $"server/webcams/test?name={Uri.EscapeDataString(name)}") : null);
                     if (testUri is not null)
                     {
                         try
                         {
-                            using var tresp = await http.PostAsync(testUri, content: null, cts.Token);
+                            using HttpResponseMessage tresp = await http.PostAsync(testUri, content: null, cts.Token);
                             if (tresp.IsSuccessStatusCode)
                             {
-                                await using var tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
-                                using var tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
-                                var troot = tdoc.RootElement;
-                                if (troot.TryGetProperty("result", out var tresult))
+                                await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
+                                using JsonDocument tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
+                                JsonElement troot = tdoc.RootElement;
+                                if (troot.TryGetProperty("result", out JsonElement tresult))
                                 {
                                     troot = tresult;
                                 }
 
-                                if (troot.TryGetProperty("snapshot_url", out var tsu) && tsu.ValueKind == JsonValueKind.String)
+                                if (troot.TryGetProperty("snapshot_url", out JsonElement tsu) && tsu.ValueKind == JsonValueKind.String)
                                 {
-                                    var s = tsu.GetString();
+                                    string? s = tsu.GetString();
                                     if (!string.IsNullOrWhiteSpace(s))
                                     {
-                                        var baseNormLocal = NormalizeBaseUrl(baseUrl);
+                                        string baseNormLocal = NormalizeBaseUrl(baseUrl);
                                         return NormalizeCameraUrl(s, baseNormLocal);
                                     }
                                 }
@@ -406,15 +406,15 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            var url = await GetCameraSnapshotUrlAsync(baseUrl, ct);
+            string? url = await GetCameraSnapshotUrlAsync(baseUrl, ct);
             if (string.IsNullOrWhiteSpace(url))
             {
                 return null;
             }
 
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            using var resp = await http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
+            using HttpResponseMessage resp = await http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -427,26 +427,26 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
     public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
     {
-        var status = await GetStatusAsync(baseUrl, ct);
-        var job = await GetJobAsync(baseUrl, ct);
+        PrinterStatus status = await GetStatusAsync(baseUrl, ct);
+        PrinterJob? job = await GetJobAsync(baseUrl, ct);
         // Try to read current position
         double? x = null, y = null, z = null;
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var posUri = new Uri(baseUri, "printer/objects/query?toolhead=position");
-            using var resp = await http.GetAsync(posUri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri posUri = new(baseUri, "printer/objects/query?toolhead=position");
+            using HttpResponseMessage resp = await http.GetAsync(posUri, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
-                await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
-                var root = doc.RootElement;
-                if (root.TryGetProperty("result", out var result) &&
-                    result.TryGetProperty("status", out var statusNode) &&
-                    statusNode.TryGetProperty("toolhead", out var th) &&
-                    th.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
+                await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+                using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+                JsonElement root = doc.RootElement;
+                if (root.TryGetProperty("result", out JsonElement result) &&
+                    result.TryGetProperty("status", out JsonElement statusNode) &&
+                    statusNode.TryGetProperty("toolhead", out JsonElement th) &&
+                    th.TryGetProperty("position", out JsonElement pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
                 {
                     try
                     { x = pos[0].GetDouble(); }
@@ -461,35 +461,35 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
         }
         catch { }
-        var state = status.State ?? job?.PrintState; // prefer system state (ready/shutdown/error) over print job state
+        string? state = status.State ?? job?.PrintState; // prefer system state (ready/shutdown/error) over print job state
         // Query temps
         double? hotend = null, bed = null, hotendT = null, bedT = null;
         try
         {
-            using var cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts2.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri2 = new Uri(NormalizeBaseUrl(baseUrl));
-            var tempsUri = new Uri(baseUri2, "printer/objects/query?extruder&heater_bed");
-            using var resp2 = await http.GetAsync(tempsUri, cts2.Token);
+            Uri baseUri2 = new(NormalizeBaseUrl(baseUrl));
+            Uri tempsUri = new(baseUri2, "printer/objects/query?extruder&heater_bed");
+            using HttpResponseMessage resp2 = await http.GetAsync(tempsUri, cts2.Token);
             if (resp2.IsSuccessStatusCode)
             {
-                await using var stream2 = await resp2.Content.ReadAsStreamAsync(cts2.Token);
-                using var doc2 = await JsonDocument.ParseAsync(stream2, cancellationToken: cts2.Token);
-                var root2 = doc2.RootElement;
-                if (root2.TryGetProperty("result", out var result2) && result2.TryGetProperty("status", out var status2))
+                await using Stream stream2 = await resp2.Content.ReadAsStreamAsync(cts2.Token);
+                using JsonDocument doc2 = await JsonDocument.ParseAsync(stream2, cancellationToken: cts2.Token);
+                JsonElement root2 = doc2.RootElement;
+                if (root2.TryGetProperty("result", out JsonElement result2) && result2.TryGetProperty("status", out JsonElement status2))
                 {
-                    if (status2.TryGetProperty("extruder", out var ex))
+                    if (status2.TryGetProperty("extruder", out JsonElement ex))
                     {
-                        if (ex.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
+                        if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
                         { try { hotend = t.GetDouble(); } catch { } }
-                        if (ex.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
+                        if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
                         { try { hotendT = tt.GetDouble(); } catch { } }
                     }
-                    if (status2.TryGetProperty("heater_bed", out var hb))
+                    if (status2.TryGetProperty("heater_bed", out JsonElement hb))
                     {
-                        if (hb.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
+                        if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
                         { try { bed = t.GetDouble(); } catch { } }
-                        if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
+                        if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
                         { try { bedT = tt.GetDouble(); } catch { } }
                     }
                 }
@@ -502,7 +502,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         string? snap = null;
         if (status.IsOnline)
         {
-            var (streamUrl, snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct);
+            (string? streamUrl, string? snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct);
             cam = streamUrl;
             snap = snapshotUrl;
         }
@@ -520,7 +520,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
     public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
     {
-        var cmds = new List<string>();
+        List<string> cmds = new();
         if (hotend is not null)
         {
             cmds.Add($"M104 S{hotend:0}");
@@ -557,7 +557,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             parts.Add($"F{f:0.###}");
         }
 
-        var cmds = new[] { string.Join(' ', parts), "G90" };
+        string[] cmds = new[] { string.Join(' ', parts), "G90" };
         return await SendGcodeAsync(baseUrl, cmds, ct);
     }
 
@@ -612,11 +612,11 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri4 = new Uri(NormalizeBaseUrl(baseUrl));
-            var scriptUri = new Uri(baseUri4, "printer/gcode/script");
-            using var resp = await http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
+            Uri baseUri4 = new(NormalizeBaseUrl(baseUrl));
+            Uri scriptUri = new(baseUri4, "printer/gcode/script");
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -632,31 +632,31 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         string? snapshot = null;
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var listUri = new Uri(baseUri, "server/webcams/list");
-            using var resp = await http.GetAsync(listUri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri listUri = new(baseUri, "server/webcams/list");
+            using HttpResponseMessage resp = await http.GetAsync(listUri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return (null, null);
             }
 
-            await using var streamContent = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using var doc = await JsonDocument.ParseAsync(streamContent, cancellationToken: cts.Token);
-            var root = doc.RootElement;
+            await using Stream streamContent = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(streamContent, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
             JsonElement cams;
             if (!((root.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array) ||
-                  (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array)))
+                  (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array)))
             {
                 return (null, null);
             }
 
-            var baseNorm = NormalizeBaseUrl(baseUrl);
-            foreach (var cam in cams.EnumerateArray())
+            string baseNorm = NormalizeBaseUrl(baseUrl);
+            foreach (JsonElement cam in cams.EnumerateArray())
             {
                 bool enabled = true;
-                if (cam.TryGetProperty("enabled", out var en))
+                if (cam.TryGetProperty("enabled", out JsonElement en))
                 {
                     if (en.ValueKind == JsonValueKind.False)
                     {
@@ -674,13 +674,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
                 // Try to resolve via /server/webcams/test using uid or name
                 string? uid = null;
-                if (cam.TryGetProperty("uid", out var uidEl) && uidEl.ValueKind == JsonValueKind.String)
+                if (cam.TryGetProperty("uid", out JsonElement uidEl) && uidEl.ValueKind == JsonValueKind.String)
                 {
                     uid = uidEl.GetString();
                 }
 
                 string? name = null;
-                if (cam.TryGetProperty("name", out var nmEl) && nmEl.ValueKind == JsonValueKind.String)
+                if (cam.TryGetProperty("name", out JsonElement nmEl) && nmEl.ValueKind == JsonValueKind.String)
                 {
                     name = nmEl.GetString();
                 }
@@ -692,23 +692,23 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 {
                     try
                     {
-                        using var tresp = await http.PostAsync(testUri, content: null, cts.Token);
+                        using HttpResponseMessage tresp = await http.PostAsync(testUri, content: null, cts.Token);
                         if (tresp.IsSuccessStatusCode)
                         {
-                            await using var tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
-                            using var tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
-                            var troot = tdoc.RootElement;
-                            if (troot.TryGetProperty("result", out var tresult))
+                            await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
+                            using JsonDocument tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
+                            JsonElement troot = tdoc.RootElement;
+                            if (troot.TryGetProperty("result", out JsonElement tresult))
                             {
                                 troot = tresult;
                             }
 
-                            if (stream is null && troot.TryGetProperty("stream_url", out var tsu) && tsu.ValueKind == JsonValueKind.String)
+                            if (stream is null && troot.TryGetProperty("stream_url", out JsonElement tsu) && tsu.ValueKind == JsonValueKind.String)
                             {
                                 stream = NormalizeCameraUrl(tsu.GetString(), baseNorm);
                             }
 
-                            if (snapshot is null && troot.TryGetProperty("snapshot_url", out var ssu) && ssu.ValueKind == JsonValueKind.String)
+                            if (snapshot is null && troot.TryGetProperty("snapshot_url", out JsonElement ssu) && ssu.ValueKind == JsonValueKind.String)
                             {
                                 snapshot = NormalizeCameraUrl(ssu.GetString(), baseNorm);
                             }
@@ -734,17 +734,17 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 }
 
                 // Fallback to raw listing values, normalizing relative paths
-                if (stream is null && cam.TryGetProperty("stream_url", out var su) && su.ValueKind == JsonValueKind.String)
+                if (stream is null && cam.TryGetProperty("stream_url", out JsonElement su) && su.ValueKind == JsonValueKind.String)
                 {
-                    var s = su.GetString();
+                    string? s = su.GetString();
                     if (!string.IsNullOrWhiteSpace(s))
                     {
                         stream = NormalizeCameraUrl(s, baseNorm);
                     }
                 }
-                if (snapshot is null && cam.TryGetProperty("snapshot_url", out var sn) && sn.ValueKind == JsonValueKind.String)
+                if (snapshot is null && cam.TryGetProperty("snapshot_url", out JsonElement sn) && sn.ValueKind == JsonValueKind.String)
                 {
-                    var s = sn.GetString();
+                    string? s = sn.GetString();
                     if (!string.IsNullOrWhiteSpace(s))
                     {
                         snapshot = NormalizeCameraUrl(s, baseNorm);
@@ -786,18 +786,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for file uploads
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/upload");
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/upload");
 
-            using var formContent = new MultipartFormDataContent();
-            using var streamContent = new StreamContent(fileContent);
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(fileContent);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
 
-            using var resp = await http.PostAsync(uri, formContent, cts.Token);
+            using HttpResponseMessage resp = await http.PostAsync(uri, formContent, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -810,14 +810,14 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "printer/print/start");
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "printer/print/start");
             var payload = new { filename = fileName };
 
-            using var resp = await http.PostAsJsonAsync(uri, payload, cts.Token);
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, payload, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -830,34 +830,34 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/list?root=gcodes");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/list?root=gcodes");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return Array.Empty<string>();
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
-            var root = doc.RootElement;
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
 
-            if (!root.TryGetProperty("result", out var result) ||
+            if (!root.TryGetProperty("result", out JsonElement result) ||
                 result.ValueKind != JsonValueKind.Array)
             {
                 return Array.Empty<string>();
             }
 
-            var files = new List<string>();
-            foreach (var file in result.EnumerateArray())
+            List<string> files = new();
+            foreach (JsonElement file in result.EnumerateArray())
             {
-                if (file.TryGetProperty("path", out var path) &&
+                if (file.TryGetProperty("path", out JsonElement path) &&
                     path.ValueKind == JsonValueKind.String)
                 {
-                    var fileName = path.GetString();
+                    string? fileName = path.GetString();
                     if (!string.IsNullOrEmpty(fileName) && fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
                     {
                         files.Add(fileName);
@@ -881,18 +881,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/roots");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/roots");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return Array.Empty<FileRoot>();
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileRoot[]>>(cancellationToken: cts.Token);
+            MoonrakerResponse<FileRoot[]>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileRoot[]>>(cancellationToken: cts.Token);
             return response?.Result ?? Array.Empty<FileRoot>();
         }
         catch
@@ -908,20 +908,20 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
             // First try using REST API
-            var encodedPath = Uri.EscapeDataString(path);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}");
+            string encodedPath = Uri.EscapeDataString(path);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}");
 
-            using var resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
                 try
                 {
-                    var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
+                    MoonrakerResponse<DirectoryInfo>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
                     if (response?.Result != null)
                     {
                         return response.Result;
@@ -935,7 +935,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
 
             // If REST API fails, try using JSON-RPC
-            var jsonRpcRequest = new JsonRpcRequest
+            JsonRpcRequest jsonRpcRequest = new()
             {
                 Method = "server.files.get_directory",
                 Params = new Dictionary<string, object>
@@ -946,21 +946,21 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 Id = 1
             };
 
-            var jsonRpcUri = new Uri(baseUri, "websocket");
-            var jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
-            using var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            Uri jsonRpcUri = new(baseUri, "websocket");
+            string jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
+            using StringContent content = new(jsonContent, Encoding.UTF8, "application/json");
 
-            using var jsonRpcResp = await http.PostAsync(jsonRpcUri, content, cts.Token);
+            using HttpResponseMessage jsonRpcResp = await http.PostAsync(jsonRpcUri, content, cts.Token);
             if (!jsonRpcResp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var responseJson = await jsonRpcResp.Content.ReadAsStringAsync(cts.Token);
+            string responseJson = await jsonRpcResp.Content.ReadAsStringAsync(cts.Token);
 
             try
             {
-                var jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(responseJson);
+                JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(responseJson);
 
                 if (jsonRpcResponse?.Error != null)
                 {
@@ -979,9 +979,9 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                         };
 
                         jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
-                        using var retryContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                        using StringContent retryContent = new(jsonContent, Encoding.UTF8, "application/json");
 
-                        using var retryResp = await http.PostAsync(jsonRpcUri, retryContent, cts.Token);
+                        using HttpResponseMessage retryResp = await http.PostAsync(jsonRpcUri, retryContent, cts.Token);
                         if (!retryResp.IsSuccessStatusCode)
                         {
                             return null;
@@ -1008,8 +1008,8 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 }
 
                 // Deserialize the result to DirectoryInfo
-                var resultJson = jsonRpcResponse.Result.ToString();
-                var directoryInfo = JsonSerializer.Deserialize<DirectoryInfo>(resultJson ?? "{}");
+                string? resultJson = jsonRpcResponse.Result.ToString();
+                DirectoryInfo? directoryInfo = JsonSerializer.Deserialize<DirectoryInfo>(resultJson ?? "{}");
                 return directoryInfo;
             }
             catch (JsonException jex)
@@ -1048,18 +1048,19 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/directory");
-            var request = new DirectoryCreateRequest { Path = path };
-            using var resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/directory");
+            DirectoryCreateRequest request = new()
+            { Path = path };
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryCreateResponse>>(cancellationToken: cts.Token);
+            MoonrakerResponse<DirectoryCreateResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryCreateResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch
@@ -1075,13 +1076,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var encodedPath = Uri.EscapeDataString(path);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/directory?path={encodedPath}&force={force.ToString().ToLowerInvariant()}");
-            using var resp = await http.DeleteAsync(uri, cts.Token);
+            string encodedPath = Uri.EscapeDataString(path);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&force={force.ToString().ToLowerInvariant()}");
+            using HttpResponseMessage resp = await http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1097,12 +1098,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/move");
-            var request = new FileMoveRequest { Source = source, Dest = dest };
-            using var resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/move");
+            FileMoveRequest request = new()
+            { Source = source, Dest = dest };
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1118,12 +1120,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/copy");
-            var request = new FileCopyRequest { Source = source, Dest = dest };
-            using var resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/copy");
+            FileCopyRequest request = new()
+            { Source = source, Dest = dest };
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1139,19 +1142,19 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var encodedFilename = Uri.EscapeDataString(filename);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/metadata?filename={encodedFilename}");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/metadata?filename={encodedFilename}");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<GCodeMetadata>>(cancellationToken: cts.Token);
+            MoonrakerResponse<GCodeMetadata>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<GCodeMetadata>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch
@@ -1167,12 +1170,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/metascan");
-            var request = new MetadataScanRequest { Filename = filename };
-            using var resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/metascan");
+            MetadataScanRequest request = new()
+            { Filename = filename };
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1204,13 +1208,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var encodedFilename = Uri.EscapeDataString(filename);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/thumbs/{encodedFilename}");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/thumbs/{encodedFilename}");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1231,13 +1235,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for downloads
 
-            var encodedFilename = Uri.EscapeDataString(filename);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/gcodes/{encodedFilename}");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1259,13 +1263,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for uploads
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/upload");
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/upload");
 
-            using var formContent = new MultipartFormDataContent();
-            using var streamContent = new StreamContent(content);
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(content);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", filename);
             formContent.Add(new StringContent(root), "root");
@@ -1275,13 +1279,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 formContent.Add(new StringContent("true"), "print");
             }
 
-            using var resp = await http.PostAsync(uri, formContent, cts.Token);
+            using HttpResponseMessage resp = await http.PostAsync(uri, formContent, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
+            MoonrakerResponse<FileUploadResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch
@@ -1298,16 +1302,16 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(60));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/files/upload");
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/files/upload");
 
-            using var formContent = new MultipartFormDataContent();
-            using var streamContent = new StreamContent(content);
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(content);
             streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
 
-            var filename = System.IO.Path.GetFileName(path);
+            string filename = System.IO.Path.GetFileName(path);
             formContent.Add(streamContent, "file", filename);
             formContent.Add(new StringContent(path), "path");
 
@@ -1316,13 +1320,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 formContent.Add(new StringContent("true"), "print");
             }
 
-            using var resp = await http.PostAsync(uri, formContent, cts.Token);
+            using HttpResponseMessage resp = await http.PostAsync(uri, formContent, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
+            MoonrakerResponse<FileUploadResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch
@@ -1338,23 +1342,23 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var relative = $"server/files/list?root={Uri.EscapeDataString(root)}&extended=true";
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            string relative = $"server/files/list?root={Uri.EscapeDataString(root)}&extended=true";
             if (!string.IsNullOrEmpty(path))
             {
                 relative += $"&path={Uri.EscapeDataString(path)}";
             }
 
-            var uri = new Uri(baseUri, relative);
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri uri = new(baseUri, relative);
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return [];
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerFileInfo[]>>(cancellationToken: cts.Token);
+            MoonrakerResponse<MoonrakerFileInfo[]>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerFileInfo[]>>(cancellationToken: cts.Token);
             return response?.Result ?? [];
         }
         catch
@@ -1370,13 +1374,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var encodedPath = Uri.EscapeDataString(path);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/gcodes/{encodedPath}");
-            using var resp = await http.DeleteAsync(uri, cts.Token);
+            string encodedPath = Uri.EscapeDataString(path);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/gcodes/{encodedPath}");
+            using HttpResponseMessage resp = await http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1392,20 +1396,20 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30));
 
-            var encodedFilename = Uri.EscapeDataString(filename);
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/files/gcodes/{encodedFilename}");
-            using var resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
+            using HttpResponseMessage resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
             // Read the content into a MemoryStream to ensure proper disposal
-            var content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            byte[] content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
             return new MemoryStream(content);
         }
         catch
@@ -1423,11 +1427,11 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var relative = "server/history/list";
-            var queryParams = new List<string>();
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            string relative = "server/history/list";
+            List<string> queryParams = new();
 
             if (limit.HasValue)
             {
@@ -1459,14 +1463,14 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 relative += "?" + string.Join("&", queryParams);
             }
 
-            var uri = new Uri(baseUri, relative);
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri uri = new(baseUri, relative);
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
+            MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch (Exception ex)
@@ -1483,18 +1487,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
+            MoonrakerResponse<HistoryJob>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch (Exception ex)
@@ -1511,12 +1515,12 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
-            using var resp = await http.DeleteAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
+            using HttpResponseMessage resp = await http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1533,18 +1537,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/history/totals");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/history/totals");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryTotals>>(cancellationToken: cts.Token);
+            MoonrakerResponse<HistoryTotals>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryTotals>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch (Exception ex)
@@ -1561,12 +1565,12 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/history/reset_totals");
-            using var resp = await http.PostAsync(uri, null, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/history/reset_totals");
+            using HttpResponseMessage resp = await http.PostAsync(uri, null, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1585,18 +1589,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/spoolman/status");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/spoolman/status");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanStatus>>(cancellationToken: cts.Token);
+            MoonrakerResponse<SpoolmanStatus>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanStatus>>(cancellationToken: cts.Token);
             return response?.Result;
         }
         catch
@@ -1612,18 +1616,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/spoolman/spool_id");
-            using var resp = await http.GetAsync(uri, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/spoolman/spool_id");
+            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanSpoolIdResponse>>(cancellationToken: cts.Token);
+            MoonrakerResponse<SpoolmanSpoolIdResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanSpoolIdResponse>>(cancellationToken: cts.Token);
             return response?.Result?.SpoolId;
         }
         catch
@@ -1639,12 +1643,13 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/spoolman/spool_id");
-            var request = new SpoolmanSpoolIdRequest { SpoolId = spoolId };
-            using var resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/spoolman/spool_id");
+            SpoolmanSpoolIdRequest request = new()
+            { SpoolId = spoolId };
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1661,11 +1666,11 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     {
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for proxy requests
-            var baseUri = new Uri(NormalizeBaseUrl(baseUrl));
-            var uri = new Uri(baseUri, "server/spoolman/proxy");
-            var request = new SpoolmanProxyRequest
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            Uri uri = new(baseUri, "server/spoolman/proxy");
+            SpoolmanProxyRequest request = new()
             {
                 RequestMethod = method,
                 Path = path,
@@ -1674,7 +1679,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 UseV2Response = useV2Response
             };
 
-            using var resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1725,7 +1730,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     /// </summary>
     public async Task<bool> DeleteSpoolmanSpoolAsync(string baseUrl, int spoolId, CancellationToken ct = default)
     {
-        var result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/spool/{spoolId}", ct: ct);
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/spool/{spoolId}", ct: ct);
         return result != null;
     }
 
@@ -1766,7 +1771,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     /// </summary>
     public async Task<bool> DeleteSpoolmanFilamentAsync(string baseUrl, int filamentId, CancellationToken ct = default)
     {
-        var result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/filament/{filamentId}", ct: ct);
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/filament/{filamentId}", ct: ct);
         return result != null;
     }
 
@@ -1807,7 +1812,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     /// </summary>
     public async Task<bool> DeleteSpoolmanVendorAsync(string baseUrl, int vendorId, CancellationToken ct = default)
     {
-        var result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/vendor/{vendorId}", ct: ct);
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/vendor/{vendorId}", ct: ct);
         return result != null;
     }
 
@@ -1817,7 +1822,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     public async Task<bool> UseSpoolmanFilamentAsync(string baseUrl, double length, CancellationToken ct = default)
     {
         var body = new { used_length = length };
-        var result = await SpoolmanProxyRequestAsync(baseUrl, "PUT", "/api/v1/spool/use", body: body, ct: ct);
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "PUT", "/api/v1/spool/use", body: body, ct: ct);
         return result != null;
     }
 
@@ -1843,7 +1848,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     public async Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null,
         bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default)
     {
-        var queryParams = new List<string>();
+        List<string> queryParams = new();
         if (!string.IsNullOrEmpty(query))
         {
             queryParams.Add($"search={Uri.EscapeDataString(query)}");
@@ -1864,7 +1869,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             queryParams.Add($"offset={offset.Value}");
         }
 
-        var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
+        string? queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/spool", query: queryString, ct: ct);
     }
 
@@ -1874,7 +1879,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     public async Task<string?> SearchSpoolmanFilamentsAsync(string baseUrl, string? query = null,
         int? limit = null, int? offset = null, CancellationToken ct = default)
     {
-        var queryParams = new List<string>();
+        List<string> queryParams = new();
         if (!string.IsNullOrEmpty(query))
         {
             queryParams.Add($"search={Uri.EscapeDataString(query)}");
@@ -1890,7 +1895,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             queryParams.Add($"offset={offset.Value}");
         }
 
-        var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
+        string? queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/filament", query: queryString, ct: ct);
     }
 
@@ -1900,7 +1905,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
     public async Task<bool> ArchiveSpoolmanSpoolAsync(string baseUrl, int spoolId, bool archived = true, CancellationToken ct = default)
     {
         var body = new { archived };
-        var result = await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: body, ct: ct);
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: body, ct: ct);
         return result != null;
     }
 

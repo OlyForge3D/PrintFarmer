@@ -25,7 +25,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         _pythonPath = configuration["ThumbnailGeneration:PythonPath"] ?? "python3";
 
         // Script will be stored in the API directory
-        var apiDirectory = AppContext.BaseDirectory;
+        string apiDirectory = AppContext.BaseDirectory;
         _scriptPath = Path.Combine(apiDirectory, "Scripts", "generate_thumbnail.py");
 
         // Thumbnails storage path
@@ -39,7 +39,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         }
 
         // Ensure scripts directory exists
-        var scriptsDir = Path.GetDirectoryName(_scriptPath);
+        string? scriptsDir = Path.GetDirectoryName(_scriptPath);
         if (scriptsDir != null && !Directory.Exists(scriptsDir))
         {
             Directory.CreateDirectory(scriptsDir);
@@ -72,14 +72,14 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         try
         {
             // Ensure output directory exists
-            var outputDir = Path.GetDirectoryName(outputPath);
+            string? outputDir = Path.GetDirectoryName(outputPath);
             if (outputDir != null && !Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
             }
 
             // Build arguments for the Python script
-            var arguments = new StringBuilder();
+            StringBuilder arguments = new();
             arguments.Append($"\"{_scriptPath}\" ");
             arguments.Append($"\"{modelFilePath}\" ");
             arguments.Append($"\"{outputPath}\" ");
@@ -87,7 +87,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             arguments.Append($"{height}");
 
             // Configure process
-            using var process = new Process
+            using Process process = new()
             {
                 StartInfo = new ProcessStartInfo
                 {
@@ -106,11 +106,11 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             process.Start();
 
             // Read output and error streams
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            var errorTask = process.StandardError.ReadToEndAsync();
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> errorTask = process.StandardError.ReadToEndAsync();
 
             // Wait for process to complete with cancellation support
-            using var registration = ct.Register(() =>
+            using CancellationTokenRegistration registration = ct.Register(() =>
             {
                 try
                 {
@@ -127,8 +127,8 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
 
             await process.WaitForExitAsync(ct);
 
-            var output = await outputTask;
-            var error = await errorTask;
+            string output = await outputTask;
+            string error = await errorTask;
 
             if (process.ExitCode == 0 && File.Exists(outputPath))
             {
@@ -170,7 +170,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             return;
         }
 
-        var scriptContent = @"#!/usr/bin/env python3
+        string scriptContent = @"#!/usr/bin/env python3
 """"""
 3D Model Thumbnail Generation Script
 Generates thumbnail images from 3D model files using Open3D
@@ -283,7 +283,7 @@ if __name__ == ""__main__"":
             {
                 try
                 {
-                    var process = Process.Start("chmod", $"+x \"{_scriptPath}\"");
+                    Process process = Process.Start("chmod", $"+x \"{_scriptPath}\"");
                     process?.WaitForExit();
                 }
                 catch (Exception ex)

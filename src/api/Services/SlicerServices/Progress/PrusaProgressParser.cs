@@ -28,14 +28,14 @@ public class PrusaProgressParser : IProgressParser
             return null;
         }
 
-        var lower = line.ToLowerInvariant();
+        string lower = line.ToLowerInvariant();
 
         if (lower.Contains('%'))
         {
-            var digits = string.Concat(line.Where(char.IsDigit));
-            if (!string.IsNullOrEmpty(digits) && int.TryParse(digits, out var p))
+            string digits = string.Concat(line.Where(char.IsDigit));
+            if (!string.IsNullOrEmpty(digits) && int.TryParse(digits, out int p))
             {
-                var clamped = Math.Max(0, Math.Min(100, p));
+                int clamped = Math.Max(0, Math.Min(100, p));
                 return new SlicerProgress(clamped, line);
             }
         }
@@ -60,8 +60,8 @@ public class PrusaProgressParser : IProgressParser
             _phaseIdx = Math.Max(_phaseIdx, 4);
         }
 
-        var phase = _phases[Math.Min(_phaseIdx, _phases.Length - 1)];
-        var progress = phase.Start + (phase.End - phase.Start) / 2;
+        (int Start, int End, string Message) phase = _phases[Math.Min(_phaseIdx, _phases.Length - 1)];
+        int progress = phase.Start + (phase.End - phase.Start) / 2;
         return new SlicerProgress(progress, line);
     }
 
@@ -72,18 +72,18 @@ public class PrusaProgressParser : IProgressParser
             return null;
         }
 
-        var m = PercentRegex.Match(line);
-        if (m.Success && int.TryParse(m.Groups["pct"].Value, out var pct))
+        Match m = PercentRegex.Match(line);
+        if (m.Success && int.TryParse(m.Groups["pct"].Value, out int pct))
         {
-            var pctClamped = Math.Max(0, Math.Min(100, pct));
+            int pctClamped = Math.Max(0, Math.Min(100, pct));
             return new ProgressUpdate(pctClamped, line, SlicerProgressState.InProgress);
         }
 
         m = LayerRegex.Match(line);
-        if (m.Success && int.TryParse(m.Groups["idx"].Value, out var idx) && int.TryParse(m.Groups["total"].Value, out var total) && total > 0)
+        if (m.Success && int.TryParse(m.Groups["idx"].Value, out int idx) && int.TryParse(m.Groups["total"].Value, out int total) && total > 0)
         {
-            var p = (double)idx / total * 100.0;
-            var pctVal = Math.Max(0.0, Math.Min(100.0, p));
+            double p = (double)idx / total * 100.0;
+            double pctVal = Math.Max(0.0, Math.Min(100.0, p));
             return new ProgressUpdate(Math.Round(pctVal, 2), line, SlicerProgressState.InProgress);
         }
 

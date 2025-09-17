@@ -13,13 +13,13 @@ public static class SlicerProgressMonitor
 
         try
         {
-            var start = DateTime.UtcNow;
-            var stdout = processHandle.StandardOutput; // do not dispose injected stream
+            DateTime start = DateTime.UtcNow;
+            StreamReader stdout = processHandle.StandardOutput; // do not dispose injected stream
             while (!processHandle.HasExited && !ct.IsCancellationRequested)
             {
                 if (!stdout.EndOfStream)
                 {
-                    var line = await stdout.ReadLineAsync();
+                    string? line = await stdout.ReadLineAsync();
                     if (!string.IsNullOrEmpty(line))
                     {
                         ProgressUpdate? parsed = null;
@@ -34,7 +34,7 @@ public static class SlicerProgressMonitor
 
                         if (parsed != null)
                         {
-                            var pct = (int)Math.Max(0, Math.Min(100, Math.Round(parsed.Percentage)));
+                            int pct = (int)Math.Max(0, Math.Min(100, Math.Round(parsed.Percentage)));
                             await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = pct, Status = SlicingJobStatus.Slicing, CurrentStep = parsed.Message }, ct);
                             if (parsed.State == SlicerProgressState.Completed)
                             {
@@ -78,8 +78,8 @@ public static class SlicerProgressMonitor
                     }
                 }
 
-                var elapsed = DateTime.UtcNow - start;
-                var estimated = Math.Min(95, 10 + (int)Math.Min(85, elapsed.TotalSeconds / 1.5));
+                TimeSpan elapsed = DateTime.UtcNow - start;
+                int estimated = Math.Min(95, 10 + (int)Math.Min(85, elapsed.TotalSeconds / 1.5));
                 await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = jobId, Progress = estimated, Status = SlicingJobStatus.Slicing, CurrentStep = "Slicing in progress..." }, ct);
 
                 await Task.Delay(TimeSpan.FromSeconds(2), ct);

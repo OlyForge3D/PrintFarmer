@@ -27,7 +27,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         try
         {
             // Get subscribers for this job
-            var connectionIds = GetJobSubscribers(update.JobId);
+            List<string> connectionIds = GetJobSubscribers(update.JobId);
 
             if (connectionIds.Count > 0)
             {
@@ -53,7 +53,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         ArgumentNullException.ThrowIfNull(result);
         try
         {
-            var completionNotification = new SlicingCompletionNotification
+            SlicingCompletionNotification completionNotification = new()
             {
                 JobId = job.Id,
                 UserId = job.UserId,
@@ -68,13 +68,13 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
                 CompletedAt = job.CompletedAt ?? DateTime.UtcNow
             };
 
-            foreach (var kv in job.Metadata)
+            foreach (KeyValuePair<string, object> kv in job.Metadata)
             {
                 completionNotification.Metadata[kv.Key] = kv.Value;
             }
 
             // Get subscribers for this job
-            var connectionIds = GetJobSubscribers(job.Id);
+            List<string> connectionIds = GetJobSubscribers(job.Id);
 
             if (connectionIds.Count > 0)
             {
@@ -105,7 +105,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         ArgumentNullException.ThrowIfNull(job);
         try
         {
-            var failureNotification = new SlicingFailureNotification
+            SlicingFailureNotification failureNotification = new()
             {
                 JobId = job.Id,
                 UserId = job.UserId,
@@ -116,13 +116,13 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
                 CanRetry = job.RetryCount < 3
             };
 
-            foreach (var kv in job.Metadata)
+            foreach (KeyValuePair<string, object> kv in job.Metadata)
             {
                 failureNotification.Metadata[kv.Key] = kv.Value;
             }
 
             // Get subscribers for this job
-            var connectionIds = GetJobSubscribers(job.Id);
+            List<string> connectionIds = GetJobSubscribers(job.Id);
 
             if (connectionIds.Count > 0)
             {
@@ -155,7 +155,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
     {
         lock (_lockObject)
         {
-            if (!_jobSubscriptions.TryGetValue(jobId, out var set))
+            if (!_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? set))
             {
                 set = [];
                 _jobSubscriptions[jobId] = set;
@@ -172,7 +172,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
     {
         lock (_lockObject)
         {
-            if (_jobSubscriptions.TryGetValue(jobId, out var set))
+            if (_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? set))
             {
                 set.Remove(connectionId);
                 if (set.Count == 0)
@@ -190,7 +190,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
     {
         lock (_lockObject)
         {
-            if (_jobSubscriptions.TryGetValue(jobId, out var subscribers))
+            if (_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? subscribers))
             {
                 return [.. subscribers];
             }

@@ -40,7 +40,7 @@ public class SetupController : ControllerBase
     public async Task<ActionResult<object>> GetSetupStatusAsync(CancellationToken ct)
     {
         // Check if there are any admin users
-        var hasAdminUsers = await _db.Users
+        bool hasAdminUsers = await _db.Users
             .AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), ct);
 
         return Ok(new { needsSetup = !hasAdminUsers });
@@ -60,7 +60,7 @@ public class SetupController : ControllerBase
             return BadRequest(new AuthenticationResult(false, Error: "Request body required"));
         }
         // Validate that setup is actually needed
-        var hasAdminUsers = await _db.Users
+        bool hasAdminUsers = await _db.Users
             .AnyAsync(u => u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), ct);
 
         if (hasAdminUsers)
@@ -70,7 +70,7 @@ public class SetupController : ControllerBase
                 !string.IsNullOrWhiteSpace(request.Email) &&
                 !string.IsNullOrWhiteSpace(request.Password))
             {
-                var existingAdmin = await _db.Users
+                User? existingAdmin = await _db.Users
                     .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
                     .FirstOrDefaultAsync(u =>
                         u.Username == request.Username && u.Email == request.Email &&
@@ -78,8 +78,8 @@ public class SetupController : ControllerBase
 
                 if (existingAdmin != null && _passwordHashingService.VerifyPassword(request.Password, existingAdmin.PasswordHash))
                 {
-                    var tokenExisting = await _authService.GenerateJwtTokenAsync(existingAdmin);
-                    var userDtoExisting = await _authService.GetUserWithRolesAndPermissionsAsync(existingAdmin.Id);
+                    string tokenExisting = await _authService.GenerateJwtTokenAsync(existingAdmin);
+                    UserDto? userDtoExisting = await _authService.GetUserWithRolesAndPermissionsAsync(existingAdmin.Id);
 
                     return Ok(new AuthenticationResult(
                         Success: true,
@@ -98,7 +98,7 @@ public class SetupController : ControllerBase
                 return BadRequest(new AuthenticationResult(false, Error: "Username, email, and password are required"));
             }
 
-            var duplicateUser = await _db.Users
+            User? duplicateUser = await _db.Users
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Username == request.Username || u.Email == request.Email, ct);
 
@@ -119,8 +119,8 @@ public class SetupController : ControllerBase
         }
 
         // Load password policy (default values if none present)
-        var policy = await _db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
-        var minLength = policy?.MinLength ?? 8;
+        PasswordPolicy? policy = await _db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
+        int minLength = policy?.MinLength ?? 8;
         if (request.Password.Length < minLength)
         {
             // Return field-level problem style error for better client UX
@@ -148,7 +148,7 @@ public class SetupController : ControllerBase
         }
 
         // Check if username or email already exists
-        var existingUser = await _db.Users
+        bool existingUser = await _db.Users
             .AnyAsync(u => u.Username == request.Username || u.Email == request.Email, ct);
 
         if (existingUser)
@@ -157,14 +157,14 @@ public class SetupController : ControllerBase
         }
 
         // Get admin role
-        var adminRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin", ct);
+        Role? adminRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin", ct);
         if (adminRole == null)
         {
             return StatusCode(500, new AuthenticationResult(false, Error: "Admin role not found in database. Database may not be properly initialized."));
         }
 
         // Create the admin user
-        var adminUser = new User
+        User adminUser = new()
         {
             Id = Guid.NewGuid(),
             Username = request.Username,
@@ -195,8 +195,8 @@ public class SetupController : ControllerBase
         _logger.LogInformation("Initial admin user created: {Username} ({Email})", adminUser.Username, adminUser.Email);
 
         // Generate JWT token for immediate login
-        var token = await _authService.GenerateJwtTokenAsync(adminUser);
-        var userDto = await _authService.GetUserWithRolesAndPermissionsAsync(adminUser.Id);
+        string token = await _authService.GenerateJwtTokenAsync(adminUser);
+        UserDto? userDto = await _authService.GetUserWithRolesAndPermissionsAsync(adminUser.Id);
 
         return Ok(new AuthenticationResult(
             Success: true,
@@ -213,7 +213,7 @@ public class SetupController : ControllerBase
     public ActionResult<object> GetConfigurationOptions()
     {
         // Use dictionaries to preserve exact key casing as expected by tests
-        var result = new Dictionary<string, object>
+        Dictionary<string, object> result = new()
         {
             ["DatabaseProviders"] = new[] { "SQLite", "SQL Server", "PostgreSQL", "MySQL" },
             ["DefaultNetworkRanges"] = new[] { "192.168.1.0/24", "192.168.0.0/24", "10.0.0.0/24" },

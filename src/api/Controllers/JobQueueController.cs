@@ -24,7 +24,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     {
         try
         {
-            var jobs = await db.PrintJobs
+            List<PrintJob> jobs = await db.PrintJobs
                 .Include(j => j.GcodeFile)
                 .Include(j => j.AssignedPrinter)
                 .OrderBy(j => j.QueuePosition)
@@ -78,14 +78,14 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
         try
         {
             // Validate the gcode file exists
-            var gcodeFile = await db.GcodeFiles.FindAsync(request.GcodeFileId);
+            GcodeFile? gcodeFile = await db.GcodeFiles.FindAsync(request.GcodeFileId);
             if (gcodeFile == null)
             {
                 return NotFound($"G-code file with ID {request.GcodeFileId} not found");
             }
 
             // Create the job
-            var job = new PrintJob
+            PrintJob job = new()
             {
                 Id = Guid.NewGuid(),
                 Name = gcodeFile.OriginalFileName,
@@ -104,7 +104,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
             };
 
             // Set queue position
-            var maxPosition = await db.PrintJobs
+            int maxPosition = await db.PrintJobs
                 .Where(j => j.Status == PrintJobStatus.Queued)
                 .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
             job.QueuePosition = maxPosition + 1;
@@ -165,7 +165,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     {
         try
         {
-            var job = await db.PrintJobs
+            PrintJob? job = await db.PrintJobs
                 .Include(j => j.GcodeFile)
                 .Include(j => j.AssignedPrinter)
                 .FirstOrDefaultAsync(j => j.Id == id);
@@ -221,7 +221,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
         }
         try
         {
-            var job = await db.PrintJobs
+            PrintJob? job = await db.PrintJobs
                 .Include(j => j.GcodeFile)
                 .Include(j => j.AssignedPrinter)
                 .FirstOrDefaultAsync(j => j.Id == id);
@@ -245,7 +245,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
             if (request.AssignedPrinterId.HasValue)
             {
                 // Validate printer exists
-                var printer = await db.Printers.FindAsync(request.AssignedPrinterId.Value);
+                Printer? printer = await db.Printers.FindAsync(request.AssignedPrinterId.Value);
                 if (printer == null)
                 {
                     return BadRequest($"Printer with ID {request.AssignedPrinterId} not found");
@@ -317,7 +317,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
     {
         try
         {
-            var job = await db.PrintJobs.FindAsync(id);
+            PrintJob? job = await db.PrintJobs.FindAsync(id);
             if (job == null)
             {
                 return NotFound($"Print job with ID {id} not found");

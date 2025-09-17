@@ -39,9 +39,9 @@ internal sealed class NormalizationEventLogger : INormalizationEventLogger
         {
             return;
         }
-        var key = entityType + "|" + normalized;
-        var now = DateTime.UtcNow;
-        var counter = _counters.AddOrUpdate(key,
+        string key = entityType + "|" + normalized;
+        DateTime now = DateTime.UtcNow;
+        Counter counter = _counters.AddOrUpdate(key,
             _ => new Counter(1, now),
             (_, existing) =>
             {

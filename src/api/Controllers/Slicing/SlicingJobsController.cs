@@ -27,7 +27,7 @@ public class SlicingJobsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetJobStatusAsync(Guid jobId)
     {
-        var status = await _orchestrator.GetJobStatusAsync(jobId);
+        SlicingJobStatusResponse? status = await _orchestrator.GetJobStatusAsync(jobId);
         if (status == null)
         {
             return NotFound();
@@ -42,11 +42,11 @@ public class SlicingJobsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetJob(string jobId)
     {
-        if (!SlicingJobStore.TryGet(jobId, out var job) || job == null)
+        if (!SlicingJobStore.TryGet(jobId, out SlicingJobDto? job) || job == null)
         {
             return NotFound();
         }
-        var j = job;
+        SlicingJobDto j = job;
         return Ok(new SliceResultDto
         {
             JobId = j.JobId,
@@ -73,7 +73,7 @@ public class SlicingJobsController : ControllerBase
     public IActionResult CancelJob(string jobId)
     {
         // Accept as string to allow graceful 404 for non-GUID IDs used in tests
-        if (!SlicingJobStore.TryGet(jobId, out var job) || job == null)
+        if (!SlicingJobStore.TryGet(jobId, out SlicingJobDto? job) || job == null)
         {
             return NotFound();
         }
@@ -96,13 +96,13 @@ public class SlicingJobsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult LegacyGetJob(string jobId)
     {
-        if (!SlicingJobStore.TryGet(jobId, out var job) || job == null)
+        if (!SlicingJobStore.TryGet(jobId, out SlicingJobDto? job) || job == null)
         {
             return NotFound();
         }
         // Add deprecation signalling headers (RFC 8594) before issuing redirect
-        var deprecationDate = new DateTime(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
-        var sunsetDate = new DateTime(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
+        DateTime deprecationDate = new(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
+        DateTime sunsetDate = new(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
         Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
         Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
         // Issue 302 redirect to canonical plural endpoint
@@ -122,15 +122,15 @@ public class SlicingJobsController : ControllerBase
         {
             return NotFound();
         }
-        if (!SlicingJobStore.TryGet(jobId, out var job) || job == null || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
+        if (!SlicingJobStore.TryGet(jobId, out SlicingJobDto? job) || job == null || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
         }
 
-        var originalPath = job.GcodeFilePath!;
-        var tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
+        string originalPath = job.GcodeFilePath!;
+        string tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
         // Rebuild path from trusted root to mitigate stored path tampering
-        var fileName = Path.GetFileName(originalPath);
+        string fileName = Path.GetFileName(originalPath);
         if (string.IsNullOrWhiteSpace(fileName))
         {
             return NotFound();
@@ -143,8 +143,8 @@ public class SlicingJobsController : ControllerBase
         {
             return NotFound();
         }
-        var rebuiltPath = Path.Combine(tempRoot, fileName);
-        var path = rebuiltPath;
+        string rebuiltPath = Path.Combine(tempRoot, fileName);
+        string path = rebuiltPath;
         if (!IsSafePath(path, tempRoot))
         {
             return NotFound();
@@ -163,13 +163,13 @@ public class SlicingJobsController : ControllerBase
     {
         try
         {
-            var fullRoot = Path.GetFullPath(root);
-            var fullCandidate = Path.GetFullPath(candidatePath);
+            string fullRoot = Path.GetFullPath(root);
+            string fullCandidate = Path.GetFullPath(candidatePath);
             if (!fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
-            var relative = Path.GetRelativePath(fullRoot, fullCandidate);
+            string relative = Path.GetRelativePath(fullRoot, fullCandidate);
             if (relative.Contains(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || relative.Contains(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
             {
                 return false;

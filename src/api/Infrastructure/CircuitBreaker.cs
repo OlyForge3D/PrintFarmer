@@ -56,10 +56,10 @@ public class CircuitBreaker
 
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(_timeout);
 
-            var result = await operation(timeoutCts.Token);
+            T? result = await operation(timeoutCts.Token);
 
             OnSuccess();
             return result;
@@ -207,7 +207,7 @@ public class CircuitBreakerService : ICircuitBreakerService
     {
         return _circuitBreakers.GetOrAdd(name, key =>
         {
-            var cb = new CircuitBreaker(
+            CircuitBreaker cb = new(
                 failureThreshold ?? 5,
                 timeout ?? TimeSpan.FromMinutes(1),
                 retryDelay ?? TimeSpan.FromSeconds(30),
@@ -224,7 +224,7 @@ public class CircuitBreakerService : ICircuitBreakerService
 
     public void ResetAll()
     {
-        foreach (var cb in _circuitBreakers.Values)
+        foreach (CircuitBreaker cb in _circuitBreakers.Values)
         {
             cb.Reset();
         }

@@ -23,7 +23,7 @@ public class DatabaseSeeder : IDatabaseSeeder
             // Desired manufacturers to ensure exist (display names)
             // NOTE: "VoronDesign" was previously used; renamed to the friendlier "Voron" for UI display.
             // We include a one-time rename below for existing databases.
-            var manufacturerNames = new[]
+            string[] manufacturerNames = new[]
             {
                 "Unknown",  // Default for unidentified manufacturers - must be first to ensure it gets a consistent ID
                 "Prusa",
@@ -37,11 +37,11 @@ public class DatabaseSeeder : IDatabaseSeeder
             };
 
 
-            var manufacturers = new Dictionary<string, Manufacturer>(StringComparer.OrdinalIgnoreCase);
-            foreach (var name in manufacturerNames.Distinct(StringComparer.OrdinalIgnoreCase))
+            Dictionary<string, Manufacturer> manufacturers = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string? name in manufacturerNames.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                var normalized = CatalogNameNormalizer.NormalizeManufacturer(name);
-                var existing = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == normalized);
+                string normalized = CatalogNameNormalizer.NormalizeManufacturer(name);
+                Manufacturer? existing = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == normalized);
                 if (existing == null)
                 {
                     existing = new Manufacturer { Id = Guid.NewGuid(), Name = normalized };
@@ -52,7 +52,7 @@ public class DatabaseSeeder : IDatabaseSeeder
             }
 
             // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend, PrinterType)
-            var modelSeeds = new (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, PrinterType? Type)[]
+            (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, PrinterType? Type)[] modelSeeds = new (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, PrinterType? Type)[]
             {
                 ("Unknown Model", "Unknown", 200, 200, 200, 0, PrinterType.Unknown), // Default for unidentified models
                 ("AD5X", "FlashForge", 220, 220, 220, 0, PrinterType.CoreXY), // Moonraker (Klipper)
@@ -100,15 +100,15 @@ public class DatabaseSeeder : IDatabaseSeeder
                 ("Original Prusa XL", "Prusa", 250, 220, 270, 1, PrinterType.CoreXY), // PrusaLink
             };
 
-            foreach (var (name, mfg, x, y, z, defaultBackend, type) in modelSeeds)
+            foreach ((string? name, string? mfg, double x, double y, double z, int? defaultBackend, PrinterType? type) in modelSeeds)
             {
-                if (!manufacturers.TryGetValue(mfg, out var m))
+                if (!manufacturers.TryGetValue(mfg, out Manufacturer? m))
                 {
                     // Skip if manufacturer wasn't ensured above for any reason
                     continue;
                 }
 
-                var exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == name);
+                bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == name);
                 if (!exists)
                 {
                     _context.Models.Add(new PrinterModel
@@ -138,7 +138,7 @@ public class DatabaseSeeder : IDatabaseSeeder
         try
         {
             // Check if SpoolmanConfig already exists
-            var existingConfig = await _context.SpoolmanConfigs.FirstOrDefaultAsync();
+            SpoolmanConfig? existingConfig = await _context.SpoolmanConfigs.FirstOrDefaultAsync();
             if (existingConfig == null)
             {
                 _context.SpoolmanConfigs.Add(new SpoolmanConfig
@@ -158,7 +158,7 @@ public class DatabaseSeeder : IDatabaseSeeder
     public async Task SeedFilamentTypesAsync()
     {
         // Default filament types to ensure exist
-        var filamentTypes = new (string Name, int HotendTemp, int BedTemp)[]
+        (string Name, int HotendTemp, int BedTemp)[] filamentTypes = new (string Name, int HotendTemp, int BedTemp)[]
         {
             ("PLA", 205, 60),
             ("ABS", 230, 100),
@@ -170,12 +170,12 @@ public class DatabaseSeeder : IDatabaseSeeder
             ("Wood", 210, 65)
         };
 
-        foreach (var (name, hotendTemp, bedTemp) in filamentTypes)
+        foreach ((string? name, int hotendTemp, int bedTemp) in filamentTypes)
         {
-            var existing = await _context.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name);
+            FilamentType? existing = await _context.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name);
             if (existing == null)
             {
-                var filamentType = new FilamentType
+                FilamentType filamentType = new()
                 {
                     Id = Guid.NewGuid(),
                     Name = name,
@@ -201,7 +201,7 @@ public class DatabaseSeeder : IDatabaseSeeder
     /// </summary>
     public async Task<Manufacturer> GetUnknownManufacturerAsync()
     {
-        var unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
+        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
         if (unknown == null)
         {
             throw new InvalidOperationException("Unknown manufacturer not found. Ensure SeedCatalogDataAsync() has been called.");
@@ -214,8 +214,8 @@ public class DatabaseSeeder : IDatabaseSeeder
     /// </summary>
     public async Task<PrinterModel> GetUnknownModelAsync()
     {
-        var unknownMfg = await GetUnknownManufacturerAsync();
-        var unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
+        Manufacturer unknownMfg = await GetUnknownManufacturerAsync();
+        PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
         if (unknownModel == null)
         {

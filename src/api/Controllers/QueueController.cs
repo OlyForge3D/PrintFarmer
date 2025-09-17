@@ -33,24 +33,24 @@ public class QueueController : ControllerBase
     {
         try
         {
-            var printers = await _context.Printers
+            List<Printer> printers = await _context.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Capabilities)
                 .Where(p => p.Capabilities != null && p.Capabilities.IsAvailable)
                 .ToListAsync();
 
-            var queueOverview = new List<QueueOverviewDto>();
+            List<QueueOverviewDto> queueOverview = new();
 
-            foreach (var printer in printers)
+            foreach (Printer? printer in printers)
             {
-                var queuedJobs = await _context.PrintJobs
+                List<PrintJob> queuedJobs = await _context.PrintJobs
                     .Where(j => j.AssignedPrinterId == printer.Id &&
                                (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned))
                     .OrderBy(j => j.Priority)
                     .ThenBy(j => j.QueuedAt)
                     .ToListAsync();
 
-                var currentJob = await _context.PrintJobs
+                PrintJob? currentJob = await _context.PrintJobs
                     .FirstOrDefaultAsync(j => j.AssignedPrinterId == printer.Id &&
                                             (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing));
 
@@ -87,7 +87,7 @@ public class QueueController : ControllerBase
     {
         try
         {
-            var jobs = await _context.PrintJobs
+            List<JobQueuePrintJobDto> jobs = await _context.PrintJobs
                 .Include(j => j.GcodeFile)
                 .Include(j => j.AssignedPrinter)
                 .Where(j => j.AssignedPrinterId == printerId)
@@ -119,7 +119,7 @@ public class QueueController : ControllerBase
                 .ToListAsync();
 
             // Calculate queue positions for queued jobs
-            var queuedJobs = jobs.Where(j => j.Status == PrintJobStatusDto.Queued || j.Status == PrintJobStatusDto.Assigned).ToList();
+            List<JobQueuePrintJobDto> queuedJobs = jobs.Where(j => j.Status == PrintJobStatusDto.Queued || j.Status == PrintJobStatusDto.Assigned).ToList();
             for (int i = 0; i < queuedJobs.Count; i++)
             {
                 queuedJobs[i].QueuePosition = i + 1;
@@ -149,7 +149,7 @@ public class QueueController : ControllerBase
         try
         {
             // Verify G-code file exists
-            var gcodeFile = await _context.GcodeFiles.FindAsync(request.GcodeFileId);
+            GcodeFile? gcodeFile = await _context.GcodeFiles.FindAsync(request.GcodeFileId);
             if (gcodeFile == null)
             {
                 return BadRequest("G-code file not found");
@@ -167,7 +167,7 @@ public class QueueController : ControllerBase
             }
 
             // Create print job
-            var printJob = new PrintJob
+            PrintJob printJob = new()
             {
                 Id = Guid.NewGuid(),
                 Name = gcodeFile.DisplayName,
@@ -191,7 +191,7 @@ public class QueueController : ControllerBase
             await _context.SaveChangesAsync();
 
             // Return job information
-            var result = new JobQueuePrintJobDto
+            JobQueuePrintJobDto result = new()
             {
                 Id = printJob.Id,
                 GcodeFileId = printJob.GcodeFileId,
@@ -229,7 +229,7 @@ public class QueueController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetJobAsync(Guid id)
     {
-        var job = await _context.PrintJobs
+        PrintJob? job = await _context.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
             .FirstOrDefaultAsync(j => j.Id == id);
@@ -239,7 +239,7 @@ public class QueueController : ControllerBase
             return NotFound();
         }
 
-        var result = new JobQueuePrintJobDto
+        JobQueuePrintJobDto result = new()
         {
             Id = job.Id,
             GcodeFileId = job.GcodeFileId,
@@ -276,7 +276,7 @@ public class QueueController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RemoveJobFromQueueAsync(Guid id)
     {
-        var job = await _context.PrintJobs.FindAsync(id);
+        PrintJob? job = await _context.PrintJobs.FindAsync(id);
         if (job == null)
         {
             return NotFound();
@@ -315,7 +315,7 @@ public class QueueController : ControllerBase
     public async Task<IActionResult> UpdateJobPriorityAsync(Guid id, [FromBody] UpdateJobPriorityDto request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var job = await _context.PrintJobs
+        PrintJob? job = await _context.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
             .FirstOrDefaultAsync(j => j.Id == id);
@@ -332,7 +332,7 @@ public class QueueController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            var result = new JobQueuePrintJobDto
+            JobQueuePrintJobDto result = new()
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
@@ -363,12 +363,12 @@ public class QueueController : ControllerBase
     private async Task<Guid?> FindBestAvailablePrinterAsync(QueuePrintJobDto request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var printers = await _context.Printers
+        List<Printer> printers = await _context.Printers
             .Include(p => p.Capabilities)
             .Where(p => p.Capabilities != null && p.Capabilities.IsAvailable)
             .ToListAsync();
 
-        foreach (var printer in printers)
+        foreach (Printer? printer in printers)
         {
             // Check nozzle diameter compatibility
             if (request.RequiredNozzleDiameter.HasValue &&
@@ -387,7 +387,7 @@ public class QueueController : ControllerBase
             }
 
             // Check current queue load
-            var queueCount = await _context.PrintJobs
+            int queueCount = await _context.PrintJobs
                 .CountAsync(j => j.AssignedPrinterId == printer.Id &&
                                (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned));
 
@@ -403,7 +403,7 @@ public class QueueController : ControllerBase
 
     private async Task<int> GetNextQueuePositionAsync(Guid printerId)
     {
-        var maxPosition = await _context.PrintJobs
+        int maxPosition = await _context.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId &&
                        (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned))
             .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
@@ -413,14 +413,14 @@ public class QueueController : ControllerBase
 
     private static DateTime? CalculateEstimatedCompletionTime(List<PrintJob> queuedJobs, PrintJob? currentJob)
     {
-        var totalMinutes = 0.0;
+        double totalMinutes = 0.0;
 
         if (currentJob?.EstimatedPrintTime.HasValue == true)
         {
-            var elapsed = currentJob.ActualStartTime.HasValue
+            TimeSpan elapsed = currentJob.ActualStartTime.HasValue
                 ? DateTime.UtcNow - currentJob.ActualStartTime.Value
                 : TimeSpan.Zero;
-            var remaining = currentJob.EstimatedPrintTime.Value - elapsed;
+            TimeSpan remaining = currentJob.EstimatedPrintTime.Value - elapsed;
             totalMinutes += Math.Max(0, remaining.TotalMinutes);
         }
 

@@ -58,7 +58,7 @@ public class GcodeHarvestController : ControllerBase
         }
         try
         {
-            var result = await _harvestService.StartHarvestAsync(request, ct);
+            GcodeHarvestResultDto result = await _harvestService.StartHarvestAsync(request, ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -85,7 +85,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var operation = await _harvestService.GetHarvestOperationAsync(operationId, ct);
+            GcodeHarvestOperationDto? operation = await _harvestService.GetHarvestOperationAsync(operationId, ct);
             return operation == null ? NotFound() : Ok(operation);
         }
         catch (Exception ex)
@@ -112,7 +112,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var files = await _harvestService.GetDiscoveredFilesAsync(operationId, ct);
+            DiscoveredGcodeFileDto[] files = await _harvestService.GetDiscoveredFilesAsync(operationId, ct);
             return Ok(files);
         }
         catch (Exception ex)
@@ -143,12 +143,12 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var op = await _harvestService.GetHarvestOperationAsync(operationId, ct);
+            GcodeHarvestOperationDto? op = await _harvestService.GetHarvestOperationAsync(operationId, ct);
             if (op == null)
             {
                 return NotFound();
             }
-            var result = await _harvestService.GetDiscoveredFilesPagedAsync(operationId, page, pageSize, search, ct);
+            PagedResult<DiscoveredGcodeFileDto> result = await _harvestService.GetDiscoveredFilesPagedAsync(operationId, page, pageSize, search, ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -181,7 +181,7 @@ public class GcodeHarvestController : ControllerBase
         }
         try
         {
-            var result = await _harvestService.ImportSelectedFilesAsync(request, ct);
+            GcodeHarvestResultDto result = await _harvestService.ImportSelectedFilesAsync(request, ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -209,7 +209,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var result = await _harvestService.CancelHarvestAsync(operationId, ct);
+            bool result = await _harvestService.CancelHarvestAsync(operationId, ct);
             return result ? Ok(true) : BadRequest("Operation cannot be cancelled");
         }
         catch (Exception ex)
@@ -234,7 +234,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var operation = await _harvestService.GetActiveHarvestAsync(printerId, ct);
+            GcodeHarvestOperationDto? operation = await _harvestService.GetActiveHarvestAsync(printerId, ct);
             return Ok(operation);
         }
         catch (Exception ex)
@@ -261,7 +261,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var operations = await _harvestService.GetRecentHarvestsAsync(printerId, count, ct);
+            GcodeHarvestOperationDto[] operations = await _harvestService.GetRecentHarvestsAsync(printerId, count, ct);
             return Ok(operations);
         }
         catch (Exception ex)
@@ -283,7 +283,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var operations = await _harvestService.GetActiveHarvestsAsync(ct);
+            GcodeHarvestOperationDto[] operations = await _harvestService.GetActiveHarvestsAsync(ct);
             return Ok(operations);
         }
         catch (Exception ex)
@@ -314,7 +314,7 @@ public class GcodeHarvestController : ControllerBase
     {
         try
         {
-            var operations = await _harvestService.GetHarvestOperationsAsync(printerId, status, limit, offset, ct);
+            GcodeHarvestOperationDto[] operations = await _harvestService.GetHarvestOperationsAsync(printerId, status, limit, offset, ct);
             return Ok(operations);
         }
         catch (Exception ex)

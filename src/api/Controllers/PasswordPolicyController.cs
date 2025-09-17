@@ -1,4 +1,5 @@
 ﻿using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,7 +15,7 @@ public class PasswordPolicyController(AppDbContext db) : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PasswordPolicyDto>> GetAsync(CancellationToken ct)
     {
-        var entity = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
+        PasswordPolicy? entity = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
         if (entity == null)
         {
             return Ok(new PasswordPolicyDto());
@@ -36,7 +37,7 @@ public class PasswordPolicyController(AppDbContext db) : ControllerBase
         {
             return BadRequest("Request body required");
         }
-        var entity = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
+        PasswordPolicy? entity = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
         if (entity == null)
         {
             entity = new Domain.PasswordPolicy();

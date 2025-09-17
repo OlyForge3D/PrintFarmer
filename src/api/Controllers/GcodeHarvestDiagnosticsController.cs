@@ -46,8 +46,8 @@ public class GcodeHarvestDiagnosticsController : ControllerBase
 
         try
         {
-            using var stream = file.OpenReadStream();
-            var metadata = await _harvestService.ExtractMetadataAsync(stream, ct);
+            using Stream stream = file.OpenReadStream();
+            GcodeMetadataDto metadata = await _harvestService.ExtractMetadataAsync(stream, ct);
             return Ok(metadata);
         }
         catch (Exception ex)

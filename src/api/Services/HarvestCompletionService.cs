@@ -48,27 +48,27 @@ public class HarvestCompletionService : BackgroundService
 
     private async Task CheckForCompletedOperationsAsync(CancellationToken ct)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _serviceProvider.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Find running operations that might be completed
-        var runningOperations = await db.GcodeHarvestOperations
+        List<GcodeHarvestOperation> runningOperations = await db.GcodeHarvestOperations
             .Where(o => o.Status == GcodeHarvestStatus.Running && o.FilesFound > 0)
             .ToListAsync(ct);
 
         _logger.LogInformation("Found {OperationCount} running harvest operations to check", runningOperations.Count);
 
-        foreach (var operation in runningOperations)
+        foreach (GcodeHarvestOperation? operation in runningOperations)
         {
             // Count processed files (added + skipped + errored)
-            var processedFiles = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
+            int processedFiles = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
 
             _logger.LogInformation(
                 "Operation {OperationId}: Found={FilesFound}, Added={FilesAdded}, Skipped={FilesSkipped}, Errored={FilesErrored}, Processed={ProcessedFiles}",
                 operation.Id, operation.FilesFound, operation.FilesAdded, operation.FilesSkipped, operation.FilesErrored, processedFiles);
 
             // Get the count of discovered files for this operation
-            var discoveredFileCount = await db.DiscoveredGcodeFiles
+            int discoveredFileCount = await db.DiscoveredGcodeFiles
                 .Where(d => d.HarvestOperationId == operation.Id)
                 .CountAsync(ct);
 

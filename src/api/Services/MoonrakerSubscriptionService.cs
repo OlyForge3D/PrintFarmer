@@ -104,7 +104,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         {
             // Already disposed/cancelled – safe to ignore during shutdown
         }
-        var tasks = new List<Task>(_loops.Values);
+        List<Task> tasks = new(_loops.Values);
         if (_mainLoop is not null)
         {
             tasks.Add(_mainLoop);
@@ -181,13 +181,13 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         // Using an async scope while awaiting EF Core ToListAsync is intentional here.
         // The scope lifetime matches the query and is disposed immediately after.
 #pragma warning disable IDISP013 // Await in using
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         // Only subscribe to Moonraker-backed printers (Backend == 0)
-        var printers = await db.Printers.AsNoTracking()
+        List<Printer> printers = await db.Printers.AsNoTracking()
             .Where(p => p.Backend == 0)
             .ToListAsync(ct);
-        foreach (var p in printers)
+        foreach (Printer? p in printers)
         {
             _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
         }
@@ -196,10 +196,10 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     private async Task CheckForStaleConnectionsAsync(CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
-        var staleThreshold = now - StaleConnectionThreshold;
+        DateTime now = DateTime.UtcNow;
+        DateTime staleThreshold = now - StaleConnectionThreshold;
 
-        foreach (var (printerId, lastUpdate) in _lastStatusUpdateTimes.ToList())
+        foreach ((Guid printerId, DateTime lastUpdate) in _lastStatusUpdateTimes.ToList())
         {
             if (lastUpdate < staleThreshold)
             {
@@ -207,9 +207,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     printerId, lastUpdate);
 
                 // Find the printer to trigger fallback
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var printer = await db.Printers.AsNoTracking()
+                await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                Printer? printer = await db.Printers.AsNoTracking()
                     .FirstOrDefaultAsync(p => p.Id == printerId, ct);
 
                 if (printer != null)
@@ -227,13 +227,13 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             throw new ArgumentException("Missing base URL", nameof(httpBase));
         }
 
-        var trimmed = httpBase.TrimEnd('/');
+        string trimmed = httpBase.TrimEnd('/');
         if (!trimmed.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
             trimmed = "http://" + trimmed;
         }
 
-        var ub = new UriBuilder(trimmed);
+        UriBuilder ub = new(trimmed);
         if (ub.Port == -1)
         {
             ub.Port = 7125;
@@ -246,8 +246,8 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     private async Task SubscribePrinterLoopAsync(Printer printer, CancellationToken ct)
     {
-        var id = printer.Id;
-        var metrics = _connectionMetrics.GetOrAdd(id, _ => new ConnectionMetrics());
+        Guid id = printer.Id;
+        ConnectionMetrics metrics = _connectionMetrics.GetOrAdd(id, _ => new ConnectionMetrics());
 
         logger.LogInformation("Starting subscription loop for printer {PrinterName} ({PrinterId})", printer.Name, id);
 
@@ -269,7 +269,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 // Apply exponential backoff if this is a retry
                 if (metrics.ReconnectAttempts > 0)
                 {
-                    var backoffDelay = metrics.GetNextBackoffDelay();
+                    TimeSpan backoffDelay = metrics.GetNextBackoffDelay();
                     logger.LogInformation("Backing off for {BackoffSeconds}s before reconnecting to printer {PrinterName} (attempt {Attempt}/{MaxAttempts})",
                         backoffDelay.TotalSeconds, printer.Name, metrics.ReconnectAttempts + 1, MaxReconnectAttempts);
 
@@ -284,7 +284,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 }
 
                 // Establish WebSocket connection
-                var uri = BuildWsUri(printer.ServerUrl);
+                Uri uri = BuildWsUri(printer.ServerUrl);
                 ws = new ClientWebSocket();
 
                 logger.LogDebug("Connecting to Moonraker WebSocket at {Uri} for printer {PrinterName}", uri, printer.Name);
@@ -375,9 +375,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var current = await db.Printers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == printerId, ct);
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Printer? current = await db.Printers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == printerId, ct);
 
             if (current is null)
             {
@@ -404,7 +404,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            var identifyRequest = new JsonRpcRequest
+            JsonRpcRequest identifyRequest = new()
             {
                 Method = "server.connection.identify",
                 Params = new
@@ -416,8 +416,8 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 Id = 100
             };
 
-            var identifyJson = JsonSerializer.Serialize(identifyRequest);
-            var identifyBytes = Encoding.UTF8.GetBytes(identifyJson);
+            string identifyJson = JsonSerializer.Serialize(identifyRequest);
+            byte[] identifyBytes = Encoding.UTF8.GetBytes(identifyJson);
             await ws.SendAsync(identifyBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
 
             logger.LogDebug("Sent connection identification to Moonraker: {ClientName} v{ClientVersion}", ClientName, ClientVersion);
@@ -431,7 +431,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, CancellationToken ct)
     {
-        var subscriptionParams = new ObjectSubscriptionRequest
+        ObjectSubscriptionRequest subscriptionParams = new()
         {
             Objects = new Dictionary<string, string[]?>
             {
@@ -444,15 +444,15 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             }
         };
 
-        var subscriptionRequest = new JsonRpcRequest
+        JsonRpcRequest subscriptionRequest = new()
         {
             Method = "printer.objects.subscribe",
             Params = subscriptionParams,
             Id = 101
         };
 
-        var subJson = JsonSerializer.Serialize(subscriptionRequest);
-        var subBytes = Encoding.UTF8.GetBytes(subJson);
+        string subJson = JsonSerializer.Serialize(subscriptionRequest);
+        byte[] subBytes = Encoding.UTF8.GetBytes(subJson);
         await ws.SendAsync(subBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
 
         logger.LogDebug("Sent object subscription request to Moonraker");
@@ -478,7 +478,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     // Send ping frame
                     try
                     {
-                        var pingData = Encoding.UTF8.GetBytes($"ping-{DateTime.UtcNow:O}");
+                        byte[] pingData = Encoding.UTF8.GetBytes($"ping-{DateTime.UtcNow:O}");
                         await ws.SendAsync(pingData, WebSocketMessageType.Text, endOfMessage: true, ct);
                         logger.LogTrace("Sent heartbeat ping to printer {PrinterName}", printer.Name);
                     }
@@ -502,8 +502,8 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     private async Task ProcessWebSocketMessagesAsync(ClientWebSocket ws, Printer printer, CancellationToken ct)
     {
-        var buffer = new byte[64 * 1024];
-        var sb = new StringBuilder();
+        byte[] buffer = new byte[64 * 1024];
+        StringBuilder sb = new();
 
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
@@ -555,8 +555,8 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            using var doc = JsonDocument.Parse(message);
-            var root = doc.RootElement;
+            using JsonDocument doc = JsonDocument.Parse(message);
+            JsonElement root = doc.RootElement;
 
             // Reset parse error count on successful JSON parsing - this indicates WebSocket connection is healthy
             _parseErrorCounts.TryRemove(printer.Id, out _);
@@ -567,7 +567,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 // This is a response to a request we made
                 try
                 {
-                    var jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
+                    JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
                     if (jsonRpcResponse?.Error != null)
                     {
                         logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
@@ -577,7 +577,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                         if (jsonRpcResponse.Error.Code == -32700)
                         {
                             _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
-                            var errorCount = _parseErrorCounts[printer.Id];
+                            int errorCount = _parseErrorCounts[printer.Id];
 
                             if (errorCount >= MaxParseErrorsBeforeFallback)
                             {
@@ -590,9 +590,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     }
 
                     // Handle subscription acknowledgement which carries current state
-                    if (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object &&
-                        root.TryGetProperty("id", out var idProp) && idProp.GetInt32() == 101 &&
-                        res.TryGetProperty("status", out var statusObj))
+                    if (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object &&
+                        root.TryGetProperty("id", out JsonElement idProp) && idProp.GetInt32() == 101 &&
+                        res.TryGetProperty("status", out JsonElement statusObj))
                     {
                         logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
                         await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, ct);
@@ -604,7 +604,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
                     // Track parse errors and trigger fallback if threshold exceeded
                     _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
-                    var errorCount = _parseErrorCounts[printer.Id];
+                    int errorCount = _parseErrorCounts[printer.Id];
 
                     if (errorCount >= MaxParseErrorsBeforeFallback)
                     {
@@ -615,15 +615,15 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 }
             }
             // Check if this is a JSON-RPC notification (has "method" field but no "id")
-            else if (root.TryGetProperty("method", out var methodProp))
+            else if (root.TryGetProperty("method", out JsonElement methodProp))
             {
-                var method = methodProp.GetString();
+                string? method = methodProp.GetString();
                 logger.LogTrace("Received notification {Method} from printer {PrinterName}", method, printer.Name);
 
                 switch (method)
                 {
                     case "notify_status_update":
-                        if (root.TryGetProperty("params", out var p) && p.ValueKind == JsonValueKind.Array && p.GetArrayLength() > 0)
+                        if (root.TryGetProperty("params", out JsonElement p) && p.ValueKind == JsonValueKind.Array && p.GetArrayLength() > 0)
                         {
                             logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
                                 printer.Name, p[0].GetRawText());
@@ -671,7 +671,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     private async Task ProcessStatusUpdateAsync(JsonElement statusObj, Guid printerId, string serverUrl, CancellationToken ct)
     {
         // Get or create persistent state for this printer
-        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+        PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
 
         // Extract status data using the same logic as before
         double? x = null, y = null, z = null, progress = null;
@@ -683,7 +683,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
         // Toolhead position and homed axes
         string? homedAxes = null;
-        if (statusObj.TryGetProperty("toolhead", out var th))
+        if (statusObj.TryGetProperty("toolhead", out JsonElement th))
         {
             // Only log toolhead structure occasionally for debugging
             if (DateTime.UtcNow.Millisecond % 1000 < 100) // Log roughly 10% of the time
@@ -692,7 +692,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             }
 
             // Extract position
-            if (th.TryGetProperty("position", out var pos) &&
+            if (th.TryGetProperty("position", out JsonElement pos) &&
                 pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
             {
                 try
@@ -713,7 +713,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             }
 
             // Extract homed axes
-            if (th.TryGetProperty("homed_axes", out var ha))
+            if (th.TryGetProperty("homed_axes", out JsonElement ha))
             {
                 try
                 {
@@ -752,12 +752,12 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         }
 
         // Display status (progress)
-        if (statusObj.TryGetProperty("display_status", out var ds) &&
-            ds.TryGetProperty("progress", out var prog))
+        if (statusObj.TryGetProperty("display_status", out JsonElement ds) &&
+            ds.TryGetProperty("progress", out JsonElement prog))
         {
             try
             {
-                var pv = prog.GetDouble();
+                double pv = prog.GetDouble();
                 progress = pv > 1 ? pv : pv * 100.0;
             }
             catch { }
@@ -765,14 +765,14 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
         // Print stats (state, filename)
         string? printStatsState = null;
-        if (statusObj.TryGetProperty("print_stats", out var ps))
+        if (statusObj.TryGetProperty("print_stats", out JsonElement ps))
         {
-            if (ps.TryGetProperty("state", out var st) && st.ValueKind == JsonValueKind.String)
+            if (ps.TryGetProperty("state", out JsonElement st) && st.ValueKind == JsonValueKind.String)
             {
                 printStatsState = st.GetString();
             }
 
-            if (ps.TryGetProperty("filename", out var fn) && fn.ValueKind == JsonValueKind.String)
+            if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
             {
                 jobName = fn.GetString();
             }
@@ -780,13 +780,11 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
         // Webhooks state (Klipper system state)
         string? webhooksState = null;
-        if (statusObj.TryGetProperty("webhooks", out var wh))
+        if (statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
+            wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
         {
-            if (wh.TryGetProperty("state", out var ws) && ws.ValueKind == JsonValueKind.String)
-            {
-                webhooksState = ws.GetString();
-                logger.LogTrace("Extracted webhooks state for printer {PrinterId}: {WebhooksState}", printerId, webhooksState);
-            }
+            webhooksState = ws.GetString();
+            logger.LogTrace("Extracted webhooks state for printer {PrinterId}: {WebhooksState}", printerId, webhooksState);
         }
 
         // Determine final state: webhooks state takes precedence over print_stats state
@@ -806,15 +804,15 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         }
 
         // Extruder temperatures
-        if (statusObj.TryGetProperty("extruder", out var ex))
+        if (statusObj.TryGetProperty("extruder", out JsonElement ex))
         {
-            if (ex.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
+            if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
             {
                 try
                 { hotend = t.GetDouble(); }
                 catch { }
             }
-            if (ex.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
+            if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
             {
                 try
                 { hotendTarget = tt.GetDouble(); }
@@ -830,15 +828,15 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         }
 
         // Bed temperatures
-        if (statusObj.TryGetProperty("heater_bed", out var hb))
+        if (statusObj.TryGetProperty("heater_bed", out JsonElement hb))
         {
-            if (hb.TryGetProperty("temperature", out var t) && t.ValueKind is JsonValueKind.Number)
+            if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
             {
                 try
                 { bed = t.GetDouble(); }
                 catch { }
             }
-            if (hb.TryGetProperty("target", out var tt) && tt.ValueKind is JsonValueKind.Number)
+            if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
             {
                 try
                 { bedTarget = tt.GetDouble(); }
@@ -854,7 +852,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         }
 
         // Get spool information
-        var spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
+        PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
 
         // Update persistent state with any new non-null values
         if (x.HasValue)
@@ -907,13 +905,10 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             state.JobName = jobName;
         }
 
-        if (homedAxes != null)
-        {
-            state.HomedAxes = homedAxes;
-        }
+        state.HomedAxes = homedAxes;
 
         // Create and send status update using persistent state (never null out good values)
-        var update = new PrinterStatusUpdate(
+        PrinterStatusUpdate update = new(
             printerId,
             true, // IsOnline
             state.State,
@@ -944,7 +939,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            var offlineUpdate = new PrinterStatusUpdate(
+            PrinterStatusUpdate offlineUpdate = new(
                 printerId,
                 false, // IsOnline
                 "Offline",
@@ -968,7 +963,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            var shutdownUpdate = new PrinterStatusUpdate(
+            PrinterStatusUpdate shutdownUpdate = new(
                 printerId,
                 false, // IsOnline
                 "Shutdown",
@@ -1004,7 +999,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 printerId, mode, reason);
 
             // Log state transition if mode changed
-            if (_pollingModes.TryGetValue(printerId, out var previousMode) && previousMode != mode)
+            if (_pollingModes.TryGetValue(printerId, out PollingMode previousMode) && previousMode != mode)
             {
                 logger.LogDebug("Polling mode transition for printer {PrinterId}: {PreviousMode} -> {NewMode}",
                     printerId, previousMode, mode);
@@ -1025,19 +1020,19 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         try
         {
             // Create scope to get moonraker client
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Step 1: Get the active spool ID from Moonraker
-            var activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
+            int? activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
             if (activeSpoolId == null)
             {
                 return new PrinterSpoolInfoDto(HasActiveSpool: false);
             }
 
             // Step 2: Get spool details directly from Spoolman using the ID
-            var spoolmanService = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
-            var spoolDetails = await spoolmanService.GetSpoolByIdAsync(activeSpoolId.Value, ct);
+            SpoolmanService spoolmanService = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
+            SpoolmanSpoolDto? spoolDetails = await spoolmanService.GetSpoolByIdAsync(activeSpoolId.Value, ct);
             if (spoolDetails == null)
             {
                 // Return basic info if detail fetch fails but we know there's an active spool
@@ -1075,8 +1070,8 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
     {
         try
         {
-            var lastPollTime = _lastHttpPollTimes.GetValueOrDefault(printer.Id, DateTime.MinValue);
-            var timeSinceLastPoll = DateTime.UtcNow - lastPollTime;
+            DateTime lastPollTime = _lastHttpPollTimes.GetValueOrDefault(printer.Id, DateTime.MinValue);
+            TimeSpan timeSinceLastPoll = DateTime.UtcNow - lastPollTime;
 
             // Only poll if enough time has passed since last poll
             if (timeSinceLastPoll < HttpPollInterval)
@@ -1087,12 +1082,12 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             logger.LogDebug("Starting HTTP polling fallback for printer {PrinterName}", printer.Name);
 
             // Use existing MoonrakerClient to fetch status via HTTP
-            using var scope = scopeFactory.CreateScope();
-            var serviceProvider = scope.ServiceProvider;
-            var moonrakerClient = serviceProvider.GetRequiredService<IMoonrakerClient>();
+            using IServiceScope scope = scopeFactory.CreateScope();
+            IServiceProvider serviceProvider = scope.ServiceProvider;
+            IMoonrakerClient moonrakerClient = serviceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Get comprehensive status using existing HTTP endpoint
-            var compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.ServerUrl, ct);
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.ServerUrl, ct);
 
             if (compositeStatus != null && compositeStatus.IsOnline)
             {
@@ -1101,9 +1096,9 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     printer.Name, compositeStatus.State, compositeStatus.IsOnline);
 
                 // Create a status update using the composite status data
-                var spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
+                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
 
-                var statusUpdate = new PrinterStatusUpdate(
+                PrinterStatusUpdate statusUpdate = new(
                     printer.Id,
                     compositeStatus.IsOnline,
                     compositeStatus.State,

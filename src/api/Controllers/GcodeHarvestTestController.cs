@@ -45,7 +45,7 @@ public class GcodeHarvestTestController : ControllerBase
             _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
                 serverUrl, path, extended);
 
-            var directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
+            Services.DirectoryInfo? directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
 
             if (directoryInfo == null)
             {
@@ -91,7 +91,7 @@ public class GcodeHarvestTestController : ControllerBase
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
 
-            var files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
+            string[] files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
 
             _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
 

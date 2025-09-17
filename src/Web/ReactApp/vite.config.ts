@@ -17,6 +17,19 @@ export default defineConfig({
       { find: '@', replacement: path.resolve(__dirname, 'src') },
     ],
   },
+  optimizeDeps: {
+    include: [
+      '@opentelemetry/api',
+      '@opentelemetry/semantic-conventions',
+      '@opentelemetry/exporter-trace-otlp-http',
+      '@opentelemetry/auto-instrumentations-web',
+      '@opentelemetry/instrumentation-fetch',
+      '@opentelemetry/sdk-trace-web',
+      '@opentelemetry/resources',
+      '@opentelemetry/instrumentation-user-interaction',
+      '@opentelemetry/instrumentation-xml-http-request'
+    ]
+  },
   server: {
     port: 3000,
     proxy: {

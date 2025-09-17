@@ -64,7 +64,7 @@ public class StartupInitializationHostedService : IHostedService
         _logger = logger;
         _status = status;
 
-        var meter = meterFactory.Create("Farm.Web.Api.Startup");
+        Meter meter = meterFactory.Create("Farm.Web.Api.Startup");
         _initDurationHistogram = meter.CreateHistogram<double>("startup.initialization.duration.ms", unit: "ms", description: "Duration of startup initialization");
         _initSuccessCounter = meter.CreateCounter<long>("startup.initialization.success.count", description: "Count of successful startup initializations");
         _initFailureCounter = meter.CreateCounter<long>("startup.initialization.failure.count", description: "Count of failed startup initializations");
@@ -82,7 +82,7 @@ public class StartupInitializationHostedService : IHostedService
         // Fire-and-forget background init so host can bind immediately
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _cts.CancelAfter(_overallTimeout);
-        var token = _cts.Token;
+        CancellationToken token = _cts.Token;
         _status.MarkInitializationStarted();
         _ = Task.Run(() => RunInitializationAsync(token), CancellationToken.None);
         _logger.LogInformation("[StartupInit] Background initialization scheduled (timeout {Timeout}s)", _overallTimeout.TotalSeconds);
@@ -97,28 +97,28 @@ public class StartupInitializationHostedService : IHostedService
     /// <param name="token">Cancellation token incorporating both host shutdown and service timeout.</param>
     private async Task RunInitializationAsync(CancellationToken token)
     {
-        var start = DateTime.UtcNow;
+        DateTime start = DateTime.UtcNow;
         try
         {
-            using var scope = _root.CreateScope();
-            var services = scope.ServiceProvider;
+            using IServiceScope scope = _root.CreateScope();
+            IServiceProvider services = scope.ServiceProvider;
 
             _logger.LogInformation("[StartupInit] Initialization started (async)");
-            var configurationValidator = services.GetRequiredService<ConfigurationValidator>();
-            var dbInitializer = services.GetRequiredService<DatabaseInitializer>();
-            var dbSettings = services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
+            ConfigurationValidator configurationValidator = services.GetRequiredService<ConfigurationValidator>();
+            DatabaseInitializer dbInitializer = services.GetRequiredService<DatabaseInitializer>();
+            DatabaseSettings dbSettings = services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
 
-            var retryCount = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_COUNT"), out var rc) ? rc : 3;
-            var retryDelay = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_DELAY"), out var rd) ? rd : 2;
+            int retryCount = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_COUNT"), out int rc) ? rc : 3;
+            int retryDelay = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_DELAY"), out int rd) ? rd : 2;
 
             await dbInitializer.InitializeAsync(dbSettings.Provider, retryCount, retryDelay);
             configurationValidator.ValidateConfiguration();
 
-            var db = services.GetRequiredService<AppDbContext>();
+            AppDbContext db = services.GetRequiredService<AppDbContext>();
             await Data.Seed.AuthenticationDataSeeder.SeedAsync(db);
 
             _status.MarkReady();
-            var elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;
+            double elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;
             _initDurationHistogram.Record(elapsedMs, KeyValuePair.Create<string, object?>("outcome", "success"));
             _initSuccessCounter.Add(1);
             _logger.LogInformation("[StartupInit] Initialization succeeded in {Elapsed} ms", (DateTime.UtcNow - start).TotalMilliseconds);

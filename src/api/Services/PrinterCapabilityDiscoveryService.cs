@@ -40,7 +40,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             _logger.LogInformation("Starting capability discovery for printer {PrinterId} ({PrinterName})", printer.Id, printer.Name);
 
             // Start with model defaults
-            var capabilities = await GetModelDefaultCapabilitiesAsync(printer);
+            PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer);
             if (capabilities == null)
             {
                 capabilities = new PrinterCapabilities
@@ -55,7 +55,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             }
 
             // Try to discover from printer API
-            var discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
+            DiscoveredCapabilities? discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
             if (discovered != null)
             {
                 ApplyDiscoveredCapabilities(capabilities, discovered);
@@ -84,12 +84,12 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         {
             _logger.LogInformation("Refreshing capabilities for printer {PrinterId}", printer.Id);
 
-            var discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
+            DiscoveredCapabilities? discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
             if (discovered != null)
             {
                 // Only update dynamic properties, preserve manual overrides for static ones
                 capabilities.CurrentMaterial = discovered.CurrentMaterial;
-                
+
                 // Update nozzle diameter if discovered and not manually set
                 if (discovered.NozzleDiameter.HasValue && !capabilities.NozzleDiameter.HasValue)
                 {
@@ -98,7 +98,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
                 capabilities.LastUpdated = DateTime.UtcNow;
                 capabilities.UpdatedAt = DateTime.UtcNow;
-                
+
                 _logger.LogInformation("Successfully refreshed capabilities for printer {PrinterId}", printer.Id);
             }
 
@@ -113,33 +113,33 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
     public async Task<CapabilityValidationResult> ValidateCapabilitiesAsync(PrinterCapabilities capabilities, Printer printer)
     {
-        var result = new CapabilityValidationResult();
+        CapabilityValidationResult result = new();
 
         try
         {
             // Load printer model for validation
-            var printerWithModel = await _context.Printers
+            Printer? printerWithModel = await _context.Printers
                 .Include(p => p.Model)
                 .FirstOrDefaultAsync(p => p.Id == printer.Id);
 
             if (printerWithModel?.Model != null)
             {
-                var model = printerWithModel.Model;
+                PrinterModel model = printerWithModel.Model;
 
                 // Validate build volume against model specifications
-                if (capabilities.MaxBuildVolumeX.HasValue && model.MaxX.HasValue && 
+                if (capabilities.MaxBuildVolumeX.HasValue && model.MaxX.HasValue &&
                     capabilities.MaxBuildVolumeX > model.MaxX)
                 {
                     result.Warnings.Add($"Build volume X ({capabilities.MaxBuildVolumeX}) exceeds model specification ({model.MaxX})");
                 }
 
-                if (capabilities.MaxBuildVolumeY.HasValue && model.MaxY.HasValue && 
+                if (capabilities.MaxBuildVolumeY.HasValue && model.MaxY.HasValue &&
                     capabilities.MaxBuildVolumeY > model.MaxY)
                 {
                     result.Warnings.Add($"Build volume Y ({capabilities.MaxBuildVolumeY}) exceeds model specification ({model.MaxY})");
                 }
 
-                if (capabilities.MaxBuildVolumeZ.HasValue && model.MaxZ.HasValue && 
+                if (capabilities.MaxBuildVolumeZ.HasValue && model.MaxZ.HasValue &&
                     capabilities.MaxBuildVolumeZ > model.MaxZ)
                 {
                     result.Warnings.Add($"Build volume Z ({capabilities.MaxBuildVolumeZ}) exceeds model specification ({model.MaxZ})");
@@ -148,7 +148,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                 // Validate nozzle diameter (common sizes)
                 if (capabilities.NozzleDiameter.HasValue)
                 {
-                    var commonSizes = new[] { 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1.0 };
+                    double[] commonSizes = new[] { 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1.0 };
                     if (!commonSizes.Any(size => Math.Abs(capabilities.NozzleDiameter.Value - size) < 0.01))
                     {
                         result.Warnings.Add($"Unusual nozzle diameter: {capabilities.NozzleDiameter}mm. Common sizes are: {string.Join(", ", commonSizes)}mm");
@@ -192,9 +192,11 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
     public async Task<PrinterCapabilities?> GetModelDefaultCapabilitiesAsync(Printer printer)
     {
+        ArgumentNullException.ThrowIfNull(printer);
+
         try
         {
-            var printerWithModel = await _context.Printers
+            Printer? printerWithModel = await _context.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printer.Id);
@@ -204,8 +206,8 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                 return null;
             }
 
-            var model = printerWithModel.Model;
-            var capabilities = new PrinterCapabilities
+            PrinterModel model = printerWithModel.Model;
+            PrinterCapabilities capabilities = new()
             {
                 Id = Guid.NewGuid(),
                 PrinterId = printer.Id,
@@ -232,7 +234,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
     private async Task<DiscoveredCapabilities?> DiscoverFromPrinterApiAsync(Printer printer, CancellationToken cancellationToken)
     {
-        var backend = (PrinterBackend)printer.Backend;
+        PrinterBackend backend = (PrinterBackend)printer.Backend;
 
         try
         {
@@ -256,37 +258,37 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         try
         {
             // Try to get printer.cfg file to determine stepper configurations and features
-            var printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken);
-            
+            byte[]? printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken);
+
             if (printerConfigBytes == null)
             {
                 // Try alternative config file name
                 printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
             }
-            
+
             if (printerConfigBytes == null)
             {
                 return null; // Config file not accessible
             }
 
-            var configContent = System.Text.Encoding.UTF8.GetString(printerConfigBytes);
-            var discovered = new DiscoveredCapabilities();
+            string configContent = System.Text.Encoding.UTF8.GetString(printerConfigBytes);
+            DiscoveredCapabilities discovered = new();
 
             // Parse Klipper configuration file (INI-style format)
             discovered.MaxBuildVolumeX = ParseConfigValue(configContent, "stepper_x", "position_max", 200.0);
             discovered.MaxBuildVolumeY = ParseConfigValue(configContent, "stepper_y", "position_max", 200.0);
             discovered.MaxBuildVolumeZ = ParseConfigValue(configContent, "stepper_z", "position_max", 200.0);
-            
+
             // Check for heated bed
             discovered.HasHeatedBed = configContent.Contains("[heater_bed]");
-            
+
             // Check for multiple extruders and temperature ranges
             discovered.NumberOfExtruders = CountExtrudersFromConfig(configContent);
-            
+
             // Get temperature limits
             discovered.MaxHotendTemp = (int)ParseConfigValue(configContent, "extruder", "max_temp", 250.0);
             discovered.MaxBedTemp = (int)ParseConfigValue(configContent, "heater_bed", "max_temp", 100.0);
-            
+
             // Get nozzle diameter
             discovered.NozzleDiameter = ParseConfigValue(configContent, "extruder", "nozzle_diameter", 0.4);
 
@@ -299,21 +301,23 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
     }
 
-    private double ParseConfigValue(string configContent, string section, string key, double defaultValue)
+    private static double ParseConfigValue(string configContent, string section, string key, double defaultValue)
     {
         try
         {
             // Parse INI-style configuration for Klipper
-            var sectionStart = configContent.IndexOf($"[{section}]", StringComparison.OrdinalIgnoreCase);
-            if (sectionStart == -1) return defaultValue;
+            int sectionStart = configContent.IndexOf($"[{section}]", StringComparison.OrdinalIgnoreCase);
+            if (sectionStart == -1)
+                return defaultValue;
 
-            var sectionEnd = configContent.IndexOf('[', sectionStart + 1);
-            if (sectionEnd == -1) sectionEnd = configContent.Length;
+            int sectionEnd = configContent.IndexOf('[', sectionStart + 1);
+            if (sectionEnd == -1)
+                sectionEnd = configContent.Length;
 
-            var sectionContent = configContent.Substring(sectionStart, sectionEnd - sectionStart);
-            var keyMatch = Regex.Match(sectionContent, $@"{Regex.Escape(key)}\s*[:=]\s*([^\r\n]+)", RegexOptions.IgnoreCase);
-            
-            if (keyMatch.Success && double.TryParse(keyMatch.Groups[1].Value.Trim(), out var value))
+            string sectionContent = configContent.Substring(sectionStart, sectionEnd - sectionStart);
+            Match keyMatch = Regex.Match(sectionContent, $@"{Regex.Escape(key)}\s*[:=]\s*([^\r\n]+)", RegexOptions.IgnoreCase);
+
+            if (keyMatch.Success && double.TryParse(keyMatch.Groups[1].Value.Trim(), out double value))
             {
                 return value;
             }
@@ -325,11 +329,12 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         return defaultValue;
     }
 
-    private int CountExtrudersFromConfig(string configContent)
+    private static int CountExtrudersFromConfig(string configContent)
     {
         int count = 0;
         // Count extruder sections: [extruder], [extruder1], [extruder2], etc.
-        if (configContent.Contains("[extruder]")) count = 1;
+        if (configContent.Contains("[extruder]"))
+            count = 1;
         for (int i = 1; i < 10; i++)
         {
             if (configContent.Contains($"[extruder{i}]"))
@@ -345,13 +350,13 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         try
         {
             // PrusaLink provides less configuration data, but we can get some basic info from status
-            var status = await _prusaClient.GetStatusAsync(printer.ServerUrl, printer.ApiKey, cancellationToken);
+            PrusaStatus status = await _prusaClient.GetStatusAsync(printer.ServerUrl, printer.ApiKey, cancellationToken);
             if (status == null)
             {
                 return null;
             }
 
-            var discovered = new DiscoveredCapabilities
+            DiscoveredCapabilities discovered = new()
             {
                 HasHeatedBed = true, // Most Prusa printers have heated beds
                 NumberOfExtruders = 1, // Most Prusa printers are single extruder
@@ -370,10 +375,12 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
     }
 
-    private Task<DiscoveredCapabilities?> DiscoverFromSdcpAsync(Printer printer, CancellationToken cancellationToken)
+#pragma warning disable S1172 // Unused method parameters should be removed
+    private static Task<DiscoveredCapabilities?> DiscoverFromSdcpAsync(Printer printer, CancellationToken cancellationToken)
+#pragma warning restore S1172 // Unused method parameters should be removed
     {
         // SDCP provides minimal configuration data
-        var discovered = new DiscoveredCapabilities
+        DiscoveredCapabilities discovered = new()
         {
             HasHeatedBed = true, // Assume heated bed for SDCP printers
             NumberOfExtruders = 1,
@@ -382,7 +389,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         return Task.FromResult<DiscoveredCapabilities?>(discovered);
     }
 
-    private void ApplyDiscoveredCapabilities(PrinterCapabilities capabilities, DiscoveredCapabilities discovered)
+    private static void ApplyDiscoveredCapabilities(PrinterCapabilities capabilities, DiscoveredCapabilities discovered)
     {
         if (discovered.NozzleDiameter.HasValue)
             capabilities.NozzleDiameter = discovered.NozzleDiameter;
@@ -415,10 +422,10 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             capabilities.CurrentMaterial = discovered.CurrentMaterial;
     }
 
-    private void SetDefaultsByManufacturerAndModel(PrinterCapabilities capabilities, Printer printer)
+    private static void SetDefaultsByManufacturerAndModel(PrinterCapabilities capabilities, Printer printer)
     {
-        var manufacturerName = printer.Manufacturer?.Name?.ToLowerInvariant();
-        var modelName = printer.Model?.Name?.ToLowerInvariant();
+        string? manufacturerName = printer.Manufacturer?.Name?.ToLowerInvariant();
+        string? modelName = printer.Model?.Name?.ToLowerInvariant();
 
         // Set manufacturer-specific defaults
         switch (manufacturerName)

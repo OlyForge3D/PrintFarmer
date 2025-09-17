@@ -1,4 +1,5 @@
 ﻿using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -12,14 +13,14 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
-        var checks = new Dictionary<string, object>();
-        var overallHealthy = true;
-        var issues = new List<string>();
+        Dictionary<string, object> checks = new();
+        bool overallHealthy = true;
+        List<string> issues = new();
 
         // Database connectivity and initialization
         try
         {
-            var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
+            bool canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
             if (!canConnect)
             {
                 checks["Database"] = new { Status = "Unhealthy", Provider = dbContext.Database.ProviderName, Error = "Cannot connect" };
@@ -29,8 +30,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             else
             {
                 // Check if database is initialized by verifying manufacturers exist
-                var manufacturerCount = await dbContext.Manufacturers.CountAsync(cancellationToken);
-                var isInitialized = manufacturerCount > 0;
+                int manufacturerCount = await dbContext.Manufacturers.CountAsync(cancellationToken);
+                bool isInitialized = manufacturerCount > 0;
 
                 checks["Database"] = new
                 {
@@ -58,8 +59,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         // Memory usage check
         try
         {
-            var memoryUsed = GC.GetTotalMemory(false);
-            var memoryMB = memoryUsed / (1024 * 1024);
+            long memoryUsed = GC.GetTotalMemory(false);
+            long memoryMB = memoryUsed / (1024 * 1024);
             checks["Memory"] = new { Status = memoryMB < 500 ? "Healthy" : "Warning", UsageMB = memoryMB };
 
             if (memoryMB > 1000) // Warning threshold
@@ -76,20 +77,20 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         // External service connectivity (sample Moonraker check)
         try
         {
-            var printers = await dbContext.Printers.Take(1).ToListAsync(cancellationToken);
-            var externalServiceCount = 0;
-            var failedServices = 0;
+            List<Printer> printers = await dbContext.Printers.Take(1).ToListAsync(cancellationToken);
+            int externalServiceCount = 0;
+            int failedServices = 0;
 
-            foreach (var printer in printers.Take(3)) // Check max 3 printers for performance
+            foreach (Printer? printer in printers.Take(3)) // Check max 3 printers for performance
             {
                 if (printer.Backend == 0) // Moonraker
                 {
                     externalServiceCount++;
                     try
                     {
-                        using var client = httpClientFactory.CreateClient();
+                        using HttpClient client = httpClientFactory.CreateClient();
                         client.Timeout = TimeSpan.FromSeconds(2);
-                        var response = await client.GetAsync($"{printer.ServerUrl}/server/info", cancellationToken);
+                        HttpResponseMessage response = await client.GetAsync($"{printer.ServerUrl}/server/info", cancellationToken);
                         if (!response.IsSuccessStatusCode)
                         {
                             failedServices++;
@@ -102,7 +103,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 }
             }
 
-            var serviceStatus = failedServices == 0 ? "Healthy" :
+            string serviceStatus = failedServices == 0 ? "Healthy" :
                               failedServices < externalServiceCount ? "Degraded" : "Unhealthy";
 
             checks["ExternalServices"] = new
@@ -133,7 +134,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "Unknown"
         };
 
-        var result = new HealthCheckResult(
+        HealthCheckResult result = new(
             overallHealthy ? HealthStatus.Healthy : HealthStatus.Unhealthy,
             description: overallHealthy ? "All systems operational" : string.Join("; ", issues),
             data: checks

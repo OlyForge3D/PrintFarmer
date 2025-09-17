@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -44,7 +45,7 @@ public class MoonrakerClientTestController : ControllerBase
             _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
                 serverUrl, path, extended);
 
-            var directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
+            Services.DirectoryInfo? directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
 
             if (directoryInfo == null)
             {
@@ -89,7 +90,7 @@ public class MoonrakerClientTestController : ControllerBase
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
 
-            var files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
+            string[] files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
 
             _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
 
@@ -126,7 +127,7 @@ public class MoonrakerClientTestController : ControllerBase
         {
             _logger.LogInformation("Testing MoonrakerClient.GetFileRootsAsync with serverUrl={ServerUrl}", serverUrl);
 
-            var roots = await _moonrakerClient.GetFileRootsAsync(serverUrl, ct);
+            FileRoot[] roots = await _moonrakerClient.GetFileRootsAsync(serverUrl, ct);
 
             _logger.LogInformation("GetFileRootsAsync succeeded. Found {RootCount} roots", roots.Length);
 

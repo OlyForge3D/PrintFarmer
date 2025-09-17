@@ -188,12 +188,12 @@ csharp_style_allow_blank_line_after_token_in_conditional_expression_experimental
 csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental = false
 
 # Prefer "var" everywhere
-csharp_style_var_for_built_in_types = true:suggestion
-csharp_style_var_when_type_is_apparent = true:suggestion
-csharp_style_var_elsewhere = true:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = false:suggestion
+csharp_style_var_elsewhere = false:suggestion
 
 # Prefer collection expressions
-dotnet_style_prefer_collection_expression = true:warning
+dotnet_style_prefer_collection_expression = never:warning
 
 # Suppress specific collection-init simplification analyzers during large automated cleanup
 dotnet_diagnostic.IDE0028.severity = none
@@ -394,7 +394,7 @@ dotnet_diagnostic.CA5394.severity = error
 dotnet_diagnostic.CA2201.severity = warning
 
 # CA1062: Validate public method arguments (PHASE1)
-dotnet_diagnostic.CA1062.severity = warning
+dotnet_diagnostic.CA1062.severity = suggestion
 
 # S5445: Disable weak JWT-related patterns (placeholder Sonar rule) (PHASE1)
 dotnet_diagnostic.S5445.severity = warning
@@ -432,3 +432,9 @@ dotnet_diagnostic.SCS0005.severity = warning
 
 # Default severity for analyzer diagnostics with category 'Naming'
 dotnet_analyzer_diagnostic.category-Naming.severity = none
+
+# S6605: Collection-specific "Exists" method should be used instead of the "Any" extension
+dotnet_diagnostic.S6605.severity = suggestion
+
+# CA2100: Review SQL queries for security vulnerabilities
+dotnet_diagnostic.CA2100.severity = suggestion

@@ -28,7 +28,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var capabilities = await db.PrinterCapabilities
+            List<PrinterCapabilities> capabilities = await db.PrinterCapabilities
                 .Include(c => c.Printer)
                 .ThenInclude(p => p.Model)
                 .ToListAsync();
@@ -74,7 +74,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await db.PrinterCapabilities
                 .Include(c => c.Printer)
                 .ThenInclude(p => p.Model)
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
@@ -132,21 +132,21 @@ public class PrinterCapabilitiesController(
         try
         {
             // Check if printer exists
-            var printer = await db.Printers.FindAsync(request.PrinterId);
+            Printer? printer = await db.Printers.FindAsync(request.PrinterId);
             if (printer == null)
             {
                 return NotFound($"Printer with ID {request.PrinterId} not found");
             }
 
             // Check if capabilities already exist
-            var existingCapabilities = await db.PrinterCapabilities
+            PrinterCapabilities? existingCapabilities = await db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == request.PrinterId);
             if (existingCapabilities != null)
             {
                 return Conflict($"Capabilities already exist for printer {request.PrinterId}");
             }
 
-            var capabilities = new PrinterCapabilities
+            PrinterCapabilities capabilities = new()
             {
                 Id = Guid.NewGuid(),
                 PrinterId = request.PrinterId,
@@ -173,7 +173,7 @@ public class PrinterCapabilitiesController(
             {
                 try
                 {
-                    var defaults = await discoveryService.GetModelDefaultCapabilitiesAsync(printer);
+                    PrinterCapabilities? defaults = await discoveryService.GetModelDefaultCapabilitiesAsync(printer);
                     if (defaults != null)
                     {
                         capabilities.MaxBuildVolumeX ??= defaults.MaxBuildVolumeX;
@@ -199,7 +199,7 @@ public class PrinterCapabilitiesController(
             // Reload to get printer name
             await db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
 
-            var result = new PrinterCapabilitiesDto(
+            PrinterCapabilitiesDto result = new(
                 Id: capabilities.Id,
                 PrinterId: capabilities.PrinterId,
                 PrinterName: capabilities.Printer.Name,
@@ -248,13 +248,13 @@ public class PrinterCapabilitiesController(
         try
         {
             // Check if printer exists
-            var printer = await db.Printers.FindAsync(printerId);
+            Printer? printer = await db.Printers.FindAsync(printerId);
             if (printer == null)
             {
                 return NotFound($"Printer with ID {printerId} not found");
             }
 
-            var capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
 
             if (capabilities == null)
@@ -307,7 +307,7 @@ public class PrinterCapabilitiesController(
             // Reload to get printer name
             await db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
 
-            var result = new PrinterCapabilitiesDto(
+            PrinterCapabilitiesDto result = new(
                 Id: capabilities.Id,
                 PrinterId: capabilities.PrinterId,
                 PrinterName: capabilities.Printer.Name,
@@ -350,20 +350,20 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var gcodeFile = await db.GcodeFiles.FindAsync(gcodeFileId);
+            GcodeFile? gcodeFile = await db.GcodeFiles.FindAsync(gcodeFileId);
             if (gcodeFile == null)
             {
                 return NotFound($"G-code file with ID {gcodeFileId} not found");
             }
 
-            var allPrinters = await db.PrinterCapabilities
+            List<PrinterCapabilities> allPrinters = await db.PrinterCapabilities
                 .Include(c => c.Printer)
                 .Where(c => c.IsAvailable)
                 .ToListAsync();
 
-            var compatiblePrinters = new List<PrinterDto>();
+            List<PrinterDto> compatiblePrinters = new();
 
-            foreach (var cap in allPrinters)
+            foreach (PrinterCapabilities? cap in allPrinters)
             {
                 bool isCompatible = true;
 
@@ -402,7 +402,7 @@ public class PrinterCapabilitiesController(
 
                 if (isCompatible)
                 {
-                    var printerDto = new PrinterDto(
+                    PrinterDto printerDto = new(
                         Id: cap.Printer.Id,
                         Name: cap.Printer.Name,
                         ServerUrl: cap.Printer.ServerUrl,
@@ -453,7 +453,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
 
             if (capabilities == null)
@@ -485,7 +485,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var printer = await db.Printers
+            Printer? printer = await db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printerId, cancellationToken);
@@ -496,7 +496,7 @@ public class PrinterCapabilitiesController(
             }
 
             // Check if capabilities already exist
-            var existingCapabilities = await db.PrinterCapabilities
+            PrinterCapabilities? existingCapabilities = await db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId, cancellationToken);
 
             PrinterCapabilities capabilities;
@@ -510,7 +510,7 @@ public class PrinterCapabilitiesController(
             else
             {
                 // Discover new capabilities
-                var discoveredCapabilities = await discoveryService.DiscoverCapabilitiesAsync(printer, cancellationToken);
+                PrinterCapabilities? discoveredCapabilities = await discoveryService.DiscoverCapabilitiesAsync(printer, cancellationToken);
                 if (discoveredCapabilities == null)
                 {
                     return Problem("Failed to discover capabilities for the printer", statusCode: 500);
@@ -525,7 +525,7 @@ public class PrinterCapabilitiesController(
             // Load printer name for response
             await db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(cancellationToken);
 
-            var result = new PrinterCapabilitiesDto(
+            PrinterCapabilitiesDto result = new(
                 Id: capabilities.Id,
                 PrinterId: capabilities.PrinterId,
                 PrinterName: capabilities.Printer.Name,
@@ -575,7 +575,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var printer = await db.Printers
+            Printer? printer = await db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printerId);
@@ -585,7 +585,7 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Printer with ID {printerId} not found");
             }
 
-            var capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
 
             if (capabilities == null)
@@ -593,7 +593,7 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Capabilities for printer {printerId} not found");
             }
 
-            var validationResult = await discoveryService.ValidateCapabilitiesAsync(capabilities, printer);
+            CapabilityValidationResult validationResult = await discoveryService.ValidateCapabilitiesAsync(capabilities, printer);
             return Ok(validationResult);
         }
         catch (Exception ex)
@@ -614,7 +614,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            var printer = await db.Printers
+            Printer? printer = await db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printerId);
@@ -624,13 +624,13 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Printer with ID {printerId} not found");
             }
 
-            var defaults = await discoveryService.GetModelDefaultCapabilitiesAsync(printer);
+            PrinterCapabilities? defaults = await discoveryService.GetModelDefaultCapabilitiesAsync(printer);
             if (defaults == null)
             {
                 return NotFound($"No model defaults available for printer {printerId}");
             }
 
-            var result = new PrinterCapabilitiesDto(
+            PrinterCapabilitiesDto result = new(
                 Id: defaults.Id,
                 PrinterId: defaults.PrinterId,
                 PrinterName: printer.Name,

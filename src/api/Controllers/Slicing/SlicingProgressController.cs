@@ -12,7 +12,7 @@ public class SlicingProgressController : ControllerBase
     public async Task GetProgressAsync([FromRoute] string jobId)
     {
 #pragma warning disable S6932 // Accept header manual inspection for SSE negotiation
-        var acceptHeaders = HttpContext.Request.Headers["Accept"].ToString();
+        string acceptHeaders = HttpContext.Request.Headers["Accept"].ToString();
 #pragma warning restore S6932
         if (!acceptHeaders.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
         {
@@ -21,7 +21,7 @@ public class SlicingProgressController : ControllerBase
         HttpContext.Response.Headers["Cache-Control"] = "no-cache";
         HttpContext.Response.Headers["X-Accel-Buffering"] = "no"; // disable buffering for nginx
 
-        var found = SlicingJobStore.TryGet(jobId, out var job);
+        bool found = SlicingJobStore.TryGet(jobId, out SlicingJobDto? job);
         if (!found || job == null)
         {
             await HttpContext.Response.WriteAsync("event: error\n");
@@ -30,10 +30,10 @@ public class SlicingProgressController : ControllerBase
             return;
         }
 
-        var ct = HttpContext.RequestAborted;
+        CancellationToken ct = HttpContext.RequestAborted;
         while (!ct.IsCancellationRequested)
         {
-            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            string payload = System.Text.Json.JsonSerializer.Serialize(new
             {
                 jobId = job.JobId,
                 status = job.Status.ToString(),

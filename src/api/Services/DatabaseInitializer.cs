@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Data;
+﻿using System.Data.Common;
+using Farm.Web.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -26,7 +27,7 @@ public class DatabaseInitializer
     {
         _logger.LogInformation("[DB] Starting database initialization for provider: {DbProvider}", dbProvider);
 
-        var retryCount = 0;
+        int retryCount = 0;
 
         while (retryCount < maxRetries)
         {
@@ -153,21 +154,21 @@ public class DatabaseInitializer
     /// </summary>
     private async Task EnsureCaseInsensitiveColumnsAsync()
     {
-        var conn = _context.Database.GetDbConnection();
+        DbConnection conn = _context.Database.GetDbConnection();
         await conn.OpenAsync();
-        using var tx = await conn.BeginTransactionAsync();
+        using DbTransaction tx = await conn.BeginTransactionAsync();
         try
         {
             async Task<bool> ColumnExistsAsync(string table, string column)
             {
-                using var cmd = conn.CreateCommand();
+                using DbCommand cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
                 cmd.CommandText = $"SELECT 1 FROM pragma_table_info('{table}') WHERE lower(name)=lower(@col) LIMIT 1";
-                var p = cmd.CreateParameter();
+                DbParameter p = cmd.CreateParameter();
                 p.ParameterName = "@col";
                 p.Value = column;
                 cmd.Parameters.Add(p);
-                var result = await cmd.ExecuteScalarAsync();
+                object? result = await cmd.ExecuteScalarAsync();
                 return result != null;
             }
 
@@ -175,7 +176,7 @@ public class DatabaseInitializer
             {
                 if (!await ColumnExistsAsync(table, column))
                 {
-                    using var alter = conn.CreateCommand();
+                    using DbCommand alter = conn.CreateCommand();
                     alter.Transaction = tx;
                     alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''";
                     await alter.ExecuteNonQueryAsync();
@@ -185,7 +186,7 @@ public class DatabaseInitializer
 
             async Task<bool> HasDuplicatesAsync(string table)
             {
-                using var cmd = conn.CreateCommand();
+                using DbCommand cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
                 if (table == "Manufacturers")
                 {
@@ -195,16 +196,16 @@ public class DatabaseInitializer
                 {
                     cmd.CommandText = "SELECT 1 FROM (SELECT ManufacturerId, lower(Name) AS L, COUNT(*) c FROM PrinterModels GROUP BY ManufacturerId, lower(Name) HAVING c>1) LIMIT 1";
                 }
-                var r = await cmd.ExecuteScalarAsync();
+                object? r = await cmd.ExecuteScalarAsync();
                 return r != null;
             }
 
             async Task BackfillAsync(string table)
             {
-                using var upd = conn.CreateCommand();
+                using DbCommand upd = conn.CreateCommand();
                 upd.Transaction = tx;
                 upd.CommandText = $"UPDATE {table} SET NameLowered = lower(Name) WHERE NameLowered = '' OR NameLowered IS NULL";
-                var rows = await upd.ExecuteNonQueryAsync();
+                int rows = await upd.ExecuteNonQueryAsync();
                 if (rows >= 0)
                 {
                     _logger.LogDebug("[DB] Backfilled {Rows} rows for {Table}.NameLowered", rows, table);
@@ -213,7 +214,7 @@ public class DatabaseInitializer
 
             async Task EnsureIndexAsync(string sql, string description)
             {
-                using var cmd = conn.CreateCommand();
+                using DbCommand cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
                 cmd.CommandText = sql;
                 try

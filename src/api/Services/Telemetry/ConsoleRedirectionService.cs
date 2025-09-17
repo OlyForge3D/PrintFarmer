@@ -106,7 +106,7 @@ internal class UnifiedConsoleWriter : TextWriter
     {
         if (_buffer.Length > 0)
         {
-            var message = _buffer.ToString();
+            string message = _buffer.ToString();
             _buffer.Clear();
 
             _unifiedLogger.LogWithContext(_logLevel, _category, message);

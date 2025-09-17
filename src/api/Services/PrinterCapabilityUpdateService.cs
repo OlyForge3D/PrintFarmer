@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Telemetry;
 using Microsoft.EntityFrameworkCore;
@@ -27,14 +29,14 @@ public class PrinterCapabilityUpdateService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.ExecuteAsync");
+        using Activity? activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.ExecuteAsync");
         _logger.LogInformation("PrinterCapabilityUpdateService started");
 
         // Add startup delay to allow server initialization to complete
         try
         {
             _logger.LogInformation("PrinterCapabilityUpdateService waiting 30 seconds for server initialization");
-            using var startupActivity = _telemetry.StartActivity("PrinterCapabilityUpdateService.StartupDelay");
+            using Activity? startupActivity = _telemetry.StartActivity("PrinterCapabilityUpdateService.StartupDelay");
             await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
         catch (OperationCanceledException)
@@ -49,7 +51,7 @@ public class PrinterCapabilityUpdateService : BackgroundService
         {
             try
             {
-                using var updateActivity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCycle");
+                using Activity? updateActivity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCycle");
                 _logger.LogDebug("Starting printer capability update cycle");
                 await UpdateCapabilitiesAsync(stoppingToken);
                 _logger.LogDebug("Completed printer capability update cycle, waiting {Minutes} minutes", _updateInterval.TotalMinutes);
@@ -80,19 +82,19 @@ public class PrinterCapabilityUpdateService : BackgroundService
 
     private async Task UpdateCapabilitiesAsync(CancellationToken cancellationToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        using var activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCapabilitiesAsync");
+        using IServiceScope scope = _serviceProvider.CreateScope();
+        using Activity? activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCapabilitiesAsync");
 
         try
         {
             _logger.LogDebug("Getting AppDbContext and IPrinterCapabilityDiscoveryService from DI");
-            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var discoveryService = scope.ServiceProvider.GetRequiredService<IPrinterCapabilityDiscoveryService>();
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            IPrinterCapabilityDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<IPrinterCapabilityDiscoveryService>();
             _logger.LogDebug("Successfully got services from DI");
 
             // Early return if no printers are registered to prevent hanging
             _logger.LogDebug("Checking printer count");
-            var printerCount = await context.Printers.CountAsync(cancellationToken);
+            int printerCount = await context.Printers.CountAsync(cancellationToken);
             _logger.LogDebug("Found {PrinterCount} registered printers", printerCount);
 
             if (printerCount == 0)
@@ -103,8 +105,8 @@ public class PrinterCapabilityUpdateService : BackgroundService
 
             // Get all printers with capabilities that haven't been updated recently
             _logger.LogDebug("Querying stale printer capabilities");
-            var staleThreshold = DateTime.UtcNow.AddHours(-2); // Update if older than 2 hours
-            var capabilities = await context.PrinterCapabilities
+            DateTime staleThreshold = DateTime.UtcNow.AddHours(-2); // Update if older than 2 hours
+            List<PrinterCapabilities> capabilities = await context.PrinterCapabilities
                 .Include(c => c.Printer)
                 .ThenInclude(p => p.Model)
                 .Include(c => c.Printer.Manufacturer)
@@ -122,7 +124,7 @@ public class PrinterCapabilityUpdateService : BackgroundService
 
             _logger.LogInformation("Updating capabilities for {Count} printers", capabilities.Count);
 
-            foreach (var capability in capabilities)
+            foreach (PrinterCapabilities? capability in capabilities)
             {
                 if (cancellationToken.IsCancellationRequested)
                     break;

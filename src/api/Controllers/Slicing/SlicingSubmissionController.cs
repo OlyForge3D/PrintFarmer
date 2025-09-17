@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using Farm.Web.Api.Data;
+using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -26,7 +27,7 @@ public class SlicingSubmissionController : ControllerBase
         _fileStorage = fileStorage;
         _logger = logger;
         // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
-        var tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
+        string tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
         Directory.CreateDirectory(tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _env = env ?? throw new ArgumentNullException(nameof(env));
@@ -47,7 +48,7 @@ public class SlicingSubmissionController : ControllerBase
         // If modelFile was not bound by the model binder, fall back to first file in the multipart payload
         if (modelFile == null && Request.HasFormContentType)
         {
-            var form = await Request.ReadFormAsync();
+            IFormCollection form = await Request.ReadFormAsync();
             // Prefer bound files collection populated by the model binder (handles arbitrary field names)
             if (files != null && files.Count > 0)
             {
@@ -71,9 +72,9 @@ public class SlicingSubmissionController : ControllerBase
 
         try
         {
-            using var validationStream = modelFile.OpenReadStream();
-            using var reader = new StreamReader(validationStream, leaveOpen: true);
-            var first = await reader.ReadLineAsync() ?? string.Empty;
+            using Stream validationStream = modelFile.OpenReadStream();
+            using StreamReader reader = new(validationStream, leaveOpen: true);
+            string first = await reader.ReadLineAsync() ?? string.Empty;
             if (!first.StartsWith("solid", StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest("Invalid model file");
@@ -89,7 +90,7 @@ public class SlicingSubmissionController : ControllerBase
             return BadRequest("Valid slicer engine is required");
         }
 
-        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out var printerGuid))
+        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out Guid printerGuid))
         {
             return BadRequest("Valid printer ID is required");
         }
@@ -121,15 +122,15 @@ public class SlicingSubmissionController : ControllerBase
 
         try
         {
-            var fileKey = $"models/{Guid.NewGuid()}/{modelFile.FileName}";
+            string fileKey = $"models/{Guid.NewGuid()}/{modelFile.FileName}";
             string modelFileUrl;
-            await using (var stream = modelFile.OpenReadStream())
+            await using (Stream stream = modelFile.OpenReadStream())
             {
                 modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, stream, "application/octet-stream");
             }
 
             // Determine authenticated user. In test environment allow a deterministic fallback user id
-            var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+            Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
             Guid userId;
             if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
             {
@@ -144,7 +145,7 @@ public class SlicingSubmissionController : ControllerBase
                 }
             }
 
-            var request = new Farm.Web.Shared.SlicingJobRequest
+            SlicingJobRequest request = new()
             {
                 UserId = userId,
                 PrinterId = printerGuid,
@@ -154,10 +155,10 @@ public class SlicingSubmissionController : ControllerBase
                 SlicerProfile = profile!
             };
 
-            var response = await _orchestrator.SubmitJobAsync(request);
+            SlicingJobResponse response = await _orchestrator.SubmitJobAsync(request);
 
             // Build a SliceResultDto to include richer metadata for tests and client consumption
-            var sliceResult = new SliceResultDto
+            SliceResultDto sliceResult = new()
             {
                 JobId = response.JobId.ToString(),
                 Status = response.Status.ToString(),
@@ -177,12 +178,12 @@ public class SlicingSubmissionController : ControllerBase
             // In Testing environment register the job in the in-memory SlicingJobStore as Queued
             if (_env.IsEnvironment("Testing"))
             {
-                var jobId = response.JobId.ToString();
+                string jobId = response.JobId.ToString();
                 sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode"; // placeholder path; actual file will be created by the worker
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
-                var storeJob = new SlicingJobDto
+                SlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
                     Status = SlicingJobStatus.Queued,
@@ -219,7 +220,7 @@ public class SlicingSubmissionController : ControllerBase
         [FromForm(Name = "priority")] string? priorityRaw)
     {
         // Find the uploaded model
-        var model = await _context.Models3D.FirstOrDefaultAsync(m => m.Id == modelId);
+        Model3D? model = await _context.Models3D.FirstOrDefaultAsync(m => m.Id == modelId);
         if (model == null)
         {
             return NotFound($"Model with ID {modelId} not found");
@@ -238,7 +239,7 @@ public class SlicingSubmissionController : ControllerBase
             return BadRequest("Valid slicer engine is required");
         }
 
-        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out var printerGuid))
+        if (string.IsNullOrWhiteSpace(printerId) || !Guid.TryParse(printerId, out Guid printerGuid))
         {
             return BadRequest("Valid printer ID is required");
         }
@@ -271,15 +272,15 @@ public class SlicingSubmissionController : ControllerBase
         try
         {
             // Upload the model file to the slicer storage
-            var fileKey = $"models/{Guid.NewGuid()}/{model.OriginalFileName}";
+            string fileKey = $"models/{Guid.NewGuid()}/{model.OriginalFileName}";
             string modelFileUrl;
-            using (var fileStream = new FileStream(model.FilePath, FileMode.Open, FileAccess.Read))
+            using (FileStream fileStream = new(model.FilePath, FileMode.Open, FileAccess.Read))
             {
                 modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, fileStream, "application/octet-stream");
             }
 
             // Determine authenticated user
-            var subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+            Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
             Guid userId;
             if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
             {
@@ -293,7 +294,7 @@ public class SlicingSubmissionController : ControllerBase
                 }
             }
 
-            var request = new Farm.Web.Shared.SlicingJobRequest
+            SlicingJobRequest request = new()
             {
                 UserId = userId,
                 PrinterId = printerGuid,
@@ -303,9 +304,9 @@ public class SlicingSubmissionController : ControllerBase
                 SlicerProfile = profile!
             };
 
-            var response = await _orchestrator.SubmitJobAsync(request);
+            SlicingJobResponse response = await _orchestrator.SubmitJobAsync(request);
 
-            var sliceResult = new SliceResultDto
+            SliceResultDto sliceResult = new()
             {
                 JobId = response.JobId.ToString(),
                 Status = response.Status.ToString(),
@@ -325,12 +326,12 @@ public class SlicingSubmissionController : ControllerBase
             // In Testing environment register the job in the in-memory SlicingJobStore as Queued
             if (_env.IsEnvironment("Testing"))
             {
-                var jobId = response.JobId.ToString();
+                string jobId = response.JobId.ToString();
                 sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode";
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
-                var storeJob = new SlicingJobDto
+                SlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
                     Status = SlicingJobStatus.Queued,

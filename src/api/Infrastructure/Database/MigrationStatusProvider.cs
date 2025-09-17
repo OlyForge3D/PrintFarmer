@@ -24,11 +24,11 @@ public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusPro
         string mode = "EnsureCreated"; // default assumption given current strategy
         try
         {
-            var available = context.Database.GetMigrations();
+            IEnumerable<string> available = context.Database.GetMigrations();
             hasMigrations = available.Any();
             if (hasMigrations)
             {
-                var applied = context.Database.GetAppliedMigrations();
+                IEnumerable<string> applied = context.Database.GetAppliedMigrations();
                 appliedAny = applied.Any();
                 mode = "Migrations"; // if any migrations exist we consider migrations mode
             }

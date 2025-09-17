@@ -19,7 +19,7 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 
         // Create unbounded channel for maximum throughput
         // In production, you might want bounded channels with backpressure
-        var options = new UnboundedChannelOptions
+        UnboundedChannelOptions options = new()
         {
             SingleReader = false, // Allow multiple workers
             SingleWriter = false, // Allow multiple harvest operations
@@ -56,7 +56,7 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
             yield break;
         }
 
-        await foreach (var job in _channel.Reader.ReadAllAsync(ct))
+        await foreach (HarvestFileJob job in _channel.Reader.ReadAllAsync(ct))
         {
             _logger.LogDebug("Dequeued job for file {FileName} from operation {OperationId}",
                 job.FileName, job.OperationId);

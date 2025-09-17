@@ -66,7 +66,7 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 
     public void LogWithContext(LogLevel level, string category, string message, object? context = null, Exception? exception = null)
     {
-        using var activity = _activitySource.StartActivity($"Log.{category}");
+        using Activity? activity = _activitySource.StartActivity($"Log.{category}");
 
         // Add context to telemetry
         if (activity != null)
@@ -108,9 +108,9 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 
     private void LogWithTelemetry(LogLevel level, string category, string message, object[] args, Exception? exception = null)
     {
-        using var activity = _activitySource.StartActivity($"Log.{category}");
+        using Activity? activity = _activitySource.StartActivity($"Log.{category}");
 
-        var formattedMessage = args.Length > 0 ? string.Format(message, args) : message;
+        string formattedMessage = args.Length > 0 ? string.Format(message, args) : message;
 
         if (activity != null)
         {
@@ -150,8 +150,8 @@ public static class UnifiedLoggingExtensions
 {
     public static void LogPrinterOperation(this IUnifiedLoggingService logger, string operation, string printerId, bool success, string? details = null)
     {
-        var level = success ? LogLevel.Information : LogLevel.Warning;
-        var message = success ? "Printer operation completed successfully" : "Printer operation failed";
+        LogLevel level = success ? LogLevel.Information : LogLevel.Warning;
+        string message = success ? "Printer operation completed successfully" : "Printer operation failed";
 
         logger.LogWithContext(level, "PrinterOperation", message, new
         {
@@ -164,8 +164,8 @@ public static class UnifiedLoggingExtensions
 
     public static void LogSlicerOperation(this IUnifiedLoggingService logger, string operation, string engine, bool success, TimeSpan? duration = null, string? details = null)
     {
-        var level = success ? LogLevel.Information : LogLevel.Error;
-        var message = success ? "Slicer operation completed" : "Slicer operation failed";
+        LogLevel level = success ? LogLevel.Information : LogLevel.Error;
+        string message = success ? "Slicer operation completed" : "Slicer operation failed";
 
         logger.LogWithContext(level, "SlicerOperation", message, new
         {
@@ -179,8 +179,8 @@ public static class UnifiedLoggingExtensions
 
     public static void LogFileOperation(this IUnifiedLoggingService logger, string operation, string fileName, bool success, long? fileSize = null, string? details = null)
     {
-        var level = success ? LogLevel.Information : LogLevel.Warning;
-        var message = success ? "File operation completed" : "File operation failed";
+        LogLevel level = success ? LogLevel.Information : LogLevel.Warning;
+        string message = success ? "File operation completed" : "File operation failed";
 
         logger.LogWithContext(level, "FileOperation", message, new
         {
@@ -194,8 +194,8 @@ public static class UnifiedLoggingExtensions
 
     public static void LogApiRequest(this IUnifiedLoggingService logger, string method, string endpoint, int statusCode, TimeSpan duration, string? details = null)
     {
-        var level = statusCode >= 400 ? LogLevel.Warning : LogLevel.Information;
-        var message = $"API request processed";
+        LogLevel level = statusCode >= 400 ? LogLevel.Warning : LogLevel.Information;
+        string message = $"API request processed";
 
         logger.LogWithContext(level, "ApiRequest", message, new
         {

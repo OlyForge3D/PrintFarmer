@@ -15,14 +15,14 @@ public class Printer
     [NotMapped]
     public Uri? ServerUri
     {
-        get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+        get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
         set => ServerUrl = value?.ToString() ?? string.Empty;
     }
 
     [NotMapped]
     public Uri? OriginalServerUri
     {
-        get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out var u) ? u : null);
+        get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
         set => OriginalServerUrl = value?.ToString();
     }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
@@ -101,7 +101,7 @@ public class SpoolmanConfig
     [NotMapped]
     public Uri? BaseUri
     {
-        get => Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null;
+        get => Uri.TryCreate(BaseUrl, UriKind.Absolute, out Uri? u) ? u : null;
         set => BaseUrl = value?.ToString() ?? string.Empty;
     }
 }

@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using System.Text.Json;
+using Farm.Web.Api.Services;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -31,43 +32,43 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
             return Ok(new { success = false, message = "BaseUrl is required" });
         }
 
-        var raw = request.BaseUrl.Trim();
+        string raw = request.BaseUrl.Trim();
         // Prepend scheme if user omitted (assume http)
         if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
             raw = "http://" + raw; // safer default inside container networks
         }
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var baseUri))
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out Uri? baseUri))
         {
             return Ok(new { success = false, message = "Invalid URL" });
         }
 
         // Apply environment-specific URL rewriting for network access
-        var rewrittenUrl = urlRewriter.RewriteUrl(baseUri.ToString(), "Spoolman");
-        var normalized = rewrittenUrl.TrimEnd('/');
+        string rewrittenUrl = urlRewriter.RewriteUrl(baseUri.ToString(), "Spoolman");
+        string normalized = rewrittenUrl.TrimEnd('/');
 
         string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
-        foreach (var path in probePaths)
+        foreach (string path in probePaths)
         {
             try
             {
-                var client = httpClientFactory.CreateClient("SpoolmanTestProbe");
+                HttpClient client = httpClientFactory.CreateClient("SpoolmanTestProbe");
                 client.Timeout = TimeSpan.FromSeconds(5);
-                using var resp = await client.GetAsync(normalized + path, ct);
+                using HttpResponseMessage resp = await client.GetAsync(normalized + path, ct);
                 if (resp.IsSuccessStatusCode)
                 {
                     string? version = null;
                     try
                     {
-                        using var stream = await resp.Content.ReadAsStreamAsync(ct);
-                        using var doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
-                        var root = doc.RootElement;
+                        using Stream stream = await resp.Content.ReadAsStreamAsync(ct);
+                        using JsonDocument doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                        JsonElement root = doc.RootElement;
                         // Try common version property names
-                        if (root.TryGetProperty("version", out var vProp) && vProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        if (root.TryGetProperty("version", out JsonElement vProp) && vProp.ValueKind == System.Text.Json.JsonValueKind.String)
                         {
                             version = vProp.GetString();
                         }
-                        else if (root.TryGetProperty("spoolman_version", out var svProp) && svProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        else if (root.TryGetProperty("spoolman_version", out JsonElement svProp) && svProp.ValueKind == System.Text.Json.JsonValueKind.String)
                         {
                             version = svProp.GetString();
                         }
@@ -88,7 +89,7 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
             {
                 if (path == probePaths[^1])
                 {
-                    var (category, message) = CategorizeException(ex);
+                    (string? category, string? message) = CategorizeException(ex);
                     return Ok(new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
                 }
             }
@@ -177,22 +178,22 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> HealthAsync(CancellationToken ct)
     {
-        var cfg = spoolman.GetConfig();
+        SpoolmanConfigDto? cfg = spoolman.GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
             return Ok(new { configured = false, success = false, message = "Spoolman not configured" });
         }
 
         // Use a minimal endpoint (info or health). Try /api/v1/health first, fallback to /api/v1/info
-        var baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
         string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
-        foreach (var p in probePaths)
+        foreach (string p in probePaths)
         {
             try
             {
-                var client = httpClientFactory.CreateClient("SpoolmanHealthProbe");
+                HttpClient client = httpClientFactory.CreateClient("SpoolmanHealthProbe");
                 client.Timeout = TimeSpan.FromSeconds(5);
-                var resp = await client.GetAsync(baseUrl + p, ct);
+                HttpResponseMessage resp = await client.GetAsync(baseUrl + p, ct);
                 if (resp.IsSuccessStatusCode)
                 {
                     return Ok(new { configured = true, success = true, endpoint = p, statusCode = (int)resp.StatusCode });

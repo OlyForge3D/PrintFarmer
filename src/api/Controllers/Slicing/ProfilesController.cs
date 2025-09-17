@@ -35,7 +35,7 @@ public class ProfilesController : ControllerBase
             {
                 return BadRequest("Name is required");
             }
-            if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse<SlicerType>(request.SlicerType, true, out var slicerType))
+            if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse<SlicerType>(request.SlicerType, true, out SlicerType slicerType))
             {
                 return BadRequest("Invalid slicer type");
             }
@@ -44,7 +44,7 @@ public class ProfilesController : ControllerBase
             {
                 return BadRequest("Invalid quality setting");
             }
-            var profile = new SlicerProfile
+            SlicerProfile profile = new()
             {
                 Id = Guid.NewGuid(),
                 Name = request.Name!,
@@ -64,7 +64,7 @@ public class ProfilesController : ControllerBase
             };
             _context.SlicerProfiles.Add(profile);
             await _context.SaveChangesAsync();
-            var response = new SlicerProfileResponseDto
+            SlicerProfileResponseDto response = new()
             {
                 Id = profile.Id,
                 Name = profile.Name,
@@ -95,7 +95,7 @@ public class ProfilesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProfileAsync(Guid id)
     {
-        var profile = await _context.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == id);
+        SlicerProfile? profile = await _context.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == id);
         if (profile == null)
         {
             return NotFound();
@@ -124,7 +124,7 @@ public class ProfilesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteProfileAsync(Guid id)
     {
-        var profile = await _context.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == id);
+        SlicerProfile? profile = await _context.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == id);
         if (profile == null)
         {
             return NotFound();
@@ -157,21 +157,21 @@ public class ProfilesController : ControllerBase
                 }));
             }
 
-            var query = _context.SlicerProfiles
+            IQueryable<SlicerProfile> query = _context.SlicerProfiles
                 .Include(p => p.PrinterModel)
                 .Include(p => p.SpecificPrinter)
                 .Where(p => p.IsPublic || p.CreatedByUserId == null);
 
-            if (!string.IsNullOrEmpty(printerId) && Guid.TryParse(printerId, out var printerGuid))
+            if (!string.IsNullOrEmpty(printerId) && Guid.TryParse(printerId, out Guid printerGuid))
             {
-                var printer = await _context.Printers.Include(p => p.Model).FirstOrDefaultAsync(p => p.Id == printerGuid);
+                Printer? printer = await _context.Printers.Include(p => p.Model).FirstOrDefaultAsync(p => p.Id == printerGuid);
                 if (printer != null)
                 {
                     query = query.Where(p => p.SpecificPrinterId == printerGuid || (p.PrinterModelId == printer.ModelId && p.SpecificPrinterId == null) || (p.PrinterModelId == null && p.SpecificPrinterId == null));
                 }
             }
 
-            if (!string.IsNullOrEmpty(slicerType) && Enum.TryParse<SlicerType>(slicerType, true, out var slicerTypeEnum))
+            if (!string.IsNullOrEmpty(slicerType) && Enum.TryParse<SlicerType>(slicerType, true, out SlicerType slicerTypeEnum))
             {
                 query = query.Where(p => p.SlicerType == slicerTypeEnum);
             }
@@ -211,14 +211,14 @@ public class ProfilesController : ControllerBase
                 }));
             }
 
-            var qualityOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            Dictionary<string, int> qualityOrder = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["draft"] = 0,
                 ["standard"] = 1,
                 ["fine"] = 2
             };
             profiles = [.. profiles
-                .OrderBy(p => qualityOrder.TryGetValue(p.quality, out var precedence) ? precedence : 99)
+                .OrderBy(p => qualityOrder.TryGetValue(p.quality, out int precedence) ? precedence : 99)
                 .ThenBy(p => p.name)];
 
             return Ok(profiles);

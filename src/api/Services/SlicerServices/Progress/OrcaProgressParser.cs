@@ -18,11 +18,11 @@ public class OrcaProgressParser : IProgressParser
         }
 
         // If we find a percent token, prefer it
-        var m = PercentRegex.Match(line);
-        if (m.Success && int.TryParse(m.Groups["pct"].Value, out var pct))
+        Match m = PercentRegex.Match(line);
+        if (m.Success && int.TryParse(m.Groups["pct"].Value, out int pct))
         {
-            var pctClamped = Math.Max(0, Math.Min(100, pct));
-            var state = pctClamped >= 100 ? SlicerProgressState.Completed : SlicerProgressState.InProgress;
+            int pctClamped = Math.Max(0, Math.Min(100, pct));
+            SlicerProgressState state = pctClamped >= 100 ? SlicerProgressState.Completed : SlicerProgressState.InProgress;
             return new ProgressUpdate(pctClamped, line, state);
         }
 

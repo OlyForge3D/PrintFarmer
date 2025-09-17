@@ -23,3 +23,4 @@ using System.Diagnostics.CodeAnalysis;
     Justification = "Over simplifies code, more difficult to read.",
     Scope = "member",
     Target = "*")]
+[assembly: SuppressMessage("Style", "IDE0300:Simplify collection initialization", Justification = "<Pending>", Scope = "member", Target = "~M:Farm.Web.Api.Services.NetworkUrlRewriteService.IsDockerDesktop~System.Boolean")]

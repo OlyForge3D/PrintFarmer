@@ -39,13 +39,13 @@ internal static class CatalogNameNormalizer
         {
             return string.Empty;
         }
-        var trimmed = name.Trim();
-        if (CanonicalManufacturerMap.TryGetValue(trimmed, out var canonical))
+        string trimmed = name.Trim();
+        if (CanonicalManufacturerMap.TryGetValue(trimmed, out string? canonical))
         {
             return canonical; // Known brand stylization
         }
         // Also try collapsing whitespace to catch spaced vs non-spaced variants
-        var collapsed = string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c)));
+        string collapsed = string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c)));
         if (CanonicalManufacturerMap.TryGetValue(collapsed, out canonical))
         {
             return canonical;

@@ -14,19 +14,19 @@ public class InMemorySlicerSettingsService : ISlicerSettingsService
     public InMemorySlicerSettingsService(IConfiguration cfg)
     {
         // Initialize from configuration if available
-        var enabled = cfg.GetValue<bool?>("SlicerWorker:Enabled") ?? false;
-        var per = new Dictionary<SlicerEngineType, PerEngineSlicerSetting>();
-        foreach (SlicerEngineType engine in Enum.GetValues(typeof(SlicerEngineType)))
+        bool enabled = cfg.GetValue<bool?>("SlicerWorker:Enabled") ?? false;
+        Dictionary<SlicerEngineType, PerEngineSlicerSetting> per = new();
+        foreach (SlicerEngineType engine in Enum.GetValues<SlicerEngineType>())
         {
-            var section = cfg.GetSection($"SlicerExecutables:{engine}");
-            var path = section["Path"];
-            var args = section["ArgsTemplate"];
+            IConfigurationSection section = cfg.GetSection($"SlicerExecutables:{engine}");
+            string? path = section["Path"];
+            string? args = section["ArgsTemplate"];
             if (!string.IsNullOrWhiteSpace(path) || !string.IsNullOrWhiteSpace(args))
             {
                 per[engine] = new PerEngineSlicerSetting(path, args);
             }
         }
-        var jitterPercent = cfg.GetValue<double?>("SlicerWorker:JitterPercent") ?? 15.0;
+        double jitterPercent = cfg.GetValue<double?>("SlicerWorker:JitterPercent") ?? 15.0;
         _settings = new SlicerSettingsDto(enabled, per, jitterPercent);
     }
 

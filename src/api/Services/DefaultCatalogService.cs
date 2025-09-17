@@ -32,7 +32,7 @@ public class DefaultCatalogService : IDefaultCatalogService
             return _cachedUnknownManufacturerId.Value;
         }
 
-        var unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
+        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
         if (unknown == null)
         {
             throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
@@ -49,8 +49,8 @@ public class DefaultCatalogService : IDefaultCatalogService
             return _cachedUnknownModelId.Value;
         }
 
-        var unknownMfgId = await GetUnknownManufacturerIdAsync();
-        var unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
+        Guid unknownMfgId = await GetUnknownManufacturerIdAsync();
+        PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfgId && m.Name == "Unknown Model");
 
         if (unknownModel == null)
@@ -64,8 +64,8 @@ public class DefaultCatalogService : IDefaultCatalogService
 
     public async Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync()
     {
-        var manufacturerId = await GetUnknownManufacturerIdAsync();
-        var modelId = await GetUnknownModelIdAsync();
+        Guid manufacturerId = await GetUnknownManufacturerIdAsync();
+        Guid modelId = await GetUnknownModelIdAsync();
         return (manufacturerId, modelId);
     }
 }

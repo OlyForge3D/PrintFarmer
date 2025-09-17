@@ -18,8 +18,8 @@ public class SignalRSettingsService : ISignalRSettingsService
         {
             if (File.Exists(_path))
             {
-                var json = File.ReadAllText(_path);
-                var cfg = JsonSerializer.Deserialize<SignalRSettingsDto>(json);
+                string json = File.ReadAllText(_path);
+                SignalRSettingsDto? cfg = JsonSerializer.Deserialize<SignalRSettingsDto>(json);
                 if (cfg is not null)
                 {
                     _settings = cfg;
@@ -41,20 +41,20 @@ public class SignalRSettingsService : ISignalRSettingsService
 
         // Default SignalR settings
         // Allow override via environment variables
-        var envLogLevel = Environment.GetEnvironmentVariable("SIGNALR_LOG_LEVEL");
-        var envConsoleLogging = Environment.GetEnvironmentVariable("SIGNALR_CONSOLE_LOGGING");
+        string? envLogLevel = Environment.GetEnvironmentVariable("SIGNALR_LOG_LEVEL");
+        string? envConsoleLogging = Environment.GetEnvironmentVariable("SIGNALR_CONSOLE_LOGGING");
 
-        var logLevel = "Information";
+        string logLevel = "Information";
         if (!string.IsNullOrWhiteSpace(envLogLevel))
         {
-            var validLevels = new[] { "Debug", "Information", "Warning", "Error", "None" };
+            string[] validLevels = new[] { "Debug", "Information", "Warning", "Error", "None" };
             if (validLevels.Contains(envLogLevel, StringComparer.OrdinalIgnoreCase))
             {
                 logLevel = envLogLevel;
             }
         }
 
-        var consoleLogging = true;
+        bool consoleLogging = true;
         if (!string.IsNullOrWhiteSpace(envConsoleLogging))
         {
             consoleLogging = string.Equals(envConsoleLogging, "true", StringComparison.OrdinalIgnoreCase);
@@ -68,7 +68,7 @@ public class SignalRSettingsService : ISignalRSettingsService
         _settings = settings;
         try
         {
-            var json = JsonSerializer.Serialize(_settings, s_writeOptions);
+            string json = JsonSerializer.Serialize(_settings, s_writeOptions);
             File.WriteAllText(_path, json);
             _logger.LogInformation("Saved SignalR settings to {Path}", _path);
         }

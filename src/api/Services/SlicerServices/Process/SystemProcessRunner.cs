@@ -1,10 +1,12 @@
-﻿namespace Farm.Web.Api.Services.SlicerServices.Process;
+﻿
+
+namespace Farm.Web.Api.Services.SlicerServices.Process;
 
 public class SystemProcessRunner : IProcessRunner
 {
     public IProcessHandle Start(System.Diagnostics.ProcessStartInfo startInfo)
     {
-        var proc = System.Diagnostics.Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start process");
+        System.Diagnostics.Process proc = System.Diagnostics.Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start process");
         return new SystemProcessHandle(proc);
     }
 

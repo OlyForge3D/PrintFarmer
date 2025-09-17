@@ -22,7 +22,7 @@ public abstract class PrinterClientBase
             return url;
         }
 
-        var trimmed = url.Trim();
+        string trimmed = url.Trim();
         if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
@@ -30,7 +30,7 @@ public abstract class PrinterClientBase
         }
         try
         {
-            var ub = new UriBuilder(trimmed);
+            UriBuilder ub = new(trimmed);
             if (ub.Port == -1)
             {
                 ub.Port = defaultPort;
@@ -46,7 +46,7 @@ public abstract class PrinterClientBase
     protected static string NormalizeBaseUrl(Uri url, int defaultPort)
     {
         ArgumentNullException.ThrowIfNull(url);
-        var ub = new UriBuilder(url);
+        UriBuilder ub = new(url);
         if (ub.Port == -1)
         {
             ub.Port = defaultPort;
@@ -64,15 +64,15 @@ public abstract class PrinterClientBase
             return string.Empty;
         }
 
-        var s = url!.Trim();
-        if (Uri.TryCreate(s, UriKind.Absolute, out var abs))
+        string s = url!.Trim();
+        if (Uri.TryCreate(s, UriKind.Absolute, out Uri? abs))
         {
             try
             {
-                var baseUri = new Uri(baseNorm);
+                Uri baseUri = new(baseNorm);
                 if (IsLoopbackHost(abs.Host))
                 {
-                    var ub = new UriBuilder(abs)
+                    UriBuilder ub = new(abs)
                     {
                         Host = baseUri.Host,
                         Port = baseUri.IsDefaultPort ? -1 : baseUri.Port,
@@ -88,14 +88,14 @@ public abstract class PrinterClientBase
         // Relative or scheme-relative URL -> resolve against base using Uri composition
         try
         {
-            var baseUri = new Uri(baseNorm);
-            var combined = new Uri(baseUri, s);
+            Uri baseUri = new(baseNorm);
+            Uri combined = new(baseUri, s);
             return combined.ToString();
         }
         catch
         {
             // Fallback: conservative join without duplicating slashes
-            var rel = s.StartsWith('/') ? s : "/" + s;
+            string rel = s.StartsWith('/') ? s : "/" + s;
             return baseNorm.TrimEnd('/') + rel;
         }
     }

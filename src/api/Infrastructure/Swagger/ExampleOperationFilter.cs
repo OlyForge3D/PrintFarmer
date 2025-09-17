@@ -15,7 +15,7 @@ public sealed class ExampleOperationFilter : IOperationFilter
         ArgumentNullException.ThrowIfNull(context);
         if (operation.RequestBody != null)
         {
-            foreach (var content in operation.RequestBody.Content.Values)
+            foreach (OpenApiMediaType? content in operation.RequestBody.Content.Values)
             {
                 if (content.Example == null && content.Schema?.Example != null)
                 {
@@ -24,14 +24,14 @@ public sealed class ExampleOperationFilter : IOperationFilter
             }
         }
 
-        foreach (var response in operation.Responses.Values)
+        foreach (OpenApiResponse? response in operation.Responses.Values)
         {
             if (response.Content == null)
             {
                 continue;
             }
 
-            foreach (var content in response.Content.Values)
+            foreach (OpenApiMediaType? content in response.Content.Values)
             {
                 if (content.Example == null && content.Schema?.Example != null)
                 {
