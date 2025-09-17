@@ -1,5 +1,6 @@
 ﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Services.Startup;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Filament Types")]
-public class FilamentTypeController(AppDbContext db) : ControllerBase
+public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus) : ControllerBase
 {
     /// <summary>
     /// Gets all available filament types.
@@ -22,8 +23,15 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
     /// <response code="200">Returns the list of filament types</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
+    [ProducesResponseType(503)]
     public async Task<ActionResult<IEnumerable<FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
     {
+        // Ensure initialization is complete to prevent race conditions during startup
+        if (!startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
         List<FilamentTypeDto> list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
             .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
             .ToListAsync(ct);
@@ -38,8 +46,15 @@ public class FilamentTypeController(AppDbContext db) : ControllerBase
     /// <response code="200">Returns the filament presets dictionary</response>
     [HttpGet("presets")]
     [ProducesResponseType(typeof(FilamentPresetsDto), 200)]
+    [ProducesResponseType(503)]
     public async Task<ActionResult<FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
     {
+        // Ensure initialization is complete to prevent race conditions during startup
+        if (!startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
         Dictionary<string, TempTargets> filamentTypes = await db.FilamentTypes.AsNoTracking()
             .ToDictionaryAsync(f => f.Name.ToLowerInvariant(), f => new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), ct);
         return Ok(new FilamentPresetsDto(filamentTypes));

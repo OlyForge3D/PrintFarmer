@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream } from '@/hooks/useSignalR';
@@ -40,11 +40,14 @@ function PrinterConfigurationForm({
   onCancel 
 }: PrinterConfigurationFormProps) {
   const [config, setConfig] = useState<PrinterConfiguration>(initialConfig || {});
+  
+  // Stabilize allModels to prevent unnecessary re-renders
+  const stableAllModels = useMemo(() => allModels, [JSON.stringify(allModels)]);
   const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>(models);
 
   useEffect(() => {
     if (config.manufacturerId) {
-      const filtered = allModels.filter(m => m.manufacturerId === config.manufacturerId);
+      const filtered = stableAllModels.filter(m => m.manufacturerId === config.manufacturerId);
       setFilteredModels(filtered);
       // Reset model selection when manufacturer changes and current model isn't available
       if (config.modelId && !filtered.some(m => m.id === config.modelId)) {
@@ -53,7 +56,7 @@ function PrinterConfigurationForm({
     } else {
       setFilteredModels([]);
     }
-  }, [config.manufacturerId, allModels, config.modelId]);
+  }, [config.manufacturerId, stableAllModels, config.modelId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

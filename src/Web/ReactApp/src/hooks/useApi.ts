@@ -571,10 +571,21 @@ export function useHealthStatus(options?: UseQueryOptions<HealthStatus, ApiError
       if (typeof raw === 'object' && raw !== null) {
         const r = raw as Record<string, unknown>;
         if (typeof r.results === 'object' && r.results !== null) {
+          const startup = r.startup && typeof r.startup === 'object' ? r.startup as Record<string, unknown> : undefined;
           return {
             kind: 'detailed',
             status: String(r.status ?? 'unknown'),
             totalChecksDuration: String(r.totalChecksDuration ?? ''),
+            startup: startup ? {
+              phase: String(startup.phase ?? 'Unknown'),
+              ready: Boolean(startup.ready),
+              failed: Boolean(startup.failed),
+              failureMessage: startup.failureMessage ? String(startup.failureMessage) : undefined,
+              failureStackTrace: startup.failureStackTrace ? String(startup.failureStackTrace) : undefined,
+              initStartedUtc: startup.initStartedUtc ? String(startup.initStartedUtc) : undefined,
+              initCompletedUtc: startup.initCompletedUtc ? String(startup.initCompletedUtc) : undefined,
+              initDurationMs: typeof startup.initDurationMs === 'number' ? startup.initDurationMs : undefined,
+            } : undefined,
             results: r.results as DetailedHealthStatus['results']
           } satisfies DetailedHealthStatus;
         }

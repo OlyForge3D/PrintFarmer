@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTelemetry } from '../telemetry/useTelemetry';
 import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/react/24/outline';
+import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
 
 interface TelemetryStats {
   operationsCount: number;
@@ -173,6 +174,11 @@ export function ObservabilityDashboard() {
       {/* Footer */}
       <div className="text-center text-sm text-gray-500">
         Last updated: {stats.lastUpdated.toLocaleString()}
+      </div>
+
+      {/* Unified Logging Dashboard Integration */}
+      <div className="mt-8">
+        <UnifiedLoggingDashboard />
       </div>
     </div>
   );

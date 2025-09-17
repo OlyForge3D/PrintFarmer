@@ -73,7 +73,7 @@ export const HarvestPage: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [refetchOperations]);
+  }, []); // Remove refetchOperations from dependency - it's stable within callback scope
 
   // Clean up optimistic operations when real operations appear
   useEffect(() => {
