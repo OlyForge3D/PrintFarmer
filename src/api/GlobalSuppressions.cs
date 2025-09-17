@@ -16,3 +16,10 @@ using System.Diagnostics.CodeAnalysis;
     Justification = "Queue naming is intentional and part of the public API surface; renaming would be a breaking change.",
     Scope = "type",
     Target = "~T:Farm.Web.Api.Services.InMemoryHarvestQueue")]
+
+[assembly: SuppressMessage(
+    "Style",
+    "IDE0301:Simplify collection initialization",
+    Justification = "Over simplifies code, more difficult to read.",
+    Scope = "member",
+    Target = "*")]

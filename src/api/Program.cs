@@ -338,7 +338,7 @@ builder.Services.AddSingleton(activitySource);
 builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IPrintFarmerTelemetryService, Farm.Web.Api.Services.Telemetry.PrintFarmerTelemetryService>();
 
 // Register unified logging services
-builder.Services.AddScoped<Farm.Web.Api.Services.Telemetry.IUnifiedLoggingService, Farm.Web.Api.Services.Telemetry.UnifiedLoggingService>();
+builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IUnifiedLoggingService, Farm.Web.Api.Services.Telemetry.UnifiedLoggingService>();
 builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService, Farm.Web.Api.Services.Telemetry.ConsoleRedirectionService>();
 
 // HTTP clients for external APIs
@@ -364,7 +364,10 @@ builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
 builder.Services.AddScoped<ISignalRSettingsService, SignalRSettingsService>();
 builder.Services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
+builder.Services.AddScoped<IPrinterCapabilityDiscoveryService, PrinterCapabilityDiscoveryService>();
+builder.Services.AddHostedService<PrinterCapabilityUpdateService>();
 builder.Services.AddScoped<DatabaseSeeder>();
+builder.Services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
 builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();

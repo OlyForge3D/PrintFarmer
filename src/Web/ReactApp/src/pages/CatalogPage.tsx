@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { Plus, Edit, Trash2, Save, X, Settings } from 'lucide-react';
 import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto } from '@/types/api';
+import { PrinterType } from '@/types/api';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
@@ -11,6 +12,7 @@ export function CatalogPage() {
   const [selectedModel, setSelectedModel] = useState<PrinterModelDto | null>(null);
   const [newManufacturer, setNewManufacturer] = useState('');
   const [newModel, setNewModel] = useState('');
+  const [newModelType, setNewModelType] = useState<PrinterType | undefined>(undefined);
   const [editingManufacturer, setEditingManufacturer] = useState<{ id: string; name: string } | null>(null);
   const [editingModel, setEditingModel] = useState<{ id: string; name: string } | null>(null);
   const [showFilamentEditor, setShowFilamentEditor] = useState(false);
@@ -50,6 +52,21 @@ export function CatalogPage() {
     return models.filter(m => m.manufacturerId === selectedManufacturer.id);
   };
 
+  const getPrinterTypeDisplayName = (type?: PrinterType): string => {
+    if (type === undefined) return 'Unknown';
+    switch (type) {
+      case PrinterType.Cartesian:
+        return 'Cartesian';
+      case PrinterType.CoreXY:
+        return 'CoreXY';
+      case PrinterType.Delta:
+        return 'Delta';
+      case PrinterType.Unknown:
+      default:
+        return 'Unknown';
+    }
+  };
+
   const addManufacturer = async () => {
     if (!newManufacturer.trim()) return;
     
@@ -69,10 +86,12 @@ export function CatalogPage() {
     try {
       const response = await apiClient.createModel({
         name: newModel.trim(),
-        manufacturerId: selectedManufacturer.id
+        manufacturerId: selectedManufacturer.id,
+        type: newModelType
       });
       setModels([...models, response]);
       setNewModel('');
+      setNewModelType(undefined);
     } catch (err) {
       setError('Failed to add model');
       console.error('Error adding model:', err);
@@ -295,6 +314,17 @@ export function CatalogPage() {
                   placeholder="Model name"
                   className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary text-sm"
                 />
+                <select
+                  value={newModelType ?? ''}
+                  onChange={(e) => setNewModelType(e.target.value === '' ? undefined : parseInt(e.target.value) as PrinterType)}
+                  className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm min-w-[120px]"
+                >
+                  <option value="">Printer Type</option>
+                  <option value={PrinterType.Cartesian}>Cartesian</option>
+                  <option value={PrinterType.CoreXY}>CoreXY</option>
+                  <option value={PrinterType.Delta}>Delta</option>
+                  <option value={PrinterType.Unknown}>Unknown</option>
+                </select>
                 <button
                   onClick={addModel}
                   disabled={!newModel.trim()}
@@ -338,6 +368,11 @@ export function CatalogPage() {
                         ) : (
                           <div>
                             <div className="font-medium text-pf-text-primary">{model.name}</div>
+                            {model.type !== undefined && (
+                              <div className="text-sm text-pf-text-secondary">
+                                Type: {getPrinterTypeDisplayName(model.type)}
+                              </div>
+                            )}
                             {model.supportedFilamentTypes && model.supportedFilamentTypes.length > 0 && (
                               <div className="text-sm text-pf-text-secondary mt-1">
                                 Filament types: {model.supportedFilamentTypes.join(', ')}

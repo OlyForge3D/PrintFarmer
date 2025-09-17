@@ -2,6 +2,7 @@
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -24,6 +25,7 @@ public class DatabaseSeeder : IDatabaseSeeder
             // We include a one-time rename below for existing databases.
             var manufacturerNames = new[]
             {
+                "Unknown",  // Default for unidentified manufacturers - must be first to ensure it gets a consistent ID
                 "Prusa",
                 "Elegoo",
                 "Eryone",
@@ -49,31 +51,56 @@ public class DatabaseSeeder : IDatabaseSeeder
                 manufacturers[normalized] = existing;
             }
 
-            // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend)
-            var modelSeeds = new (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend)[]
+            // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend, PrinterType)
+            var modelSeeds = new (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, PrinterType? Type)[]
             {
-                ("AD5X", "FlashForge", 220, 220, 220, 0), // Moonraker (Klipper)
-                ("SV08", "Sovol", 350, 350, 350, 0), // Moonraker (Klipper)
-                ("SV08 Max", "Sovol", 500, 500, 500, 0), // Moonraker (Klipper)
-                ("Zero", "Sovol", 150, 150, 150, 0), // Moonraker (Klipper)
-                ("Thinker X400", "Eryone", 400, 400, 400, 0), // Moonraker (Klipper)
-                ("Centauri", "Elegoo", 256, 256, 256, 2), // SDCP
-                ("Centauri Carbon", "Elegoo", 256, 256, 256, 2), // SDCP
-                ("SaladFork", "PrintersForAnts", 120, 120, 120, 0), // Moonraker (Klipper)
-                ("Micron", "PrintersForAnts", 180, 180, 165, 0), // Moonraker (Klipper)
-                ("Voron v0", "Voron", 120, 120, 120, 0), // Moonraker (Klipper)
-                ("Voron v2.4", "Voron", 350, 350, 350, 0), // Moonraker (Klipper)
-                ("Voron Trident", "Voron", 300, 300, 200, 0), // Moonraker (Klipper)
-                ("vCore3.1", "RatRig", 400, 400, 400, 0), // Moonraker (Klipper)
-                ("vCore4", "RatRig", 500, 500, 500, 0), // Moonraker (Klipper)
-                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1), // PrusaLink
-                ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1), // PrusaLink
-                ("Original Prusa MK4S", "Prusa", 250, 210, 220, 1), // PrusaLink
-                ("Original Prusa Core One", "Prusa", 250, 220, 270, 1), // PrusaLink
-                ("Original Prusa XL", "Prusa", 250, 220, 270, 1), // PrusaLink
+                ("Unknown Model", "Unknown", 200, 200, 200, 0, PrinterType.Unknown), // Default for unidentified models
+                ("AD5X", "FlashForge", 220, 220, 220, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("SV08", "Sovol", 350, 350, 350, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("SV08 Max", "Sovol", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Zero", "Sovol", 150, 150, 150, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Thinker X400", "Eryone", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Centauri", "Elegoo", 256, 256, 256, 2, PrinterType.CoreXY), // SDCP
+                ("Centauri Carbon", "Elegoo", 256, 256, 256, 2, PrinterType.CoreXY), // SDCP
+                ("SaladFork 120", "PrintersForAnts", 120, 120, 120, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("SaladFork 180", "PrintersForAnts", 180, 180, 180, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Micron 120", "PrintersForAnts", 120, 120, 120, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Micron 160", "PrintersForAnts", 160, 160, 165, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Micron 180", "PrintersForAnts", 180, 180, 165, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Voron v0", "Voron", 120, 120, 120, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("v2.4 250", "Voron", 250, 250, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("v2.4 300", "Voron", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("v2.4 350", "Voron", 350, 350, 350, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Switchwire", "Voron", 250, 210, 240, 0, PrinterType.Cartesian), // Moonraker (Klipper)
+                ("Trident 250", "Voron", 250, 250, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Trident 300", "Voron", 300, 300, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Trident 300 Cube", "Voron", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Trident 350", "Voron", 350, 350, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.1 200", "RatRig", 200, 200, 200, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.1 300", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.1 400", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.1 500", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.2 200", "RatRig", 200, 200, 200, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.2 300", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.2 400", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore3.2 500", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 300", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 400", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 500", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 300 Hybrid", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 400 Hybrid", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 500 Hybrid", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 300 IDEX", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 400 IDEX", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("vCore4 500 IDEX", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1, PrinterType.Cartesian), // PrusaLink
+                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1, PrinterType.Cartesian), // PrusaLink
+                ("Original Prusa MK4S", "Prusa", 250, 210, 220, 1, PrinterType.Cartesian), // PrusaLink
+                ("Original Prusa Core One", "Prusa", 250, 220, 270, 1, PrinterType.CoreXY), // PrusaLink
+                ("Original Prusa XL", "Prusa", 250, 220, 270, 1, PrinterType.CoreXY), // PrusaLink
             };
 
-            foreach (var (name, mfg, x, y, z, defaultBackend) in modelSeeds)
+            foreach (var (name, mfg, x, y, z, defaultBackend, type) in modelSeeds)
             {
                 if (!manufacturers.TryGetValue(mfg, out var m))
                 {
@@ -167,5 +194,33 @@ public class DatabaseSeeder : IDatabaseSeeder
         await SeedSpoolmanConfigAsync();
         await SeedCatalogDataAsync();
         await SeedFilamentTypesAsync();
+    }
+
+    /// <summary>
+    /// Gets the "Unknown" manufacturer, which should always exist after seeding
+    /// </summary>
+    public async Task<Manufacturer> GetUnknownManufacturerAsync()
+    {
+        var unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
+        if (unknown == null)
+        {
+            throw new InvalidOperationException("Unknown manufacturer not found. Ensure SeedCatalogDataAsync() has been called.");
+        }
+        return unknown;
+    }
+
+    /// <summary>
+    /// Gets the "Unknown Model" from the "Unknown" manufacturer, which should always exist after seeding
+    /// </summary>
+    public async Task<PrinterModel> GetUnknownModelAsync()
+    {
+        var unknownMfg = await GetUnknownManufacturerAsync();
+        var unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
+            m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
+        if (unknownModel == null)
+        {
+            throw new InvalidOperationException("Unknown Model not found. Ensure SeedCatalogDataAsync() has been called.");
+        }
+        return unknownModel;
     }
 }

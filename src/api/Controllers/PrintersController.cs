@@ -20,7 +20,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Printers")]
-public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker) : ControllerBase
+public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
 {
     private static string EnsureLocalSuffix(string host)
     {
@@ -572,8 +572,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         logger.LogInformation("Creating new printer: {Name} ({Backend})", dto.Name, dto.Backend);
 
         // resolve or create manufacturer/model
-        Guid? manufacturerId = dto.ManufacturerId;
-        if (manufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
+        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             var name = dto.NewManufacturerName!.Trim();
             var existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
@@ -586,18 +586,32 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             manufacturerId = existing.Id;
         }
 
-        Guid? modelId = dto.ModelId;
-        if (modelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId is Guid mid)
+        Guid modelId = dto.ModelId ?? Guid.Empty;
+        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
         {
             var mname = dto.NewModelName!.Trim();
-            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == mid && m.Name == mname, ct);
+            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
             if (existingModel is null)
             {
-                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mid, Name = mname };
+                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
                 db.Models.Add(existingModel);
                 await db.SaveChangesAsync(ct);
             }
             modelId = existingModel.Id;
+        }
+
+        // Use default catalog entries if manufacturer or model are still empty
+        if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
+        {
+            var (defaultManufacturerId, defaultModelId) = await defaultCatalog.GetDefaultCatalogIdsAsync();
+            if (manufacturerId == Guid.Empty)
+            {
+                manufacturerId = defaultManufacturerId;
+            }
+            if (modelId == Guid.Empty)
+            {
+                modelId = defaultModelId;
+            }
         }
 
         // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
@@ -652,17 +666,47 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         logger.LogInformation("Successfully created printer: {Name} with ID {Id}", p.Name, p.Id);
 
+        // Auto-discover capabilities for the newly created printer
+        try
+        {
+            logger.LogInformation("Starting capability discovery for newly created printer: {Name} ({Id})", p.Name, p.Id);
+            
+            // Reload the printer with includes for proper discovery
+            var printerForDiscovery = await db.Printers
+                .Include(pr => pr.Manufacturer)
+                .Include(pr => pr.Model)
+                .FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
+                
+            if (printerForDiscovery != null)
+            {
+                var discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
+                if (discoveredCapabilities != null)
+                {
+                    logger.LogInformation("Successfully discovered and saved capabilities for printer: {Name} ({Id})", p.Name, p.Id);
+                }
+                else
+                {
+                    logger.LogWarning("Failed to discover capabilities for printer: {Name} ({Id}) - capabilities will need to be added manually", p.Name, p.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during capability discovery for newly created printer: {Name} ({Id}) - printer was created successfully but capabilities discovery failed", p.Name, p.Id);
+            // Don't fail the printer creation if capability discovery fails - user can manually add capabilities or trigger discovery later
+        }
+
         // Get manufacturer and model names for the response
         string? manufacturerName = null;
         string? modelName = null;
 
-        if (manufacturerId.HasValue)
+        if (manufacturerId != Guid.Empty)
         {
             var manufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Id == manufacturerId, ct);
             manufacturerName = manufacturer?.Name;
         }
 
-        if (modelId.HasValue)
+        if (modelId != Guid.Empty)
         {
             var model = await db.Models.FirstOrDefaultAsync(m => m.Id == modelId, ct);
             modelName = model?.Name;
@@ -723,7 +767,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         if (p is null)
         { return NotFound(); }
         // resolve or create manufacturer/model
-        Guid? manufacturerId = dto.ManufacturerId ?? p.ManufacturerId;
+        Guid manufacturerId = dto.ManufacturerId ?? p.ManufacturerId;
         if (dto.ManufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             var name = dto.NewManufacturerName!.Trim();
@@ -737,18 +781,32 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             manufacturerId = existing.Id;
         }
 
-        Guid? modelId = dto.ModelId ?? p.ModelId;
-        if ((dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName)) && manufacturerId is Guid mid)
+        Guid modelId = dto.ModelId ?? p.ModelId;
+        if ((dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName)) && manufacturerId != Guid.Empty)
         {
             var mname = dto.NewModelName!.Trim();
-            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == mid && m.Name == mname, ct);
+            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
             if (existingModel is null)
             {
-                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mid, Name = mname };
+                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
                 db.Models.Add(existingModel);
                 await db.SaveChangesAsync(ct);
             }
             modelId = existingModel.Id;
+        }
+
+        // Use default catalog entries if manufacturer or model are still empty
+        if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
+        {
+            var (defaultManufacturerId, defaultModelId) = await defaultCatalog.GetDefaultCatalogIdsAsync();
+            if (manufacturerId == Guid.Empty)
+            {
+                manufacturerId = defaultManufacturerId;
+            }
+            if (modelId == Guid.Empty)
+            {
+                modelId = defaultModelId;
+            }
         }
 
         p.Name = dto.Name;
@@ -807,12 +865,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Build updated manufacturer/model names
         string? manufacturerName = null;
         string? modelName = null;
-        if (p.ManufacturerId.HasValue)
+        if (p.ManufacturerId != Guid.Empty)
         {
             var man = await db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(m => m.Id == p.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
-        if (p.ModelId.HasValue)
+        if (p.ModelId != Guid.Empty)
         {
             var mod = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == p.ModelId, ct);
             modelName = mod?.Name;
@@ -1910,8 +1968,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     private async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
     {
         // resolve or create manufacturer/model
-        Guid? manufacturerId = dto.ManufacturerId;
-        if (manufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
+        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             var name = dto.NewManufacturerName!.Trim();
             var existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
@@ -1924,18 +1982,32 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             manufacturerId = existing.Id;
         }
 
-        Guid? modelId = dto.ModelId;
-        if (modelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId is Guid mid)
+        Guid modelId = dto.ModelId ?? Guid.Empty;
+        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
         {
             var mname = dto.NewModelName!.Trim();
-            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == mid && m.Name == mname, ct);
+            var existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
             if (existingModel is null)
             {
-                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mid, Name = mname };
+                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
                 db.Models.Add(existingModel);
                 await db.SaveChangesAsync(ct);
             }
             modelId = existingModel.Id;
+        }
+
+        // Use default catalog entries if manufacturer or model are still empty
+        if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
+        {
+            var (defaultManufacturerId, defaultModelId) = await defaultCatalog.GetDefaultCatalogIdsAsync();
+            if (manufacturerId == Guid.Empty)
+            {
+                manufacturerId = defaultManufacturerId;
+            }
+            if (modelId == Guid.Empty)
+            {
+                modelId = defaultModelId;
+            }
         }
 
         // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
@@ -1987,6 +2059,31 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         };
         db.Printers.Add(p);
         await db.SaveChangesAsync(ct);
+
+        // Auto-discover capabilities for the newly created printer (import scenario)
+        try
+        {
+            // Reload the printer with includes for proper discovery
+            var printerForDiscovery = await db.Printers
+                .Include(pr => pr.Manufacturer)
+                .Include(pr => pr.Model)
+                .FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
+                
+            if (printerForDiscovery != null)
+            {
+                var discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
+                // For bulk import, don't log individual success/failures to avoid log spam
+                if (discoveredCapabilities == null)
+                {
+                    logger.LogDebug("Could not discover capabilities for imported printer: {Name} ({Id})", p.Name, p.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Error during capability discovery for imported printer: {Name} ({Id})", p.Name, p.Id);
+            // Don't fail the import if capability discovery fails
+        }
 
         // For import, we'll return a simplified PrinterDto without live status to avoid network delays
         return new PrinterDto(

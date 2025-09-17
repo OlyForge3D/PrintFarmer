@@ -36,6 +36,10 @@ node_modules/
 *.db
 *.db-shm
 *.db-wal
+*.db.back*
+
+# Backup files
+*.bak
 
 # Test repository-local temp artifacts
 src/tests/_temp/

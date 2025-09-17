@@ -24,6 +24,32 @@ public enum PrinterBackend
 }
 
 /// <summary>
+/// Printer movement mechanism type defining the kinematic configuration.
+/// </summary>
+public enum PrinterType
+{
+    /// <summary>
+    /// Traditional 3-axis Cartesian system with independent XYZ movement.
+    /// </summary>
+    Cartesian = 0,
+    
+    /// <summary>
+    /// CoreXY kinematics where X and Y motors work together for diagonal movement.
+    /// </summary>
+    CoreXY = 1,
+    
+    /// <summary>
+    /// Delta kinematics with 3 towers and effector for precise movement.
+    /// </summary>
+    Delta = 2,
+    
+    /// <summary>
+    /// Unknown or unspecified printer type.
+    /// </summary>
+    Unknown = 99
+}
+
+/// <summary>
 /// Full printer representation including current status, coordinates, temperatures and optional spool information.
 /// </summary>
 /// <param name="Id">Printer identifier.</param>
@@ -289,7 +315,7 @@ public record ManufacturerDto(Guid Id, string Name);
 /// <summary>
 /// Printer model catalog entry including optional build volume and defaults.
 /// </summary>
-public record PrinterModelDto(Guid Id, string Name, Guid ManufacturerId, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null, string[]? SupportedFilamentTypes = null);
+public record PrinterModelDto(Guid Id, string Name, Guid ManufacturerId, PrinterType? Type = null, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null, string[]? SupportedFilamentTypes = null);
 
 // Filament type management
 /// <summary>

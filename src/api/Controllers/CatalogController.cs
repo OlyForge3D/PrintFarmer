@@ -170,7 +170,7 @@ public class CatalogController : ControllerBase
         {
             return NotFound();
         }
-        return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+        return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.Type.HasValue ? (PrinterType)model.Type.Value : (PrinterType?)null, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
             [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)]));
     }
@@ -209,7 +209,7 @@ public class CatalogController : ControllerBase
         // normalized column or a case-insensitive unique index at the database layer.
         var candidateNames = await _db.Models.AsNoTracking()
             .Where(m => m.ManufacturerId == req.ManufacturerId)
-            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
+            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.Type, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
             .ToListAsync(ct);
         var existing = candidateNames.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
@@ -219,7 +219,7 @@ public class CatalogController : ControllerBase
             {
                 headerName = existing.Name;
             }
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MaxX, existing.MaxY, existing.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.Type.HasValue ? (PrinterType)existing.Type.Value : (PrinterType?)null, existing.MaxX, existing.MaxY, existing.MaxZ,
                 existing.DefaultBackend.HasValue ? (PrinterBackend)existing.DefaultBackend.Value : (PrinterBackend?)null), headerName,
                 $"A model with the normalized name '{existing.Name}' already exists for this manufacturer.");
         }
@@ -229,6 +229,7 @@ public class CatalogController : ControllerBase
             Id = Guid.NewGuid(),
             ManufacturerId = req.ManufacturerId,
             Name = normalizedName,
+            Type = req.Type.HasValue ? (int)req.Type.Value : (int?)null,
             MaxX = req.MaxX,
             MaxY = req.MaxY,
             MaxZ = req.MaxZ,
@@ -262,7 +263,7 @@ public class CatalogController : ControllerBase
         {
             var existingNow = await _db.Models.AsNoTracking()
                 .FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == normalizedName, ct) ?? new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.Type.HasValue ? (PrinterType)existingNow.Type.Value : (PrinterType?)null, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
                 existingNow.DefaultBackend.HasValue ? (PrinterBackend)existingNow.DefaultBackend.Value : (PrinterBackend?)null), null,
                 $"A model with the normalized name '{existingNow.Name}' already exists for this manufacturer.");
         }
@@ -276,7 +277,7 @@ public class CatalogController : ControllerBase
             Response.Headers["X-Normalized-Name"] = model.Name;
         }
         _catalogCache.InvalidateModels(model.ManufacturerId);
-        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MaxX, model.MaxY, model.MaxZ,
+        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.Type.HasValue ? (PrinterType)model.Type.Value : (PrinterType?)null, model.MaxX, model.MaxY, model.MaxZ,
                     model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
                     createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
     }
@@ -306,6 +307,7 @@ public class CatalogController : ControllerBase
             }
         }
 
+        model.Type = req.Type.HasValue ? (int)req.Type.Value : (int?)null;
         model.MaxX = req.MaxX;
         model.MaxY = req.MaxY;
         model.MaxZ = req.MaxZ;

@@ -94,6 +94,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(128)
                 .IsRequired();
             b.HasIndex(nameof(PrinterModel.ManufacturerId), "NameLowered").IsUnique();
+            b.Property(m => m.Type); // PrinterType enum stored as int
             b.Property(m => m.MaxX);
             b.Property(m => m.MaxY);
             b.Property(m => m.MaxZ);

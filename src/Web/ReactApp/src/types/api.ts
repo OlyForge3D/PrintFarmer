@@ -35,6 +35,13 @@ export enum PrinterBackend {
   SDCP = 2
 }
 
+export enum PrinterType {
+  Cartesian = 0,
+  CoreXY = 1,
+  Delta = 2,
+  Unknown = 99
+}
+
 export interface PrinterSpoolInfo {
   id?: number;
   filament?: FilamentInfo;
@@ -154,6 +161,7 @@ export interface PrinterModelDto {
   id: string;
   name: string;
   manufacturerId: string;
+  type?: PrinterType;
   maxX?: number;
   maxY?: number;
   maxZ?: number;
@@ -254,6 +262,7 @@ export interface UpdateFilamentTypeRequest {
 
 export interface UpdateModelRequest {
   name: string;
+  type?: PrinterType;
   maxX?: number;
   maxY?: number;
   maxZ?: number;

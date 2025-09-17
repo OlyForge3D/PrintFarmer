@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Services.SlicerServices.Progress;
+using Farm.Web.Api.Services.Telemetry;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -18,6 +19,7 @@ public class SlicerWorkerHostedService : BackgroundService
     private readonly SlicerWorkerConfiguration _config;
     private readonly ISlicerSettingsService _settingsService;
     private readonly Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner _processRunner;
+    private readonly IPrintFarmerTelemetryService _telemetry;
 
     public SlicerWorkerHostedService(
         IServiceScopeFactory scopeFactory,
@@ -26,7 +28,8 @@ public class SlicerWorkerHostedService : BackgroundService
         ILogger<SlicerWorkerHostedService> logger,
         IConfiguration cfg,
         ISlicerSettingsService settingsService,
-        Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner processRunner)
+        Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner processRunner,
+        IPrintFarmerTelemetryService telemetry)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _exeManager = exeManager ?? throw new ArgumentNullException(nameof(exeManager));
@@ -36,17 +39,24 @@ public class SlicerWorkerHostedService : BackgroundService
         cfg?.GetSection("SlicerWorker")?.Bind(_config);
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
+        _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        using var activity = _telemetry.StartActivity("SlicerWorkerHostedService.ExecuteAsync");
         _logger.LogInformation("Slicer worker started (worker id {WorkerId})", _config.WorkerId);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                using var loopActivity = _telemetry.StartActivity("SlicerWorkerHostedService.WorkLoop");
+
+                _logger.LogDebug("Getting runtime settings from SlicerSettingsService");
                 var runtimeSettings = _settingsService.GetSettings();
+                _logger.LogDebug("Got runtime settings: Enabled={Enabled}", runtimeSettings.Enabled);
+
                 if (!runtimeSettings.Enabled)
                 {
                     _logger.LogDebug("Slicer worker is disabled via runtime settings; sleeping");
@@ -54,6 +64,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     continue;
                 }
 
+                _logger.LogDebug("Attempting to dequeue slicer job");
                 // Attempt to dequeue a job (non-blocking)
                 DistributedSlicingJob? dequeuedJob = null;
                 using (var scope = _scopeFactory.CreateScope())
@@ -62,11 +73,13 @@ public class SlicerWorkerHostedService : BackgroundService
                     dequeuedJob = await jobQueue.DequeueAsync(_config.WorkerId, null, stoppingToken);
                     if (dequeuedJob == null)
                     {
+                        _logger.LogDebug("No jobs available, sleeping for 2 seconds");
                         await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                         continue;
                     }
                 }
 
+                _logger.LogDebug("Dequeued job {JobId}, starting background processing", dequeuedJob.JobId);
                 // Start background processing after scope is disposed (ProcessJobAsync creates its own scope)
                 _ = Task.Run(() => ProcessJobAsync(dequeuedJob!, stoppingToken), stoppingToken);
             }

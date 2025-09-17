@@ -9,6 +9,7 @@ public record CreateModelRequest(
     Guid ManufacturerId,
     [Required, MinLength(1)]
     string Name,
+    PrinterType? Type,
     double? MaxX,
     double? MaxY,
     double? MaxZ,
