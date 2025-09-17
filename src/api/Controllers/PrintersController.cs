@@ -22,6 +22,10 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Printers")]
 public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
 {
+    // Feature flag: when enabled we swallow transient startup DB errors for /fast endpoint and return empty list.
+    private static readonly bool FastEndpointDefensive =
+        (Environment.GetEnvironmentVariable("PF_FAST_ENDPOINT_DEFENSIVE") ?? "true")
+            .Equals("true", StringComparison.OrdinalIgnoreCase);
     private static string EnsureLocalSuffix(string host)
     {
         if (string.IsNullOrWhiteSpace(host))
@@ -249,27 +253,45 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAllFastAsync(CancellationToken ct)
     {
-        var items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
+        try
+        {
+            var items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
 
-        // Return all printers as offline initially - let the client load statuses progressively
-        var dtos = items.Select(p => new PrinterDto(
-            Id: p.Id,
-            Name: p.Name,
-            ServerUrl: p.ServerUrl,
-            Notes: p.Notes,
-            IsOnline: false, // Default to offline, client will update via individual status calls
-            State: null,
-            ManufacturerName: p.Manufacturer?.Name,
-            ModelName: p.Model?.Name,
-            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink :
-                     p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP :
-                     Farm.Web.Shared.PrinterBackend.Moonraker,
-            ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
-        )).ToList();
+            // Return all printers as offline initially - let the client load statuses progressively
+            var dtos = items.Select(p => new PrinterDto(
+                Id: p.Id,
+                Name: p.Name,
+                ServerUrl: p.ServerUrl,
+                Notes: p.Notes,
+                IsOnline: false, // Default to offline, client will update via individual status calls
+                State: null,
+                ManufacturerName: p.Manufacturer?.Name,
+                ModelName: p.Model?.Name,
+                Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink :
+                         p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP :
+                         Farm.Web.Shared.PrinterBackend.Moonraker,
+                ApiKey: p.ApiKey,
+                OriginalServerUrl: p.OriginalServerUrl,
+                IpAddress: p.IpAddress
+            )).ToList();
 
-        return Ok(dtos);
+            return Ok(dtos);
+        }
+        catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
+        {
+            // During early startup the DB might not yet be fully initialised (e.g. migrations running).
+            // Instead of surfacing a 500 to the UI, return an empty list so the UI can retry shortly.
+            logger.LogDebug(ex, "Printers fast endpoint accessed before startup completed; returning empty list.");
+            return Ok(Array.Empty<PrinterDto>());
+        }
+    }
+
+    private static bool IsTransientStartupDbException(Exception ex)
+    {
+        // SQLite "no such table" or other typical init race messages
+        var msg = ex.GetBaseException().Message;
+        return msg.Contains("no such table", StringComparison.OrdinalIgnoreCase) ||
+               msg.Contains("database is locked", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
