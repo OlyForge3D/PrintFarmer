@@ -42,7 +42,12 @@ function PrinterConfigurationForm({
   const [config, setConfig] = useState<PrinterConfiguration>(initialConfig || {});
   
   // Stabilize allModels to prevent unnecessary re-renders
-  const stableAllModels = useMemo(() => allModels, [JSON.stringify(allModels)]);
+  // Use array length and first/last elements as dependency instead of JSON.stringify
+  const stableAllModels = useMemo(() => allModels, [
+    allModels.length, 
+    allModels[0]?.id, 
+    allModels[allModels.length - 1]?.id
+  ]);
   const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>(models);
 
   useEffect(() => {

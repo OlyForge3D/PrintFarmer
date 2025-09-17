@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { SpoolmanState, SpoolmanContextValue, SpoolmanContext } from './SpoolmanTypes';
 
 const defaultState: SpoolmanState = {
@@ -36,14 +36,15 @@ export const SpoolmanProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const clear = useCallback(() => setState(defaultState), []);
 
-  const value: SpoolmanContextValue = {
+  // Memoize the context value to prevent unnecessary re-renders
+  const value: SpoolmanContextValue = useMemo(() => ({
     ...state,
     setEnabled,
     setBaseUrl,
     updateProbeSuccess,
     updateProbeFailure,
     clear
-  };
+  }), [state, setEnabled, setBaseUrl, updateProbeSuccess, updateProbeFailure, clear]);
 
   return <SpoolmanContext.Provider value={value}>{children}</SpoolmanContext.Provider>;
 };

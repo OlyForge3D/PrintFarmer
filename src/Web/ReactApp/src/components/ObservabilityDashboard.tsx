@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTelemetry } from '../telemetry/useTelemetry';
 import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
@@ -20,8 +20,12 @@ export function ObservabilityDashboard() {
   
   const { trackComponentMount, trackComponentUnmount, trackUserInteraction } = useTelemetry();
 
+  // Stable function references to prevent infinite re-renders
+  const handleTrackMount = useCallback((component: string) => trackComponentMount(component), [trackComponentMount]);
+  const handleTrackUnmount = useCallback((component: string, span: any) => trackComponentUnmount(component, span), [trackComponentUnmount]);
+
   useEffect(() => {
-    const mountSpan = trackComponentMount('ObservabilityDashboard');
+    const mountSpan = handleTrackMount('ObservabilityDashboard');
     
     // Simulate fetching telemetry stats
     const fetchStats = () => {
@@ -38,11 +42,11 @@ export function ObservabilityDashboard() {
 
     return () => {
       clearInterval(interval);
-      trackComponentUnmount('ObservabilityDashboard', mountSpan);
+      handleTrackUnmount('ObservabilityDashboard', mountSpan);
     };
-  }, [trackComponentMount, trackComponentUnmount]);
+  }, []); // Empty dependency array - mount/unmount functions are stable
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     trackUserInteraction('refresh', 'observability-dashboard', { 
       section: 'telemetry-stats' 
     });
@@ -54,7 +58,7 @@ export function ObservabilityDashboard() {
       errorRate: Math.random() * 5,
       lastUpdated: new Date()
     }));
-  };
+  }, [trackUserInteraction]);
 
   const statCards = [
     {
@@ -62,28 +66,28 @@ export function ObservabilityDashboard() {
       value: stats.operationsCount.toLocaleString(),
       icon: ChartBarIcon,
       description: 'API calls tracked',
-      color: 'text-blue-600'
+      color: 'text-pf-accent'
     },
     {
       title: 'Avg Response Time',
       value: `${stats.averageResponseTime}ms`,
       icon: ClockIcon,
       description: 'Average latency',
-      color: 'text-green-600'
+      color: 'text-pf-success'
     },
     {
       title: 'Error Rate',
       value: `${stats.errorRate.toFixed(2)}%`,
       icon: ServerIcon,
       description: 'Failed operations',
-      color: stats.errorRate > 2 ? 'text-red-600' : 'text-yellow-600'
+      color: stats.errorRate > 2 ? 'text-pf-error' : 'text-pf-warning'
     },
     {
       title: 'System Health',
       value: 'Healthy',
       icon: CpuChipIcon,
       description: 'Overall status',
-      color: 'text-green-600'
+      color: 'text-pf-success'
     }
   ];
 
@@ -91,14 +95,14 @@ export function ObservabilityDashboard() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">System Observability</h2>
-          <p className="text-gray-600 mt-1">
+          <h2 className="text-2xl font-bold text-pf-text-primary">System Observability</h2>
+          <p className="text-pf-text-secondary mt-1">
             Real-time system monitoring and telemetry data
           </p>
         </div>
         <button
           onClick={handleRefresh}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-success-hover transition-colors"
         >
           Refresh Data
         </button>
@@ -107,12 +111,12 @@ export function ObservabilityDashboard() {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
-          <div key={index} className="bg-white rounded-lg shadow-sm border p-6">
+          <div key={index} className="bg-pf-bg-1 rounded-lg shadow-sm border border-pf-border p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">{stat.title}</p>
+                <p className="text-sm font-medium text-pf-text-secondary">{stat.title}</p>
                 <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-                <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+                <p className="text-xs text-pf-text-tertiary mt-1">{stat.description}</p>
               </div>
               <stat.icon className={`h-8 w-8 ${stat.color}`} />
             </div>
@@ -121,14 +125,14 @@ export function ObservabilityDashboard() {
       </div>
 
       {/* OpenTelemetry Configuration */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+      <div className="bg-pf-bg-1 rounded-lg shadow-sm border border-pf-border p-6">
+        <h3 className="text-lg font-semibold text-pf-text-primary mb-4">
           OpenTelemetry Configuration
         </h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
-            <h4 className="font-medium text-gray-700 mb-2">Frontend Tracing</h4>
-            <ul className="text-sm text-gray-600 space-y-1">
+            <h4 className="font-medium text-pf-text-primary mb-2">Frontend Tracing</h4>
+            <ul className="text-sm text-pf-text-secondary space-y-1">
               <li>✅ Web instrumentation enabled</li>
               <li>✅ Fetch/XHR auto-instrumentation</li>
               <li>✅ User interaction tracking</li>
@@ -136,8 +140,8 @@ export function ObservabilityDashboard() {
             </ul>
           </div>
           <div>
-            <h4 className="font-medium text-gray-700 mb-2">Backend Tracing</h4>
-            <ul className="text-sm text-gray-600 space-y-1">
+            <h4 className="font-medium text-pf-text-primary mb-2">Backend Tracing</h4>
+            <ul className="text-sm text-pf-text-secondary space-y-1">
               <li>✅ ASP.NET Core instrumentation</li>
               <li>✅ Entity Framework tracing</li>
               <li>✅ HTTP client instrumentation</li>
@@ -148,31 +152,31 @@ export function ObservabilityDashboard() {
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+      <div className="bg-pf-bg-1 rounded-lg shadow-sm border border-pf-border p-6">
+        <h3 className="text-lg font-semibold text-pf-text-primary mb-4">
           Recent Telemetry Activity
         </h3>
         <div className="space-y-3">
           <div className="flex items-center text-sm">
-            <div className="w-2 h-2 bg-green-500 rounded-full mr-3"></div>
-            <span className="text-gray-700">API endpoint /api/printers traced successfully</span>
-            <span className="ml-auto text-gray-500">2 min ago</span>
+            <div className="w-2 h-2 bg-pf-success rounded-full mr-3"></div>
+            <span className="text-pf-text-primary">API endpoint /api/printers traced successfully</span>
+            <span className="ml-auto text-pf-text-tertiary">2 min ago</span>
           </div>
           <div className="flex items-center text-sm">
-            <div className="w-2 h-2 bg-blue-500 rounded-full mr-3"></div>
-            <span className="text-gray-700">Component lifecycle span completed: PrinterDashboard</span>
-            <span className="ml-auto text-gray-500">5 min ago</span>
+            <div className="w-2 h-2 bg-pf-accent rounded-full mr-3"></div>
+            <span className="text-pf-text-primary">Component lifecycle span completed: PrinterDashboard</span>
+            <span className="ml-auto text-pf-text-tertiary">5 min ago</span>
           </div>
           <div className="flex items-center text-sm">
-            <div className="w-2 h-2 bg-yellow-500 rounded-full mr-3"></div>
-            <span className="text-gray-700">User interaction tracked: button click on settings</span>
-            <span className="ml-auto text-gray-500">8 min ago</span>
+            <div className="w-2 h-2 bg-pf-warning rounded-full mr-3"></div>
+            <span className="text-pf-text-primary">User interaction tracked: button click on settings</span>
+            <span className="ml-auto text-pf-text-tertiary">8 min ago</span>
           </div>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="text-center text-sm text-gray-500">
+      <div className="text-center text-sm text-pf-text-tertiary">
         Last updated: {stats.lastUpdated.toLocaleString()}
       </div>
 

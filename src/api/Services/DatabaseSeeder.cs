@@ -26,14 +26,15 @@ public class DatabaseSeeder : IDatabaseSeeder
             string[] manufacturerNames = new[]
             {
                 "Unknown",  // Default for unidentified manufacturers - must be first to ensure it gets a consistent ID
-                "Prusa",
                 "Elegoo",
                 "Eryone",
                 "FlashForge",
+                "Phrozen",
+                "PrintersForAnts",
+                "Prusa",
                 "Sovol",
                 "RatRig",
                 "Voron",
-                "PrintersForAnts"
             };
 
 
@@ -93,6 +94,7 @@ public class DatabaseSeeder : IDatabaseSeeder
                 ("vCore4 300 IDEX", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
                 ("vCore4 400 IDEX", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
                 ("vCore4 500 IDEX", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
+                ("Arco", "Phrozen", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
                 ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1, PrinterType.Cartesian), // PrusaLink
                 ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1, PrinterType.Cartesian), // PrusaLink
                 ("Original Prusa MK4S", "Prusa", 250, 210, 220, 1, PrinterType.Cartesian), // PrusaLink

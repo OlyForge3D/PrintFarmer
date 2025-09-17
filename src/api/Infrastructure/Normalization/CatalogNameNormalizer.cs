@@ -21,6 +21,7 @@ internal static class CatalogNameNormalizer
         ["ratrig"] = "RatRig",
         ["rat rig"] = "RatRig",
         ["voron"] = "Voron",
+        ["phrozen"] = "Phrozen",
         ["printersforants"] = "PrintersForAnts",
         ["printers for ants"] = "PrintersForAnts",
         ["esun"] = "eSun",

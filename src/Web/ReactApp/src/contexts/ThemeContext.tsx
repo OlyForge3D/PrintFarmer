@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useEffect, useState, ReactNode, useContext } from 'react';
+import React, { createContext, useEffect, useState, ReactNode, useContext, useCallback, useMemo } from 'react';
 
 export type ThemeName = 'dark' | 'light' | 'system';
 
@@ -120,12 +120,12 @@ export function ThemeProvider({
     }));
   }, [theme, systemTheme, prefersReducedMotion, prefersHighContrast]);
 
-  const setTheme = (newTheme: ThemeName) => {
+  const setTheme = useCallback((newTheme: ThemeName) => {
     setThemeState(newTheme);
     localStorage.setItem(storageKey, newTheme);
-  };
+  }, [storageKey]);
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
     if (theme === 'system') {
       // If currently system, toggle to opposite of system preference
       setTheme(systemTheme === 'dark' ? 'light' : 'dark');
@@ -133,18 +133,19 @@ export function ThemeProvider({
       // Toggle between dark and light
       setTheme(theme === 'dark' ? 'light' : 'dark');
     }
-  };
+  }, [theme, systemTheme, setTheme]);
 
   const computedTheme = theme === 'system' ? systemTheme : theme;
 
-  const value: ThemeContextType = {
+  // Memoize the context value to prevent unnecessary re-renders
+  const value: ThemeContextType = useMemo(() => ({
     theme,
     computedTheme,
     setTheme,
     toggleTheme,
     prefersReducedMotion,
     prefersHighContrast,
-  };
+  }), [theme, computedTheme, setTheme, toggleTheme, prefersReducedMotion, prefersHighContrast]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

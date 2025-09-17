@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useUnifiedLogging } from '../hooks/useUnifiedLogging';
 import { LogEntry } from '../services/unifiedLogging';
 
@@ -17,70 +17,83 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
   const [filter, setFilter] = useState<'all' | 'error' | 'warn' | 'info' | 'debug'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Stable function references to prevent infinite re-renders
+  // Use the debugHelpers directly without creating additional callback wrappers
+  const getStoredLogs = debugHelpers.getStoredLogs;
+  const clearStoredLogs = debugHelpers.clearStoredLogs;
+  const downloadLogs = debugHelpers.downloadLogs;
+
   useEffect(() => {
     const updateLogs = () => {
-      const allLogs = debugHelpers.getStoredLogs();
-      setLogs(allLogs.slice(-maxEntries));
+      const allLogs = getStoredLogs();
+      // Fix timestamp parsing - convert string timestamps back to Date objects
+      const processedLogs = allLogs.slice(-maxEntries).map(log => ({
+        ...log,
+        timestamp: typeof log.timestamp === 'string' ? new Date(log.timestamp) : log.timestamp
+      }));
+      setLogs(processedLogs);
     };
 
     updateLogs();
     const interval = setInterval(updateLogs, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [debugHelpers, maxEntries, refreshInterval]);
+  }, [getStoredLogs, maxEntries, refreshInterval]);
 
-  const filteredLogs = logs.filter(log => {
-    if (filter !== 'all' && log.level !== filter) return false;
-    if (searchTerm && !log.message.toLowerCase().includes(searchTerm.toLowerCase()) && 
-        !log.component?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-    return true;
-  });
+  const filteredLogs = useMemo(() => {
+    return logs.filter(log => {
+      if (filter !== 'all' && log.level !== filter) return false;
+      if (searchTerm && !log.message.toLowerCase().includes(searchTerm.toLowerCase()) && 
+          !log.component?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      return true;
+    });
+  }, [logs, filter, searchTerm]);
 
   const getLevelColor = (level: LogEntry['level']): string => {
     switch (level) {
-      case 'error': return 'text-red-600 bg-red-50';
-      case 'warn': return 'text-yellow-600 bg-yellow-50';
-      case 'info': return 'text-blue-600 bg-blue-50';
-      case 'debug': return 'text-gray-600 bg-gray-50';
-      default: return 'text-gray-600 bg-gray-50';
+      case 'error': return 'text-pf-error bg-pf-error-bg';
+      case 'warn': return 'text-pf-warning bg-pf-bg-2';
+      case 'info': return 'text-pf-accent bg-pf-bg-2';
+      case 'debug': return 'text-pf-text-tertiary bg-pf-bg-2';
+      default: return 'text-pf-text-tertiary bg-pf-bg-2';
     }
   };
 
-  const handleDownloadLogs = () => {
-    debugHelpers.downloadLogs();
+  const handleDownloadLogs = useCallback(() => {
+    downloadLogs();
     logger.logUserAction('download_logs', { totalLogs: logs.length });
-  };
+  }, [downloadLogs, logger, logs.length]);
 
-  const handleClearLogs = () => {
-    debugHelpers.clearStoredLogs();
+  const handleClearLogs = useCallback(() => {
+    clearStoredLogs();
     setLogs([]);
     logger.logUserAction('clear_logs');
-  };
+  }, [clearStoredLogs, logger]);
 
-  const handleTestLogs = () => {
+  const handleTestLogs = useCallback(() => {
     logger.debug('Test debug message', { testData: 'debug test' });
     logger.info('Test info message', { testData: 'info test' });
     logger.warn('Test warning message', { testData: 'warning test' });
     logger.error('Test error message', { testData: 'error test' });
     logger.logUserAction('test_logs_generated');
-  };
+  }, [logger]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg shadow-sm">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200">
+      <div className="px-4 py-3 border-b border-pf-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
               onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-center space-x-2 text-gray-700 hover:text-gray-900"
+              className="flex items-center space-x-2 text-pf-text-primary hover:text-pf-accent"
             >
               <span className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
                 ►
               </span>
               <h3 className="text-lg font-semibold">Unified Logging Dashboard</h3>
             </button>
-            <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
+            <span className="bg-pf-bg-2 text-pf-accent text-xs font-medium px-2.5 py-0.5 rounded">
               {filteredLogs.length} / {logs.length} logs
             </span>
           </div>
@@ -88,19 +101,19 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
           <div className="flex items-center space-x-2">
             <button
               onClick={handleTestLogs}
-              className="px-3 py-1 text-xs font-medium text-purple-600 bg-purple-100 rounded hover:bg-purple-200"
+              className="px-3 py-1 text-xs font-medium text-pf-accent bg-pf-bg-2 rounded hover:bg-pf-accent hover:text-white transition-colors"
             >
               Test Logs
             </button>
             <button
               onClick={handleDownloadLogs}
-              className="px-3 py-1 text-xs font-medium text-green-600 bg-green-100 rounded hover:bg-green-200"
+              className="px-3 py-1 text-xs font-medium text-pf-success bg-pf-bg-2 rounded hover:bg-pf-success hover:text-white transition-colors"
             >
               Download
             </button>
             <button
               onClick={handleClearLogs}
-              className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 rounded hover:bg-red-200"
+              className="px-3 py-1 text-xs font-medium text-pf-error bg-pf-bg-2 rounded hover:bg-pf-error hover:text-white transition-colors"
             >
               Clear
             </button>
@@ -114,14 +127,14 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
           {/* Filters */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="flex items-center space-x-2">
-              <label htmlFor="level-filter" className="text-sm font-medium text-gray-700">
+              <label htmlFor="level-filter" className="text-sm font-medium text-pf-text-primary">
                 Level:
               </label>
               <select
                 id="level-filter"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as typeof filter)}
-                className="text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="text-sm border border-pf-border rounded px-2 py-1 bg-pf-bg-0 text-pf-text-primary focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               >
                 <option value="all">All</option>
                 <option value="error">Error</option>
@@ -132,7 +145,7 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
             </div>
             
             <div className="flex items-center space-x-2">
-              <label htmlFor="search-logs" className="text-sm font-medium text-gray-700">
+              <label htmlFor="search-logs" className="text-sm font-medium text-pf-text-primary">
                 Search:
               </label>
               <input
@@ -141,28 +154,28 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search messages or components..."
-                className="text-sm border border-gray-300 rounded px-2 py-1 w-64 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="text-sm border border-pf-border rounded px-2 py-1 w-64 bg-pf-bg-0 text-pf-text-primary placeholder-pf-text-tertiary focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               />
             </div>
           </div>
 
           {/* Log Entries */}
-          <div className="bg-gray-50 rounded border max-h-96 overflow-y-auto">
+          <div className="bg-pf-bg-0 rounded border border-pf-border max-h-96 overflow-y-auto">
             {filteredLogs.length === 0 ? (
-              <div className="p-4 text-center text-gray-500">
+              <div className="p-4 text-center text-pf-text-tertiary">
                 No log entries found. {logs.length === 0 ? 'Try clicking "Test Logs" to generate some entries.' : 'Adjust your filters.'}
               </div>
             ) : (
-              <div className="divide-y divide-gray-200">
+              <div className="divide-y divide-pf-border">
                 {filteredLogs.reverse().map((log, index) => (
-                  <div key={`${log.timestamp.getTime()}-${index}`} className="p-3 hover:bg-gray-100">
+                  <div key={`${log.timestamp.getTime()}-${index}`} className="p-3 hover:bg-pf-bg-2">
                     <div className="flex items-start space-x-3">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getLevelColor(log.level)}`}>
                         {log.level.toUpperCase()}
                       </span>
                       
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2 text-xs text-gray-500 mb-1">
+                        <div className="flex items-center space-x-2 text-xs text-pf-text-tertiary mb-1">
                           <span>{log.timestamp.toLocaleTimeString()}</span>
                           {log.component && (
                             <>
@@ -178,16 +191,16 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
                           )}
                         </div>
                         
-                        <p className="text-sm text-gray-900 break-words">
+                        <p className="text-sm text-pf-text-primary break-words">
                           {log.message}
                         </p>
                         
                         {log.context && (
                           <details className="mt-2">
-                            <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-900">
+                            <summary className="cursor-pointer text-xs text-pf-text-secondary hover:text-pf-text-primary">
                               View context
                             </summary>
-                            <pre className="mt-1 text-xs text-gray-700 bg-white p-2 rounded border overflow-x-auto">
+                            <pre className="mt-1 text-xs text-pf-text-secondary bg-pf-bg-1 p-2 rounded border border-pf-border overflow-x-auto">
                               {JSON.stringify(log.context, null, 2)}
                             </pre>
                           </details>

@@ -6,6 +6,15 @@ import { useHealthStatus } from '@/hooks/useApi';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { apiClient } from '@/services/api';
 
+// Move password policy outside component to prevent unnecessary re-renders
+const passwordPolicy = { 
+  minLength: 8, 
+  recommendUpper: true, 
+  recommendLower: true, 
+  recommendDigit: true, 
+  recommendSymbol: true 
+};
+
 interface SetupWizardProps {
   onComplete: () => void;
 }
@@ -130,7 +139,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setLoading(false);
     }
   };
-  const passwordPolicy = { minLength: 8, recommendUpper: true, recommendLower: true, recommendDigit: true, recommendSymbol: true };
 
   const validateAccount = () => {
     const errs: typeof fieldErrors = {};

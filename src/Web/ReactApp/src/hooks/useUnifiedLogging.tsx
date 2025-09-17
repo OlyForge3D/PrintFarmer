@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo } from 'react';
 import { unifiedLogger, loggerExtensions, type LogEntry } from '../services/unifiedLogging';
 
 export interface UseUnifiedLoggingOptions {
@@ -75,21 +75,22 @@ export function useUnifiedLogging(options: UseUnifiedLoggingOptions = {}) {
     logFormSubmission: loggerExtensions.logFormSubmission,
   };
 
-  // Debug helpers
-  const debugHelpers = {
-    getStoredLogs: useCallback((): LogEntry[] => {
+  // Debug helpers - stabilized with useMemo to prevent infinite re-renders
+  // Remove dependency on logger to break circular dependency
+  const debugHelpers = useMemo(() => ({
+    getStoredLogs: (): LogEntry[] => {
       return unifiedLogger.getStoredLogs();
-    }, []),
+    },
 
-    clearStoredLogs: useCallback(() => {
+    clearStoredLogs: () => {
       unifiedLogger.clearStoredLogs();
-    }, []),
+    },
 
-    exportLogs: useCallback((): string => {
+    exportLogs: (): string => {
       return unifiedLogger.exportLogs();
-    }, []),
+    },
 
-    downloadLogs: useCallback(() => {
+    downloadLogs: () => {
       const logs = unifiedLogger.exportLogs();
       const blob = new Blob([logs], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -100,9 +101,10 @@ export function useUnifiedLogging(options: UseUnifiedLoggingOptions = {}) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      logger.info('Logs downloaded', { filename: a.download });
-    }, [logger]),
-  };
+      // Log directly to avoid circular dependency
+      unifiedLogger.info('Logs downloaded', { filename: a.download }, component);
+    },
+  }), [component]);
 
   return { logger, debugHelpers };
 }
