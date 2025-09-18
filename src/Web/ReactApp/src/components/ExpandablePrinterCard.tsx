@@ -55,7 +55,11 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   // Camera URL logic: prioritize real-time status, fallback to printer config
   const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
   const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
-  const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
+  // Only enable camera button if at least one URL is a non-empty string
+  const hasCameraUrls = (
+    (typeof cameraStreamUrl === 'string' && cameraStreamUrl.trim().length > 0) ||
+    (typeof cameraSnapshotUrl === 'string' && cameraSnapshotUrl.trim().length > 0)
+  );
 
   // Update last known values when new data is available
   useEffect(() => {

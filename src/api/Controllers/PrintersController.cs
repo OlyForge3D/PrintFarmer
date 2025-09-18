@@ -307,19 +307,74 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             List<Printer> items = await db.Printers.AsNoTracking().ToListAsync(ct);
 
-            List<PrinterCameraUrlsDto> dtos = items.Select(p => new PrinterCameraUrlsDto(
-                Id: p.Id,
-                Name: p.Name,
-                CameraStreamUrl: GenerateStaticCameraStreamUrl(p.ServerUrl, p.Backend),
-                CameraSnapshotUrl: GenerateStaticCameraSnapshotUrl(p.ServerUrl, p.Backend)
-            )).ToList();
+            PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
+            {
+                string? streamUrl = null;
+                string? snapshotUrl = null;
 
-            return Ok(dtos);
+                // Only return camera URLs if we can verify the camera endpoints are actually available
+                if (await IsCameraAvailableAsync(p.ServerUrl, p.Backend, ct))
+                {
+                    streamUrl = GenerateStaticCameraStreamUrl(p.ServerUrl, p.Backend);
+                    snapshotUrl = GenerateStaticCameraSnapshotUrl(p.ServerUrl, p.Backend);
+                }
+
+                return new PrinterCameraUrlsDto(
+                    Id: p.Id,
+                    Name: p.Name,
+                    CameraStreamUrl: streamUrl,
+                    CameraSnapshotUrl: snapshotUrl
+                );
+            }));
+
+            return Ok(dtos.ToList());
         }
         catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
         {
             logger.LogDebug(ex, "Printers camera-urls endpoint accessed before startup completed; returning empty list.");
             return Ok(Array.Empty<PrinterCameraUrlsDto>());
+        }
+    }
+
+    /// <summary>
+    /// Checks if a camera is actually available for the given printer by testing the camera endpoint.
+    /// </summary>
+    /// <param name="serverUrl">The printer server URL</param>
+    /// <param name="backend">The printer backend type</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if camera is available, false otherwise</returns>
+    private async Task<bool> IsCameraAvailableAsync(string serverUrl, int backend, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            // Test the snapshot URL with a short timeout
+            string? snapshotUrl = GenerateStaticCameraSnapshotUrl(serverUrl, backend);
+            if (string.IsNullOrWhiteSpace(snapshotUrl))
+            {
+                return false;
+            }
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(2); // Short timeout to avoid blocking
+            
+            using var request = new HttpRequestMessage(HttpMethod.Head, snapshotUrl);
+            using var response = await httpClient.SendAsync(request, ct);
+            
+            // Camera is available if we get a successful response (2xx) or even a 4xx
+            // (404 might mean camera exists but no current image, 401/403 means auth required but camera exists)
+            // 5xx errors typically mean the camera service is not running/configured
+            return response.StatusCode < System.Net.HttpStatusCode.InternalServerError;
+        }
+        catch (Exception ex)
+        {
+            // Log the exception for debugging but don't expose it
+            logger.LogDebug(ex, "Camera availability check failed for printer {ServerUrl} (backend {Backend})", serverUrl, backend);
+            return false;
         }
     }
 
