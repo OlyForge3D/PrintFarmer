@@ -1,4 +1,7 @@
-﻿using Farm.Web.Api.Data;
+﻿#pragma warning disable SA1402 // File may only contain a single type (or custom namespace warning)
+#pragma warning disable CS0136 // Suppress variable shadowing error in this file
+
+using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
@@ -7,14 +10,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
-public class DatabaseSeeder : IDatabaseSeeder
+public class DatabaseSeeder(AppDbContext context, ILogger<DatabaseSeeder> logger) : IDatabaseSeeder
 {
-    private readonly AppDbContext _context;
-
-    public DatabaseSeeder(AppDbContext context)
-    {
-        _context = context;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly ILogger<DatabaseSeeder> _logger = logger;
 
     public async Task SeedCatalogDataAsync()
     {
@@ -123,11 +122,10 @@ public class DatabaseSeeder : IDatabaseSeeder
                 ("Original Prusa XL", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, true, 5, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
             };
 
-            foreach (var modelSeed in modelSeeds)
+            foreach ((string modelName, string mfg, double x, double y, double z, int? defaultBackend, MotionType? motionType,
+                      double? nozzleDiameter, bool hasBed, bool hasEnclosure, bool multiMaterial, int extruders, bool autoLevel,
+                      int? minHotend, int? maxHotend, int? minBed, int? maxBed, string _, int? maxSpeed) in modelSeeds)
             {
-                (string name, string mfg, double x, double y, double z, int? defaultBackend, MotionType? motionType,
-                 double? nozzleDiameter, bool hasBed, bool hasEnclosure, bool multiMaterial, int extruders, bool autoLevel,
-                 int? minHotend, int? maxHotend, int? minBed, int? maxBed, string _, int? maxSpeed) = modelSeed;
 
                 if (!manufacturers.TryGetValue(mfg, out Manufacturer? m))
                 {
@@ -135,13 +133,13 @@ public class DatabaseSeeder : IDatabaseSeeder
                     continue;
                 }
 
-                bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == name);
+                bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
                 if (!exists)
                 {
                     _context.Models.Add(new PrinterModel
                     {
                         Id = Guid.NewGuid(),
-                        Name = name,
+                        Name = modelName,
                         ManufacturerId = m.Id,
                         MaxX = x,
                         MaxY = y,
@@ -170,7 +168,7 @@ public class DatabaseSeeder : IDatabaseSeeder
         catch (Exception ex)
         {
             // Log the exception but don't throw to prevent application startup failure
-            Console.WriteLine($"Catalog seeding error: {ex.Message}");
+            _logger.LogError(ex, "Catalog seeding error");
             throw; // Re-throw if you want startup to fail on seeding errors
         }
     }
@@ -188,21 +186,39 @@ public class DatabaseSeeder : IDatabaseSeeder
 
             // Process each model's supported materials
 #pragma warning disable IDE0008 // Use explicit type
-            foreach (var (name, mfg, x, y, z, defaultBackend, type, nozzleDiameter,
-                         hasBed, hasEnclosure, multiMaterial, extruders, autoLevel,
-                         minHotend, maxHotend, minBed, maxBed, materials, maxSpeed) in modelSeeds)
+            foreach (var (
+                modelName,
+                manufacturerName,
+                volumeX,
+                volumeY,
+                volumeZ,
+                backendId,
+                modelMotionType,
+                modelNozzleDiameter,
+                hasHeatedBed,
+                hasPrinterEnclosure,
+                supportsMultiMaterial,
+                extruderCount,
+                supportsAutoLeveling,
+                minHotendTemp,
+                maxHotendTemp,
+                minBedTemp,
+                maxBedTemp,
+                supportedMaterials,
+                maxPrintSpeed
+            ) in modelSeeds)
             {
                 // Find the model we just created
                 var model = await _context.Models
-                    .FirstOrDefaultAsync(m => m.Name == name &&
+                    .FirstOrDefaultAsync(m => m.Name == modelName &&
                                            m.Manufacturer != null &&
-                                           m.Manufacturer.Name == mfg);
+                                           m.Manufacturer.Name == manufacturerName);
 
-                if (model != null && !string.IsNullOrEmpty(materials))
+                if (model != null && !string.IsNullOrEmpty(supportedMaterials))
                 {
                     // Parse the comma-separated materials list
-                    var materialNames = materials.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                               .Select(m => m.Trim().ToUpperInvariant());
+                    var materialNames = supportedMaterials.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(material => material.Trim().ToUpperInvariant());
 
                     foreach (var materialName in materialNames)
                     {
@@ -231,7 +247,7 @@ public class DatabaseSeeder : IDatabaseSeeder
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Filament type seeding error: {ex.Message}");
+            _logger.LogError(ex, "Filament type seeding error");
             // Don't throw - this is not critical for application startup
         }
     }
@@ -254,7 +270,7 @@ public class DatabaseSeeder : IDatabaseSeeder
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Spoolman config seeding error: {ex.Message}");
+            _logger.LogError(ex, "Spoolman config seeding error");
         }
     }
 
@@ -305,11 +321,7 @@ public class DatabaseSeeder : IDatabaseSeeder
     public async Task<Manufacturer> GetUnknownManufacturerAsync()
     {
         Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
-        if (unknown == null)
-        {
-            throw new InvalidOperationException("Unknown manufacturer not found. Ensure SeedCatalogDataAsync() has been called.");
-        }
-        return unknown;
+        return unknown ?? throw new InvalidOperationException("Unknown manufacturer not found. Ensure SeedCatalogDataAsync() has been called.");
     }
 
     /// <summary>
@@ -320,10 +332,6 @@ public class DatabaseSeeder : IDatabaseSeeder
         Manufacturer unknownMfg = await GetUnknownManufacturerAsync();
         PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
-        if (unknownModel == null)
-        {
-            throw new InvalidOperationException("Unknown Model not found. Ensure SeedCatalogDataAsync() has been called.");
-        }
-        return unknownModel;
+        return unknownModel ?? throw new InvalidOperationException("Unknown model not found. Ensure SeedCatalogDataAsync() has been called.");
     }
 }

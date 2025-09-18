@@ -43,6 +43,10 @@ public class SlicerWorkerHostedService : BackgroundService
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        category: "IDisposableAnalyzers",
+        checkId: "IDISP013:Await in using",
+        Justification = "IServiceScope implements only synchronous dispose; awaited operations occur before dispose. Scope disposal is fast and non-blocking, and converting to async scope adds no safety benefit here.")]
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using Activity? activity = _telemetry.StartActivity("SlicerWorkerHostedService.ExecuteAsync");
@@ -68,16 +72,18 @@ public class SlicerWorkerHostedService : BackgroundService
                 _logger.LogDebug("Attempting to dequeue slicer job");
                 // Attempt to dequeue a job (non-blocking)
                 DistributedSlicingJob? dequeuedJob = null;
-                using (IServiceScope scope = _scopeFactory.CreateScope())
+                // Create scope (AsyncServiceScope implements IAsyncDisposable but synchronous disposal acceptable here)
+                using (var scope = _scopeFactory.CreateScope())
                 {
                     ISlicerJobQueue jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
                     dequeuedJob = await jobQueue.DequeueAsync(_config.WorkerId, null, stoppingToken);
-                    if (dequeuedJob == null)
-                    {
-                        _logger.LogDebug("No jobs available, sleeping for 2 seconds");
-                        await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-                        continue;
-                    }
+                }
+
+                if (dequeuedJob == null)
+                {
+                    _logger.LogDebug("No jobs available, sleeping for 2 seconds");
+                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                    continue;
                 }
 
                 _logger.LogDebug("Dequeued job {JobId}, starting background processing", dequeuedJob.JobId);
@@ -238,7 +244,9 @@ public class SlicerWorkerHostedService : BackgroundService
                                         }
                                         // Ask process to terminate now that we're done
                                         try
-                                        { procHandle.Kill(); }
+                                        {
+                                            procHandle.Kill();
+                                        }
                                         catch { }
                                     }
                                 }
@@ -289,7 +297,9 @@ public class SlicerWorkerHostedService : BackgroundService
                                             await notifier.NotifyCompletionAsync(job, result, ct);
                                         }
                                         try
-                                        { procHandle.Kill(); }
+                                        {
+                                            procHandle.Kill();
+                                        }
                                         catch { }
                                     }
                                 }
@@ -417,7 +427,11 @@ public class SlicerWorkerHostedService : BackgroundService
                 // Decide whether to retry or fail permanently
                 int maxRetries = _config.MaxRetryCount;
                 // Treat IO/timeout related exceptions as transient; also treat process exit (InvalidOperationException) as transient
-                bool isTransient = ex is System.IO.IOException || ex is TimeoutException || ex is System.Net.Http.HttpRequestException || ex is InvalidOperationException && !(ex.Message?.Contains("No gcode") ?? false);
+                bool isTransient =
+                    ex is System.IO.IOException
+                    || ex is TimeoutException
+                    || ex is System.Net.Http.HttpRequestException
+                    || (ex is InvalidOperationException && !(ex.Message?.Contains("No gcode") ?? false));
 
                 if (isTransient && job.RetryCount < maxRetries)
                 {

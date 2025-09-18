@@ -129,19 +129,19 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                 if (capabilities.MaxBuildVolumeX.HasValue && model.MaxX.HasValue &&
                     capabilities.MaxBuildVolumeX > model.MaxX)
                 {
-                    result.Warnings.Add($"Build volume X ({capabilities.MaxBuildVolumeX}) exceeds model specification ({model.MaxX})");
+                    result._warnings.Add($"Build volume X ({capabilities.MaxBuildVolumeX}) exceeds model specification ({model.MaxX})");
                 }
 
                 if (capabilities.MaxBuildVolumeY.HasValue && model.MaxY.HasValue &&
                     capabilities.MaxBuildVolumeY > model.MaxY)
                 {
-                    result.Warnings.Add($"Build volume Y ({capabilities.MaxBuildVolumeY}) exceeds model specification ({model.MaxY})");
+                    result._warnings.Add($"Build volume Y ({capabilities.MaxBuildVolumeY}) exceeds model specification ({model.MaxY})");
                 }
 
                 if (capabilities.MaxBuildVolumeZ.HasValue && model.MaxZ.HasValue &&
                     capabilities.MaxBuildVolumeZ > model.MaxZ)
                 {
-                    result.Warnings.Add($"Build volume Z ({capabilities.MaxBuildVolumeZ}) exceeds model specification ({model.MaxZ})");
+                    result._warnings.Add($"Build volume Z ({capabilities.MaxBuildVolumeZ}) exceeds model specification ({model.MaxZ})");
                 }
 
                 // Validate nozzle diameter (common sizes)
@@ -150,30 +150,30 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                     double[] commonSizes = new[] { 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1.0 };
                     if (!commonSizes.Any(size => Math.Abs(capabilities.NozzleDiameter.Value - size) < 0.01))
                     {
-                        result.Warnings.Add($"Unusual nozzle diameter: {capabilities.NozzleDiameter}mm. Common sizes are: {string.Join(", ", commonSizes)}mm");
+                        result._warnings.Add($"Unusual nozzle diameter: {capabilities.NozzleDiameter}mm. Common sizes are: {string.Join(", ", commonSizes)}mm");
                     }
                 }
 
                 // Validate temperature ranges
                 if (capabilities.MaxHotendTemp.HasValue && capabilities.MaxHotendTemp > 500)
                 {
-                    result.Warnings.Add($"Very high hotend temperature limit: {capabilities.MaxHotendTemp}°C");
+                    result._warnings.Add($"Very high hotend temperature limit: {capabilities.MaxHotendTemp}°C");
                 }
 
                 if (capabilities.MaxBedTemp.HasValue && capabilities.MaxBedTemp > 150)
                 {
-                    result.Warnings.Add($"Very high bed temperature limit: {capabilities.MaxBedTemp}°C");
+                    result._warnings.Add($"Very high bed temperature limit: {capabilities.MaxBedTemp}°C");
                 }
 
                 // Suggest missing critical capabilities
                 if (!capabilities.NozzleDiameter.HasValue)
                 {
-                    result.Suggestions.Add("Consider specifying nozzle diameter for accurate job matching");
+                    result._suggestions.Add("Consider specifying nozzle diameter for accurate job matching");
                 }
 
                 if (!capabilities.MaxBuildVolumeX.HasValue || !capabilities.MaxBuildVolumeY.HasValue || !capabilities.MaxBuildVolumeZ.HasValue)
                 {
-                    result.Suggestions.Add("Consider specifying build volume for job compatibility checking");
+                    result._suggestions.Add("Consider specifying build volume for job compatibility checking");
                 }
             }
 
@@ -182,7 +182,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating capabilities for printer {PrinterId}", printer.Id);
-            result.Errors.Add("Failed to validate capabilities due to internal error");
+            result._errors.Add("Failed to validate capabilities due to internal error");
             result.IsValid = false;
         }
 
@@ -321,7 +321,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
         catch (Exception ex)
         {
-            // Log error but don't expose logger dependency issue during build
+            _logger.LogDebug(ex, "Moonraker capability discovery failed (non-fatal) for printer {PrinterId}", printer.Id);
             return null;
         }
     }
@@ -333,11 +333,15 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             // Parse INI-style configuration for Klipper
             int sectionStart = configContent.IndexOf($"[{section}]", StringComparison.OrdinalIgnoreCase);
             if (sectionStart == -1)
+            {
                 return defaultValue;
+            }
 
             int sectionEnd = configContent.IndexOf('[', sectionStart + 1);
             if (sectionEnd == -1)
+            {
                 sectionEnd = configContent.Length;
+            }
 
             string sectionContent = configContent.Substring(sectionStart, sectionEnd - sectionStart);
             Match keyMatch = Regex.Match(sectionContent, $@"{Regex.Escape(key)}\s*[:=]\s*([^\r\n]+)", RegexOptions.IgnoreCase);
@@ -359,7 +363,10 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         int count = 0;
         // Count extruder sections: [extruder], [extruder1], [extruder2], etc.
         if (configContent.Contains("[extruder]"))
+        {
             count = 1;
+        }
+
         for (int i = 1; i < 10; i++)
         {
             if (configContent.Contains($"[extruder{i}]"))
@@ -417,34 +424,54 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
     private static void ApplyDiscoveredCapabilities(PrinterCapabilities capabilities, DiscoveredCapabilities discovered)
     {
         if (discovered.NozzleDiameter.HasValue)
+        {
             capabilities.NozzleDiameter = discovered.NozzleDiameter;
+        }
 
         if (discovered.MaxBuildVolumeX.HasValue)
+        {
             capabilities.MaxBuildVolumeX = discovered.MaxBuildVolumeX;
+        }
 
         if (discovered.MaxBuildVolumeY.HasValue)
+        {
             capabilities.MaxBuildVolumeY = discovered.MaxBuildVolumeY;
+        }
 
         if (discovered.MaxBuildVolumeZ.HasValue)
+        {
             capabilities.MaxBuildVolumeZ = discovered.MaxBuildVolumeZ;
+        }
 
         if (discovered.MaxHotendTemp.HasValue)
+        {
             capabilities.MaxHotendTemp = discovered.MaxHotendTemp;
+        }
 
         if (discovered.MaxBedTemp.HasValue)
+        {
             capabilities.MaxBedTemp = discovered.MaxBedTemp;
+        }
 
         if (discovered.HasHeatedBed.HasValue)
+        {
             capabilities.HasHeatedBed = discovered.HasHeatedBed.Value;
+        }
 
         if (discovered.NumberOfExtruders.HasValue)
+        {
             capabilities.NumberOfExtruders = discovered.NumberOfExtruders.Value;
+        }
 
         if (discovered.SupportedMaterials != null)
+        {
             capabilities.SupportedMaterials = discovered.SupportedMaterials;
+        }
 
         if (!string.IsNullOrEmpty(discovered.CurrentMaterial))
+        {
             capabilities.CurrentMaterial = discovered.CurrentMaterial;
+        }
     }
 
     private static void SetDefaultsByManufacturerAndModel(PrinterCapabilities capabilities, Printer printer)
@@ -459,70 +486,232 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         switch (manufacturerName)
         {
             case "prusa":
-                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
-                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
-                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
-                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 300;
-                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 120;
-                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 170;
-                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 35;
+                if (!capabilities.HasHeatedBed)
+                {
+                    capabilities.HasHeatedBed = true;
+                }
+
+                if (capabilities.NumberOfExtruders == 0)
+                {
+                    capabilities.NumberOfExtruders = 1;
+                }
+
+                if (!capabilities.NozzleDiameter.HasValue)
+                {
+                    capabilities.NozzleDiameter = 0.4;
+                }
+
+                if (!capabilities.MaxHotendTemp.HasValue)
+                {
+                    capabilities.MaxHotendTemp = 300;
+                }
+
+                if (!capabilities.MaxBedTemp.HasValue)
+                {
+                    capabilities.MaxBedTemp = 120;
+                }
+
+                if (!capabilities.MinHotendTemp.HasValue)
+                {
+                    capabilities.MinHotendTemp = 170;
+                }
+
+                if (!capabilities.MinBedTemp.HasValue)
+                {
+                    capabilities.MinBedTemp = 35;
+                }
+
                 if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                {
                     capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG" };
+                }
+
                 break;
 
             case "voron":
-                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
-                if (!capabilities.HasEnclosure) capabilities.HasEnclosure = modelName?.Contains("v2.4") == true || modelName?.Contains("trident") == true;
-                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
-                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
-                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 350;
-                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 120;
-                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
-                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 40;
+                if (!capabilities.HasHeatedBed)
+                {
+                    capabilities.HasHeatedBed = true;
+                }
+
+                if (!capabilities.HasEnclosure)
+                {
+                    capabilities.HasEnclosure = modelName?.Contains("v2.4") == true || modelName?.Contains("trident") == true;
+                }
+
+                if (capabilities.NumberOfExtruders == 0)
+                {
+                    capabilities.NumberOfExtruders = 1;
+                }
+
+                if (!capabilities.NozzleDiameter.HasValue)
+                {
+                    capabilities.NozzleDiameter = 0.4;
+                }
+
+                if (!capabilities.MaxHotendTemp.HasValue)
+                {
+                    capabilities.MaxHotendTemp = 350;
+                }
+
+                if (!capabilities.MaxBedTemp.HasValue)
+                {
+                    capabilities.MaxBedTemp = 120;
+                }
+
+                if (!capabilities.MinHotendTemp.HasValue)
+                {
+                    capabilities.MinHotendTemp = 180;
+                }
+
+                if (!capabilities.MinBedTemp.HasValue)
+                {
+                    capabilities.MinBedTemp = 40;
+                }
+
                 if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                {
                     capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG", "PA", "PPS" };
+                }
+
                 break;
 
             case "ratrig":
-                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
-                if (!capabilities.HasEnclosure) capabilities.HasEnclosure = false; // Most RatRig are open frame
-                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = modelName?.Contains("idex") == true ? 2 : 1;
-                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
-                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 300;
-                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 120;
-                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
-                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 35;
+                if (!capabilities.HasHeatedBed)
+                {
+                    capabilities.HasHeatedBed = true;
+                }
+
+                if (!capabilities.HasEnclosure)
+                {
+                    capabilities.HasEnclosure = false; // Most RatRig are open frame
+                }
+
+                if (capabilities.NumberOfExtruders == 0)
+                {
+                    capabilities.NumberOfExtruders = modelName?.Contains("idex") == true ? 2 : 1;
+                }
+
+                if (!capabilities.NozzleDiameter.HasValue)
+                {
+                    capabilities.NozzleDiameter = 0.4;
+                }
+
+                if (!capabilities.MaxHotendTemp.HasValue)
+                {
+                    capabilities.MaxHotendTemp = 300;
+                }
+
+                if (!capabilities.MaxBedTemp.HasValue)
+                {
+                    capabilities.MaxBedTemp = 120;
+                }
+
+                if (!capabilities.MinHotendTemp.HasValue)
+                {
+                    capabilities.MinHotendTemp = 180;
+                }
+
+                if (!capabilities.MinBedTemp.HasValue)
+                {
+                    capabilities.MinBedTemp = 35;
+                }
+
                 if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                {
                     capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG" };
+                }
+
                 break;
 
             case "elegoo":
                 if (modelName?.Contains("centauri") == true)
                 {
                     // Delta printer specifics
-                    if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
-                    if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
-                    if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
-                    if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 280;
-                    if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 100;
-                    if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
-                    if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 50;
+                    if (!capabilities.HasHeatedBed)
+                    {
+                        capabilities.HasHeatedBed = true;
+                    }
+
+                    if (capabilities.NumberOfExtruders == 0)
+                    {
+                        capabilities.NumberOfExtruders = 1;
+                    }
+
+                    if (!capabilities.NozzleDiameter.HasValue)
+                    {
+                        capabilities.NozzleDiameter = 0.4;
+                    }
+
+                    if (!capabilities.MaxHotendTemp.HasValue)
+                    {
+                        capabilities.MaxHotendTemp = 280;
+                    }
+
+                    if (!capabilities.MaxBedTemp.HasValue)
+                    {
+                        capabilities.MaxBedTemp = 100;
+                    }
+
+                    if (!capabilities.MinHotendTemp.HasValue)
+                    {
+                        capabilities.MinHotendTemp = 180;
+                    }
+
+                    if (!capabilities.MinBedTemp.HasValue)
+                    {
+                        capabilities.MinBedTemp = 50;
+                    }
+
                     if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                    {
                         capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS" };
+                    }
                 }
                 break;
 
             default:
                 // Generic defaults - only apply if not already set by model
-                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
-                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
-                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
-                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 280;
-                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 100;
-                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
-                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 40;
+                if (!capabilities.HasHeatedBed)
+                {
+                    capabilities.HasHeatedBed = true;
+                }
+
+                if (capabilities.NumberOfExtruders == 0)
+                {
+                    capabilities.NumberOfExtruders = 1;
+                }
+
+                if (!capabilities.NozzleDiameter.HasValue)
+                {
+                    capabilities.NozzleDiameter = 0.4;
+                }
+
+                if (!capabilities.MaxHotendTemp.HasValue)
+                {
+                    capabilities.MaxHotendTemp = 280;
+                }
+
+                if (!capabilities.MaxBedTemp.HasValue)
+                {
+                    capabilities.MaxBedTemp = 100;
+                }
+
+                if (!capabilities.MinHotendTemp.HasValue)
+                {
+                    capabilities.MinHotendTemp = 180;
+                }
+
+                if (!capabilities.MinBedTemp.HasValue)
+                {
+                    capabilities.MinBedTemp = 40;
+                }
+
                 if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                {
                     capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS" };
+                }
+
                 break;
         }
     }

@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Collections.ObjectModel;
+using System.Text.RegularExpressions;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -49,18 +50,18 @@ public partial class SlicerAdminController : ControllerBase
         {
             if (!known.Contains(ph, StringComparer.OrdinalIgnoreCase))
             {
-                result.Warnings.Add($"Unknown placeholder '{{{ph}}}' — it will remain unexpanded.");
+                result._warnings.Add($"Unknown placeholder '{{{ph}}}' — it will remain unexpanded.");
             }
         }
 
         // Basic validation rules
         if (!placeholders.Contains("input", StringComparer.OrdinalIgnoreCase))
         {
-            result.Issues.Add("Template should include an {input} placeholder pointing to the model path.");
+            result._issues.Add("Template should include an {input} placeholder pointing to the model path.");
         }
         if (!placeholders.Contains("output", StringComparer.OrdinalIgnoreCase))
         {
-            result.Warnings.Add("Template does not include an {output} placeholder — default output name will be used.");
+            result._warnings.Add("Template does not include an {output} placeholder — default output name will be used.");
         }
 
         // Do a safe render using sample values
@@ -73,7 +74,7 @@ public partial class SlicerAdminController : ControllerBase
         // Safety checks on rendered args
         if (rendered.Contains("..") || rendered.Contains("~"))
         {
-            result.Warnings.Add("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
+            result._warnings.Add("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
         }
 
         result.IsValid = result.Issues.Count == 0;
@@ -95,8 +96,10 @@ public class DryRunRequest
 public class DryRunResult
 {
     public bool IsValid { get; set; }
-    public List<string> Issues { get; } = new();
-    public List<string> Warnings { get; } = new();
+    internal readonly List<string> _issues = new();
+    internal readonly List<string> _warnings = new();
+    public IReadOnlyList<string> Issues => _issues;
+    public IReadOnlyList<string> Warnings => _warnings;
     public string? Rendered { get; set; }
     public Dictionary<string, string> SamplePlaceholders { get; set; } = new();
 }

@@ -47,11 +47,7 @@ internal static class CatalogNameNormalizer
         }
         // Also try collapsing whitespace to catch spaced vs non-spaced variants
         string collapsed = string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c)));
-        if (CanonicalManufacturerMap.TryGetValue(collapsed, out canonical))
-        {
-            return canonical;
-        }
-        return CapitalizeFirst(trimmed);
+        return CanonicalManufacturerMap.TryGetValue(collapsed, out canonical) ? canonical : CapitalizeFirst(trimmed);
     }
 
     /// <summary>
@@ -59,11 +55,7 @@ internal static class CatalogNameNormalizer
     /// </summary>
     public static string NormalizeModel(string? name)
     {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return string.Empty;
-        }
-        return CapitalizeFirst(name.Trim());
+        return string.IsNullOrWhiteSpace(name) ? string.Empty : CapitalizeFirst(name.Trim());
     }
 
     /// <summary>

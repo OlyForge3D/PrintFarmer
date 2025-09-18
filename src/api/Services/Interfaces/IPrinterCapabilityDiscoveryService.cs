@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 
@@ -47,9 +48,12 @@ public interface IPrinterCapabilityDiscoveryService
 public class CapabilityValidationResult
 {
     public bool IsValid { get; set; } = true;
-    public List<string> Errors { get; set; } = new();
-    public List<string> Warnings { get; set; } = new();
-    public List<string> Suggestions { get; set; } = new();
+    internal readonly List<string> _errors = new();
+    internal readonly List<string> _warnings = new();
+    internal readonly List<string> _suggestions = new();
+    public IReadOnlyList<string> Errors => _errors;
+    public IReadOnlyList<string> Warnings => _warnings;
+    public IReadOnlyList<string> Suggestions => _suggestions;
 }
 
 /// <summary>

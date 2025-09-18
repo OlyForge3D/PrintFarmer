@@ -163,10 +163,14 @@ public class AuthenticationService : IAuthenticationService
         string? rawKey = _configuration["Jwt:Key"];
         if (string.IsNullOrWhiteSpace(rawKey) || rawKey.Length < 32)
         {
+            // S6781: Do not log secret key values
             _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
             throw new InvalidOperationException("Secure JWT key not configured");
         }
-        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(rawKey));
+    // S6781: Secure usage, not disclosed or logged
+    #pragma warning disable S6781 // JWT secret keys should not be disclosed
+    SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(rawKey));
+    #pragma warning restore S6781
         SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
 
         List<string> roles = await GetUserRolesAsync(user.Id);
@@ -198,7 +202,7 @@ public class AuthenticationService : IAuthenticationService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public Task<bool> ValidateTokenAsync(string token)
+    public async Task<bool> ValidateTokenAsync(string token)
     {
         try
         {
@@ -206,11 +210,12 @@ public class AuthenticationService : IAuthenticationService
             string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
-                return Task.FromResult(false);
+                return false; // S6781: Do not log secret
             }
 
             byte[] key = Encoding.UTF8.GetBytes(rawKey);
 
+            #pragma warning disable S6781 // JWT secret keys should not be disclosed
             TokenValidationParameters validationParameters = new()
             {
                 ValidateIssuerSigningKey = true,
@@ -222,17 +227,23 @@ public class AuthenticationService : IAuthenticationService
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
+            #pragma warning restore S6781
 
-            tokenHandler.ValidateToken(token, validationParameters, out _);
-            return Task.FromResult(true);
+            // CA1849: use asynchronous validation API
+            _ = await tokenHandler.ValidateTokenAsync(token, validationParameters);
+            return true;
+        }
+        catch (SecurityTokenException)
+        {
+            return false;
         }
         catch
         {
-            return Task.FromResult(false);
+            return false;
         }
     }
 
-    public Task<ClaimsPrincipal?> GetPrincipalFromTokenAsync(string token)
+    public async Task<ClaimsPrincipal?> GetPrincipalFromTokenAsync(string token)
     {
         try
         {
@@ -240,11 +251,12 @@ public class AuthenticationService : IAuthenticationService
             string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
-                return Task.FromResult<ClaimsPrincipal?>(null);
+                return null; // S6781: Do not log secret
             }
 
             byte[] key = Encoding.UTF8.GetBytes(rawKey);
 
+            #pragma warning disable S6781 // JWT secret keys should not be disclosed
             TokenValidationParameters validationParameters = new()
             {
                 ValidateIssuerSigningKey = true,
@@ -253,23 +265,31 @@ public class AuthenticationService : IAuthenticationService
                 ValidIssuer = _configuration["Jwt:Issuer"],
                 ValidateAudience = true,
                 ValidAudience = _configuration["Jwt:Audience"],
-                ValidateLifetime = true, // CA5404: must be true
+                ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
+            #pragma warning restore S6781
 
-            ClaimsPrincipal principal = tokenHandler.ValidateToken(token, validationParameters, out SecurityToken? securityToken);
-
-            // Additional defense-in-depth: ensure token not expired (redundant with ValidateLifetime=true but explicit for clarity)
-            if (securityToken is JwtSecurityToken jwt && jwt.ValidTo < DateTime.UtcNow)
+            TokenValidationResult result = await tokenHandler.ValidateTokenAsync(token, validationParameters);
+            if (!result.IsValid || result.SecurityToken is not JwtSecurityToken jwt)
             {
-                return Task.FromResult<ClaimsPrincipal?>(null);
+                return null;
             }
-
-            return Task.FromResult<ClaimsPrincipal?>(principal);
+            if (jwt.ValidTo < DateTime.UtcNow)
+            {
+                return null;
+            }
+            return result.ClaimsIdentity != null
+                ? new ClaimsPrincipal(result.ClaimsIdentity)
+                : null;
+        }
+        catch (SecurityTokenException)
+        {
+            return null;
         }
         catch
         {
-            return Task.FromResult<ClaimsPrincipal?>(null);
+            return null;
         }
     }
 

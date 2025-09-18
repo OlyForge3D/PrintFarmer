@@ -40,7 +40,10 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
 try
 {
+    // CA3003: Path is constructed from known root, not user input
+#pragma warning disable CA3003
     string potentialShared = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "wwwroot"));
+#pragma warning restore CA3003
     if (Directory.Exists(potentialShared))
     {
         builder.Environment.WebRootPath = potentialShared;
@@ -74,8 +77,11 @@ builder.Services.AddSwaggerGen(options =>
 {
     // Include XML documentation if generated (for enriched Swagger docs)
     string xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    // CA3003: xmlFile is assembly name, not user input
+#pragma warning disable CA3003
     string xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
     if (System.IO.File.Exists(xmlPath))
+#pragma warning restore CA3003
     {
         options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
     }
@@ -123,11 +129,9 @@ builder.Services.AddCors(options =>
             }
 
             // Check if origin matches allowed network ranges (ip-based origin like http://192.168.x.x:port)
-            if (Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri))
-            {
-                return IsIpInAllowedRanges(uri.Host, networkRanges);
-            }
-            return false;
+            return Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+                ? IsIpInAllowedRanges(uri.Host, networkRanges)
+                : false;
         })
         .AllowAnyHeader()
         .AllowAnyMethod()
@@ -405,11 +409,9 @@ builder.Services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>
 builder.Services.AddSingleton<IGcodeUploadQuotaService>(sp =>
 {
     string? limitEnv = Environment.GetEnvironmentVariable("GCODE_DAILY_UPLOAD_LIMIT_BYTES");
-    if (long.TryParse(limitEnv, out long limit) && limit > 0)
-    {
-        return new InMemoryGcodeUploadQuotaService(limit);
-    }
-    return new InMemoryGcodeUploadQuotaService();
+    return long.TryParse(limitEnv, out long limit) && limit > 0
+        ? new InMemoryGcodeUploadQuotaService(limit)
+        : new InMemoryGcodeUploadQuotaService();
 });
 
 // Catalog caching (manufacturers/models lists + ETags)
@@ -706,11 +708,9 @@ if (headlessCreateAdmin || headlessListUsers)
         string GetArg(string name)
         {
             int idx = rawArgs.IndexOf(name);
-            if (idx >= 0 && idx + 1 < rawArgs.Count)
-            {
-                return rawArgs[idx + 1];
-            }
-            return string.Empty;
+            return (idx >= 0 && idx + 1 < rawArgs.Count)
+                ? rawArgs[idx + 1]
+                : string.Empty;
         }
         string username = GetArg("--username");
         string email = GetArg("--email");
@@ -881,10 +881,10 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
                     kvp => kvp.Key,
                     kvp => new
                     {
-                        Status = kvp.Value.Status.ToString(),
-                        Duration = kvp.Value.Duration,
-                        Description = kvp.Value.Description,
-                        Data = kvp.Value.Data
+                        kvp.Value.Status,
+                        kvp.Value.Duration,
+                        kvp.Value.Description,
+                        kvp.Value.Data
                     })
             },
             Program.HealthJsonOptions);
@@ -920,10 +920,10 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
                     kvp => kvp.Key,
                     kvp => new
                     {
-                        Status = kvp.Value.Status.ToString(),
-                        Duration = kvp.Value.Duration,
-                        Description = kvp.Value.Description,
-                        Data = kvp.Value.Data
+                        kvp.Value.Status,
+                        kvp.Value.Duration,
+                        kvp.Value.Description,
+                        kvp.Value.Data
                     })
             },
             Program.HealthJsonOptions);
@@ -934,11 +934,19 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 
 // Minimal API for presets
 app.MapGet("/api/presets", ([FromServices] IPresetService svc) => Results.Ok(svc.GetPresets()));
-app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] FilamentPresetsDto body) => { svc.SavePresets(body); return Results.NoContent(); });
+app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] FilamentPresetsDto body) =>
+{
+    svc.SavePresets(body);
+    return Results.NoContent();
+});
 
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
-app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
+app.MapPost("/api/network-discovery/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] INetworkDiscoverySettingsService svc, [FromBody] NetworkDiscoverySettingsDto body) =>
+{
+    svc.SaveSettings(body);
+    return Results.NoContent();
+});
 app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettingsDto body) =>
 {
     NetworkValidationResult validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
@@ -953,7 +961,11 @@ app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Au
 
 // Minimal API for SignalR settings
 app.MapGet("/api/signalr/settings", ([FromServices] ISignalRSettingsService svc) => Results.Ok(svc.GetSettings()));
-app.MapPost("/api/signalr/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] ISignalRSettingsService svc, [FromBody] SignalRSettingsDto body) => { svc.SaveSettings(body); return Results.NoContent(); });
+app.MapPost("/api/signalr/settings", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] ISignalRSettingsService svc, [FromBody] SignalRSettingsDto body) =>
+{
+    svc.SaveSettings(body);
+    return Results.NoContent();
+});
 app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () =>
 {
     // Enumerate local IPv4 addresses and suggest /24 CIDR blocks.
@@ -992,7 +1004,7 @@ app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authoriz
                         }
                     }
                     byte[] networkBytes = ua.Address.GetAddressBytes();
-                    if (prefix <= 32 && prefix >= 8)
+                    if (prefix is >= 8 and <= 32)
                     {
                         // Zero remaining host bits for canonical network base
                         int fullBytes = prefix / 8;
@@ -1039,7 +1051,7 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
     {
         ports = [.. portsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(p => int.TryParse(p, out int v) ? v : -1)
-            .Where(v => v > 0 && v < 65536)
+            .Where(v => v is > 0 and < 65536)
             .Distinct()];
         if (ports.Count == 0)
         {
@@ -1055,13 +1067,10 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
 app.MapGet("/diagnostics/temp-root", (Microsoft.AspNetCore.Hosting.IWebHostEnvironment env, Farm.Web.Api.Infrastructure.Temp.ITempPathProvider provider) =>
-{
-    if (env.IsProduction())
-    {
-        return Results.StatusCode(StatusCodes.Status404NotFound);
-    }
-    return Results.Ok(new { tempRoot = provider.GetTempRoot() });
-});
+    env.IsProduction()
+        ? Results.StatusCode(StatusCodes.Status404NotFound)
+        : Results.Ok(new { tempRoot = provider.GetTempRoot() })
+);
 // Combined diagnostics (non-sensitive) for UI consumption
 app.MapGet("/api/diagnostics/summary", ([FromServices] SpoolmanService spoolmanSvc, [FromServices] INetworkDiscoverySettingsService discoverySvc) =>
 {
@@ -1144,6 +1153,8 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
             {
                 SqliteConnectionStringBuilder builder = new(cs);
                 string dataSource = builder.DataSource;
+                // CA3003: dataSource is from connection string, not user input
+#pragma warning disable CA3003
                 if (!Path.IsPathRooted(dataSource))
                 {
                     dataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dataSource));
@@ -1152,6 +1163,7 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
                 {
                     fileSizeBytes = new System.IO.FileInfo(dataSource).Length;
                 }
+#pragma warning restore CA3003
             }
         }
         catch { }

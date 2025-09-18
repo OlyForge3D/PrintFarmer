@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
@@ -9,7 +10,7 @@ import type { Printer } from '@/types/api';
 
 // Mock the API hooks
 vi.mock('@/hooks/useApi', async () => ({
-  usePrinters: vi.fn(),
+  usePrintersWithCameraUrls: vi.fn(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreatePrinter: () => ({ mutateAsync: vi.fn() }),
@@ -45,7 +46,7 @@ vi.mock('@/hooks/useSignalR', () => ({
 
 // dynamic import after mocks
 // @ts-expect-error: dynamic alias import resolved by Vite
-const { usePrinters } = await import('@/hooks/useApi');
+const { usePrintersWithCameraUrls } = await import('@/hooks/useApi');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -71,12 +72,12 @@ describe('PrinterDashboard', () => {
   });
 
   it('should render loading state', () => {
-    vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
 
     render(
       <TestWrapper>
@@ -90,12 +91,12 @@ describe('PrinterDashboard', () => {
   });
 
   it('should render empty state when no printers', () => {
-    vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
       data: [] as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
 
     render(
       <TestWrapper>
@@ -113,12 +114,12 @@ describe('PrinterDashboard', () => {
       statusCode: 500,
     };
 
-    vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: mockError,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
 
     render(
       <TestWrapper>
@@ -154,12 +155,12 @@ describe('PrinterDashboard', () => {
       },
     ];
 
-    vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
       data: mockPrinters as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
 
     render(
       <TestWrapper>
