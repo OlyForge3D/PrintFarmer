@@ -244,7 +244,9 @@ public class SlicerWorkerHostedService : BackgroundService
                                         }
                                         // Ask process to terminate now that we're done
                                         try
-                                        { procHandle.Kill(); }
+                                        {
+                                            procHandle.Kill();
+                                        }
                                         catch { }
                                     }
                                 }
@@ -295,7 +297,9 @@ public class SlicerWorkerHostedService : BackgroundService
                                             await notifier.NotifyCompletionAsync(job, result, ct);
                                         }
                                         try
-                                        { procHandle.Kill(); }
+                                        {
+                                            procHandle.Kill();
+                                        }
                                         catch { }
                                     }
                                 }
@@ -423,7 +427,11 @@ public class SlicerWorkerHostedService : BackgroundService
                 // Decide whether to retry or fail permanently
                 int maxRetries = _config.MaxRetryCount;
                 // Treat IO/timeout related exceptions as transient; also treat process exit (InvalidOperationException) as transient
-                bool isTransient = ex is System.IO.IOException || ex is TimeoutException || ex is System.Net.Http.HttpRequestException || ex is InvalidOperationException && !(ex.Message?.Contains("No gcode") ?? false);
+                bool isTransient =
+                    ex is System.IO.IOException
+                    || ex is TimeoutException
+                    || ex is System.Net.Http.HttpRequestException
+                    || (ex is InvalidOperationException && !(ex.Message?.Contains("No gcode") ?? false));
 
                 if (isTransient && job.RetryCount < maxRetries)
                 {

@@ -75,7 +75,7 @@ export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls
   });
 }
 
-export function usePrintersWithCameraUrls(options?: UseQueryOptions<Printer[], ApiError>) {
+export function usePrintersWithCameraUrls() {
   const printersQuery = usePrintersFast();
   const cameraUrlsQuery = usePrinterCameraUrls();
 
