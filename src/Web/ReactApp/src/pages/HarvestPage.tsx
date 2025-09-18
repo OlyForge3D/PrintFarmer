@@ -73,7 +73,7 @@ export const HarvestPage: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, []); // Remove refetchOperations from dependency - it's stable within callback scope
+  }, [refetchOperations]); // Include refetchOperations for ESLint compliance (stable from useQuery)
 
   // Clean up optimistic operations when real operations appear
   useEffect(() => {

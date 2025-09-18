@@ -106,7 +106,7 @@ export function Layout() {
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       return true;
     });
-  }, [isAuthenticated, user]); // Use user instead of hasRole/hasPermission functions
+  }, [isAuthenticated, hasRole, hasPermission]); // Include all dependencies
 
   const handleLogout = async () => {
     await logout();
@@ -208,7 +208,7 @@ export function Layout() {
       setExpanded(autoExpanded);
       initializedRef.current = true;
     }
-  }, [isAuthenticated]); // Only run when authentication state changes
+  }, [isAuthenticated, filteredNavigation, location.pathname]); // Include all dependencies
 
   // Persist expanded changes
   useEffect(() => {
@@ -243,7 +243,7 @@ export function Layout() {
       
       return hasChanges ? next : prev; // Prevent unnecessary re-renders
     });
-  }, [location.pathname]); // Remove filteredNavigation dependency to prevent loops
+  }, [location.pathname, filteredNavigation]); // Include all dependencies
 
   return (
     <div className="min-h-screen bg-pf-bg-0 flex flex-col">

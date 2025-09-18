@@ -13,12 +13,14 @@ public class SpoolmanService : ISpoolmanService
     private readonly HttpClient http;
     private readonly AppDbContext db;
     private readonly ILogger<SpoolmanService> logger;
+    private readonly INetworkDiscoverySettingsService networkSettings;
 
-    public SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanService> logger)
+    public SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanService> logger, INetworkDiscoverySettingsService networkSettings)
     {
         this.http = http;
         this.db = db;
         this.logger = logger;
+        this.networkSettings = networkSettings;
     }
 
     public SpoolmanConfigDto? GetConfig()
@@ -149,7 +151,67 @@ public class SpoolmanService : ISpoolmanService
         return [];
     }
 
+    /// <summary>
+    /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
+    /// This is the correct endpoint for getting material definitions like PLA, ABS, PETG, etc.
+    /// </summary>
+    public async Task<IReadOnlyList<SpoolmanMaterialDto>> ListMaterialsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – returning empty material list");
+            return [];
+        }
+
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+
+        // Candidate endpoints for materials
+        string[] candidates =
+        [
+            "/api/v1/material",
+            "/api/v1/material/",
+            "/api/v1/materials",   // fallback (in case of alternative routing)
+            "/api/v1/materials/"
+        ];
+
+        foreach (string ep in candidates)
+        {
+            string full = baseUrl + ep;
+            try
+            {
+                MaterialPageFetchResult result = await FetchAllMaterialPagesAsync(full, ct);
+                if (result.Items.Count > 0)
+                {
+                    if (result.AttemptedPages > 1)
+                    {
+                        logger.LogInformation("Retrieved {Count} materials across {Pages} pages via endpoint {Endpoint}", result.Items.Count, result.AttemptedPages, ep);
+                    }
+                    else
+                    {
+                        logger.LogDebug("Retrieved {Count} materials via endpoint {Endpoint}", result.Items.Count, ep);
+                    }
+                    return result.Items;
+                }
+                else if (result.Success)
+                {
+                    logger.LogInformation("Successfully queried Spoolman material endpoint {Endpoint} but got 0 results", ep);
+                    return [];
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Exception when querying Spoolman material endpoint {Endpoint}; trying next candidate", ep);
+            }
+        }
+
+        logger.LogWarning("All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list");
+        return [];
+    }
+
     private sealed record PageFetchResult(List<SpoolmanSpoolDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);
+
+    private sealed record MaterialPageFetchResult(List<SpoolmanMaterialDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);
 
     private async Task<PageFetchResult> FetchAllPagesAsync(string initialUrl, CancellationToken ct)
     {
@@ -234,6 +296,101 @@ public class SpoolmanService : ISpoolmanService
         }
 
         return new PageFetchResult(collected, anySuccess, page, lastStatus);
+    }
+
+    private async Task<MaterialPageFetchResult> FetchAllMaterialPagesAsync(string initialUrl, CancellationToken ct)
+    {
+        List<SpoolmanMaterialDto> collected = new();
+        string? nextUrl = initialUrl;
+        int page = 0;
+        HttpStatusCode? lastStatus = null;
+        bool anySuccess = false;
+        const int MAX_PAGES = 20; // safety cap
+
+        while (!string.IsNullOrWhiteSpace(nextUrl) && page < MAX_PAGES)
+        {
+            page++;
+            using HttpRequestMessage req = new(HttpMethod.Get, nextUrl);
+            req.Headers.Accept.ParseAdd("application/json");
+            using HttpResponseMessage resp = await http.SendAsync(req, ct);
+            lastStatus = resp.StatusCode;
+            if (!resp.IsSuccessStatusCode)
+            {
+                // Stop paging on first failure after at least one success; otherwise treat as total failure
+                break;
+            }
+            anySuccess = true;
+
+            string? mediaType = resp.Content.Headers.ContentType?.MediaType;
+            if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogDebug("Spoolman material page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
+                break;
+            }
+
+            string json = await resp.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                logger.LogDebug("Spoolman material page {Page} returned empty response; aborting", page);
+                break;
+            }
+
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement root = doc.RootElement;
+            
+            // Handle both array formats:
+            // 1. Simple string array: ["PLA", "ABS", "PETG"]
+            // 2. Object array: [{"id": 1, "name": "PLA"}, ...]
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                JsonElement[] currentBatch = root.EnumerateArray().ToArray();
+                if (currentBatch.Length == 0)
+                {
+                    // Empty batch is normal end-of-pagination
+                    break;
+                }
+
+                foreach (JsonElement el in currentBatch)
+                {
+                    SpoolmanMaterialDto? parsedMaterial = null;
+                    
+                    if (el.ValueKind == JsonValueKind.String)
+                    {
+                        // Simple string format: "PLA"
+                        string materialName = el.GetString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(materialName))
+                        {
+                            parsedMaterial = new SpoolmanMaterialDto(
+                                Id: 0, // No ID available in string format
+                                Name: materialName,
+                                Density: null,
+                                ColorHex: null
+                            );
+                        }
+                    }
+                    else if (el.ValueKind == JsonValueKind.Object && TryParseMaterialFromJson(el, out SpoolmanMaterialDto objectMaterial))
+                    {
+                        // Object format: {"id": 1, "name": "PLA", ...}
+                        parsedMaterial = objectMaterial;
+                    }
+                    
+                    if (parsedMaterial != null)
+                    {
+                        collected.Add(parsedMaterial);
+                    }
+                }
+
+                // Check for pagination - Spoolman uses standard HTTP header-based pagination
+                // For materials, we expect a single page usually, but handle pagination if present
+                nextUrl = null;
+                if (currentBatch.Length < 100) // Typical page size - if less than full page, probably last page
+                {
+                    break;
+                }
+            }
+        }
+
+        return new MaterialPageFetchResult(collected, anySuccess, page, lastStatus);
     }
 
     public async Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct)
@@ -754,5 +911,213 @@ public class SpoolmanService : ISpoolmanService
         return null;
     }
 
+    /// <summary>
+    /// Tries to parse a Spoolman material from JSON element
+    /// </summary>
+    private static bool TryParseMaterialFromJson(JsonElement el, out SpoolmanMaterialDto material)
+    {
+        try
+        {
+            int id = TryGetInt(el, "id");
+            string name = TryGetString(el, "name") ?? string.Empty;
+            
+            // Skip materials without required fields
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                material = default!;
+                return false;
+            }
+
+            double? density = TryGetDoubleNullable(el, "density");
+            string? colorHex = TryGetString(el, "color_hex");
+            colorHex = NormalizeHexColor(colorHex);
+
+            material = new SpoolmanMaterialDto(
+                Id: id,
+                Name: name,
+                Density: density,
+                ColorHex: colorHex
+            );
+            return true;
+        }
+        catch
+        {
+            material = default!;
+            return false;
+        }
+    }
+
     // no extra constructors
+
+    /// <summary>
+    /// Scans the configured network ranges for available Spoolman instances.
+    /// Uses the discovery settings to determine which network ranges to scan.
+    /// </summary>
+    public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(CancellationToken ct = default)
+    {
+        // Get network ranges from discovery settings
+        var discoverySettings = networkSettings.GetSettings();
+        if (discoverySettings.NetworkRanges.Count == 0)
+        {
+            return new[] { new SpoolmanDiscoveryResult("", false, "No network ranges configured in discovery settings") };
+        }
+
+        // Scan each network range for Spoolman instances
+        var tasks = discoverySettings.NetworkRanges
+            .SelectMany(ExpandNetworkRange)
+            .Select(ip => ScanIpForSpoolmanAsync(ip, ct))
+            .ToArray();
+
+        var scanResults = await Task.WhenAll(tasks);
+        return scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error));
+    }
+
+    /// <summary>
+    /// Expands a network range specification into individual IP addresses.
+    /// Supports formats like "192.168.1.1-192.168.1.254" and "192.168.1.0/24"
+    /// </summary>
+    private IEnumerable<string> ExpandNetworkRange(string range)
+    {
+        try
+        {
+            // Handle CIDR notation (e.g., "192.168.1.0/24")
+            if (range.Contains('/'))
+            {
+                var parts = range.Split('/');
+                if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var network) && int.TryParse(parts[1], out var prefixLength))
+                {
+                    return ExpandCidrRange(network, prefixLength);
+                }
+            }
+            
+            // Handle range notation (e.g., "192.168.1.1-192.168.1.254")
+            if (range.Contains('-'))
+            {
+                var parts = range.Split('-');
+                if (parts.Length == 2 && IPAddress.TryParse(parts[0].Trim(), out var startIp) && IPAddress.TryParse(parts[1].Trim(), out var endIp))
+                {
+                    return ExpandIpRange(startIp, endIp);
+                }
+            }
+
+            // Single IP address
+            if (IPAddress.TryParse(range, out _))
+            {
+                return new[] { range };
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("Failed to expand network range '{Range}': {Error}", range, ex.Message);
+        }
+
+        return Enumerable.Empty<string>();
+    }
+
+    /// <summary>
+    /// Expands a CIDR range into individual IP addresses (limited to reasonable subnet sizes)
+    /// </summary>
+    private IEnumerable<string> ExpandCidrRange(IPAddress network, int prefixLength)
+    {
+        // Limit to /16 or smaller subnets to avoid excessive scanning
+        if (prefixLength < 16)
+        {
+            logger.LogWarning("CIDR range too large (/{PrefixLength}), limiting to /16", prefixLength);
+            prefixLength = 16;
+        }
+
+        var networkBytes = network.GetAddressBytes();
+        var hostBits = 32 - prefixLength;
+        var maxHosts = Math.Min(1 << hostBits, 1024); // Limit to 1024 IPs max
+
+        for (int i = 1; i < maxHosts - 1; i++) // Skip network and broadcast
+        {
+            var hostBytes = BitConverter.GetBytes(i);
+            if (BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(hostBytes);
+            }
+
+            var ipBytes = new byte[4];
+            for (int j = 0; j < 4; j++)
+            {
+                ipBytes[j] = (byte)(networkBytes[j] | hostBytes[j]);
+            }
+
+            yield return new IPAddress(ipBytes).ToString();
+        }
+    }
+
+    /// <summary>
+    /// Expands an IP range into individual addresses
+    /// </summary>
+    private IEnumerable<string> ExpandIpRange(IPAddress startIp, IPAddress endIp)
+    {
+        var start = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
+        var end = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
+        
+        // Limit range size to prevent excessive scanning
+        if (end - start > 1024)
+        {
+            logger.LogWarning("IP range too large ({Start}-{End}), limiting to 1024 addresses", startIp, endIp);
+            end = start + 1024;
+        }
+
+        for (uint ip = start; ip <= end; ip++)
+        {
+            var bytes = BitConverter.GetBytes(ip).Reverse().ToArray();
+            yield return new IPAddress(bytes).ToString();
+        }
+    }
+
+    /// <summary>
+    /// Scans a single IP address for a Spoolman instance on port 7912
+    /// </summary>
+    private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
+    {
+        var url = $"http://{ip}:7912";
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var combined = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            
+            // Try to get the Spoolman info endpoint
+            var response = await http.GetAsync($"{url}/api/v1/info", combined.Token);
+            stopwatch.Stop();
+
+            if (response.IsSuccessStatusCode)
+            {
+                try
+                {
+                    var content = await response.Content.ReadAsStringAsync(combined.Token);
+                    var json = JsonDocument.Parse(content);
+                    var version = json.RootElement.TryGetProperty("version", out var versionProp)
+                        ? versionProp.GetString()
+                        : null;
+
+                    return new SpoolmanDiscoveryResult(url, true, null, version, stopwatch.Elapsed);
+                }
+                catch
+                {
+                    return new SpoolmanDiscoveryResult(url, true, null, null, stopwatch.Elapsed);
+                }
+            }
+
+            return new SpoolmanDiscoveryResult(url, false, $"HTTP {response.StatusCode}");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new SpoolmanDiscoveryResult(url, false, "Scan cancelled");
+        }
+        catch (OperationCanceledException)
+        {
+            return new SpoolmanDiscoveryResult(url, false, "Timeout");
+        }
+        catch (Exception ex)
+        {
+            return new SpoolmanDiscoveryResult(url, false, ex.Message);
+        }
+    }
 }

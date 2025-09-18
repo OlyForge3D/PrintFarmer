@@ -17,6 +17,7 @@ vi.mock('@/hooks/useApi', async () => ({
   usePrinterDetails: vi.fn(() => ({ data: undefined })),
   useManufacturers: vi.fn(() => ({ data: [] })),
   useModels: vi.fn(() => ({ data: [] })),
+  useFilamentTypes: vi.fn(() => ({ data: [] })),
   useUpdatePrinter: () => ({ mutateAsync: vi.fn() }),
   usePrinterHistory: vi.fn(() => ({ 
     data: { jobs: [], total: 0 }, 

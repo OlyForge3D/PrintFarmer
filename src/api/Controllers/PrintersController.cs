@@ -250,19 +250,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     /// Retrieves all printers with cached information for fast loading.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>A list of all printers with cached information without real-time status</returns>
+    /// <returns>A list of all printers with cached information without real-time status or camera URLs</returns>
     /// <response code="200">Returns the list of printers with cached information</response>
     [HttpGet("fast")]
-    [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
+    [ProducesResponseType(typeof(IEnumerable<PrinterFastDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAllFastAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetAllFastAsync(CancellationToken ct)
     {
         try
         {
             List<Printer> items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
 
             // Return all printers as offline initially - let the client load statuses progressively
-            List<PrinterDto> dtos = items.Select(p => new PrinterDto(
+            List<PrinterFastDto> dtos = items.Select(p => new PrinterFastDto(
                 Id: p.Id,
                 Name: p.Name,
                 ServerUrl: p.ServerUrl,
@@ -286,7 +286,92 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             // During early startup the DB might not yet be fully initialised (e.g. migrations running).
             // Instead of surfacing a 500 to the UI, return an empty list so the UI can retry shortly.
             logger.LogDebug(ex, "Printers fast endpoint accessed before startup completed; returning empty list.");
-            return Ok(Array.Empty<PrinterDto>());
+            return Ok(Array.Empty<PrinterFastDto>());
+        }
+    }
+
+    /// <summary>
+    /// Retrieves camera URLs for all printers without making external API calls.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A lightweight list of all printers with their configured camera URLs</returns>
+    /// <response code="200">Returns the list of printers with camera URL information</response>
+    [HttpGet("camera-urls")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterCameraUrlsDto>), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<PrinterCameraUrlsDto>>> GetCameraUrlsAsync(CancellationToken ct)
+    {
+        try
+        {
+            List<Printer> items = await db.Printers.AsNoTracking().ToListAsync(ct);
+
+            List<PrinterCameraUrlsDto> dtos = items.Select(p => new PrinterCameraUrlsDto(
+                Id: p.Id,
+                Name: p.Name,
+                CameraStreamUrl: GenerateStaticCameraStreamUrl(p.ServerUrl, p.Backend),
+                CameraSnapshotUrl: GenerateStaticCameraSnapshotUrl(p.ServerUrl, p.Backend)
+            )).ToList();
+
+            return Ok(dtos);
+        }
+        catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
+        {
+            logger.LogDebug(ex, "Printers camera-urls endpoint accessed before startup completed; returning empty list.");
+            return Ok(Array.Empty<PrinterCameraUrlsDto>());
+        }
+    }
+
+    /// <summary>
+    /// Generates static camera stream URL based on printer configuration without external API calls.
+    /// </summary>
+    private static string? GenerateStaticCameraStreamUrl(string serverUrl, int backend)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return null;
+        }
+        
+        try
+        {
+            Uri baseUri = new(serverUrl);
+            return backend switch
+            {
+                0 => new Uri(baseUri, "/webcam/?action=stream").ToString(), // Moonraker
+                1 => new Uri(baseUri, "/webcam/?action=stream").ToString(), // PrusaLink (often same pattern)
+                2 => new Uri(baseUri, "/camera/stream").ToString(),         // SDCP
+                _ => new Uri(baseUri, "/webcam/?action=stream").ToString()  // Default to Moonraker pattern
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Generates static camera snapshot URL based on printer configuration without external API calls.
+    /// </summary>
+    private static string? GenerateStaticCameraSnapshotUrl(string serverUrl, int backend)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return null;
+        }
+        
+        try
+        {
+            Uri baseUri = new(serverUrl);
+            return backend switch
+            {
+                0 => new Uri(baseUri, "/webcam/?action=snapshot").ToString(), // Moonraker
+                1 => new Uri(baseUri, "/webcam/?action=snapshot").ToString(), // PrusaLink (often same pattern)
+                2 => new Uri(baseUri, "/camera/snapshot").ToString(),         // SDCP
+                _ => new Uri(baseUri, "/webcam/?action=snapshot").ToString()  // Default to Moonraker pattern
+            };
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -552,6 +637,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         p.Manufacturer?.Name,
         p.ModelId,
         p.Model?.Name,
+        p.Model?.MotionType != null ? (MotionType)p.Model.MotionType.Value : (MotionType?)null,
         p.Model?.MaxX,
         p.Model?.MaxY,
         p.Model?.MaxZ,
@@ -702,7 +788,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 .Include(pr => pr.Manufacturer)
                 .Include(pr => pr.Model)
                 .FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
-                
+
             if (printerForDiscovery != null)
             {
                 PrinterCapabilities? discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
@@ -2094,7 +2180,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 .Include(pr => pr.Manufacturer)
                 .Include(pr => pr.Model)
                 .FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
-                
+
             if (printerForDiscovery != null)
             {
                 PrinterCapabilities? discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);

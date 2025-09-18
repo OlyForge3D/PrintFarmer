@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useTelemetry } from '../telemetry/useTelemetry';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useTelemetry } from '@/telemetry/useTelemetry';
+import type { Span } from '@opentelemetry/api';
 import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
 
@@ -22,7 +23,7 @@ export function ObservabilityDashboard() {
 
   // Stable function references to prevent infinite re-renders
   const handleTrackMount = useCallback((component: string) => trackComponentMount(component), [trackComponentMount]);
-  const handleTrackUnmount = useCallback((component: string, span: any) => trackComponentUnmount(component, span), [trackComponentUnmount]);
+  const handleTrackUnmount = useCallback((component: string, span?: Span) => trackComponentUnmount(component, span), [trackComponentUnmount]);
 
   useEffect(() => {
     const mountSpan = handleTrackMount('ObservabilityDashboard');
@@ -44,7 +45,7 @@ export function ObservabilityDashboard() {
       clearInterval(interval);
       handleTrackUnmount('ObservabilityDashboard', mountSpan);
     };
-  }, []); // Empty dependency array - mount/unmount functions are stable
+  }, [handleTrackMount, handleTrackUnmount]); // Include stable callback dependencies
 
   const handleRefresh = useCallback(() => {
     trackUserInteraction('refresh', 'observability-dashboard', { 

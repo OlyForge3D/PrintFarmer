@@ -70,9 +70,30 @@ internal sealed class CatalogCache : ICatalogCache
             q = q.Where(m => m.ManufacturerId == mid2);
         }
         List<PrinterModelDto> list = await q.OrderBy(m => m.Name)
-            .Select(m => new PrinterModelDto(m.Id, m.Name, m.ManufacturerId, m.Type.HasValue ? (PrinterType)m.Type.Value : (PrinterType?)null, m.MaxX, m.MaxY, m.MaxZ,
+            .Select(m => new PrinterModelDto(
+                m.Id,
+                m.Name,
+                m.ManufacturerId,
+                m.MotionType.HasValue ? (MotionType)m.MotionType.Value : (MotionType?)null,
+                m.MaxX,
+                m.MaxY,
+                m.MaxZ,
                 m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null,
-                m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray())).ToListAsync(ct);
+                m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+                // Default capabilities
+                m.DefaultNozzleDiameter,
+                m.HasHeatedBed,
+                m.HasEnclosure,
+                m.MultiMaterial,
+                m.NumberOfExtruders,
+                m.SupportsAutoLeveling,
+                // Temperature ranges
+                m.MinHotendTemp,
+                m.MaxHotendTemp,
+                m.MinBedTemp,
+                m.MaxBedTemp,
+                // Speed capabilities
+                m.MaxPrintSpeed)).ToListAsync(ct);
         IEnumerable<string> etagInput = list.Select(m => m.Id.ToString("N") + ":" + m.Name).Prepend(manufacturerId?.ToString("N") ?? "all");
         string etag = ComputeWeakEtag(etagInput);
         _cache.Set(key, (list, etag), _options.ListTtl);

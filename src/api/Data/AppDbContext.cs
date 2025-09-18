@@ -96,10 +96,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(128)
                 .IsRequired();
             b.HasIndex(nameof(PrinterModel.ManufacturerId), "NameLowered").IsUnique();
-            b.Property(m => m.Type); // PrinterType enum stored as int
+
+            // Basic properties
+            b.Property(m => m.MotionType); // MotionType enum stored as int
             b.Property(m => m.MaxX);
             b.Property(m => m.MaxY);
             b.Property(m => m.MaxZ);
+            b.Property(m => m.DefaultBackend);
+
+            // Capability defaults
+            b.Property(m => m.DefaultNozzleDiameter).HasDefaultValue(0.4);
+            b.Property(m => m.HasHeatedBed).HasDefaultValue(true);
+            b.Property(m => m.HasEnclosure).HasDefaultValue(false);
+            b.Property(m => m.MultiMaterial).HasDefaultValue(false);
+            b.Property(m => m.NumberOfExtruders).HasDefaultValue(1);
+            b.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
+            b.Property(m => m.MinHotendTemp).HasDefaultValue(0);
+            b.Property(m => m.MaxHotendTemp).HasDefaultValue(300);
+            b.Property(m => m.MinBedTemp).HasDefaultValue(0);
+            b.Property(m => m.MaxBedTemp).HasDefaultValue(120);
+            b.Property(m => m.MaxPrintSpeed).HasDefaultValue(150);
         });
 
         modelBuilder.Entity<FilamentType>(b =>

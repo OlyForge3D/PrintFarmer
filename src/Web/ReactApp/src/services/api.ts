@@ -20,11 +20,15 @@ import {
   MoveRequest,
   MultiUploadResponse,
   Printer,
+  PrinterCameraUrls,
   PrinterDetails,
+  PrinterFast,
   PrinterModelDto,
   RegisterRequest,
   ResolveHostnameRequest,
   ResolveHostnameResponse,
+  SpoolmanDiscoveryResult,
+  SpoolmanFilamentImportResult,
   TempTargets,
   UpdateFilamentTypeRequest,
   UpdateModelRequest,
@@ -83,7 +87,17 @@ export class ApiClient {
   // ============ Printer API methods ============
 
   async getPrinters(): Promise<Printer[]> {
-    const response = await this.client.get<Printer[]>('/printers/fast');
+    const response = await this.client.get<Printer[]>('/printers');
+    return response.data;
+  }
+
+  async getPrintersFast(): Promise<PrinterFast[]> {
+    const response = await this.client.get<PrinterFast[]>('/printers/fast');
+    return response.data;
+  }
+
+  async getPrinterCameraUrls(): Promise<PrinterCameraUrls[]> {
+    const response = await this.client.get<PrinterCameraUrls[]>('/printers/camera-urls');
     return response.data;
   }
 
@@ -314,6 +328,16 @@ export class ApiClient {
 
   async saveFilamentPresets(presets: FilamentPresets): Promise<void> {
     await this.client.post('/filamenttype/presets', { presets });
+  }
+
+  async importFilamentTypesFromSpoolman(): Promise<SpoolmanFilamentImportResult> {
+    const response = await this.client.post<SpoolmanFilamentImportResult>('/filamenttype/import-from-spoolman');
+    return response.data;
+  }
+
+  async scanNetworkForSpoolman(): Promise<SpoolmanDiscoveryResult[]> {
+    const response = await this.client.post<SpoolmanDiscoveryResult[]>('/spoolman/scan-network');
+    return response.data;
   }
 
   // ============ Network utilities ============

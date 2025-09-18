@@ -1,7 +1,6 @@
 // This file contains unified logging hooks that need to handle various data types
 // TypeScript 'any' is acceptable here for logging flexible data structures
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable react-hooks/exhaustive-deps */
 
 import { useEffect, useCallback, useMemo } from 'react';
 import { unifiedLogger, loggerExtensions, type LogEntry } from '../services/unifiedLogging';

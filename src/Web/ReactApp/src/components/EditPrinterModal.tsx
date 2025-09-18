@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertCircle, Check } from 'lucide-react';
-import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
+import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes } from '@/hooks/useApi';
 import type { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
+import { FilamentTypeSelector } from './FilamentTypeSelector';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -14,6 +15,7 @@ interface EditPrinterModalProps {
 export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: EditPrinterModalProps) {
   const { data: printerDetails } = usePrinterDetails(printerId || '');
   const { data: manufacturers } = useManufacturers();
+  const { data: filamentTypes } = useFilamentTypes();
   const [selectedManufacturer, setSelectedManufacturer] = useState<string | undefined>();
   const { data: models } = useModels(selectedManufacturer);
   const updateMutation = useUpdatePrinter();
@@ -222,11 +224,16 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-pf-text-secondary mb-1">Printer Type</label>
-                  <div className="text-sm text-pf-text-tertiary mb-1">{printerDetails?.modelName && `Model: ${printerDetails.modelName}`}</div>
                   <div className="px-3 py-2 rounded-lg bg-pf-bg-2 border border-pf-border text-pf-text-secondary">
-                    {printerDetails?.modelType !== undefined 
-                      ? ['Cartesian', 'CoreXY', 'Delta', 'Unknown'][printerDetails.modelType] || 'Unknown'
-                      : 'Not specified'}
+                    {(() => {
+                      // Try to get printer type from model motion type (enum)
+                      const modelMotionType = printerDetails?.modelMotionType;
+                      if (modelMotionType !== undefined) {
+                        const typeNames = ['Cartesian', 'CoreXY', 'Delta', 'Unknown'];
+                        return typeNames[modelMotionType] || 'Unknown';
+                      }
+                      return 'Not specified';
+                    })()}
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -277,8 +284,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                     <input
                       type="number"
                       step="0.1"
-                      value={formData.nozzleDiameter || ''}
-                      onChange={e => handleInputChange('nozzleDiameter', parseFloat(e.target.value) || undefined)}
+                      value={formData.nozzleDiameter?.toString() || ''}
+                      onChange={e => {
+                        const value = e.target.value;
+                        handleInputChange('nozzleDiameter', value ? parseFloat(value) : undefined);
+                      }}
                       className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder="0.4"
                       title="Nozzle diameter"
@@ -300,15 +310,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
                 <div>
                   <label className="block text-sm font-medium text-pf-text-secondary mb-1">Supported Materials</label>
-                  <input
-                    type="text"
-                    value={formData.supportedMaterials?.join(', ') || ''}
-                    onChange={e => handleInputChange('supportedMaterials', e.target.value.split(',').map(s => s.trim()).filter(s => s))}
-                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
-                    placeholder="PLA, PETG, ABS, ASA"
-                    title="Supported materials (comma-separated)"
+                  <FilamentTypeSelector
+                    availableFilamentTypes={filamentTypes}
+                    selectedFilamentTypes={formData.supportedMaterials || []}
+                    onSelectionChange={(selectedTypes) => handleInputChange('supportedMaterials', selectedTypes)}
                   />
-                  <p className="text-xs text-pf-text-tertiary mt-1">Enter materials separated by commas</p>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

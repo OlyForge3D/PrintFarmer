@@ -52,28 +52,13 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const isPaused = state === 'paused';
   const isShutdown = state === 'shutdown';
 
+  // Camera URL logic: prioritize real-time status, fallback to printer config
+  const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
+  const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
+  const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
+
   // Update last known values when new data is available
   useEffect(() => {
-    console.log('PrinterCard status:', {
-      printerName: printer.name,
-      hotendTemp: status?.hotendTemp,
-      hotendTarget: status?.hotendTarget,
-      bedTemp: status?.bedTemp,
-      bedTarget: status?.bedTarget,
-      x: status?.x, y: status?.y, z: status?.z,
-      fullStatus: status,
-      printerData: {
-        printerHotendTemp: printer.hotendTemp,
-        printerHotendTarget: printer.hotendTarget,
-        printerBedTemp: printer.bedTemp,
-        printerBedTarget: printer.bedTarget,
-        printerX: printer.x, printerY: printer.y, printerZ: printer.z
-      },
-      lastKnownPositions: {
-        lastKnownX, lastKnownY, lastKnownZ
-      }
-    });
-    
     // Initialize from printer data if we don't have last known values and status is null
     if (lastKnownHotendTemp === null && (status?.hotendTemp === null || status?.hotendTemp === undefined) && printer.hotendTemp !== null && printer.hotendTemp !== undefined) {
       setLastKnownHotendTemp(printer.hotendTemp);
@@ -82,15 +67,12 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
       setLastKnownBedTemp(printer.bedTemp);
     }
     if (lastKnownX === null && (status?.x === null || status?.x === undefined) && printer.x !== null && printer.x !== undefined) {
-      console.log(`Initializing lastKnownX from printer: ${printer.x}`);
       setLastKnownX(printer.x);
     }
     if (lastKnownY === null && (status?.y === null || status?.y === undefined) && printer.y !== null && printer.y !== undefined) {
-      console.log(`Initializing lastKnownY from printer: ${printer.y}`);
       setLastKnownY(printer.y);
     }
     if (lastKnownZ === null && (status?.z === null || status?.z === undefined) && printer.z !== null && printer.z !== undefined) {
-      console.log(`Initializing lastKnownZ from printer: ${printer.z}`);
       setLastKnownZ(printer.z);
     }
     
@@ -102,15 +84,12 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
       setLastKnownBedTemp(status.bedTemp);
     }
     if (status?.x !== null && status?.x !== undefined) {
-      console.log(`Setting lastKnownX from status: ${status.x}`);
       setLastKnownX(status.x);
     }
     if (status?.y !== null && status?.y !== undefined) {
-      console.log(`Setting lastKnownY from status: ${status.y}`);
       setLastKnownY(status.y);
     }
     if (status?.z !== null && status?.z !== undefined) {
-      console.log(`Setting lastKnownZ from status: ${status.z}`);
       setLastKnownZ(status.z);
     }
   }, [status, printer.id, printer.name, printer.hotendTemp, printer.bedTemp, printer.hotendTarget, printer.bedTarget, printer.x, printer.y, printer.z, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ]);
@@ -242,7 +221,9 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     } catch (error) {
       console.error(`Error during ${action} action:`, error);
     }
-  };  const handleStepChange = (newStep: number) => {
+  };
+
+  const handleStepChange = (newStep: number) => {
     setStep(newStep);
   };
 
@@ -382,22 +363,22 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 >
                   <ExternalLink className="h-4 w-4" />
                 </a>
-                {printer.cameraStreamUrl && (
-                  <button
-                    onClick={() => setShowCamera(!showCamera)}
-                    className="text-pf-text-secondary hover:text-pf-text-primary"
-                    aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-                    title={showCamera ? 'Hide camera' : 'Show camera'}
-                  >
-                    <Camera className="h-4 w-4" />
-                  </button>
-                )}
+                {/* Camera button - always visible, enabled/disabled based on camera URLs */}
+                <button
+                  onClick={() => setShowCamera(!showCamera)}
+                  disabled={!hasCameraUrls}
+                  className="text-pf-text-secondary hover:text-pf-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
+                  title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+                >
+                  <Camera className="h-4 w-4" />
+                </button>
               </div>
             </div>
-            
-            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stateColorClasses}`}>
-              {isOnline ? toCamelCase(state) : 'Offline'}
-            </div>
+          </div>
+          
+          <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stateColorClasses}`}>
+            {isOnline ? toCamelCase(state) : 'Offline'}
           </div>
           
           <div className="flex items-center gap-1">
@@ -458,6 +439,25 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </button>
         </div>
 
+        {showCamera && (
+          <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+            {cameraStreamUrl ? (
+              <img 
+                src={cameraStreamUrl} 
+                alt="webcam snapshot"
+                className="max-w-full max-h-full object-contain"
+                onError={(e) => e.currentTarget.style.display = 'none'}
+                onLoad={(e) => e.currentTarget.style.display = 'block'}
+              />
+            ) : (
+              <div className="text-center text-pf-text-secondary p-4">
+                <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No camera configured</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* History Modal */}
         <PrinterHistoryModal
           isOpen={showHistory}
@@ -470,7 +470,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
 
   // Expanded view - matching Blazor structure exactly
   return (
-    <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg">
+    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">
@@ -497,26 +497,33 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
-              {printer.cameraStreamUrl && (
-                <button
-                  onClick={() => setShowCamera(!showCamera)}
-                  className="text-pf-text-secondary hover:text-pf-text-primary"
-                  aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-                  title={showCamera ? 'Hide camera' : 'Show camera'}
-                >
-                  <Camera className="h-4 w-4" />
-                </button>
-              )}
+                            {/* Camera button - always visible, enabled/disabled based on camera URLs */}
+              <button
+                onClick={() => setShowCamera(!showCamera)}
+                disabled={!hasCameraUrls}
+                className="text-pf-text-secondary hover:text-pf-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
+                title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+              >
+                <Camera className="h-4 w-4" />
+              </button>
             </div>
-            {showCamera && printer.cameraStreamUrl && (
-              <div className="mt-2 w-52 min-h-30 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                <img 
-                  src={printer.cameraStreamUrl} 
-                  alt="webcam snapshot"
-                  className="max-w-full max-h-full object-contain"
-                  onError={(e) => e.currentTarget.style.display = 'none'}
-                  onLoad={(e) => e.currentTarget.style.display = 'block'}
-                />
+            {showCamera && (
+              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                {cameraStreamUrl ? (
+                  <img 
+                    src={cameraStreamUrl} 
+                    alt="webcam snapshot"
+                    className="max-w-full max-h-full object-contain"
+                    onError={(e) => e.currentTarget.style.display = 'none'}
+                    onLoad={(e) => e.currentTarget.style.display = 'block'}
+                  />
+                ) : (
+                  <div className="text-center text-pf-text-secondary p-4">
+                    <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No camera configured</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -537,7 +544,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           <button
             onClick={handleViewHistory}
             className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
-              aria-label="Expand printer card"
             title="View print history"
           >
             <History className="h-4 w-4" />

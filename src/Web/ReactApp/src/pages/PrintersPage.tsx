@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { usePrinters, useDeletePrinter } from '@/hooks/useApi';
+import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
@@ -67,7 +67,7 @@ export function PrintersPage() {
     isLoading, 
     error,
     refetch: refetchPrinters
-  } = usePrinters();
+  } = usePrintersWithCameraUrls();
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
   const [showDiscovery, setShowDiscovery] = useState(false);

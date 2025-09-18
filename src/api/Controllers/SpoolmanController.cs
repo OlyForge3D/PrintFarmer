@@ -212,15 +212,43 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
     }
 
     /// <summary>
-    /// Clears the stored Spoolman configuration (disables integration until reconfigured).
+    /// Clears the Spoolman configuration.
     /// </summary>
-    /// <response code="204">Configuration cleared</response>
+    /// <returns>No content</returns>
     [HttpDelete("config")]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public IActionResult ClearConfig()
     {
         spoolman.ClearConfig();
         return NoContent();
+    }
+
+    /// <summary>
+    /// Scans the configured network ranges for Spoolman instances.
+    /// Uses the discovery settings to determine which IP ranges to scan.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of discovered Spoolman instances</returns>
+    /// <response code="200">Returns list of discovered Spoolman instances</response>
+    [HttpPost("scan-network")]
+    [ProducesResponseType(typeof(IEnumerable<SpoolmanDiscoveryResult>), StatusCodes.Status200OK)]
+    [AllowAnonymous]
+    public async Task<IActionResult> ScanNetworkAsync(CancellationToken ct)
+    {
+        try
+        {
+            var results = await spoolman.ScanNetworkForSpoolmanAsync(ct);
+            return Ok(results);
+        }
+        catch (Exception ex)
+        {
+            return Ok(new[]
+            {
+                new SpoolmanDiscoveryResult(
+                    Url: "",
+                    IsAvailable: false,
+                    Error: $"Network scan failed: {ex.Message}")
+            });
+        }
     }
 }

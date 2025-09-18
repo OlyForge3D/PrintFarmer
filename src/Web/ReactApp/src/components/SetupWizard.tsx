@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info } from 'lucide-react';
+import { Shield, User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info, Search, Wifi } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthContext';
 import { useHealthStatus } from '@/hooks/useApi';
+import { useSpoolmanNetworkScan } from '@/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { apiClient } from '@/services/api';
 
@@ -62,6 +63,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [spoolmanErrorCategory, setSpoolmanErrorCategory] = useState<string | null>(null);
   const { setEnabled: setSpoolmanEnabledCtx, setBaseUrl: setSpoolmanBaseUrlCtx, updateProbeSuccess: updateSpoolmanSuccessCtx, updateProbeFailure: updateSpoolmanFailureCtx } = useSpoolmanContext();
 
+  // Network scanning for Spoolman discovery
+  const { isScanning, results: scanResults, error: scanError, scanNetwork, reset: resetScan, availableInstances } = useSpoolmanNetworkScan();
+
   // Friendly mapping for error categories coming from backend probe
   const spoolmanErrorMeta: Record<string, { label: string; hint: string }> = {
     timeout: { label: 'Connection timed out', hint: 'The server did not respond within 5 seconds. Verify the host/port or network reachability.' },
@@ -90,7 +94,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   useEffect(() => {
     if (!healthLoading && healthStatus) {
       if (healthStatus.kind === 'detailed' && healthStatus.startup) {
-        const { ready, failed, phase } = healthStatus.startup;
+        const { ready, failed } = healthStatus.startup;
         
         if (failed) {
           setGlobalError(`System initialization failed: ${healthStatus.startup.failureMessage || 'Unknown error'}`);
@@ -231,6 +235,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setSpoolmanTestOk(false);
       setSpoolmanTestResult(e instanceof Error ? e.message : 'Test failed');
     } finally { setTestingSpoolman(false); }
+  };
+
+  const selectSpoolmanInstance = (url: string) => {
+    setSpoolmanUrl(url);
+    setSpoolmanBaseUrlCtx(url);
+    // Auto-test the selected instance
+    testSpoolman();
+  };
+
+  const handleNetworkScan = async () => {
+    resetScan();
+    await scanNetwork();
   };
 
   const nextFromSpoolman = () => {
@@ -446,22 +462,86 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <label htmlFor="useSpoolman" className="text-sm">Enable Spoolman</label>
       </div>
   {spoolmanEnabled && (
-        <div className="space-y-2">
-          <input
-            type="url"
-            value={spoolmanUrl}
-            onChange={e => { setSpoolmanUrl(e.target.value); setSpoolmanBaseUrlCtx(e.target.value || null); }}
-            placeholder="http://spoolman:7912"
-            className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded"
-          />
-          <button
-            type="button"
-            onClick={testSpoolman}
-            disabled={testingSpoolman}
-            className="px-3 py-2 bg-blue-600 text-white rounded text-sm"
-          >
-            {testingSpoolman ? 'Testing...' : 'Test URL'}
-          </button>
+        <div className="space-y-4">
+          {/* Network Discovery Section */}
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wifi className="h-4 w-4 text-pf-accent" />
+                <span className="text-sm font-medium">Network Discovery</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleNetworkScan}
+                disabled={isScanning}
+                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded text-sm hover:bg-pf-accent-dark disabled:opacity-50"
+              >
+                <Search className="h-4 w-4" />
+                {isScanning ? 'Scanning...' : 'Scan Network'}
+              </button>
+            </div>
+            
+            {scanError && (
+              <div className="text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2">
+                {scanError}
+              </div>
+            )}
+            
+            {availableInstances.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-pf-text-secondary">Found {availableInstances.length} Spoolman instance(s):</p>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {availableInstances.map((instance, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => selectSpoolmanInstance(instance.url)}
+                      className="w-full text-left p-2 bg-pf-bg-2 hover:bg-pf-bg-3 border border-pf-border rounded text-xs flex items-center justify-between transition-colors"
+                    >
+                      <div>
+                        <div className="font-medium">{instance.url}</div>
+                        {instance.version && (
+                          <div className="text-pf-text-tertiary">v{instance.version}</div>
+                        )}
+                      </div>
+                      {instance.responseTime && (
+                        <div className="text-pf-text-tertiary">{instance.responseTime}ms</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {scanResults.length > 0 && availableInstances.length === 0 && (
+              <div className="text-xs text-orange-400 bg-orange-950/30 border border-orange-800/40 rounded p-2">
+                Found {scanResults.length} address(es) but no Spoolman instances were responding
+              </div>
+            )}
+          </div>
+
+          {/* Manual URL Input */}
+          <div className="space-y-2">
+            <label className="text-sm text-pf-text-secondary">Or enter URL manually:</label>
+            <input
+              type="url"
+              value={spoolmanUrl}
+              onChange={e => { setSpoolmanUrl(e.target.value); setSpoolmanBaseUrlCtx(e.target.value || null); }}
+              placeholder="http://spoolman:7912"
+              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={testSpoolman}
+                disabled={testingSpoolman}
+                className="px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {testingSpoolman ? 'Testing...' : 'Test URL'}
+              </button>
+            </div>
+          </div>
+
           {spoolmanTestResult && (
             <p className={`text-xs ${spoolmanTestOk ? 'text-green-500':'text-red-500'}`}>{spoolmanTestResult}</p>
           )}

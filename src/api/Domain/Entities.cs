@@ -66,11 +66,29 @@ public class PrinterModel
     public string Name { get; set; } = string.Empty;
     public Guid ManufacturerId { get; set; }
     public Manufacturer? Manufacturer { get; set; }
-    public int? Type { get; set; } // PrinterType enum: 0=Cartesian, 1=CoreXY, 2=Delta, 3=Polar, 4=SCARA, 99=Unknown
+    public int? MotionType { get; set; } // MotionType enum: 0=Cartesian, 1=CoreXY, 2=Delta, 99=Unknown
     public double? MaxX { get; set; }
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
     public int? DefaultBackend { get; set; } // Default backend for this model: 0=Moonraker, 1=PrusaLink, 2=SDCP
+
+    // Default capabilities that can be inherited by new printers of this model
+    public double? DefaultNozzleDiameter { get; set; } = 0.4; // Most common nozzle size
+    public bool HasHeatedBed { get; set; } = true;
+    public bool HasEnclosure { get; set; }
+    public bool MultiMaterial { get; set; }
+    public int NumberOfExtruders { get; set; } = 1;
+    public bool SupportsAutoLeveling { get; set; }
+
+    // Temperature ranges
+    public int? MinHotendTemp { get; set; } = 0;
+    public int? MaxHotendTemp { get; set; } = 300;
+    public int? MinBedTemp { get; set; } = 0;
+    public int? MaxBedTemp { get; set; } = 120;
+
+    // Speed capabilities
+    public int? MaxPrintSpeed { get; set; } = 150; // mm/s
+
     public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();
 }
 

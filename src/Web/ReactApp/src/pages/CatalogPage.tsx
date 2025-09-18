@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { Plus, Edit, Trash2, Save, X, Settings } from 'lucide-react';
-import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto } from '@/types/api';
-import { PrinterType } from '@/types/api';
+import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto, PrinterTypeString } from '@/types/api';
+import { EditModelModal } from '@/components/EditModelModal';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
@@ -12,9 +12,11 @@ export function CatalogPage() {
   const [selectedModel, setSelectedModel] = useState<PrinterModelDto | null>(null);
   const [newManufacturer, setNewManufacturer] = useState('');
   const [newModel, setNewModel] = useState('');
-  const [newModelType, setNewModelType] = useState<PrinterType | undefined>(undefined);
+  const [newModelType, setNewModelType] = useState<PrinterTypeString | undefined>(undefined);
   const [editingManufacturer, setEditingManufacturer] = useState<{ id: string; name: string } | null>(null);
   const [editingModel, setEditingModel] = useState<{ id: string; name: string } | null>(null);
+  const [editModelModalOpen, setEditModelModalOpen] = useState(false);
+  const [modelToEdit, setModelToEdit] = useState<PrinterModelDto | null>(null);
   const [showFilamentEditor, setShowFilamentEditor] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,16 +54,16 @@ export function CatalogPage() {
     return models.filter(m => m.manufacturerId === selectedManufacturer.id);
   };
 
-  const getPrinterTypeDisplayName = (type?: PrinterType): string => {
-    if (type === undefined) return 'Unknown';
+  const getPrinterTypeDisplayName = (type?: PrinterTypeString): string => {
     switch (type) {
-      case PrinterType.Cartesian:
+      case 'Cartesian':
         return 'Cartesian';
-      case PrinterType.CoreXY:
+      case 'CoreXY':
         return 'CoreXY';
-      case PrinterType.Delta:
+      case 'Delta':
         return 'Delta';
-      case PrinterType.Unknown:
+      case 'Unknown':
+        return 'Unknown';
       default:
         return 'Unknown';
     }
@@ -112,12 +114,21 @@ export function CatalogPage() {
   const updateModel = async (id: string, name: string) => {
     try {
       await apiClient.updateModelName(id, name);
-      setModels(models.map(m => m.id === id ? { ...m, name } : m));
+      await loadData();
       setEditingModel(null);
     } catch (err) {
-      setError('Failed to update model');
       console.error('Error updating model:', err);
     }
+  };
+
+  const openEditModal = (model: PrinterModelDto) => {
+    setModelToEdit(model);
+    setEditModelModalOpen(true);
+  };
+
+  const closeEditModal = () => {
+    setModelToEdit(null);
+    setEditModelModalOpen(false);
   };
 
   const updateModelFilamentTypes = async (modelId: string, filamentTypeNames: string[]) => {
@@ -316,14 +327,15 @@ export function CatalogPage() {
                 />
                 <select
                   value={newModelType ?? ''}
-                  onChange={(e) => setNewModelType(e.target.value === '' ? undefined : parseInt(e.target.value) as PrinterType)}
+                  onChange={(e) => setNewModelType(e.target.value === '' ? undefined : e.target.value as PrinterTypeString)}
                   className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm min-w-[120px]"
+                  title="Printer Type"
                 >
                   <option value="">Printer Type</option>
-                  <option value={PrinterType.Cartesian}>Cartesian</option>
-                  <option value={PrinterType.CoreXY}>CoreXY</option>
-                  <option value={PrinterType.Delta}>Delta</option>
-                  <option value={PrinterType.Unknown}>Unknown</option>
+                  <option value="Cartesian">Cartesian</option>
+                  <option value="CoreXY">CoreXY</option>
+                  <option value="Delta">Delta</option>
+                  <option value="Unknown">Unknown</option>
                 </select>
                 <button
                   onClick={addModel}
@@ -391,14 +403,16 @@ export function CatalogPage() {
                             <Settings className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => setEditingModel({ id: model.id, name: model.name })}
+                            onClick={() => openEditModal(model)}
                             className="text-blue-400 hover:text-blue-300"
+                            title="Edit model capabilities"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => deleteModel(model.id)}
                             className="text-red-400 hover:text-red-300"
+                            title="Delete model"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -468,6 +482,16 @@ export function CatalogPage() {
           </div>
         </div>
       </div>
+      
+      <EditModelModal
+        model={modelToEdit}
+        isOpen={editModelModalOpen}
+        onClose={closeEditModal}
+        onSuccess={() => {
+          loadData();
+          closeEditModal();
+        }}
+      />
     </div>
   );
 }

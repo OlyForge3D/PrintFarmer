@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
-import type { PrinterModelDto } from '@/types/api';
 import { signalRService } from '@/services/signalr';
-import { X, Search, Settings } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 
 interface PrinterDiscoveryModalProps {
   isOpen: boolean;
@@ -20,160 +19,11 @@ interface PrinterConfiguration {
   newModelName?: string;
 }
 
-interface PrinterConfigurationFormProps {
-  printerUrl: string;
-  manufacturers: Array<{ id: string; name: string }>;
-  models: PrinterModelDto[];
-  allModels: PrinterModelDto[];
-  initialConfig?: PrinterConfiguration;
-  onSave: (config: PrinterConfiguration) => void;
-  onCancel: () => void;
-}
-
-function PrinterConfigurationForm({ 
-  printerUrl, 
-  manufacturers, 
-  models, 
-  allModels,
-  initialConfig, 
-  onSave, 
-  onCancel 
-}: PrinterConfigurationFormProps) {
-  const [config, setConfig] = useState<PrinterConfiguration>(initialConfig || {});
-  
-  // Stabilize allModels to prevent unnecessary re-renders
-  // Use array length and first/last elements as dependency instead of JSON.stringify
-  const stableAllModels = useMemo(() => allModels, [
-    allModels.length, 
-    allModels[0]?.id, 
-    allModels[allModels.length - 1]?.id
-  ]);
-  const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>(models);
-
-  useEffect(() => {
-    if (config.manufacturerId) {
-      const filtered = stableAllModels.filter(m => m.manufacturerId === config.manufacturerId);
-      setFilteredModels(filtered);
-      // Reset model selection when manufacturer changes and current model isn't available
-      if (config.modelId && !filtered.some(m => m.id === config.modelId)) {
-        setConfig(prev => ({ ...prev, modelId: undefined }));
-      }
-    } else {
-      setFilteredModels([]);
-    }
-  }, [config.manufacturerId, stableAllModels, config.modelId]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave(config);
-  };
-
-  return (
-    <div>
-      <h3 className="text-lg font-medium text-pf-text-primary mb-4">Configure Printer</h3>
-      <p className="text-sm text-pf-text-secondary mb-4">{printerUrl}</p>
-      
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Manufacturer Selection */}
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">Manufacturer</label>
-          <select
-            value={config.manufacturerId || ''}
-            onChange={(e) => setConfig(prev => ({ 
-              ...prev, 
-              manufacturerId: e.target.value || undefined,
-              newManufacturerName: undefined // Clear custom name when selecting existing
-            }))}
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-0 text-pf-text-primary"
-            aria-label="Select manufacturer"
-          >
-            <option value="">Select existing manufacturer...</option>
-            {manufacturers.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Custom Manufacturer */}
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">Or create new manufacturer</label>
-          <input
-            type="text"
-            value={config.newManufacturerName || ''}
-            onChange={(e) => setConfig(prev => ({ 
-              ...prev, 
-              newManufacturerName: e.target.value || undefined,
-              manufacturerId: undefined // Clear existing selection when typing custom
-            }))}
-            placeholder="Enter new manufacturer name"
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-0 text-pf-text-primary"
-          />
-        </div>
-
-        {/* Model Selection - only show if manufacturer is selected */}
-        {config.manufacturerId && filteredModels.length > 0 && (
-          <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-2">Model</label>
-            <select
-              value={config.modelId || ''}
-              onChange={(e) => setConfig(prev => ({ 
-                ...prev, 
-                modelId: e.target.value || undefined,
-                newModelName: undefined // Clear custom name when selecting existing
-              }))}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-0 text-pf-text-primary"
-              aria-label="Select printer model"
-            >
-              <option value="">Select model...</option>
-              {filteredModels.map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Custom Model */}
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">Or create new model</label>
-          <input
-            type="text"
-            value={config.newModelName || ''}
-            onChange={(e) => setConfig(prev => ({ 
-              ...prev, 
-              newModelName: e.target.value || undefined,
-              modelId: undefined // Clear existing selection when typing custom
-            }))}
-            placeholder="Enter new model name"
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-0 text-pf-text-primary"
-          />
-        </div>
-
-        <div className="flex justify-end space-x-3 pt-4">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-pf-border rounded-md text-sm font-medium text-pf-text-primary bg-pf-bg-1 hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
-          >
-            Save Configuration
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDiscoveryModalProps) {
   console.log('PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [printerConfigs, setPrinterConfigs] = useState<Record<string, PrinterConfiguration>>({});
-  const [showConfigModal, setShowConfigModal] = useState<string | null>(null);
 
   const startDiscoveryMutation = useStartDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
@@ -231,18 +81,6 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     setSelectedPrinters(newSelected);
   };
 
-  const handleConfigurePrinter = (serverUrl: string) => {
-    setShowConfigModal(serverUrl);
-  };
-
-  const handleSaveConfiguration = (serverUrl: string, config: PrinterConfiguration) => {
-    setPrinterConfigs(prev => ({
-      ...prev,
-      [serverUrl]: config
-    }));
-    setShowConfigModal(null);
-  };
-
   const getFilteredModels = (manufacturerId?: string) => {
     if (!manufacturerId) return [];
     return allModels.filter(m => m.manufacturerId === manufacturerId);
@@ -284,10 +122,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const getBackendColor = (backend: PrinterBackend) => {
     switch (backend) {
-      case PrinterBackend.Moonraker: return 'bg-purple-100 text-purple-800';
-      case PrinterBackend.PrusaLink: return 'bg-orange-100 text-orange-800';
-      case PrinterBackend.SDCP: return 'bg-pf-accent text-pf-bg-0';
-      default: return 'bg-pf-bg-2 text-pf-text-primary';
+      case PrinterBackend.Moonraker: return 'bg-pf-accent-bg text-pf-text-primary border border-pf-border-medium';
+      case PrinterBackend.PrusaLink: return 'bg-pf-warning text-pf-bg-0 border border-pf-border-medium';
+      case PrinterBackend.SDCP: return 'bg-pf-accent text-pf-bg-0 border border-pf-border-medium';
+      default: return 'bg-pf-bg-2 text-pf-text-primary border border-pf-border';
     }
   };
 
@@ -316,7 +154,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
             <div className="w-full">
               <div className="text-center sm:text-left">
                 <h3 className="text-lg leading-6 font-medium text-pf-text-primary mb-4">
-                  Discover Printers (Debug: {Math.random().toString(36).substr(2, 5)})
+                  Discover Printers
                 </h3>
                 
                 <div className="mb-6">
@@ -404,6 +242,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       {foundPrinters.map((printer) => {
                         const config = printerConfigs[printer.serverUrl];
                         const hasConfig = !!(config?.manufacturerId || config?.newManufacturerName);
+                        const hasModelConfig = !!(config?.modelId || config?.newModelName);
                         
                         return (
                           <div
@@ -425,30 +264,121 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                     {PrinterBackend[printer.backend]}
                                   </span>
                                   {hasConfig && (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                      Configured
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                      hasModelConfig ? 'bg-pf-success-bg text-pf-status-online-text border border-pf-status-online-border' : 'bg-pf-warning text-pf-warning-text border border-pf-border-medium'
+                                    }`}>
+                                      {hasModelConfig ? 'Fully Configured' : 'Manufacturer Set'}
                                     </span>
                                   )}
                                 </div>
                                 
-                                <p className="text-sm text-pf-text-secondary mb-1">
+                                <p className="text-sm text-pf-text-secondary mb-2">
                                   {printer.ipAddress}:{printer.port} • {printer.serverUrl}
                                 </p>
                                 
-                                {/* Configuration info */}
-                                {config && (
+                                {/* Inline Manufacturer and Model Selection */}
+                                <div className="space-y-2 mb-2">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {/* Manufacturer Selection */}
+                                    <div>
+                                      <select
+                                        value={config?.manufacturerId || ''}
+                                        onChange={(e) => {
+                                          const newConfig = { 
+                                            ...config, 
+                                            manufacturerId: e.target.value || undefined,
+                                            modelId: undefined, // Reset model when manufacturer changes
+                                            newManufacturerName: undefined 
+                                          };
+                                          setPrinterConfigs(prev => ({ ...prev, [printer.serverUrl]: newConfig }));
+                                          
+                                          // Auto-select checkbox when manufacturer is set (and model was already set)
+                                          if (e.target.value && (config?.modelId || config?.newModelName)) {
+                                            setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
+                                          }
+                                        }}
+                                        className="w-full px-2 py-1 text-xs border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:ring-1 focus:ring-pf-accent"
+                                        title="Select manufacturer"
+                                      >
+                                        <option value="">Select manufacturer...</option>
+                                        {manufacturers.filter(m => m.name.toLowerCase() !== 'unknown').map(m => (
+                                          <option key={m.id} value={m.id}>{m.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    {/* Model Selection */}
+                                    <div>
+                                      <select
+                                        value={config?.modelId || ''}
+                                        onChange={(e) => {
+                                          const newConfig = { 
+                                            ...config, 
+                                            modelId: e.target.value || undefined,
+                                            newModelName: undefined 
+                                          };
+                                          setPrinterConfigs(prev => ({ ...prev, [printer.serverUrl]: newConfig }));
+                                          
+                                          // Auto-select checkbox when both manufacturer and model are set
+                                          if ((config?.manufacturerId || config?.newManufacturerName) && e.target.value) {
+                                            setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
+                                          }
+                                        }}
+                                        className="w-full px-2 py-1 text-xs border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:ring-1 focus:ring-pf-accent"
+                                        title="Select model"
+                                        disabled={!config?.manufacturerId}
+                                      >
+                                        <option value="">Select model...</option>
+                                        {config?.manufacturerId && getFilteredModels(config.manufacturerId)
+                                          .filter(m => m.name.toLowerCase() !== 'unknown')
+                                          .map(m => (
+                                            <option key={m.id} value={m.id}>{m.name}</option>
+                                          ))
+                                        }
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  {/* Show selected model capabilities preview */}
+                                  {config?.modelId && (() => {
+                                    const selectedModel = allModels.find(m => m.id === config.modelId);
+                                    if (selectedModel) {
+                                      return (
+                                        <div className="text-xs text-pf-text-tertiary bg-pf-bg-2 rounded p-2">
+                                          <p className="font-medium mb-1">Model Capabilities:</p>
+                                          <div className="grid grid-cols-2 gap-1">
+                                            {selectedModel.defaultNozzleDiameter && (
+                                              <span>Nozzle: {selectedModel.defaultNozzleDiameter}mm</span>
+                                            )}
+                                            {selectedModel.maxX && selectedModel.maxY && selectedModel.maxZ && (
+                                              <span>Build: {selectedModel.maxX}×{selectedModel.maxY}×{selectedModel.maxZ}</span>
+                                            )}
+                                            {selectedModel.hasHeatedBed && <span>Heated Bed</span>}
+                                            {selectedModel.hasEnclosure && <span>Enclosure</span>}
+                                            {selectedModel.multiMaterial && <span>Multi-Material</span>}
+                                            {selectedModel.supportsAutoLeveling && <span>Auto-Leveling</span>}
+                                            {selectedModel.maxHotendTemp && (
+                                              <span>Max Hotend: {selectedModel.maxHotendTemp}°C</span>
+                                            )}
+                                            {selectedModel.maxBedTemp && (
+                                              <span>Max Bed: {selectedModel.maxBedTemp}°C</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                                
+                                {/* Configuration info (legacy, keeping for custom names) */}
+                                {config && (config.newManufacturerName || config.newModelName) && (
                                   <div className="text-xs text-pf-text-tertiary mb-2">
-                                    {config.manufacturerId && (
-                                      <p>Manufacturer: {manufacturers.find(m => m.id === config.manufacturerId)?.name || 'Unknown'}</p>
-                                    )}
                                     {config.newManufacturerName && (
-                                      <p>Manufacturer: {config.newManufacturerName} (new)</p>
-                                    )}
-                                    {config.modelId && (
-                                      <p>Model: {allModels.find(m => m.id === config.modelId)?.name || 'Unknown'}</p>
+                                      <p>Custom Manufacturer: {config.newManufacturerName}</p>
                                     )}
                                     {config.newModelName && (
-                                      <p>Model: {config.newModelName} (new)</p>
+                                      <p>Custom Model: {config.newModelName}</p>
                                     )}
                                   </div>
                                 )}
@@ -463,17 +393,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                 )}
                               </div>
                               
-                              <div className="flex items-center space-x-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleConfigurePrinter(printer.serverUrl);
-                                  }}
-                                  className="p-1 text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded"
-                                  title="Configure manufacturer and model"
-                                >
-                                  <Settings className="h-4 w-4" />
-                                </button>
+                              <div className="flex items-center">
                                 <input
                                   type="checkbox"
                                   aria-label={`Select printer ${printer.name || printer.serverUrl}`}
@@ -524,27 +444,6 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
         </div>
       </div>
     </div>
-
-    {/* Configuration Modal */}
-    {showConfigModal && (
-      <div className="fixed inset-0 z-60 overflow-y-auto">
-        <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-          <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" onClick={() => setShowConfigModal(null)} />
-          
-          <div className="relative inline-block align-bottom bg-pf-bg-1 rounded-lg px-6 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full sm:p-6 border border-pf-border">
-            <PrinterConfigurationForm
-              printerUrl={showConfigModal}
-              manufacturers={manufacturers}
-              models={getFilteredModels(printerConfigs[showConfigModal]?.manufacturerId)}
-              allModels={allModels}
-              initialConfig={printerConfigs[showConfigModal]}
-              onSave={(config: PrinterConfiguration) => handleSaveConfiguration(showConfigModal, config)}
-              onCancel={() => setShowConfigModal(null)}
-            />
-          </div>
-        </div>
-      </div>
-    )}
     </>
   );
 }

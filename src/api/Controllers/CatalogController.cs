@@ -171,9 +171,30 @@ public class CatalogController : ControllerBase
         {
             return NotFound();
         }
-        return Ok(new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.Type.HasValue ? (PrinterType)model.Type.Value : (PrinterType?)null, model.MaxX, model.MaxY, model.MaxZ,
+        return Ok(new PrinterModelDto(
+            model.Id,
+            model.Name,
+            model.ManufacturerId,
+            model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null,
+            model.MaxX,
+            model.MaxY,
+            model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)]));
+            [.. model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name)],
+            // Default capabilities
+            model.DefaultNozzleDiameter,
+            model.HasHeatedBed,
+            model.HasEnclosure,
+            model.MultiMaterial,
+            model.NumberOfExtruders,
+            model.SupportsAutoLeveling,
+            // Temperature ranges
+            model.MinHotendTemp,
+            model.MaxHotendTemp,
+            model.MinBedTemp,
+            model.MaxBedTemp,
+            // Speed capabilities
+            model.MaxPrintSpeed));
     }
 
     [HttpPost("printer-models")]
@@ -210,7 +231,7 @@ public class CatalogController : ControllerBase
         // normalized column or a case-insensitive unique index at the database layer.
         var candidateNames = await _db.Models.AsNoTracking()
             .Where(m => m.ManufacturerId == req.ManufacturerId)
-            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.Type, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
+            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.MotionType, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
             .ToListAsync(ct);
         var existing = candidateNames.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
@@ -220,7 +241,7 @@ public class CatalogController : ControllerBase
             {
                 headerName = existing.Name;
             }
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.Type.HasValue ? (PrinterType)existing.Type.Value : (PrinterType?)null, existing.MaxX, existing.MaxY, existing.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MotionType.HasValue ? (MotionType)existing.MotionType.Value : (MotionType?)null, existing.MaxX, existing.MaxY, existing.MaxZ,
                 existing.DefaultBackend.HasValue ? (PrinterBackend)existing.DefaultBackend.Value : (PrinterBackend?)null), headerName,
                 $"A model with the normalized name '{existing.Name}' already exists for this manufacturer.");
         }
@@ -230,11 +251,24 @@ public class CatalogController : ControllerBase
             Id = Guid.NewGuid(),
             ManufacturerId = req.ManufacturerId,
             Name = normalizedName,
-            Type = req.Type.HasValue ? (int)req.Type.Value : (int?)null,
+            MotionType = req.Type.HasValue ? (int)req.Type.Value : (int?)null,
             MaxX = req.MaxX,
             MaxY = req.MaxY,
             MaxZ = req.MaxZ,
-            DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null
+            DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null,
+
+            // Set capability fields with defaults from request
+            DefaultNozzleDiameter = req.DefaultNozzleDiameter,
+            HasHeatedBed = req.HasHeatedBed,
+            HasEnclosure = req.HasEnclosure,
+            MultiMaterial = req.MultiMaterial,
+            NumberOfExtruders = req.NumberOfExtruders,
+            SupportsAutoLeveling = req.SupportsAutoLeveling,
+            MinHotendTemp = req.MinHotendTemp,
+            MaxHotendTemp = req.MaxHotendTemp,
+            MinBedTemp = req.MinBedTemp,
+            MaxBedTemp = req.MaxBedTemp,
+            MaxPrintSpeed = req.MaxPrintSpeed
         };
         _db.Models.Add(model);
 
@@ -264,7 +298,7 @@ public class CatalogController : ControllerBase
         {
             PrinterModel existingNow = await _db.Models.AsNoTracking()
                 .FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == normalizedName, ct) ?? new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.Type.HasValue ? (PrinterType)existingNow.Type.Value : (PrinterType?)null, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MotionType.HasValue ? (MotionType)existingNow.MotionType.Value : (MotionType?)null, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
                 existingNow.DefaultBackend.HasValue ? (PrinterBackend)existingNow.DefaultBackend.Value : (PrinterBackend?)null), null,
                 $"A model with the normalized name '{existingNow.Name}' already exists for this manufacturer.");
         }
@@ -278,9 +312,9 @@ public class CatalogController : ControllerBase
             Response.Headers["X-Normalized-Name"] = model.Name;
         }
         _catalogCache.InvalidateModels(model.ManufacturerId);
-        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.Type.HasValue ? (PrinterType)model.Type.Value : (PrinterType?)null, model.MaxX, model.MaxY, model.MaxZ,
-                    model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-                    createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
+        return CreatedAtRoute("GetPrinterModelById", new { id = model.Id }, new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null, model.MaxX, model.MaxY, model.MaxZ,
+            model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
+            createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()));
     }
 
     [HttpPut("models/{id:guid}")]
@@ -308,11 +342,67 @@ public class CatalogController : ControllerBase
             }
         }
 
-        model.Type = req.Type.HasValue ? (int)req.Type.Value : (int?)null;
+        model.MotionType = req.Type.HasValue ? (int)req.Type.Value : (int?)null;
         model.MaxX = req.MaxX;
         model.MaxY = req.MaxY;
         model.MaxZ = req.MaxZ;
         model.DefaultBackend = req.DefaultBackend.HasValue ? (int)req.DefaultBackend.Value : (int?)null;
+
+        // Update capability fields if provided
+        if (req.DefaultNozzleDiameter.HasValue)
+        {
+            model.DefaultNozzleDiameter = req.DefaultNozzleDiameter;
+        }
+
+        if (req.HasHeatedBed.HasValue)
+        {
+            model.HasHeatedBed = req.HasHeatedBed.Value;
+        }
+
+        if (req.HasEnclosure.HasValue)
+        {
+            model.HasEnclosure = req.HasEnclosure.Value;
+        }
+
+        if (req.MultiMaterial.HasValue)
+        {
+            model.MultiMaterial = req.MultiMaterial.Value;
+        }
+
+        if (req.NumberOfExtruders.HasValue)
+        {
+            model.NumberOfExtruders = req.NumberOfExtruders.Value;
+        }
+
+        if (req.SupportsAutoLeveling.HasValue)
+        {
+            model.SupportsAutoLeveling = req.SupportsAutoLeveling.Value;
+        }
+
+        if (req.MinHotendTemp.HasValue)
+        {
+            model.MinHotendTemp = req.MinHotendTemp;
+        }
+
+        if (req.MaxHotendTemp.HasValue)
+        {
+            model.MaxHotendTemp = req.MaxHotendTemp;
+        }
+
+        if (req.MinBedTemp.HasValue)
+        {
+            model.MinBedTemp = req.MinBedTemp;
+        }
+
+        if (req.MaxBedTemp.HasValue)
+        {
+            model.MaxBedTemp = req.MaxBedTemp;
+        }
+
+        if (req.MaxPrintSpeed.HasValue)
+        {
+            model.MaxPrintSpeed = req.MaxPrintSpeed;
+        }
 
         // Update supported filament types
         if (req.SupportedFilamentTypeIds != null)

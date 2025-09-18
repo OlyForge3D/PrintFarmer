@@ -29,18 +29,44 @@ export interface Printer {
   spoolInfo?: PrinterSpoolInfo;
 }
 
+export interface PrinterCameraUrls {
+  id: string;
+  name: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
+}
+
+export interface PrinterFast {
+  id: string;
+  name: string;
+  serverUrl: string;
+  notes?: string;
+  isOnline: boolean;
+  state?: string;
+  manufacturerName?: string;
+  modelName?: string;
+  backend: PrinterBackend;
+  apiKey?: string;
+  originalServerUrl?: string;
+  ipAddress?: string;
+}
+
 export enum PrinterBackend {
   Moonraker = 0,
   PrusaLink = 1,
   SDCP = 2
 }
 
-export enum PrinterType {
+export enum MotionType {
   Cartesian = 0,
   CoreXY = 1,
   Delta = 2,
   Unknown = 99
 }
+
+// String enum types for API responses (enums are serialized as strings)
+export type PrinterBackendString = 'Moonraker' | 'PrusaLink' | 'SDCP';
+export type MotionTypeString = 'Cartesian' | 'CoreXY' | 'Delta' | 'Unknown';
 
 export interface PrinterSpoolInfo {
   id?: number;
@@ -177,12 +203,25 @@ export interface PrinterModelDto {
   id: string;
   name: string;
   manufacturerId: string;
-  type?: PrinterType;
+  motionType?: MotionTypeString;
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypes?: string[];
+  
+  // Capability properties
+  defaultNozzleDiameter?: number;
+  hasHeatedBed?: boolean;
+  hasEnclosure?: boolean;
+  multiMaterial?: boolean;
+  numberOfExtruders?: number;
+  supportsAutoLeveling?: boolean;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  maxPrintSpeed?: number;
 }
 
 // Printer capabilities interface
@@ -221,7 +260,7 @@ export interface PrinterDetails {
   manufacturerName?: string;
   modelId?: string;
   modelName?: string;
-  modelType?: PrinterType;
+  modelMotionType?: MotionType;
   modelMaxX?: number;
   modelMaxY?: number;
   modelMaxZ?: number;
@@ -316,14 +355,66 @@ export interface UpdateFilamentTypeRequest {
   defaultTemperatures: TempTargets;
 }
 
+export interface SpoolmanFilamentImportResult {
+  importedCount: number;
+  skippedCount: number;
+  totalSpoolmanMaterials: number;
+  importedNames: string[];
+}
+
+export interface SpoolmanDiscoveryResult {
+  url: string;
+  isAvailable: boolean;
+  error?: string;
+  version?: string;
+  responseTime?: number; // in milliseconds
+}
+
 export interface UpdateModelRequest {
   name: string;
-  type?: PrinterType;
+  motionType?: MotionTypeString;
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypeIds?: string[];
+  
+  // Capability properties
+  defaultNozzleDiameter?: number;
+  hasHeatedBed?: boolean;
+  hasEnclosure?: boolean;
+  multiMaterial?: boolean;
+  numberOfExtruders?: number;
+  supportsAutoLeveling?: boolean;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  maxPrintSpeed?: number;
+}
+
+export interface CreateModelRequest {
+  manufacturerId: string;
+  name: string;
+  motionType?: MotionTypeString;
+  maxX?: number;
+  maxY?: number;
+  maxZ?: number;
+  defaultBackend?: PrinterBackendString;
+  supportedFilamentTypeIds?: string[];
+  
+  // Capability properties
+  defaultNozzleDiameter?: number;
+  hasHeatedBed?: boolean;
+  hasEnclosure?: boolean;
+  multiMaterial?: boolean;
+  numberOfExtruders?: number;
+  supportsAutoLeveling?: boolean;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  maxPrintSpeed?: number;
 }
 
 // Resolve hostname/IP utility

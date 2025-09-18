@@ -4,6 +4,7 @@ import {
   ApiError,
   CreatePrinterDto,
   FilamentPresets,
+  FilamentTypeDto,
   GcodeFile,
   GcodeHarvestOperation,
   GcodeHarvestStatus,
@@ -14,11 +15,14 @@ import {
   ManufacturerDto,
   PrinterModelDto,
   Printer,
+  PrinterCameraUrls,
   PrinterDetails,
+  PrinterFast,
   UpdatePrinterDto
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { toast } from 'sonner';
 
 // ============ Query Keys ============
@@ -32,6 +36,7 @@ export const queryKeys = {
   printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
   manufacturers: ['manufacturers'] as const,
   models: (manufacturerId?: string) => ['models', manufacturerId] as const,
+  filamentTypes: ['filament-types'] as const,
   filamentPresets: ['presets', 'filament'] as const,
   gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
   gcodeFile: (id: string) => ['gcode-files', id] as const,
@@ -50,6 +55,83 @@ export function usePrinters(options?: UseQueryOptions<Printer[], ApiError>) {
     staleTime: 30000, // 30 seconds
     ...options,
   });
+}
+
+export function usePrintersFast(options?: UseQueryOptions<PrinterFast[], ApiError>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, 'fast'],
+    queryFn: () => apiClient.getPrintersFast(),
+    staleTime: 30000, // 30 seconds
+    ...options,
+  });
+}
+
+export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls[], ApiError>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, 'camera-urls'],
+    queryFn: () => apiClient.getPrinterCameraUrls(),
+    staleTime: 300000, // 5 minutes - camera URLs are more static
+    ...options,
+  });
+}
+
+export function usePrintersWithCameraUrls(options?: UseQueryOptions<Printer[], ApiError>) {
+  const printersQuery = usePrintersFast();
+  const cameraUrlsQuery = usePrinterCameraUrls();
+
+  return useMemo(() => {
+    if (printersQuery.data && cameraUrlsQuery.data) {
+      // Create a map of camera URLs by printer ID for efficient lookup
+      const cameraUrlsMap = new Map<string, PrinterCameraUrls>();
+      cameraUrlsQuery.data.forEach(camera => {
+        cameraUrlsMap.set(camera.id, camera);
+      });
+
+      // Merge camera URLs into printer data and convert PrinterFast to Printer
+      const printersWithCameraUrls: Printer[] = printersQuery.data.map(printerFast => {
+        const cameraUrls = cameraUrlsMap.get(printerFast.id);
+        return {
+          ...printerFast,
+          isReachable: printerFast.isOnline, // Add missing property for Printer interface
+          cameraStreamUrl: cameraUrls?.cameraStreamUrl,
+          cameraSnapshotUrl: cameraUrls?.cameraSnapshotUrl,
+          // Add other missing Printer properties with defaults
+          progress: undefined,
+          jobName: undefined,
+          thumbnailUrl: undefined,
+          x: undefined,
+          y: undefined,
+          z: undefined,
+          hotendTemp: undefined,
+          bedTemp: undefined,
+          hotendTarget: undefined,
+          bedTarget: undefined,
+          spoolInfo: undefined,
+        } as Printer;
+      });
+
+      return {
+        data: printersWithCameraUrls,
+        isLoading: printersQuery.isLoading || cameraUrlsQuery.isLoading,
+        isError: printersQuery.isError || cameraUrlsQuery.isError,
+        error: printersQuery.error || cameraUrlsQuery.error,
+        refetch: printersQuery.refetch,
+        isSuccess: printersQuery.isSuccess && cameraUrlsQuery.isSuccess,
+        isFetching: printersQuery.isFetching || cameraUrlsQuery.isFetching,
+      };
+    }
+
+    // Return loading/error states from fast query if no data yet
+    return {
+      data: undefined,
+      isLoading: printersQuery.isLoading || cameraUrlsQuery.isLoading,
+      isError: printersQuery.isError || cameraUrlsQuery.isError,
+      error: printersQuery.error || cameraUrlsQuery.error,
+      refetch: printersQuery.refetch,
+      isSuccess: false,
+      isFetching: printersQuery.isFetching || cameraUrlsQuery.isFetching,
+    };
+  }, [printersQuery, cameraUrlsQuery]);
 }
 
 export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiError>) {
@@ -305,6 +387,15 @@ export function useCreateModel() {
 
 // ============ Settings Hooks ============
 
+export function useFilamentTypes(options?: UseQueryOptions<FilamentTypeDto[], ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.filamentTypes,
+    queryFn: () => apiClient.getFilamentTypes(),
+    staleTime: 300000, // 5 minutes
+    ...options,
+  });
+}
+
 export function useFilamentPresets(options?: UseQueryOptions<FilamentPresets, ApiError>) {
   return useQuery({
     queryKey: queryKeys.filamentPresets,
@@ -320,6 +411,19 @@ export function useSaveFilamentPresets() {
   return useMutation({
     mutationFn: (presets: FilamentPresets) => apiClient.saveFilamentPresets(presets),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+export function useImportFilamentTypesFromSpoolman() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiClient.importFilamentTypesFromSpoolman(),
+    onSuccess: () => {
+      // Invalidate both filament types and presets since new types were added
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
     },
   });

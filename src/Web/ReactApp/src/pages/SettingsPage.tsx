@@ -10,6 +10,7 @@ import type { FilamentType } from '@/types/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTelemetry } from '@/telemetry/useTelemetry';
 import { isTelemetryInitialized } from '@/telemetry/config';
+import { SpoolmanFilamentImportButton } from '@/components/SpoolmanFilamentImportButton';
 
 interface NetworkRange {
   cidr: string;
@@ -638,13 +639,16 @@ export function SettingsPage() {
               Manage filament types and their default temperature settings. These are used as presets for printer controls.
             </p>
           </div>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Add Type
-          </button>
+          <div className="flex items-center gap-2">
+            <SpoolmanFilamentImportButton onImportSuccess={loadSettings} />
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Add Type
+            </button>
+          </div>
         </div>
         
         {/* Add new filament type form */}

@@ -23,6 +23,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import './App.css';
 
 // Create a query client for React Query
@@ -115,6 +116,7 @@ function App() {
           <AuthProvider>
             <QueryClientProvider client={queryClient}>
               <SetupWizard onComplete={handleSetupComplete} />
+              <Toaster position="top-right" richColors />
             </QueryClientProvider>
           </AuthProvider>
         </ThemeProvider>
@@ -187,6 +189,7 @@ function App() {
               </Routes>
             </Router>
             <ReactQueryDevtools initialIsOpen={false} />
+            <Toaster position="top-right" richColors />
           </QueryClientProvider>
         </AuthProvider>
       </ThemeProvider>

@@ -26,23 +26,23 @@ public enum PrinterBackend
 /// <summary>
 /// Printer movement mechanism type defining the kinematic configuration.
 /// </summary>
-public enum PrinterType
+public enum MotionType
 {
     /// <summary>
     /// Traditional 3-axis Cartesian system with independent XYZ movement.
     /// </summary>
     Cartesian = 0,
-    
+
     /// <summary>
     /// CoreXY kinematics where X and Y motors work together for diagonal movement.
     /// </summary>
     CoreXY = 1,
-    
+
     /// <summary>
     /// Delta kinematics with 3 towers and effector for precise movement.
     /// </summary>
     Delta = 2,
-    
+
     /// <summary>
     /// Unknown or unspecified printer type.
     /// </summary>
@@ -130,6 +130,45 @@ public partial record PrinterBasicDto(
     string? IpAddress = null);
 
 public partial record PrinterBasicDto
+{
+    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+}
+
+// Camera URLs for all printers (static configuration without external API calls)
+/// <summary>
+/// Lightweight camera URL information for printers without external API overhead.
+/// </summary>
+public partial record PrinterCameraUrlsDto(
+    Guid Id,
+    string Name,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null);
+
+public partial record PrinterCameraUrlsDto
+{
+    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out var u) ? u : null);
+}
+
+// Fast printer info optimized for performance - excludes camera URLs and real-time status
+/// <summary>
+/// Fast printer information for dashboard loading - excludes camera URLs which are available via separate endpoint.
+/// </summary>
+public partial record PrinterFastDto(
+    Guid Id,
+    string Name,
+    string ServerUrl,
+    string? Notes,
+    bool IsOnline,
+    string? State,
+    string? ManufacturerName = null,
+    string? ModelName = null,
+    PrinterBackend Backend = PrinterBackend.Moonraker,
+    string? ApiKey = null,
+    string? OriginalServerUrl = null,
+    string? IpAddress = null);
+
+public partial record PrinterFastDto
 {
     [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
 }
@@ -292,6 +331,16 @@ public partial record SpoolmanSpoolDto
             : null;
 }
 
+/// <summary>
+/// Result of scanning a network address for a Spoolman instance.
+/// </summary>
+public record SpoolmanDiscoveryResult(
+    string Url,
+    bool IsAvailable,
+    string? Error = null,
+    string? Version = null,
+    TimeSpan? ResponseTime = null);
+
 // Printer spool information for Moonraker printers
 /// <summary>
 /// Snapshot of active spool information attached to a printer (Moonraker + Spoolman bridge).
@@ -315,7 +364,30 @@ public record ManufacturerDto(Guid Id, string Name);
 /// <summary>
 /// Printer model catalog entry including optional build volume and defaults.
 /// </summary>
-public record PrinterModelDto(Guid Id, string Name, Guid ManufacturerId, PrinterType? Type = null, double? MaxX = null, double? MaxY = null, double? MaxZ = null, PrinterBackend? DefaultBackend = null, string[]? SupportedFilamentTypes = null);
+public record PrinterModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    MotionType? MotionType = null,
+    double? MaxX = null,
+    double? MaxY = null,
+    double? MaxZ = null,
+    PrinterBackend? DefaultBackend = null,
+    string[]? SupportedFilamentTypes = null,
+    // Default capabilities that can be inherited by new printers
+    double? DefaultNozzleDiameter = null,
+    bool HasHeatedBed = true,
+    bool HasEnclosure = false,
+    bool MultiMaterial = false,
+    int NumberOfExtruders = 1,
+    bool SupportsAutoLeveling = false,
+    // Temperature ranges
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+    // Speed capabilities
+    int? MaxPrintSpeed = null);
 
 // Filament type management
 /// <summary>
@@ -331,6 +403,26 @@ public record CreateFilamentTypeRequest(string Name, TempTargets DefaultTemperat
 /// </summary>
 public record UpdateFilamentTypeRequest(string Name, TempTargets DefaultTemperatures);
 
+/// <summary>
+/// Result of importing filament types from Spoolman.
+/// </summary>
+public record SpoolmanFilamentImportResult(
+    int ImportedCount,
+    int SkippedCount,
+    int TotalSpoolmanMaterials,
+    string[] ImportedNames
+);
+
+/// <summary>
+/// Represents a material type definition from Spoolman's /api/v1/material endpoint
+/// </summary>
+public record SpoolmanMaterialDto(
+    int Id,
+    string Name,
+    double? Density = null,
+    string? ColorHex = null
+);
+
 // Printer details for edit page
 /// <summary>
 /// Extended printer details used for edit forms and detail pages.
@@ -344,6 +436,7 @@ public record PrinterDetailsDto(
     string? ManufacturerName,
     Guid? ModelId,
     string? ModelName,
+    MotionType? ModelMotionType,
     double? ModelMaxX,
     double? ModelMaxY,
     double? ModelMaxZ,
@@ -779,10 +872,12 @@ public record UpdatePrinterCapabilitiesDto(
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
+    bool SupportsAutoLeveling = false,
     int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
     int? MinBedTemp = null,
     int? MaxBedTemp = null,
+    int? MaxPrintSpeed = null,
     string? CurrentMaterial = null,
     int? CurrentSpoolId = null,
     bool IsAvailable = true);

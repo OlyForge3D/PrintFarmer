@@ -52,58 +52,83 @@ public class DatabaseSeeder : IDatabaseSeeder
                 manufacturers[normalized] = existing;
             }
 
-            // Models to ensure exist (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend, PrinterType)
-            (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, PrinterType? Type)[] modelSeeds = new (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, PrinterType? Type)[]
+            // Models to ensure exist with comprehensive capability data
+            // (Name, ManufacturerName, MaxX/MaxY/MaxZ, DefaultBackend, MotionType, NozzleDiam, HasBed, HasEnclosure, MultiMat, Extruders, AutoLevel, MinHot, MaxHot, MinBed, MaxBed, Materials, MaxSpeed)
+            (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, MotionType? MotionType,
+             double? NozzleDiameter, bool HasBed, bool HasEnclosure, bool MultiMaterial, int Extruders, bool AutoLevel,
+             int? MinHotend, int? MaxHotend, int? MinBed, int? MaxBed, string Materials, int? MaxSpeed)[] modelSeeds = new[]
             {
-                ("Unknown Model", "Unknown", 200, 200, 200, 0, PrinterType.Unknown), // Default for unidentified models
-                ("AD5X", "FlashForge", 220, 220, 220, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("SV08", "Sovol", 350, 350, 350, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("SV08 Max", "Sovol", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Zero", "Sovol", 150, 150, 150, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Thinker X400", "Eryone", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Centauri", "Elegoo", 256, 256, 256, 2, PrinterType.CoreXY), // SDCP
-                ("Centauri Carbon", "Elegoo", 256, 256, 256, 2, PrinterType.CoreXY), // SDCP
-                ("SaladFork 120", "PrintersForAnts", 120, 120, 120, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("SaladFork 180", "PrintersForAnts", 180, 180, 180, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Micron 120", "PrintersForAnts", 120, 120, 120, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Micron 160", "PrintersForAnts", 160, 160, 165, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Micron 180", "PrintersForAnts", 180, 180, 165, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Voron v0", "Voron", 120, 120, 120, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("v2.4 250", "Voron", 250, 250, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("v2.4 300", "Voron", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("v2.4 350", "Voron", 350, 350, 350, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Switchwire", "Voron", 250, 210, 240, 0, PrinterType.Cartesian), // Moonraker (Klipper)
-                ("Trident 250", "Voron", 250, 250, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Trident 300", "Voron", 300, 300, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Trident 300 Cube", "Voron", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Trident 350", "Voron", 350, 350, 250, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.1 200", "RatRig", 200, 200, 200, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.1 300", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.1 400", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.1 500", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.2 200", "RatRig", 200, 200, 200, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.2 300", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.2 400", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore3.2 500", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 300", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 400", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 500", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 300 Hybrid", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 400 Hybrid", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 500 Hybrid", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 300 IDEX", "RatRig", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 400 IDEX", "RatRig", 400, 400, 400, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("vCore4 500 IDEX", "RatRig", 500, 500, 500, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Arco", "Phrozen", 300, 300, 300, 0, PrinterType.CoreXY), // Moonraker (Klipper)
-                ("Original Prusa Mini+", "Prusa", 180, 180, 180, 1, PrinterType.Cartesian), // PrusaLink
-                ("Original Prusa i3 MK3S+", "Prusa", 250, 210, 210, 1, PrinterType.Cartesian), // PrusaLink
-                ("Original Prusa MK4S", "Prusa", 250, 210, 220, 1, PrinterType.Cartesian), // PrusaLink
-                ("Original Prusa Core One", "Prusa", 250, 220, 270, 1, PrinterType.CoreXY), // PrusaLink
-                ("Original Prusa XL", "Prusa", 250, 220, 270, 1, PrinterType.CoreXY), // PrusaLink
+                ("Unknown Model", "Unknown", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.Unknown, (double?)0.4, true, false, false, 1, false, (int?)0, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS", (int?)100),
+                
+                // FlashForge models
+                ("AD5X", "FlashForge", 220.0, 220.0, 220.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                
+                // Sovol models
+                ("SV08", "Sovol", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("SV08 Max", "Sovol", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("Zero", "Sovol", 150.0, 150.0, 150.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS", (int?)150),
+                
+                // Eryone models
+                ("Thinker X400", "Eryone", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                
+                // Elegoo models  
+                ("Centauri", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("Centauri Carbon", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                
+                // PrintersForAnts models
+                ("SaladFork 120", "PrintersForAnts", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("SaladFork 180", "PrintersForAnts", 180.0, 180.0, 180.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("Micron 120", "PrintersForAnts", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("Micron 160", "PrintersForAnts", 160.0, 160.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("Micron 180", "PrintersForAnts", 180.0, 180.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                
+                // Voron models
+                ("Voron v0", "Voron", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("v2.4 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("v2.4 300", "Voron", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("v2.4 350", "Voron", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Switchwire", "Voron", 250.0, 210.0, 240.0, (int?)0, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("Trident 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Trident 300", "Voron", 300.0, 300.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Trident 300 Cube", "Voron", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Trident 350", "Voron", 350.0, 350.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                
+                // RatRig models
+                ("vCore3.1 200", "RatRig", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.1 300", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.1 400", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.1 500", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.2 200", "RatRig", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.2 300", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.2 400", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore3.2 500", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("vCore4 300", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 400", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 500", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 300 Hybrid", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 400 Hybrid", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 500 Hybrid", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 300 IDEX", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 400 IDEX", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("vCore4 500 IDEX", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                
+                // Phrozen models
+                ("Arco", "Phrozen", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                
+                // Prusa models
+                ("Original Prusa Mini+", "Prusa", 180.0, 180.0, 180.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS,ASA,PC", (int?)180),
+                ("Original Prusa i3 MK3S+", "Prusa", 250.0, 210.0, 210.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                ("Original Prusa MK4S", "Prusa", 250.0, 210.0, 220.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
+                ("Original Prusa Core One", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)250),
+                ("Original Prusa XL", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, true, 5, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
             };
 
-            foreach ((string? name, string? mfg, double x, double y, double z, int? defaultBackend, PrinterType? type) in modelSeeds)
+            foreach (var modelSeed in modelSeeds)
             {
+                (string name, string mfg, double x, double y, double z, int? defaultBackend, MotionType? motionType,
+                 double? nozzleDiameter, bool hasBed, bool hasEnclosure, bool multiMaterial, int extruders, bool autoLevel,
+                 int? minHotend, int? maxHotend, int? minBed, int? maxBed, string _, int? maxSpeed) = modelSeed;
+
                 if (!manufacturers.TryGetValue(mfg, out Manufacturer? m))
                 {
                     // Skip if manufacturer wasn't ensured above for any reason
@@ -121,17 +146,93 @@ public class DatabaseSeeder : IDatabaseSeeder
                         MaxX = x,
                         MaxY = y,
                         MaxZ = z,
-                        DefaultBackend = defaultBackend
+                        DefaultBackend = defaultBackend,
+                        MotionType = (int?)motionType,
+                        DefaultNozzleDiameter = nozzleDiameter,
+                        HasHeatedBed = hasBed,
+                        HasEnclosure = hasEnclosure,
+                        MultiMaterial = multiMaterial,
+                        NumberOfExtruders = extruders,
+                        SupportsAutoLeveling = autoLevel,
+                        MinHotendTemp = minHotend,
+                        MaxHotendTemp = maxHotend,
+                        MinBedTemp = minBed,
+                        MaxBedTemp = maxBed,
+                        MaxPrintSpeed = maxSpeed
                     });
                 }
             }
             await _context.SaveChangesAsync();
+
+            // Now create the filament type relationships
+            await SeedModelFilamentTypesAsync(modelSeeds);
         }
         catch (Exception ex)
         {
             // Log the exception but don't throw to prevent application startup failure
             Console.WriteLine($"Catalog seeding error: {ex.Message}");
             throw; // Re-throw if you want startup to fail on seeding errors
+        }
+    }
+
+    private async Task SeedModelFilamentTypesAsync((string Name, string Mfg, double X, double Y, double Z,
+             int? DefaultBackend, MotionType? MotionType, double? NozzleDiameter, bool HasBed, bool HasEnclosure,
+             bool MultiMaterial, int Extruders, bool AutoLevel, int? MinHotend, int? MaxHotend,
+             int? MinBed, int? MaxBed, string Materials, int? MaxSpeed)[] modelSeeds)
+    {
+        try
+        {
+            // Get all filament types once
+            var filamentTypes = await _context.FilamentTypes
+                .ToDictionaryAsync(ft => ft.Name.ToUpperInvariant(), ft => ft);
+
+            // Process each model's supported materials
+#pragma warning disable IDE0008 // Use explicit type
+            foreach (var (name, mfg, x, y, z, defaultBackend, type, nozzleDiameter,
+                         hasBed, hasEnclosure, multiMaterial, extruders, autoLevel,
+                         minHotend, maxHotend, minBed, maxBed, materials, maxSpeed) in modelSeeds)
+            {
+                // Find the model we just created
+                var model = await _context.Models
+                    .FirstOrDefaultAsync(m => m.Name == name &&
+                                           m.Manufacturer != null &&
+                                           m.Manufacturer.Name == mfg);
+
+                if (model != null && !string.IsNullOrEmpty(materials))
+                {
+                    // Parse the comma-separated materials list
+                    var materialNames = materials.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                               .Select(m => m.Trim().ToUpperInvariant());
+
+                    foreach (var materialName in materialNames)
+                    {
+                        if (filamentTypes.TryGetValue(materialName, out var filamentType))
+                        {
+                            // Check if relationship already exists
+                            bool exists = await _context.PrinterModelFilamentTypes
+                                .AnyAsync(pmft => pmft.PrinterModelId == model.Id &&
+                                                pmft.FilamentTypeId == filamentType.Id);
+
+                            if (!exists)
+                            {
+                                _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                                {
+                                    PrinterModelId = model.Id,
+                                    FilamentTypeId = filamentType.Id
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+#pragma warning restore IDE0008 // Use explicit type
+
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Filament type seeding error: {ex.Message}");
+            // Don't throw - this is not critical for application startup
         }
     }
 
@@ -194,8 +295,8 @@ public class DatabaseSeeder : IDatabaseSeeder
     public async Task SeedAllAsync()
     {
         await SeedSpoolmanConfigAsync();
-        await SeedCatalogDataAsync();
-        await SeedFilamentTypesAsync();
+        await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
+        await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
     }
 
     /// <summary>

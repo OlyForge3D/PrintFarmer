@@ -3,7 +3,6 @@ using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Farm.Web.Api.Services;
@@ -211,16 +210,42 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             {
                 Id = Guid.NewGuid(),
                 PrinterId = printer.Id,
+                // Use model capability defaults
                 MaxBuildVolumeX = model.MaxX,
                 MaxBuildVolumeY = model.MaxY,
                 MaxBuildVolumeZ = model.MaxZ,
+                NozzleDiameter = model.DefaultNozzleDiameter,
+                HasHeatedBed = model.HasHeatedBed,
+                HasEnclosure = model.HasEnclosure,
+                MultiMaterial = model.MultiMaterial,
+                NumberOfExtruders = model.NumberOfExtruders,
+                SupportsAutoLeveling = model.SupportsAutoLeveling,
+                MinHotendTemp = model.MinHotendTemp,
+                MaxHotendTemp = model.MaxHotendTemp,
+                MinBedTemp = model.MinBedTemp,
+                MaxBedTemp = model.MaxBedTemp,
+                MaxPrintSpeed = model.MaxPrintSpeed,
                 IsAvailable = true,
                 LastUpdated = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
-            // Set defaults based on printer type and manufacturer
+            // Get supported materials from the filament type relationships
+            if (model.SupportedFilamentTypes?.Any() == true)
+            {
+                capabilities.SupportedMaterials = model.SupportedFilamentTypes
+                    .Where(sft => sft.FilamentType != null)
+                    .Select(sft => sft.FilamentType!.Name)
+                    .ToArray();
+            }
+            else
+            {
+                // Fallback to empty array if no filament types are defined
+                capabilities.SupportedMaterials = Array.Empty<string>();
+            }
+
+            // Apply additional manufacturer-specific defaults (as fallback for missing model data)
             SetDefaultsByManufacturerAndModel(capabilities, printerWithModel);
 
             return capabilities;
@@ -427,69 +452,77 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         string? manufacturerName = printer.Manufacturer?.Name?.ToLowerInvariant();
         string? modelName = printer.Model?.Name?.ToLowerInvariant();
 
-        // Set manufacturer-specific defaults
+        // Only apply manufacturer defaults if model defaults aren't already set
+        // This provides fallbacks for older model entries that may not have complete capability data
+
+        // Set manufacturer-specific defaults as fallbacks
         switch (manufacturerName)
         {
             case "prusa":
-                capabilities.HasHeatedBed = true;
-                capabilities.NumberOfExtruders = 1;
-                capabilities.NozzleDiameter = 0.4;
-                capabilities.MaxHotendTemp = 300;
-                capabilities.MaxBedTemp = 120;
-                capabilities.MinHotendTemp = 170;
-                capabilities.MinBedTemp = 35;
-                capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG" };
+                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
+                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
+                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
+                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 300;
+                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 120;
+                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 170;
+                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 35;
+                if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                    capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG" };
                 break;
 
             case "voron":
-                capabilities.HasHeatedBed = true;
-                capabilities.HasEnclosure = modelName?.Contains("v2.4") == true || modelName?.Contains("trident") == true;
-                capabilities.NumberOfExtruders = 1;
-                capabilities.NozzleDiameter = 0.4;
-                capabilities.MaxHotendTemp = 350;
-                capabilities.MaxBedTemp = 120;
-                capabilities.MinHotendTemp = 180;
-                capabilities.MinBedTemp = 40;
-                capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG", "PA", "PPS" };
+                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
+                if (!capabilities.HasEnclosure) capabilities.HasEnclosure = modelName?.Contains("v2.4") == true || modelName?.Contains("trident") == true;
+                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
+                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
+                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 350;
+                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 120;
+                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
+                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 40;
+                if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                    capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG", "PA", "PPS" };
                 break;
 
             case "ratrig":
-                capabilities.HasHeatedBed = true;
-                capabilities.HasEnclosure = false; // Most RatRig are open frame
-                capabilities.NumberOfExtruders = modelName?.Contains("idex") == true ? 2 : 1;
-                capabilities.NozzleDiameter = 0.4;
-                capabilities.MaxHotendTemp = 300;
-                capabilities.MaxBedTemp = 120;
-                capabilities.MinHotendTemp = 180;
-                capabilities.MinBedTemp = 35;
-                capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG" };
+                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
+                if (!capabilities.HasEnclosure) capabilities.HasEnclosure = false; // Most RatRig are open frame
+                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = modelName?.Contains("idex") == true ? 2 : 1;
+                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
+                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 300;
+                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 120;
+                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
+                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 35;
+                if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                    capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS", "ASA", "PC", "PCTG" };
                 break;
 
             case "elegoo":
                 if (modelName?.Contains("centauri") == true)
                 {
                     // Delta printer specifics
-                    capabilities.HasHeatedBed = true;
-                    capabilities.NumberOfExtruders = 1;
-                    capabilities.NozzleDiameter = 0.4;
-                    capabilities.MaxHotendTemp = 280;
-                    capabilities.MaxBedTemp = 100;
-                    capabilities.MinHotendTemp = 180;
-                    capabilities.MinBedTemp = 50;
-                    capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS" };
+                    if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
+                    if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
+                    if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
+                    if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 280;
+                    if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 100;
+                    if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
+                    if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 50;
+                    if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                        capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS" };
                 }
                 break;
 
             default:
-                // Generic defaults
-                capabilities.HasHeatedBed = true;
-                capabilities.NumberOfExtruders = 1;
-                capabilities.NozzleDiameter = 0.4;
-                capabilities.MaxHotendTemp = 280;
-                capabilities.MaxBedTemp = 100;
-                capabilities.MinHotendTemp = 180;
-                capabilities.MinBedTemp = 40;
-                capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS" };
+                // Generic defaults - only apply if not already set by model
+                if (!capabilities.HasHeatedBed) capabilities.HasHeatedBed = true;
+                if (capabilities.NumberOfExtruders == 0) capabilities.NumberOfExtruders = 1;
+                if (!capabilities.NozzleDiameter.HasValue) capabilities.NozzleDiameter = 0.4;
+                if (!capabilities.MaxHotendTemp.HasValue) capabilities.MaxHotendTemp = 280;
+                if (!capabilities.MaxBedTemp.HasValue) capabilities.MaxBedTemp = 100;
+                if (!capabilities.MinHotendTemp.HasValue) capabilities.MinHotendTemp = 180;
+                if (!capabilities.MinBedTemp.HasValue) capabilities.MinBedTemp = 40;
+                if (capabilities.SupportedMaterials == null || capabilities.SupportedMaterials.Length == 0)
+                    capabilities.SupportedMaterials = new[] { "PLA", "PETG", "ABS" };
                 break;
         }
     }

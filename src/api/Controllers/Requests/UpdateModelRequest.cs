@@ -2,4 +2,28 @@
 
 using Farm.Web.Shared;
 
-public record UpdateModelRequest(string Name, PrinterType? Type, double? MaxX, double? MaxY, double? MaxZ, PrinterBackend? DefaultBackend, Guid[]? SupportedFilamentTypeIds);
+public record UpdateModelRequest(
+    string Name,
+    MotionType? Type,
+    double? MaxX,
+    double? MaxY,
+    double? MaxZ,
+    PrinterBackend? DefaultBackend,
+    Guid[]? SupportedFilamentTypeIds,
+
+    // Default capabilities that can be inherited by new printers
+    double? DefaultNozzleDiameter = null,
+    bool? HasHeatedBed = null,
+    bool? HasEnclosure = null,
+    bool? MultiMaterial = null,
+    int? NumberOfExtruders = null,
+    bool? SupportsAutoLeveling = null,
+
+    // Temperature ranges
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+
+    // Speed capabilities
+    int? MaxPrintSpeed = null);

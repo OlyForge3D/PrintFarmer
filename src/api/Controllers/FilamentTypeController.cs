@@ -1,5 +1,6 @@
 ﻿using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Startup;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Filament Types")]
-public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus) : ControllerBase
+public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus, SpoolmanService spoolmanService) : ControllerBase
 {
     /// <summary>
     /// Gets all available filament types.
@@ -210,5 +211,136 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
 
         await db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Imports unique filament types from Spoolman's /api/v1/material endpoint to maintain parity between applications.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Import result with counts of imported and skipped types</returns>
+    /// <response code="200">Returns the import results</response>
+    /// <response code="400">If Spoolman is not configured</response>
+    /// <response code="503">If system is still initializing</response>
+    [HttpPost("import-from-spoolman")]
+    [ProducesResponseType(typeof(SpoolmanFilamentImportResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<SpoolmanFilamentImportResult>> ImportFromSpoolmanAsync(CancellationToken ct)
+    {
+        // Ensure initialization is complete to prevent race conditions during startup
+        if (!startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        // Check if Spoolman is configured
+        SpoolmanConfigDto? config = spoolmanService.GetConfig();
+        if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
+        {
+            return BadRequest(new { message = "Spoolman is not configured. Please configure Spoolman integration first." });
+        }
+
+        try
+        {
+            // Get all materials from Spoolman's material endpoint (more direct and efficient)
+            IReadOnlyList<SpoolmanMaterialDto> materials = await spoolmanService.ListMaterialsAsync(ct);
+            
+            // Extract unique material names (filament types)
+            HashSet<string> uniqueMaterials = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SpoolmanMaterialDto material in materials)
+            {
+                if (!string.IsNullOrWhiteSpace(material.Name))
+                {
+                    uniqueMaterials.Add(material.Name.Trim());
+                }
+            }
+
+            // Get existing filament types from our database
+            List<string> existingTypes = await db.FilamentTypes
+                .Select(ft => ft.Name)
+                .ToListAsync(ct);
+            
+            HashSet<string> existingTypesSet = new(existingTypes, StringComparer.OrdinalIgnoreCase);
+
+            // Import new filament types
+            int importedCount = 0;
+            int skippedCount = 0;
+            List<string> importedNames = new();
+
+            foreach (string materialName in uniqueMaterials.OrderBy(m => m))
+            {
+                if (existingTypesSet.Contains(materialName))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                // Create new filament type with reasonable defaults
+                // Note: We use reasonable temperature defaults since Spoolman materials may not include temperature info
+                FilamentType newFilamentType = new()
+                {
+                    Id = Guid.NewGuid(),
+                    Name = materialName,
+                    DefaultHotendTemp = GetDefaultHotendTemp(materialName),
+                    DefaultBedTemp = GetDefaultBedTemp(materialName),
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                db.FilamentTypes.Add(newFilamentType);
+                importedNames.Add(materialName);
+                importedCount++;
+            }
+
+            await db.SaveChangesAsync(ct);
+
+            return Ok(new SpoolmanFilamentImportResult(
+                ImportedCount: importedCount,
+                SkippedCount: skippedCount,
+                TotalSpoolmanMaterials: uniqueMaterials.Count,
+                ImportedNames: importedNames.ToArray()
+            ));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = $"Failed to import filament types from Spoolman: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Gets reasonable default hotend temperature for a material name.
+    /// </summary>
+    private static int GetDefaultHotendTemp(string material)
+    {
+        string upperMaterial = material.ToUpperInvariant();
+        if (upperMaterial.Contains("PLA")) { return 205; }
+        if (upperMaterial.Contains("ABS")) { return 230; }
+        if (upperMaterial.Contains("PETG")) { return 240; }
+        if (upperMaterial.Contains("ASA")) { return 245; }
+        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE")) { return 260; }
+        if (upperMaterial.Contains("PCTG")) { return 235; }
+        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX")) { return 220; }
+        if (upperMaterial.Contains("WOOD")) { return 210; }
+        if (upperMaterial.Contains("NYLON")) { return 250; }
+        if (upperMaterial.Contains("CARBON")) { return 260; }
+        return 210; // Default for unknown materials
+    }
+
+    /// <summary>
+    /// Gets reasonable default bed temperature for a material name.
+    /// </summary>
+    private static int GetDefaultBedTemp(string material)
+    {
+        string upperMaterial = material.ToUpperInvariant();
+        if (upperMaterial.Contains("PLA")) { return 60; }
+        if (upperMaterial.Contains("ABS")) { return 100; }
+        if (upperMaterial.Contains("PETG")) { return 85; }
+        if (upperMaterial.Contains("ASA")) { return 100; }
+        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE")) { return 110; }
+        if (upperMaterial.Contains("PCTG")) { return 80; }
+        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX")) { return 60; }
+        if (upperMaterial.Contains("WOOD")) { return 65; }
+        if (upperMaterial.Contains("NYLON")) { return 80; }
+        if (upperMaterial.Contains("CARBON")) { return 100; }
+        return 70; // Default for unknown materials
     }
 }
