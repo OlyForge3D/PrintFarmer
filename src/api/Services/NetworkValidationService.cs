@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Collections.ObjectModel;
+using System.Net;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
@@ -37,10 +38,10 @@ public static class NetworkValidationService
             CidrValidationResult cidrValidation = ValidateCidr(trimmed);
             if (!cidrValidation.IsValid)
             {
-                result.Errors.Add($"Invalid CIDR format: {trimmed} - {cidrValidation.Error}");
+                result._errors.Add($"Invalid CIDR format: {trimmed} - {cidrValidation.Error}");
                 if (!string.IsNullOrEmpty(cidrValidation.Suggestion))
                 {
-                    result.Suggestions.Add($"Consider using: {cidrValidation.Suggestion} instead of {trimmed}");
+                    result._suggestions.Add($"Consider using: {cidrValidation.Suggestion} instead of {trimmed}");
                 }
             }
             else
@@ -53,30 +54,30 @@ public static class NetworkValidationService
         List<(string cidr1, string cidr2)> overlaps = FindOverlappingNetworks(validNetworks);
         foreach ((string cidr1, string cidr2) overlap in overlaps)
         {
-            result.Warnings.Add($"Network ranges overlap: {overlap.cidr1} and {overlap.cidr2}");
+            result._warnings.Add($"Network ranges overlap: {overlap.cidr1} and {overlap.cidr2}");
         }
 
         // Additional validation
         if (settings.TimeoutMs < 100 || settings.TimeoutMs > 30000)
         {
-            result.Errors.Add("Discovery timeout must be between 100ms and 30,000ms");
+            result._errors.Add("Discovery timeout must be between 100ms and 30,000ms");
         }
 
         if (settings.MaxConcurrentScans < 1 || settings.MaxConcurrentScans > 100)
         {
-            result.Errors.Add("Max concurrent scans must be between 1 and 100");
+            result._errors.Add("Max concurrent scans must be between 1 and 100");
         }
 
         if (settings.Ports.Count == 0 && validNetworks.Count > 0)
         {
-            result.Errors.Add("At least one port is required when network ranges are configured");
+            result._errors.Add("At least one port is required when network ranges are configured");
         }
 
         foreach (int port in settings.Ports)
         {
             if (port < 1 || port > 65535)
             {
-                result.Errors.Add($"Invalid port number: {port} (must be 1-65535)");
+                result._errors.Add($"Invalid port number: {port} (must be 1-65535)");
             }
         }
 
@@ -226,10 +227,13 @@ public static class NetworkValidationService
 /// </summary>
 public class NetworkValidationResult
 {
-    public List<string> Errors { get; } = new();
-    public List<string> Warnings { get; } = new();
-    public List<string> Suggestions { get; } = new();
-    public bool IsValid => Errors.Count == 0;
+    internal readonly List<string> _errors = new();
+    internal readonly List<string> _warnings = new();
+    internal readonly List<string> _suggestions = new();
+    public IReadOnlyList<string> Errors => _errors;
+    public IReadOnlyList<string> Warnings => _warnings;
+    public IReadOnlyList<string> Suggestions => _suggestions;
+    public bool IsValid => _errors.Count == 0;
 }
 
 /// <summary>

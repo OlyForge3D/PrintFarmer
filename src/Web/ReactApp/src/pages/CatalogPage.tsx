@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { Plus, Edit, Trash2, Save, X, Settings } from 'lucide-react';
-import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto, PrinterTypeString } from '@/types/api';
+import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
 
 export function CatalogPage() {
@@ -12,7 +12,7 @@ export function CatalogPage() {
   const [selectedModel, setSelectedModel] = useState<PrinterModelDto | null>(null);
   const [newManufacturer, setNewManufacturer] = useState('');
   const [newModel, setNewModel] = useState('');
-  const [newModelType, setNewModelType] = useState<PrinterTypeString | undefined>(undefined);
+  const [newModelType, setNewModelType] = useState<MotionTypeString | undefined>(undefined);
   const [editingManufacturer, setEditingManufacturer] = useState<{ id: string; name: string } | null>(null);
   const [editingModel, setEditingModel] = useState<{ id: string; name: string } | null>(null);
   const [editModelModalOpen, setEditModelModalOpen] = useState(false);
@@ -54,7 +54,7 @@ export function CatalogPage() {
     return models.filter(m => m.manufacturerId === selectedManufacturer.id);
   };
 
-  const getPrinterTypeDisplayName = (type?: PrinterTypeString): string => {
+  const getMotionTypeDisplayName = (type?: MotionTypeString): string => {
     switch (type) {
       case 'Cartesian':
         return 'Cartesian';
@@ -89,7 +89,7 @@ export function CatalogPage() {
       const response = await apiClient.createModel({
         name: newModel.trim(),
         manufacturerId: selectedManufacturer.id,
-        type: newModelType
+        motionType: newModelType
       });
       setModels([...models, response]);
       setNewModel('');
@@ -323,15 +323,16 @@ export function CatalogPage() {
                   onChange={(e) => setNewModel(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && addModel()}
                   placeholder="Model name"
+                  title="Model name"
                   className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary text-sm"
                 />
                 <select
                   value={newModelType ?? ''}
-                  onChange={(e) => setNewModelType(e.target.value === '' ? undefined : e.target.value as PrinterTypeString)}
+                  onChange={(e) => setNewModelType(e.target.value === '' ? undefined : e.target.value as MotionTypeString)}
                   className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm min-w-[120px]"
-                  title="Printer Type"
+                  title="Motion Type"
                 >
-                  <option value="">Printer Type</option>
+                  <option value="">Motion Type</option>
                   <option value="Cartesian">Cartesian</option>
                   <option value="CoreXY">CoreXY</option>
                   <option value="Delta">Delta</option>
@@ -367,12 +368,14 @@ export function CatalogPage() {
                             <button
                               onClick={() => updateModel(editingModel.id, editingModel.name)}
                               className="text-green-400 hover:text-green-300"
+                              title="Save model name"
                             >
                               <Save className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => setEditingModel(null)}
                               className="text-red-400 hover:text-red-300"
+                              title="Cancel edit"
                             >
                               <X className="h-4 w-4" />
                             </button>
@@ -380,9 +383,9 @@ export function CatalogPage() {
                         ) : (
                           <div>
                             <div className="font-medium text-pf-text-primary">{model.name}</div>
-                            {model.type !== undefined && (
+                            {model.motionType !== undefined && (
                               <div className="text-sm text-pf-text-secondary">
-                                Type: {getPrinterTypeDisplayName(model.type)}
+                                Type: {getMotionTypeDisplayName(model.motionType)}
                               </div>
                             )}
                             {model.supportedFilamentTypes && model.supportedFilamentTypes.length > 0 && (

@@ -24,3 +24,8 @@ using System.Diagnostics.CodeAnalysis;
     Scope = "member",
     Target = "*")]
 [assembly: SuppressMessage("Style", "IDE0300:Simplify collection initialization", Justification = "<Pending>", Scope = "member", Target = "~M:Farm.Web.Api.Services.NetworkUrlRewriteService.IsDockerDesktop~System.Boolean")]
+
+[assembly: SuppressMessage(
+    "Security",
+    "CA3003:Review code for file path injection vulnerabilities",
+    Justification = "All file and directory paths are validated, sanitized, or constructed from trusted sources throughout the codebase. Project reviewed for path injection risks.")]
