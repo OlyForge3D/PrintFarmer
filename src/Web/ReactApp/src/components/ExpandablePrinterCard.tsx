@@ -438,7 +438,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             }`}
             title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
-            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1 text-red-500" />}
+            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1 text-white stroke-2" />}
             {isShutdown ? 'Restart' : 'Stop'}
           </button>
         </div>
@@ -777,7 +777,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                 >
-                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <AlertOctagon className="h-4 w-4 text-red-500" />}
+                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <AlertOctagon className="h-4 w-4 text-white stroke-2" />}
                 </button>
               </div>
               
