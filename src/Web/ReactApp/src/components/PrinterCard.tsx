@@ -64,13 +64,15 @@ export function PrinterCard({
   const getBackendIcon = (backend: PrinterBackend) => {
     switch (backend) {
       case PrinterBackend.Moonraker:
-        return '🌙';
+        return <span title="Moonraker" aria-label="Moonraker" role="img">🌙</span>;
       case PrinterBackend.PrusaLink:
-        return '🔗';
+        return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
       case PrinterBackend.SDCP:
-        return '📡';
+        return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
+      case PrinterBackend.OctoPrint:
+        return <img src={require("@/assets/octoprint.svg")} alt="OctoPrint" title="OctoPrint" className="inline h-6 w-6 align-middle" />;
       default:
-        return '🖨️';
+        return <span title="Other" aria-label="Other" role="img">🖨️</span>;
     }
   };
 

@@ -28,9 +28,12 @@ public class Printer
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
     public string? Notes { get; set; }
 
-    // Backend type (Moonraker or PrusaLink)
-    public int Backend { get; set; } // 0 = Moonraker, 1 = PrusaLink
-    public string? ApiKey { get; set; } // For PrusaLink
+
+    // Backend type (Moonraker, PrusaLink, SDCP, OctoPrint)
+    public int Backend { get; set; } // 0 = Moonraker, 1 = PrusaLink, 2 = SDCP, 3 = OctoPrint
+    public string? ApiKey { get; set; } // For PrusaLink/OctoPrint
+    public string? CameraStreamUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
+    public string? CameraSnapshotUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
 
     // Metadata
     public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer
