@@ -35,10 +35,30 @@ public class OctoPrintIntegrationTests : CustomDbHeavyTestBase
             Backend = PrinterBackend.OctoPrint,
             ApiKey = "dummy-key"
         };
-        var created = await client.PostAsJsonAsync("/api/printers", createDto);
+
+        // Retry POST /api/printers if DB is not ready (ServiceUnavailable/Database service unavailable)
+        const int maxAttempts = 5;
+        int attempt = 0;
+        HttpResponseMessage created = null!;
+        string errorContent = string.Empty;
+        while (attempt < maxAttempts)
+        {
+            created = await client.PostAsJsonAsync("/api/printers", createDto);
+            if (created.IsSuccessStatusCode)
+            {
+                break;
+            }
+            errorContent = await created.Content.ReadAsStringAsync();
+            if (created.StatusCode == HttpStatusCode.ServiceUnavailable && errorContent.Contains("Database service unavailable"))
+            {
+                await Task.Delay(500); // Wait 0.5s and retry
+                attempt++;
+                continue;
+            }
+            break; // Other errors, don't retry
+        }
         if (!created.IsSuccessStatusCode)
         {
-            var errorContent = await created.Content.ReadAsStringAsync();
             throw new Xunit.Sdk.XunitException($"POST /api/printers failed: {created.StatusCode}\nResponse: {errorContent}");
         }
         created.IsSuccessStatusCode.Should().BeTrue();
