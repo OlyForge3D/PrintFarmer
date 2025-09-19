@@ -16,7 +16,7 @@ Add support for OctoPrint as a printer backend in PrintFarmer, enabling manageme
 	- [x] Field parity with Moonraker maximized; differences and plugin requirements documented in `docs/octoprint-vs-moonraker-parity.md`
 - [x] Update database migrations if new fields are needed
 - [x] Add validation for OctoPrint printer configuration
-- [ ] Add unit/integration tests for OctoPrint backend
+- [x] Add unit/integration tests for OctoPrint backend
 
 ### 2. Frontend (React/TypeScript)
 - [x] Add 'OctoPrint' to PrinterBackend enum/type
