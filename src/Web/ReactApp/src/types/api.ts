@@ -163,6 +163,8 @@ export interface CreatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
 }
 
 export interface UpdatePrinterDto {
@@ -177,6 +179,8 @@ export interface UpdatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
   // Printer capabilities
   nozzleDiameter?: number;
   supportedMaterials?: string[];

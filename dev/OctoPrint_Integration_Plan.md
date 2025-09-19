@@ -21,9 +21,9 @@ Add support for OctoPrint as a printer backend in PrintFarmer, enabling manageme
 ### 2. Frontend (React/TypeScript)
 - [x] Add 'OctoPrint' to PrinterBackend enum/type
 - [x] Add OctoPrint icon/branding and update getBackendIcon logic in all relevant components (PrinterDiscoveryModal, PrinterCard, PrinterTableView, EnhancedPrinterCard) to use custom SVG for OctoPrint and unique icons for each backend
-- [ ] Update printer creation/edit UI to support OctoPrint
-- [ ] Add OctoPrint-specific fields (API key, camera URL) to forms
-- [ ] Update API client/types for OctoPrint support
+- [x] Update printer creation/edit UI to support OctoPrint
+- [x] Add OctoPrint-specific fields (API key, camera URL) to forms
+- [x] Update API client/types for OctoPrint support
 - [ ] Update UI logic to handle OctoPrint printers (status, camera, controls)
 - [ ] Add frontend tests for OctoPrint support
 

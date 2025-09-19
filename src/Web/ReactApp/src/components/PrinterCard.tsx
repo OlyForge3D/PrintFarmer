@@ -301,17 +301,21 @@ export function PrinterCard({
           </div>
         )}
 
-        {/* Camera thumbnail */}
-        {printer.cameraSnapshotUrl && (
+        {/* Camera thumbnail (OctoPrint/Moonraker/PrusaLink) */}
+        {(printer.cameraSnapshotUrl || printer.cameraStreamUrl) && (
           <div className="mb-4">
             <img
-              src={printer.cameraSnapshotUrl}
+              src={printer.cameraSnapshotUrl || printer.cameraStreamUrl}
               alt={`${printer.name} camera`}
               className="w-full h-24 object-cover rounded border"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}
             />
+            {/* For OctoPrint, optionally show a note if only stream is available */}
+            {printer.backend === PrinterBackend.OctoPrint && !printer.cameraSnapshotUrl && printer.cameraStreamUrl && (
+              <div className="text-xs text-pf-text-tertiary mt-1">Live stream only (no snapshot)</div>
+            )}
           </div>
         )}
 
@@ -324,16 +328,18 @@ export function PrinterCard({
             <Cog className="h-4 w-4 mr-1.5" />
             Manage
           </button>
-          
+          {/* OctoPrint/Moonraker/PrusaLink: Only show controls if supported */}
           {hasPermission('printers', 'execute') && currentStatus.isOnline && (
             <>
-              {currentStatus.state === 'printing' && (
+              {/* Only show Pause if printer is printing and backend supports it */}
+              {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && currentStatus.state === 'printing' && (
                 <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-warning hover:bg-pf-warning focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-warning transition-colors">
                   <Pause className="h-4 w-4 mr-1.5" />
                   Pause
                 </button>
               )}
-              {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
+              {/* Only show Resume/Start if printer is paused or ready and backend supports it */}
+              {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
                 <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-success hover:bg-pf-success-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-success transition-colors">
                   <Play className="h-4 w-4 mr-1.5" />
                   {currentStatus.state === 'paused' ? 'Resume' : 'Start'}

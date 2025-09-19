@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+// ...existing code...
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
@@ -133,7 +134,11 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
               <div className="flex items-center space-x-2 text-sm text-gray-500">
                 <span>{printer.serverUrl}</span>
                 <a href={printer.serverUrl?.replace(/:\d+/, ':80')} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
-                {(currentStatus.cameraStreamUrl || currentStatus.cameraSnapshotUrl) && <button onClick={() => setIsCameraVisible(!isCameraVisible)} className="text-blue-500 hover:text-blue-700" title={isCameraVisible ? 'Hide camera' : 'Show camera'}>{isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}</button>}
+                {(currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl) && (
+                  <button onClick={() => setIsCameraVisible(!isCameraVisible)} className="text-blue-500 hover:text-blue-700" title={isCameraVisible ? 'Hide camera' : 'Show camera'}>
+                    {isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -143,7 +148,20 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
             <button className="p-2 text-gray-500 hover:text-gray-700" title="Settings"><Cog className="h-4 w-4" /></button>
           </div>
         </div>
-        {isCameraVisible && currentStatus.cameraSnapshotUrl && <div className="mt-3"><img src={`${currentStatus.cameraSnapshotUrl}?t=${Date.now()}`} alt="Camera snapshot" className="w-full h-32 object-cover rounded border" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} /></div>}
+        {isCameraVisible && (currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl) && (
+          <div className="mt-3">
+            <img
+              src={`${currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl}?t=${Date.now()}`}
+              alt="Camera snapshot"
+              className="w-full h-32 object-cover rounded border"
+              onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+            />
+            {/* For OctoPrint, optionally show a note if only stream is available */}
+            {printer.backend === PrinterBackend.OctoPrint && !currentStatus.cameraSnapshotUrl && currentStatus.cameraStreamUrl && (
+              <div className="text-xs text-gray-400 mt-1">Live stream only (no snapshot)</div>
+            )}
+          </div>
+        )}
       </div>
       <div className="p-4 border-b border-gray-200">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><Thermometer className="h-4 w-4 mr-2" />Temperatures</h4>
@@ -166,7 +184,19 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
         </div>
       </div>
       <div className="p-4 border-b border-gray-200">
-        <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-gray-700">Print Controls</h4><div className="flex space-x-2"><button onClick={handlePause} disabled={!isPrinting} className="px-3 py-1 text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"><Pause className="h-3 w-3 mr-1" />Pause</button><button onClick={handleResume} disabled={!isPaused} className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"><Play className="h-3 w-3 mr-1" />Resume</button><button onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop} disabled={!currentStatus.isOnline} className={`px-3 py-1 text-sm font-medium text-white rounded flex items-center disabled:bg-gray-300 disabled:cursor-not-allowed ${isShutdown ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}>{isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <StopIcon className="h-3 w-3 mr-1" />}{isShutdown ? 'Restart' : 'Stop'}</button></div></div>
+        <div className="flex items-center justify-between">
+          <h4 className="text-sm font-medium text-gray-700">Print Controls</h4>
+          <div className="flex space-x-2">
+            {/* Only show Pause/Resume for supported backends */}
+            {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (
+              <>
+                <button onClick={handlePause} disabled={!isPrinting} className="px-3 py-1 text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"><Pause className="h-3 w-3 mr-1" />Pause</button>
+                <button onClick={handleResume} disabled={!isPaused} className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"><Play className="h-3 w-3 mr-1" />Resume</button>
+              </>
+            )}
+            <button onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop} disabled={!currentStatus.isOnline} className={`px-3 py-1 text-sm font-medium text-white rounded flex items-center disabled:bg-gray-300 disabled:cursor-not-allowed ${isShutdown ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}>{isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <StopIcon className="h-3 w-3 mr-1" />}{isShutdown ? 'Restart' : 'Stop'}</button>
+          </div>
+        </div>
         {progressNow > 0 && (
           <div className="mt-3">
             <div className="flex justify-between text-sm text-gray-600 mb-1">

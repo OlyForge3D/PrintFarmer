@@ -1,3 +1,4 @@
+// ...existing code...
 import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { X, AlertCircle, Check } from 'lucide-react';
@@ -20,6 +21,8 @@ interface CreatePrinterDto {
   dateAcquired?: string;
   backend: number;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
 }
 
 interface AddPrinterModalProps {
@@ -31,7 +34,8 @@ interface AddPrinterModalProps {
 const PrinterBackends = {
   Moonraker: 0,
   PrusaLink: 1,
-  SDCP: 2
+  SDCP: 2,
+  OctoPrint: 3
 } as const;
 
 export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
@@ -44,7 +48,10 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     manufacturerId: undefined,
     modelId: undefined,
     apiKey: undefined,
-  });  const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
+    cameraStreamUrl: '',
+    cameraSnapshotUrl: '',
+  });
+  const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
   const [models, setModels] = useState<PrinterModelDto[]>([]);
   const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -126,8 +133,12 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
       }
     }
     
-    if (formData.backend === PrinterBackends.PrusaLink && !formData.apiKey?.trim()) {
-      errors.apiKey = ['API Key is required for PrusaLink printers'];
+    if ((formData.backend === PrinterBackends.PrusaLink || formData.backend === PrinterBackends.OctoPrint) && !formData.apiKey?.trim()) {
+      errors.apiKey = [
+        formData.backend === PrinterBackends.OctoPrint
+          ? 'API Key is required for OctoPrint printers'
+          : 'API Key is required for PrusaLink printers'
+      ];
     }
 
     setValidationErrors(errors);
@@ -183,6 +194,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
       manufacturerId: undefined,
       modelId: undefined,
       apiKey: undefined,
+      cameraStreamUrl: '',
+      cameraSnapshotUrl: '',
     });
     setValidationErrors({});
     setError('');
@@ -260,6 +273,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   <option value={PrinterBackends.Moonraker}>Moonraker (Klipper)</option>
                   <option value={PrinterBackends.PrusaLink}>PrusaLink (Prusa)</option>
                   <option value={PrinterBackends.SDCP}>SDCP (Generic)</option>
+                  <option value={PrinterBackends.OctoPrint}>OctoPrint</option>
                 </select>
               </div>
             </div>
@@ -281,8 +295,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               )}
             </div>
 
-            {/* API Key (for PrusaLink) */}
-            {formData.backend === PrinterBackends.PrusaLink && (
+            {/* API Key (for PrusaLink and OctoPrint) */}
+            {(formData.backend === PrinterBackends.PrusaLink || formData.backend === PrinterBackends.OctoPrint) && (
               <div>
                 <label className="block text-sm font-medium text-pf-text-primary mb-1">
                   API Key *
@@ -292,7 +306,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   value={formData.apiKey || ''}
                   onChange={(e) => handleInputChange('apiKey', e.target.value)}
                   className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
-                  placeholder="Enter PrusaLink API key"
+                  placeholder={formData.backend === PrinterBackends.OctoPrint ? "Enter OctoPrint API key" : "Enter PrusaLink API key"}
                 />
                 {validationErrors.apiKey && (
                   <p className="mt-1 text-sm text-pf-error-text">{validationErrors.apiKey[0]}</p>
@@ -300,6 +314,35 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               </div>
             )}
 
+            {/* Camera URLs (for OctoPrint) */}
+            {formData.backend === PrinterBackends.OctoPrint && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
+                    Camera Stream URL
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.cameraStreamUrl || ''}
+                    onChange={(e) => handleInputChange('cameraStreamUrl', e.target.value)}
+                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                    placeholder="http://octoprint.local/webcam/?action=stream"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
+                    Camera Snapshot URL
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.cameraSnapshotUrl || ''}
+                    onChange={(e) => handleInputChange('cameraSnapshotUrl', e.target.value)}
+                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                    placeholder="http://octoprint.local/webcam/?action=snapshot"
+                  />
+                </div>
+              </>
+            )}
             {/* Manufacturer & Model */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Manufacturer */}
