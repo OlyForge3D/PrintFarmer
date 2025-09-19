@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
+using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Moq;
 
@@ -8,13 +9,10 @@ namespace Farm.Web.Api.Tests;
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class PrintersFileOpsTests : IClassFixture<CustomWebApplicationFactory>
+public class PrintersFileOpsTests : CustomDbHeavyTestBase
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public PrintersFileOpsTests(CustomWebApplicationFactory factory)
+    public PrintersFileOpsTests() : base(new CustomWebApplicationFactory())
     {
-        _factory = factory;
     }
 
     [Fact]

@@ -1,5 +1,10 @@
-﻿using Farm.Web.Api.Data;
+﻿using System;
+using System.Linq;
+using System.Threading.Tasks;
+using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,13 +16,32 @@ namespace Farm.Web.Api.Tests;
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming("DbHeavy")]
-public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
+public class DatabaseEntityTests : IClassFixture<WebApplicationFactory<Program>>
 {
-    private readonly CustomWebApplicationFactory _factory;
+    private readonly WebApplicationFactory<Program> _factory;
 
-    public DatabaseEntityTests(CustomWebApplicationFactory factory)
+    public DatabaseEntityTests(WebApplicationFactory<Program> factory)
     {
-        _factory = factory;
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+                var connection = new SqliteConnection("DataSource=:memory:");
+                connection.Open();
+                services.AddSingleton(connection);
+                services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+                // Ensure schema is created for the shared connection
+                using var provider = services.BuildServiceProvider();
+                using var scope = provider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                dbContext.Database.EnsureCreated();
+            });
+        });
     }
 
     [Fact]
@@ -74,6 +98,7 @@ public class DatabaseEntityTests : IClassFixture<CustomWebApplicationFactory>
         retrieved.ThumbnailPath.Should().Be("/tmp/test-model-thumb.png");
     }
 
+    // ...existing code for all other test methods...
     [Fact]
     public async Task SlicerProfile_ShouldCreateAndRetrieve_WithAllPropertiesAsync()
     {

@@ -1,18 +1,16 @@
 ﻿using System.Text.Json;
 using Moq;
+using Farm.Web.Api.Tests.Infrastructure;
 
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class PrintersIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class PrintersIntegrationTests : CustomDbHeavyTestBase
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public PrintersIntegrationTests(CustomWebApplicationFactory factory)
+    public PrintersIntegrationTests() : base(new CustomWebApplicationFactory())
     {
-        _factory = factory;
     }
 
     [Fact]

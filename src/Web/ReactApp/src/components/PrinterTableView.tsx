@@ -1,4 +1,7 @@
 import { useState, useCallback } from 'react';
+import moonrakerIcon from '@/assets/moonraker.svg';
+import octoprintIcon from '@/assets/octoprint.svg';
+import styles from './PrinterTableView.module.css';
 import { Printer, PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -83,13 +86,13 @@ export function PrinterTableView({
   const getBackendIcon = (backend: PrinterBackend) => {
     switch (backend) {
       case PrinterBackend.Moonraker:
-        return <span title="Moonraker" aria-label="Moonraker" role="img">🌙</span>;
+        return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle" />;
       case PrinterBackend.PrusaLink:
         return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
       case PrinterBackend.SDCP:
         return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
       case PrinterBackend.OctoPrint:
-        return <img src={require("@/assets/octoprint.svg")} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle" />;
+        return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle" />;
       default:
         return <span title="Other" aria-label="Other" role="img">🖨️</span>;
     }
@@ -262,8 +265,7 @@ export function PrinterTableView({
                       <div className="flex items-center space-x-2">
                         <div className="w-12 bg-pf-border-dark rounded-full h-2">
                           <div
-                            className="bg-pf-success h-2 rounded-full transition-all"
-                            style={{ width: `${currentStatus.progress}%` }}
+                            className={`bg-pf-success ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(currentStatus.progress / 5) * 5))}`]}`}
                           />
                         </div>
                         <span className="text-sm text-pf-text-primary">

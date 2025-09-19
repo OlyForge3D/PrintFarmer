@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using Farm.Web.Api.Data;
+using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,14 +14,12 @@ namespace Farm.Web.Api.Tests;
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class ModelControllerTests : IClassFixture<CustomWebApplicationFactory>
+public class ModelControllerTests : DbHeavyTestBase<Program>
 {
-    private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    public ModelControllerTests(CustomWebApplicationFactory factory)
+    public ModelControllerTests() : base(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>())
     {
-        _factory = factory;
         _client = _factory.CreateClient();
     }
 

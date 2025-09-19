@@ -1,4 +1,6 @@
 import { PrinterBackend } from '@/types/api';
+import moonrakerIcon from '@/assets/moonraker.svg';
+import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -64,13 +66,13 @@ export function PrinterCard({
   const getBackendIcon = (backend: PrinterBackend) => {
     switch (backend) {
       case PrinterBackend.Moonraker:
-        return <span title="Moonraker" aria-label="Moonraker" role="img">🌙</span>;
+        return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-6 w-6 align-middle" />;
       case PrinterBackend.PrusaLink:
         return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
       case PrinterBackend.SDCP:
         return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
       case PrinterBackend.OctoPrint:
-        return <img src={require("@/assets/octoprint.svg")} alt="OctoPrint" title="OctoPrint" className="inline h-6 w-6 align-middle" />;
+        return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-6 w-6 align-middle" />;
       default:
         return <span title="Other" aria-label="Other" role="img">🖨️</span>;
     }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import styles from './AddPrinterModal.module.css';
 import { X, AlertCircle, Check } from 'lucide-react';
 import type { PrinterModelDto } from '@/types/api';
 
@@ -349,10 +350,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   type="date"
                   value={formData.dateAcquired || ''}
                   onChange={(e) => handleInputChange('dateAcquired', e.target.value)}
-                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
-                  style={{
-                    colorScheme: 'dark',
-                  }}
+                  className={`w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent ${styles.dateInputDark}`}
                   max={new Date().toISOString().split('T')[0]}
                   title="Click to open date picker"
                   aria-label="Date acquired"

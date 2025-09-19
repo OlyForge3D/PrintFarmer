@@ -30,9 +30,12 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
             .Must(BeValidUrl).WithMessage("Server URL must be a valid HTTP/HTTPS URL")
             .Must(NotContainSqlInjectionPatterns).WithMessage("Server URL contains potentially harmful content");
 
+
         RuleFor(x => x.ApiKey)
             .Length(0, 500).WithMessage("API Key cannot exceed 500 characters")
-            .When(x => !string.IsNullOrEmpty(x.ApiKey));
+            .When(x => !string.IsNullOrEmpty(x.ApiKey) || x.Backend == PrinterBackend.OctoPrint)
+            .NotEmpty().WithMessage("API Key is required for OctoPrint printers")
+            .When(x => x.Backend == PrinterBackend.OctoPrint);
 
         RuleFor(x => x.Notes)
             .Length(0, 1000).WithMessage("Notes cannot exceed 1000 characters")

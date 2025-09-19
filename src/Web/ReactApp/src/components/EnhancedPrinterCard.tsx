@@ -1,4 +1,6 @@
 import React, { useState, useCallback } from 'react';
+import moonrakerIcon from '@/assets/moonraker.svg';
+import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
@@ -44,10 +46,10 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
   const widthClass = (pct: number) => `pf-w-${Math.min(100, Math.max(0, Math.round(pct / 5) * 5))}`;
   const getStatusColor = (online: boolean, state?: string) => !online ? 'bg-gray-100 text-gray-800 border-gray-300' : ({ printing: 'bg-green-100 text-green-800 border-green-300', paused: 'bg-yellow-100 text-yellow-800 border-yellow-300', error: 'bg-red-100 text-red-800 border-red-300', ready: 'bg-blue-100 text-blue-800 border-blue-300', idle: 'bg-blue-100 text-blue-800 border-blue-300', operational: 'bg-blue-100 text-blue-800 border-blue-300' } as Record<string, string>)[(state||'').toLowerCase()] || 'bg-gray-100 text-gray-800 border-gray-300';
   const getBackendIcon = (b: PrinterBackend) => {
-    if (b === PrinterBackend.Moonraker) return <span title="Moonraker" aria-label="Moonraker" role="img">🌙</span>;
+    if (b === PrinterBackend.Moonraker) return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle" />;
     if (b === PrinterBackend.PrusaLink) return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
     if (b === PrinterBackend.SDCP) return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
-    if (b === PrinterBackend.OctoPrint) return <img src={require("@/assets/octoprint.svg")} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle" />;
+    if (b === PrinterBackend.OctoPrint) return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle" />;
     return <span title="Other" aria-label="Other" role="img">🖨️</span>;
   };
   const formatTemperature = (t?: number, target?: number) => target !== undefined ? `${Math.round(t || 0)}° → ${Math.round(target)}°` : `${Math.round(t || 0)}°`;

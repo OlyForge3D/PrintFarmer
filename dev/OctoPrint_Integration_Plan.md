@@ -9,9 +9,11 @@ Add support for OctoPrint as a printer backend in PrintFarmer, enabling manageme
 ### 1. Backend (C#/.NET)
 - [x] Add OctoPrint to PrinterBackend enum (shared and API)
 - [x] Add OctoPrint-specific fields to Printer model/DTO (API key, camera URL, etc.)
-- [ ] Create IOctoPrintClient interface and OctoPrintClient implementation
-- [ ] Implement OctoPrint API calls (status, job control, camera, etc.)
-- [ ] Integrate OctoPrintClient into PrintersController and related services
+- [x] Create IOctoPrintClient interface and OctoPrintClient implementation
+- [x] Implement OctoPrint API calls (status, job control, camera, etc.)
+- [x] Integrate OctoPrintClient into PrintersController and related services
+	- [x] Plugin detection and auto-discovery for X/Y/Z and spool info (Display Current Position, SpoolManager, Spoolman plugins)
+	- [x] Field parity with Moonraker maximized; differences and plugin requirements documented in `docs/octoprint-vs-moonraker-parity.md`
 - [x] Update database migrations if new fields are needed
 - [x] Add validation for OctoPrint printer configuration
 - [ ] Add unit/integration tests for OctoPrint backend
@@ -26,7 +28,7 @@ Add support for OctoPrint as a printer backend in PrintFarmer, enabling manageme
 - [ ] Add frontend tests for OctoPrint support
 
 ### 3. Documentation
-- [ ] Document OctoPrint integration, configuration, and limitations
+- [x] Document OctoPrint integration, configuration, and limitations (see `docs/octoprint-vs-moonraker-parity.md`)
 - [ ] Update README and API docs as needed
 
 ## References
@@ -37,4 +39,5 @@ Add support for OctoPrint as a printer backend in PrintFarmer, enabling manageme
 - Users can add/manage OctoPrint printers in PrintFarmer
 - Status, job control, and camera features work for OctoPrint printers
 - OctoPrint printers are clearly identified in the UI (custom icon/branding implemented)
+- Plugin detection and field parity logic is implemented in backend
 - All tests pass and documentation is updated

@@ -24,7 +24,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Printers")]
-public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
+public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
 {
     // Feature flag: when enabled we swallow transient startup DB errors for /fast endpoint and return empty list.
     private static readonly bool FastEndpointDefensive =
@@ -143,6 +143,231 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         Backend: Farm.Web.Shared.PrinterBackend.SDCP,
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress
+                    );
+                }
+                else if (p.Backend == 3) // OctoPrint
+                {
+                    CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"octoprint-{p.Id}");
+                    // Fetch both printer and job status
+                    string printerJson = await breaker.ExecuteAsync(async ct =>
+                        await octoprint.GetPrinterStateAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
+                    string jobJson = await breaker.ExecuteAsync(async ct =>
+                        await octoprint.GetJobStatusAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
+                    // Plugin detection: query /api/plugins
+                    string pluginsJson = string.Empty;
+                    bool hasPositionPlugin = false;
+                    bool hasSpoolManager = false;
+                    bool hasSpoolmanPlugin = false;
+                    try
+                    {
+                        var pluginsRequest = new HttpRequestMessage(HttpMethod.Get, $"{p.ServerUrl.TrimEnd('/')}/api/plugins");
+                        pluginsRequest.Headers.Add("X-Api-Key", p.ApiKey ?? string.Empty);
+                        var pluginsResponse = await ((OctoPrintClient)octoprint).HttpClient.SendAsync(pluginsRequest, fastTimeoutCts.Token);
+                        pluginsJson = await pluginsResponse.Content.ReadAsStringAsync();
+                    }
+                    catch { }
+
+                    if (!string.IsNullOrWhiteSpace(pluginsJson))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(pluginsJson);
+                            var root = doc.RootElement;
+                            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("plugins", out var pluginsProp))
+                            {
+                                foreach (var plugin in pluginsProp.EnumerateArray())
+                                {
+                                    if (plugin.TryGetProperty("key", out var keyProp))
+                                    {
+                                        var key = keyProp.GetString()?.ToLowerInvariant();
+                                        if (key == "display_current_position" || key == "positioninfo")
+                                        {
+                                            hasPositionPlugin = true;
+                                        }
+                                        if (key == "spoolmanager")
+                                        {
+                                            hasSpoolManager = true;
+                                        }
+                                        if (key == "spoolman")
+                                        {
+                                            hasSpoolmanPlugin = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Parse printer state
+                    bool isOnline = false;
+                    string? state = null;
+                    double? hotendTemp = null;
+                    double? bedTemp = null;
+                    double? hotendTarget = null;
+                    double? bedTarget = null;
+                    double? x = null, y = null, z = null;
+                    PrinterSpoolInfoDto? spoolInfo = null;
+                    if (!string.IsNullOrWhiteSpace(printerJson))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(printerJson);
+                            var root = doc.RootElement;
+                            if (root.TryGetProperty("state", out var stateProp))
+                            {
+                                state = stateProp.GetString();
+                                isOnline = state != null && state != "Offline";
+                            }
+                            if (root.TryGetProperty("temperature", out var tempProp))
+                            {
+                                if (tempProp.TryGetProperty("tool0", out var tool0))
+                                {
+                                    if (tool0.TryGetProperty("actual", out var actual))
+                                    {
+                                        hotendTemp = actual.GetDouble();
+                                    }
+                                    if (tool0.TryGetProperty("target", out var target))
+                                    {
+                                        hotendTarget = target.GetDouble();
+                                    }
+                                }
+                                if (tempProp.TryGetProperty("bed", out var bed))
+                                {
+                                    if (bed.TryGetProperty("actual", out var actual))
+                                    {
+                                        bedTemp = actual.GetDouble();
+                                    }
+                                    if (bed.TryGetProperty("target", out var target))
+                                    {
+                                        bedTarget = target.GetDouble();
+                                    }
+                                }
+                            }
+
+                            // X/Y/Z position plugin support
+                            if (hasPositionPlugin && root.TryGetProperty("position", out var posProp))
+                            {
+                                if (posProp.TryGetProperty("x", out var xProp))
+                                {
+                                    x = xProp.GetDouble();
+                                }
+                                if (posProp.TryGetProperty("y", out var yProp))
+                                {
+                                    y = yProp.GetDouble();
+                                }
+                                if (posProp.TryGetProperty("z", out var zProp))
+                                {
+                                    z = zProp.GetDouble();
+                                }
+                            }
+
+                            // SpoolManager plugin support
+                            if (hasSpoolManager && root.TryGetProperty("spoolmanager", out var spoolProp))
+                            {
+                                // Map OctoPrint SpoolManager plugin fields to PrinterSpoolInfoDto
+                                spoolInfo = new PrinterSpoolInfoDto(
+                                    HasActiveSpool: true,
+                                    ActiveSpoolId: spoolProp.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : null,
+                                    SpoolName: spoolProp.TryGetProperty("display_name", out var nameProp) ? nameProp.GetString() : null,
+                                    Material: spoolProp.TryGetProperty("material", out var matProp) ? matProp.GetString() : null,
+                                    ColorHex: spoolProp.TryGetProperty("color", out var colorProp) ? colorProp.GetString() : null,
+                                    FilamentName: spoolProp.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null,
+                                    Vendor: spoolProp.TryGetProperty("vendor", out var vendorProp) ? vendorProp.GetString() : null,
+                                    RemainingWeightG: spoolProp.TryGetProperty("remaining_weight", out var remProp) ? remProp.GetDouble() : null,
+                                    SpoolInUse: spoolProp.TryGetProperty("in_use", out var inUseProp) ? inUseProp.GetBoolean() : null
+                                );
+                            }
+
+                            // Spoolman plugin support (OctoPrint-Spoolman bridge)
+                            if (hasSpoolmanPlugin)
+                            {
+                                try
+                                {
+                                    var spoolmanRequest = new HttpRequestMessage(HttpMethod.Get, $"{p.ServerUrl.TrimEnd('/')}/plugin/spoolman/api/v1/printer");
+                                    spoolmanRequest.Headers.Add("X-Api-Key", p.ApiKey ?? string.Empty);
+                                    var spoolmanResponse = await ((OctoPrintClient)octoprint).HttpClient.SendAsync(spoolmanRequest, fastTimeoutCts.Token);
+                                    if (spoolmanResponse.IsSuccessStatusCode)
+                                    {
+                                        var spoolmanJson = await spoolmanResponse.Content.ReadAsStringAsync();
+                                        using var spoolmanDoc = JsonDocument.Parse(spoolmanJson);
+                                        var spoolmanRoot = spoolmanDoc.RootElement;
+                                        // Map Spoolman fields to PrinterSpoolInfoDto (example fields, adjust as needed)
+                                        spoolInfo = new PrinterSpoolInfoDto(
+                                            HasActiveSpool: spoolmanRoot.TryGetProperty("has_active_spool", out var hasSpool) && hasSpool.GetBoolean(),
+                                            ActiveSpoolId: spoolmanRoot.TryGetProperty("active_spool_id", out var spoolId) ? spoolId.GetInt32() : null,
+                                            SpoolName: spoolmanRoot.TryGetProperty("spool_name", out var spoolName) ? spoolName.GetString() : null,
+                                            Material: spoolmanRoot.TryGetProperty("material", out var mat) ? mat.GetString() : null,
+                                            ColorHex: spoolmanRoot.TryGetProperty("color", out var color) ? color.GetString() : null,
+                                            FilamentName: spoolmanRoot.TryGetProperty("filament_name", out var filName) ? filName.GetString() : null,
+                                            Vendor: spoolmanRoot.TryGetProperty("vendor", out var vendor) ? vendor.GetString() : null,
+                                            RemainingWeightG: spoolmanRoot.TryGetProperty("remaining_weight_g", out var remG) ? remG.GetDouble() : null,
+                                            SpoolInUse: spoolmanRoot.TryGetProperty("spool_in_use", out var inUse) ? inUse.GetBoolean() : null
+                                        );
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Parse job info
+                    double? progress = null;
+                    string? jobName = null;
+                    if (!string.IsNullOrWhiteSpace(jobJson))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(jobJson);
+                            var root = doc.RootElement;
+                            if (root.TryGetProperty("progress", out var progressProp))
+                            {
+                                if (progressProp.TryGetProperty("completion", out var completion))
+                                {
+                                    progress = completion.GetDouble();
+                                }
+                            }
+                            if (root.TryGetProperty("job", out var jobProp))
+                            {
+                                if (jobProp.TryGetProperty("file", out var fileProp))
+                                {
+                                    if (fileProp.TryGetProperty("name", out var nameProp))
+                                    {
+                                        jobName = nameProp.GetString();
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    return new PrinterDto(
+                        Id: p.Id,
+                        Name: p.Name,
+                        ServerUrl: p.ServerUrl,
+                        Notes: p.Notes,
+                        IsOnline: isOnline,
+                        State: state,
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Progress: progress,
+                        JobName: jobName,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: await octoprint.GetCameraStreamUrlAsync(p.ServerUrl, p.ApiKey ?? string.Empty),
+                        CameraSnapshotUrl: null,
+                        HotendTemp: hotendTemp,
+                        BedTemp: bedTemp,
+                        HotendTarget: hotendTarget,
+                        BedTarget: bedTarget,
+                        X: x, // Will be populated if plugin is installed
+                        Y: y,
+                        Z: z,
+                        SpoolInfo: spoolInfo, // Will be populated if plugin is installed
+                        Backend: Farm.Web.Shared.PrinterBackend.OctoPrint,
                         ApiKey: p.ApiKey,
                         OriginalServerUrl: p.OriginalServerUrl,
                         IpAddress: p.IpAddress
@@ -361,10 +586,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(2); // Short timeout to avoid blocking
-            
+
             using var request = new HttpRequestMessage(HttpMethod.Head, snapshotUrl);
             using var response = await httpClient.SendAsync(request, ct);
-            
+
             // Camera is available if we get a successful response (2xx) or even a 4xx
             // (404 might mean camera exists but no current image, 401/403 means auth required but camera exists)
             // 5xx errors typically mean the camera service is not running/configured
@@ -457,7 +682,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         Printer? p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null)
+        {
             return NotFound();
+        }
 
         // Use moderate timeout for individual status checks (balance between responsiveness and accuracy)
         using CancellationTokenSource statusCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -580,7 +807,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         Printer? p = await db.Printers.Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null)
+        {
             return NotFound();
+        }
         if (p.Backend == 1) // PrusaLink
         {
             PrusaCompositeStatus status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
@@ -904,7 +1133,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             BedTemp: null,
             HotendTarget: null,
             BedTarget: null,
-            Backend: (PrinterBackend)p.Backend,
+            Backend: dto.Backend, // Use the requested backend (ensures OctoPrint is set correctly)
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress

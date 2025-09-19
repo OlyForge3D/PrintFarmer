@@ -367,6 +367,11 @@ builder.Services.AddHttpClient<PrusaLinkClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 
+builder.Services.AddHttpClient<OctoPrintClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 builder.Services.AddHttpClient<SpoolmanService>("SpoolmanService", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
@@ -387,6 +392,7 @@ builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<ConfigurationValidator>();
 builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
 builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
+builder.Services.AddScoped<IOctoPrintClient, OctoPrintClient>();
 // Model analysis and virus scanning services for ModelController
 builder.Services.AddScoped<IModelAnalysisService, ModelAnalysisService>();
 builder.Services.AddScoped<IVirusScanner, ClamAVVirusScanner>();
