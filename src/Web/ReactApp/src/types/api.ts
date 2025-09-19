@@ -1,3 +1,11 @@
+// PrintJobStatusDto for Moonraker print job status
+export interface PrintJobStatusDto {
+  state: string;
+  progress?: number;
+  jobName?: string;
+  thumbnailUrl?: string;
+  error?: string;
+}
 // Mirror existing shared models from Farm.Web.Shared
 
 export interface Printer {

@@ -1,3 +1,4 @@
+import type { PrintJobStatusDto } from '@/types/api';
 import {
   ApiError,
   AuthenticationResult,
@@ -581,6 +582,15 @@ export class ApiClient {
   async request<T>(config: AxiosRequestConfig): Promise<T> {
     const response = await this.client.request<T>(config);
     return response.data;
+  }
+  // Get print job status for Moonraker printers
+  async getPrintJobStatus(printerId: string): Promise<PrintJobStatusDto | null> {
+    try {
+      const response = await this.client.get<PrintJobStatusDto>(`/printers/${printerId}/printjob`);
+      return response.data;
+    } catch {
+      return null;
+    }
   }
 }
 

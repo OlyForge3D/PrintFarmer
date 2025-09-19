@@ -740,8 +740,8 @@ public record UpdateGcodeFileDto(
 /// Lifecycle status of a print job.
 /// </summary>
 // Custom permissive converter so tests / workers can deserialize numeric or string forms ("Queued", 0, "0").
-[JsonConverter(typeof(Farm.Web.Shared.Json.PrintJobStatusDtoJsonConverter))]
-public enum PrintJobStatusDto
+[JsonConverter(typeof(Farm.Web.Shared.Json.PrintJobStatusJsonConverter))]
+public enum PrintJobStatus
 {
     Queued = 0,
     Assigned = 1,
@@ -771,7 +771,7 @@ public record PrintJobDto(
     Guid Id,
     string Name,
     int Priority,
-    PrintJobStatusDto Status,
+    PrintJobStatus Status,
     DateTime QueuedAt,
     DateTime? StartedAt = null,
     DateTime? CompletedAt = null,
@@ -1270,7 +1270,7 @@ public class JobQueuePrintJobDto
     public string GcodeFileName { get; set; } = string.Empty;
     public Guid? AssignedPrinterId { get; set; }
     public string AssignedPrinterName { get; set; } = string.Empty;
-    public PrintJobStatusDto Status { get; set; }
+    public PrintJobStatus? Status { get; set; }
     public int Priority { get; set; }
     public int QueuePosition { get; set; }
     public decimal? RequiredNozzleDiameter { get; set; }
@@ -1304,7 +1304,7 @@ public class QueuePrintJobDto
 /// </summary>
 public class UpdatePrintJobStatusDto
 {
-    public PrintJobStatusDto? Status { get; set; }
+    public PrintJobStatus? Status { get; set; }
     public PrintJobPriority? Priority { get; set; }
     public Guid? AssignedPrinterId { get; set; }
     public double? ActualFilamentUsage { get; set; }

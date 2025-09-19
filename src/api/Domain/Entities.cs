@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Domain;
 
@@ -399,18 +400,6 @@ public class PrintJob
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime QueuedAt { get; set; }
-}
-
-public enum PrintJobStatus
-{
-    Queued = 0,
-    Assigned = 1,
-    Starting = 2,
-    Printing = 3,
-    Paused = 4,
-    Completed = 5,
-    Failed = 6,
-    Cancelled = 7
 }
 
 // Printer Capabilities (extends Printer entity conceptually)

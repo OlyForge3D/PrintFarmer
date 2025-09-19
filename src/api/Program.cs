@@ -62,7 +62,7 @@ builder.Services.AddControllers(options =>
         o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
         // Add permissive converters for enums that have been causing deserialization failures in tests
         o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrinterBackendJsonConverter());
-        o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrintJobStatusDtoJsonConverter());
+        o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrintJobStatusJsonConverter());
     })
     .AddJsonOptions(options =>
     {

@@ -59,47 +59,47 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
 }
 
 /// <summary>
-/// Permissive converter for PrintJobStatusDto; mirrors PrinterBackendJsonConverter behavior.
+/// Permissive converter for PrintJobStatus; mirrors PrinterBackendJsonConverter behavior.
 /// </summary>
-public sealed class PrintJobStatusDtoJsonConverter : JsonConverter<PrintJobStatusDto>
+public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
 {
-    public override PrintJobStatusDto Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override PrintJobStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         try
         {
             return reader.TokenType switch
             {
                 JsonTokenType.String => ParseString(reader.GetString()),
-                JsonTokenType.Number => reader.TryGetInt32(out var i) && Enum.IsDefined(typeof(PrintJobStatusDto), i)
-                    ? (PrintJobStatusDto)i : PrintJobStatusDto.Queued,
-                _ => PrintJobStatusDto.Queued
+                JsonTokenType.Number => reader.TryGetInt32(out var i) && Enum.IsDefined(typeof(PrintJobStatus), i)
+                    ? (PrintJobStatus)i : PrintJobStatus.Queued,
+                _ => PrintJobStatus.Queued
             };
         }
         catch
         {
-            return PrintJobStatusDto.Queued;
+            return PrintJobStatus.Queued;
         }
     }
 
-    private static PrintJobStatusDto ParseString(string? value)
+    private static PrintJobStatus ParseString(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return PrintJobStatusDto.Queued;
+            return PrintJobStatus.Queued;
         }
 
-        if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrintJobStatusDto), num))
+        if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrintJobStatus), num))
         {
-            return (PrintJobStatusDto)num;
+            return (PrintJobStatus)num;
         }
-        if (Enum.TryParse<PrintJobStatusDto>(value, ignoreCase: true, out var parsed))
+        if (Enum.TryParse<PrintJobStatus>(value, ignoreCase: true, out var parsed))
         {
             return parsed;
         }
-        return PrintJobStatusDto.Queued;
+        return PrintJobStatus.Queued;
     }
 
-    public override void Write(Utf8JsonWriter writer, PrintJobStatusDto value, JsonSerializerOptions options)
+    public override void Write(Utf8JsonWriter writer, PrintJobStatus value, JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(writer);
         writer.WriteStringValue(value.ToString());

@@ -6,6 +6,9 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Cog, Play, Pause, Square as StopIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { apiClient } from '@/services/api';
+import type { PrintJobStatusDto } from '@/types/api';
 
 interface PrinterCardProps {
   printer: Printer;
@@ -26,23 +29,60 @@ export function PrinterCard({
   const { getPrinterStatus } = usePrinterStatusUpdates();
   const realtimeStatus = getPrinterStatus(printer.id);
 
-  // Use realtime status if available, otherwise use the printer data
-  const currentStatus = {
-    isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
-    state: realtimeStatus?.state ?? printer.state,
-    progress: realtimeStatus?.progress ?? printer.progress,
-    jobName: realtimeStatus?.jobName ?? printer.jobName,
-    hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
-    bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
-    hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
-    bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
-    x: realtimeStatus?.x ?? printer.x,
-    y: realtimeStatus?.y ?? printer.y,
-    z: realtimeStatus?.z ?? printer.z,
-    cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
-    cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
-    thumbnailUrl: realtimeStatus?.thumbnailUrl ?? printer.thumbnailUrl,
-  };
+  // State for print job status (Moonraker only)
+  const [printJobStatus, setPrintJobStatus] = useState<PrintJobStatusDto | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    if (printer.backend === PrinterBackend.Moonraker) {
+      apiClient.getPrintJobStatus(printer.id).then(res => {
+        if (!ignore) setPrintJobStatus(res);
+      });
+    } else {
+      setPrintJobStatus(null);
+    }
+    return () => { ignore = true; };
+  }, [printer.id, printer.backend]);
+
+  // Prefer print job status for Moonraker, fallback to realtime/server status
+  const currentStatus = (() => {
+    if (printer.backend === PrinterBackend.Moonraker && printJobStatus && printJobStatus.state && printJobStatus.state !== 'offline') {
+      return {
+        ...realtimeStatus,
+        isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
+        state: printJobStatus.state,
+        progress: printJobStatus.progress ?? realtimeStatus?.progress ?? printer.progress,
+        jobName: printJobStatus.jobName ?? realtimeStatus?.jobName ?? printer.jobName,
+        thumbnailUrl: printJobStatus.thumbnailUrl ?? realtimeStatus?.thumbnailUrl ?? printer.thumbnailUrl,
+        hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
+        bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
+        hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
+        bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
+        x: realtimeStatus?.x ?? printer.x,
+        y: realtimeStatus?.y ?? printer.y,
+        z: realtimeStatus?.z ?? printer.z,
+        cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
+        cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
+      };
+    }
+    // Default fallback
+    return {
+      isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
+      state: realtimeStatus?.state ?? printer.state,
+      progress: realtimeStatus?.progress ?? printer.progress,
+      jobName: realtimeStatus?.jobName ?? printer.jobName,
+      hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
+      bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
+      hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
+      bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
+      x: realtimeStatus?.x ?? printer.x,
+      y: realtimeStatus?.y ?? printer.y,
+      z: realtimeStatus?.z ?? printer.z,
+      cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
+      cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
+      thumbnailUrl: realtimeStatus?.thumbnailUrl ?? printer.thumbnailUrl,
+    };
+  })();
 
   const getStatusColor = (isOnline: boolean, state?: string) => {
     if (!isOnline) return 'bg-pf-status-offline-bg text-pf-status-offline-text border-pf-status-offline-border';

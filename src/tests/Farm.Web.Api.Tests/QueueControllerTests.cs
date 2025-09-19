@@ -99,7 +99,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         jobs![0].Id.Should().Be(job.Id);
         jobs[0].AssignedPrinterId.Should().Be(printer.Id);
         jobs[0].AssignedPrinterName.Should().Be("Queue Test Printer");
-        jobs[0].Status.Should().Be(PrintJobStatusDto.Queued);
+        jobs[0].Status.Should().Be(PrintJobStatus.Queued);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         job!.Id.Should().NotBeEmpty();
         job.GcodeFileId.Should().Be(gcodeFile.Id);
         job.AssignedPrinterId.Should().Be(printer.Id);
-        job.Status.Should().Be(PrintJobStatusDto.Queued);
+        job.Status.Should().Be(PrintJobStatus.Queued);
         job.Priority.Should().Be((int)PrintJobPriority.Normal);
         job.RequiredNozzleDiameter.Should().Be(0.4m);
         job.RequiredMaterialType.Should().Be("PLA");

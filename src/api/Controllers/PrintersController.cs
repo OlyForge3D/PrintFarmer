@@ -1,7 +1,12 @@
-﻿using System.Globalization;
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
@@ -66,6 +71,58 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             // If parsing fails, fall back to original input
             return url;
+        }
+    }
+
+    /// <summary>
+    /// Gets the current print job status and all available properties for the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>All available print job status properties (from Moonraker print_stats, display_status, job_queue, etc)</returns>
+    /// <response code="200">Returns the print job status</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error communicating with the printer</response>
+    [HttpGet("{id:guid}/printjob")]
+    [ProducesResponseType(typeof(PrintJobStatusDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrintJobStatusDto>> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
+    {
+        var p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null)
+        {
+            return NotFound();
+        }
+
+        if (p.Backend != 0) // Only Moonraker supported for now
+        {
+            return BadRequest("Print job status is only available for Moonraker printers.");
+        }
+
+        try
+        {
+            var job = await moon.GetJobAsync(p.ServerUrl, ct);
+            if (job == null)
+            {
+                return Ok(new Farm.Web.Shared.PrintJobStatusDto { State = "offline" });
+            }
+
+            // Map all available fields from PrinterJob and extend as needed
+            var dto = new PrintJobStatusDto
+            {
+                State = job.PrintState,
+                Progress = job.Progress,
+                JobName = job.JobName,
+                ThumbnailUrl = job.ThumbnailUrl
+                // Additional fields can be filled by extending PrinterJob and GetJobAsync
+            };
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Error getting print job status for printer {PrinterId}", p.Id);
+            return StatusCode(500, new Farm.Web.Shared.PrintJobStatusDto { State = "error", Error = ex.Message });
         }
     }
 

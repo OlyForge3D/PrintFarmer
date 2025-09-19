@@ -101,7 +101,7 @@ public class QueueController : ControllerBase
                     GcodeFileName = j.GcodeFile.DisplayName,
                     AssignedPrinterId = j.AssignedPrinterId,
                     AssignedPrinterName = j.AssignedPrinter!.Name,
-                    Status = (PrintJobStatusDto)j.Status,
+                    Status = (PrintJobStatus?)j.Status,
                     Priority = j.Priority,
                     QueuePosition = 0, // Will be calculated below
                     RequiredNozzleDiameter = j.RequiredNozzleDiameter,
@@ -119,7 +119,7 @@ public class QueueController : ControllerBase
                 .ToListAsync();
 
             // Calculate queue positions for queued jobs
-            List<JobQueuePrintJobDto> queuedJobs = jobs.Where(j => j.Status == PrintJobStatusDto.Queued || j.Status == PrintJobStatusDto.Assigned).ToList();
+            List<JobQueuePrintJobDto> queuedJobs = jobs.Where(j => j.Status.HasValue && (j.Status.Value == PrintJobStatus.Queued || j.Status.Value == PrintJobStatus.Assigned)).ToList();
             for (int i = 0; i < queuedJobs.Count; i++)
             {
                 queuedJobs[i].QueuePosition = i + 1;
@@ -198,7 +198,7 @@ public class QueueController : ControllerBase
                 GcodeFileName = gcodeFile.DisplayName,
                 AssignedPrinterId = printJob.AssignedPrinterId,
                 AssignedPrinterName = (await _context.Printers.FindAsync(printJob.AssignedPrinterId))?.Name ?? "Unknown",
-                Status = (PrintJobStatusDto)printJob.Status,
+                Status = (Farm.Web.Shared.PrintJobStatus?)printJob.Status,
                 Priority = printJob.Priority,
                 QueuePosition = printJob.QueuePosition,
                 RequiredNozzleDiameter = printJob.RequiredNozzleDiameter,
@@ -246,7 +246,7 @@ public class QueueController : ControllerBase
             GcodeFileName = job.GcodeFile.DisplayName,
             AssignedPrinterId = job.AssignedPrinterId,
             AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-            Status = (PrintJobStatusDto)job.Status,
+            Status = (Farm.Web.Shared.PrintJobStatus?)job.Status,
             Priority = job.Priority,
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
@@ -339,7 +339,7 @@ public class QueueController : ControllerBase
                 GcodeFileName = job.GcodeFile.DisplayName,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-                Status = (PrintJobStatusDto)job.Status,
+                Status = job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
