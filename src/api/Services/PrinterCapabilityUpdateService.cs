@@ -127,7 +127,9 @@ public class PrinterCapabilityUpdateService : BackgroundService
             foreach (PrinterCapabilities? capability in capabilities)
             {
                 if (cancellationToken.IsCancellationRequested)
+                {
                     break;
+                }
 
                 try
                 {

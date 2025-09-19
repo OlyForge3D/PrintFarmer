@@ -219,6 +219,7 @@ export function CatalogPage() {
                 onChange={(e) => setNewManufacturer(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && addManufacturer()}
                 placeholder="Manufacturer name"
+                title="Manufacturer name"
                 className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary text-sm"
               />
               <button
@@ -250,6 +251,8 @@ export function CatalogPage() {
                           onChange={(e) => setEditingManufacturer({ ...editingManufacturer, name: e.target.value })}
                           className="px-2 py-1 bg-pf-bg-0 border border-pf-border rounded text-sm"
                           autoFocus
+                          placeholder="Edit manufacturer name"
+                          title="Edit manufacturer name"
                         />
                         <button
                           onClick={(e) => {
@@ -257,6 +260,7 @@ export function CatalogPage() {
                             updateManufacturer(editingManufacturer.id, editingManufacturer.name);
                           }}
                           className="text-green-400 hover:text-green-300"
+                          title="Save manufacturer name"
                         >
                           <Save className="h-4 w-4" />
                         </button>
@@ -266,6 +270,7 @@ export function CatalogPage() {
                             setEditingManufacturer(null);
                           }}
                           className="text-red-400 hover:text-red-300"
+                          title="Cancel edit"
                         >
                           <X className="h-4 w-4" />
                         </button>
@@ -285,6 +290,7 @@ export function CatalogPage() {
                           setEditingManufacturer({ id: manufacturer.id, name: manufacturer.name });
                         }}
                         className="text-blue-400 hover:text-blue-300"
+                        title="Edit manufacturer"
                       >
                         <Edit className="h-4 w-4" />
                       </button>
@@ -294,6 +300,7 @@ export function CatalogPage() {
                           deleteManufacturer(manufacturer.id);
                         }}
                         className="text-red-400 hover:text-red-300"
+                        title="Delete manufacturer"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -364,6 +371,8 @@ export function CatalogPage() {
                               onChange={(e) => setEditingModel({ ...editingModel, name: e.target.value })}
                               className="px-2 py-1 bg-pf-bg-0 border border-pf-border rounded text-sm"
                               autoFocus
+                              placeholder="Edit model name"
+                              title="Edit model name"
                             />
                             <button
                               onClick={() => updateModel(editingModel.id, editingModel.name)}

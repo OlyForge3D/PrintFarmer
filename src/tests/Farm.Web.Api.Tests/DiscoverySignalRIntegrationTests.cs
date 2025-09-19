@@ -11,45 +11,25 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests;
 
+using Farm.Web.Api.Tests.Infrastructure;
+
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class DiscoverySignalRIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
     public DiscoverySignalRIntegrationTests(WebApplicationFactory<Program> factory)
-    {
-        ArgumentNullException.ThrowIfNull(factory);
-        _factory = factory.WithWebHostBuilder(builder =>
+        : base(factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {
                 // Replace network discovery settings with a tiny pretend network (/30 gives 2 usable hosts)
                 services.AddSingleton<INetworkDiscoverySettingsService>(sp => new TestDiscoverySettingsService());
-
-                // Swap the AppDbContext to an in-memory SQLite database to guarantee fresh schema per test run.
-                // Remove existing context registration
-                var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-                if (descriptor != null)
-                {
-                    services.Remove(descriptor);
-                }
-
-                // Create and open shared in-memory connection (must stay open for lifetime of factory)
-                var connection = new SqliteConnection("DataSource=:memory:");
-                connection.Open();
-                services.AddSingleton(connection); // dispose with container
-
-                services.AddDbContext<AppDbContext>(options =>
-                {
-                    options.UseSqlite(connection);
-                });
-
                 // Suppress verbose EF Core SQL command logs during tests (set global minimum to Warning)
                 services.AddLogging(lb => lb.SetMinimumLevel(LogLevel.Warning));
             });
-        });
+        }))
+    {
     }
 
     [Fact(Timeout = 15000)]

@@ -2,6 +2,7 @@
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -12,33 +13,20 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests;
 
-[Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
-[TestTiming]
-public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+[
+    Trait("Category", "DbHeavy"),
+    Collection("DbHeavySerial"),
+    TestTiming
+]
+public class DiscoveryExclusionIntegrationTests : DbHeavyTestBase<Program>
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
     public DiscoveryExclusionIntegrationTests(WebApplicationFactory<Program> factory)
-    {
-        ArgumentNullException.ThrowIfNull(factory);
-        _factory = factory.WithWebHostBuilder(builder =>
+        : base(factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {
                 // Replace discovery settings with a deterministic /30 that includes 10.10.0.1 and 10.10.0.2
                 services.AddSingleton<INetworkDiscoverySettingsService>(sp => new FixedRangeDiscoverySettingsService());
-
-                // Swap AppDbContext to in-memory SQLite (shared connection) so we can seed
-                var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-                if (descriptor != null)
-                {
-                    services.Remove(descriptor);
-                }
-                var connection = new SqliteConnection("DataSource=:memory:");
-                connection.Open();
-                services.AddSingleton(connection);
-                services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
 
                 // Reconfigure the HttpClient used by MoonrakerClient so that requests to 10.10.0.2 return a valid printer/info payload
                 // Remove existing HttpClient registration for MoonrakerClient
@@ -55,7 +43,8 @@ public class DiscoveryExclusionIntegrationTests : IClassFixture<WebApplicationFa
 
                 services.AddLogging(lb => lb.SetMinimumLevel(LogLevel.Warning));
             });
-        });
+        }))
+    {
     }
 
     [Fact(Timeout = 20000)]

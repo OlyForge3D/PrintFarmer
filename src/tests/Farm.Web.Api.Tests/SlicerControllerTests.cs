@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,14 +16,12 @@ namespace Farm.Web.Api.Tests;
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class SlicerControllerTests : IClassFixture<CustomWebApplicationFactory>
+public class SlicerControllerTests : DbHeavyTestBase<Program>
 {
-    private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    public SlicerControllerTests(CustomWebApplicationFactory factory)
+    public SlicerControllerTests() : base(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>())
     {
-        _factory = factory;
         _client = _factory.CreateClient();
     }
 

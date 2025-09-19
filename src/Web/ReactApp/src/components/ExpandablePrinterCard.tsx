@@ -1,3 +1,37 @@
+import moonrakerIcon from '@/assets/moonraker.svg';
+import octoprintIcon from '@/assets/octoprint.svg';
+import { PrinterBackend } from '@/types/api';
+// Official backend icon for this printer
+function getBackendIcon(backend: PrinterBackend | number | string) {
+  // Accepts enum, number, or string (for robustness)
+  let backendValue: PrinterBackend | undefined = undefined;
+  if (typeof backend === 'number') {
+    backendValue = backend;
+  } else if (typeof backend === 'string') {
+    // Try to map string to enum
+    switch (backend) {
+      case 'Moonraker': backendValue = PrinterBackend.Moonraker; break;
+      case 'PrusaLink': backendValue = PrinterBackend.PrusaLink; break;
+      case 'SDCP': backendValue = PrinterBackend.SDCP; break;
+      case 'OctoPrint': backendValue = PrinterBackend.OctoPrint; break;
+      default: backendValue = undefined;
+    }
+  } else {
+    backendValue = undefined;
+  }
+  switch (backendValue) {
+    case PrinterBackend.Moonraker:
+      return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle mr-1" />;
+    case PrinterBackend.PrusaLink:
+      return <span title="PrusaLink" aria-label="PrusaLink" role="img" className="mr-1">🔗</span>;
+    case PrinterBackend.SDCP:
+      return <span title="SDCP" aria-label="SDCP" role="img" className="mr-1">📡</span>;
+    case PrinterBackend.OctoPrint:
+      return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle mr-1" />;
+    default:
+      return <span title="Other" aria-label="Other" role="img" className="mr-1">🖨️</span>;
+  }
+}
 import { useState, useEffect } from 'react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
@@ -382,6 +416,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </div>
           
           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stateColorClasses}`}>
+            {getBackendIcon(printer.backend)}
             {isOnline ? toCamelCase(state) : 'Offline'}
           </div>
           
@@ -533,6 +568,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </div>
           
           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stateColorClasses}`}>
+            {getBackendIcon(printer.backend)}
             {isOnline ? toCamelCase(state) : 'Offline'}
           </div>
         </div>

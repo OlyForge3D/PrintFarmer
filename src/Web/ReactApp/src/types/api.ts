@@ -54,7 +54,8 @@ export interface PrinterFast {
 export enum PrinterBackend {
   Moonraker = 0,
   PrusaLink = 1,
-  SDCP = 2
+  SDCP = 2,
+  OctoPrint = 3
 }
 
 export enum MotionType {
@@ -65,7 +66,7 @@ export enum MotionType {
 }
 
 // String enum types for API responses (enums are serialized as strings)
-export type PrinterBackendString = 'Moonraker' | 'PrusaLink' | 'SDCP';
+export type PrinterBackendString = 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
 export type MotionTypeString = 'Cartesian' | 'CoreXY' | 'Delta' | 'Unknown';
 
 export interface PrinterSpoolInfo {
@@ -162,6 +163,8 @@ export interface CreatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
 }
 
 export interface UpdatePrinterDto {
@@ -176,6 +179,8 @@ export interface UpdatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
   // Printer capabilities
   nozzleDiameter?: number;
   supportedMaterials?: string[];

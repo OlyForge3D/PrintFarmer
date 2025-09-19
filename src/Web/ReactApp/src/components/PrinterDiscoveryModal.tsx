@@ -3,6 +3,8 @@ import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
+import moonrakerIcon from '@/assets/moonraker.svg';
+import octoprintIcon from '@/assets/octoprint.svg';
 import { signalRService } from '@/services/signalr';
 import { X, Search } from 'lucide-react';
 
@@ -113,10 +115,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const getBackendIcon = (backend: PrinterBackend) => {
     switch (backend) {
-      case PrinterBackend.Moonraker: return '🌙';
-      case PrinterBackend.PrusaLink: return '🔗';
-      case PrinterBackend.SDCP: return '📡';
-      default: return '🖨️';
+      case PrinterBackend.Moonraker:
+        return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-6 w-6 align-middle" />;
+      case PrinterBackend.PrusaLink:
+        return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
+      case PrinterBackend.SDCP:
+        return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
+      case PrinterBackend.OctoPrint:
+        return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-6 w-6 align-middle" />;
+      default:
+        return <span title="Other" aria-label="Other" role="img">🖨️</span>;
     }
   };
 

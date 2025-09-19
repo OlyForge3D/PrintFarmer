@@ -20,7 +20,8 @@ public enum PrinterBackend
 {
     Moonraker = 0,
     PrusaLink = 1,
-    SDCP = 2
+    SDCP = 2,
+    OctoPrint = 3
 }
 
 /// <summary>
@@ -241,6 +242,8 @@ public class CreatePrinterDto
     public DateTime? DateAcquired { get; set; }
     public PrinterBackend Backend { get; set; } = PrinterBackend.Moonraker;
     public string? ApiKey { get; set; }
+    public string? CameraStreamUrl { get; set; }
+    public string? CameraSnapshotUrl { get; set; }
 }
 
 /// <summary>
@@ -257,6 +260,8 @@ public record UpdatePrinterDto(
     DateTime? DateAcquired,
     PrinterBackend? Backend = null,
     string? ApiKey = null,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null);
 
 // Local spools removed; Spoolman is the source of truth
@@ -443,6 +448,8 @@ public record PrinterDetailsDto(
     DateTime? DateAcquired,
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null);
 
