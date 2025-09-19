@@ -1,7 +1,7 @@
+﻿using System.Diagnostics.Metrics;
 using Farm.Web.Api.Configuration;
 using Farm.Web.Api.Data;
 using Microsoft.Extensions.Options;
-using System.Diagnostics.Metrics;
 
 namespace Farm.Web.Api.Services.Startup;
 

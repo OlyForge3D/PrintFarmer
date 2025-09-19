@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Startup;
+﻿namespace Farm.Web.Api.Services.Startup;
 
 /// <summary>
 /// Represents the coarse phase of application startup used by readiness and health probes.

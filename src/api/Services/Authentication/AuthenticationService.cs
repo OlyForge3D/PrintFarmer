@@ -167,10 +167,10 @@ public class AuthenticationService : IAuthenticationService
             _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
             throw new InvalidOperationException("Secure JWT key not configured");
         }
-    // S6781: Secure usage, not disclosed or logged
-    #pragma warning disable S6781 // JWT secret keys should not be disclosed
-    SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(rawKey));
-    #pragma warning restore S6781
+        // S6781: Secure usage, not disclosed or logged
+#pragma warning disable S6781 // JWT secret keys should not be disclosed
+        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(rawKey));
+#pragma warning restore S6781
         SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
 
         List<string> roles = await GetUserRolesAsync(user.Id);
@@ -215,7 +215,7 @@ public class AuthenticationService : IAuthenticationService
 
             byte[] key = Encoding.UTF8.GetBytes(rawKey);
 
-            #pragma warning disable S6781 // JWT secret keys should not be disclosed
+#pragma warning disable S6781 // JWT secret keys should not be disclosed
             TokenValidationParameters validationParameters = new()
             {
                 ValidateIssuerSigningKey = true,
@@ -227,7 +227,7 @@ public class AuthenticationService : IAuthenticationService
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
-            #pragma warning restore S6781
+#pragma warning restore S6781
 
             // CA1849: use asynchronous validation API
             _ = await tokenHandler.ValidateTokenAsync(token, validationParameters);
@@ -256,7 +256,7 @@ public class AuthenticationService : IAuthenticationService
 
             byte[] key = Encoding.UTF8.GetBytes(rawKey);
 
-            #pragma warning disable S6781 // JWT secret keys should not be disclosed
+#pragma warning disable S6781 // JWT secret keys should not be disclosed
             TokenValidationParameters validationParameters = new()
             {
                 ValidateIssuerSigningKey = true,
@@ -268,7 +268,7 @@ public class AuthenticationService : IAuthenticationService
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
-            #pragma warning restore S6781
+#pragma warning restore S6781
 
             TokenValidationResult result = await tokenHandler.ValidateTokenAsync(token, validationParameters);
             if (!result.IsValid || result.SecurityToken is not JwtSecurityToken jwt)

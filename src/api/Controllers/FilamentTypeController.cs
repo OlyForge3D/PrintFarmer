@@ -244,7 +244,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         {
             // Get all materials from Spoolman's material endpoint (more direct and efficient)
             IReadOnlyList<SpoolmanMaterialDto> materials = await spoolmanService.ListMaterialsAsync(ct);
-            
+
             // Extract unique material names (filament types)
             HashSet<string> uniqueMaterials = new(StringComparer.OrdinalIgnoreCase);
             foreach (SpoolmanMaterialDto material in materials)
@@ -259,7 +259,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
             List<string> existingTypes = await db.FilamentTypes
                 .Select(ft => ft.Name)
                 .ToListAsync(ct);
-            
+
             HashSet<string> existingTypesSet = new(existingTypes, StringComparer.OrdinalIgnoreCase);
 
             // Import new filament types
@@ -312,16 +312,26 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     private static int GetDefaultHotendTemp(string material)
     {
         string upperMaterial = material.ToUpperInvariant();
-        if (upperMaterial.Contains("PLA")) { return 205; }
-        if (upperMaterial.Contains("ABS")) { return 230; }
-        if (upperMaterial.Contains("PETG")) { return 240; }
-        if (upperMaterial.Contains("ASA")) { return 245; }
-        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE")) { return 260; }
-        if (upperMaterial.Contains("PCTG")) { return 235; }
-        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX")) { return 220; }
-        if (upperMaterial.Contains("WOOD")) { return 210; }
-        if (upperMaterial.Contains("NYLON")) { return 250; }
-        if (upperMaterial.Contains("CARBON")) { return 260; }
+        if (upperMaterial.Contains("PLA"))
+        { return 205; }
+        if (upperMaterial.Contains("ABS"))
+        { return 230; }
+        if (upperMaterial.Contains("PETG"))
+        { return 240; }
+        if (upperMaterial.Contains("ASA"))
+        { return 245; }
+        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE"))
+        { return 260; }
+        if (upperMaterial.Contains("PCTG"))
+        { return 235; }
+        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX"))
+        { return 220; }
+        if (upperMaterial.Contains("WOOD"))
+        { return 210; }
+        if (upperMaterial.Contains("NYLON"))
+        { return 250; }
+        if (upperMaterial.Contains("CARBON"))
+        { return 260; }
         return 210; // Default for unknown materials
     }
 
@@ -331,16 +341,26 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     private static int GetDefaultBedTemp(string material)
     {
         string upperMaterial = material.ToUpperInvariant();
-        if (upperMaterial.Contains("PLA")) { return 60; }
-        if (upperMaterial.Contains("ABS")) { return 100; }
-        if (upperMaterial.Contains("PETG")) { return 85; }
-        if (upperMaterial.Contains("ASA")) { return 100; }
-        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE")) { return 110; }
-        if (upperMaterial.Contains("PCTG")) { return 80; }
-        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX")) { return 60; }
-        if (upperMaterial.Contains("WOOD")) { return 65; }
-        if (upperMaterial.Contains("NYLON")) { return 80; }
-        if (upperMaterial.Contains("CARBON")) { return 100; }
+        if (upperMaterial.Contains("PLA"))
+        { return 60; }
+        if (upperMaterial.Contains("ABS"))
+        { return 100; }
+        if (upperMaterial.Contains("PETG"))
+        { return 85; }
+        if (upperMaterial.Contains("ASA"))
+        { return 100; }
+        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE"))
+        { return 110; }
+        if (upperMaterial.Contains("PCTG"))
+        { return 80; }
+        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX"))
+        { return 60; }
+        if (upperMaterial.Contains("WOOD"))
+        { return 65; }
+        if (upperMaterial.Contains("NYLON"))
+        { return 80; }
+        if (upperMaterial.Contains("CARBON"))
+        { return 100; }
         return 70; // Default for unknown materials
     }
 }

@@ -460,8 +460,10 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 }
             }
         }
-        catch { }
-        string? state = status.State ?? job?.PrintState; // prefer system state (ready/shutdown/error) over print job state
+        catch
+        {
+        }
+        string? state = job?.PrintState ?? status.State; // prefer print job state (printing, paused, complete) over system state
         // Query temps
         double? hotend = null, bed = null, hotendT = null, bedT = null;
         try

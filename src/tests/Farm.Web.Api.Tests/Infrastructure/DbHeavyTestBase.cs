@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Linq;
+using Farm.Web.Api.Data;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Farm.Web.Api.Data;
 
 namespace Farm.Web.Api.Tests.Infrastructure;
 

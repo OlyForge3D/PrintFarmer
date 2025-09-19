@@ -337,7 +337,7 @@ public class SpoolmanService : ISpoolmanService
 
             using JsonDocument doc = JsonDocument.Parse(json);
             JsonElement root = doc.RootElement;
-            
+
             // Handle both array formats:
             // 1. Simple string array: ["PLA", "ABS", "PETG"]
             // 2. Object array: [{"id": 1, "name": "PLA"}, ...]
@@ -353,7 +353,7 @@ public class SpoolmanService : ISpoolmanService
                 foreach (JsonElement el in currentBatch)
                 {
                     SpoolmanMaterialDto? parsedMaterial = null;
-                    
+
                     if (el.ValueKind == JsonValueKind.String)
                     {
                         // Simple string format: "PLA"
@@ -373,7 +373,7 @@ public class SpoolmanService : ISpoolmanService
                         // Object format: {"id": 1, "name": "PLA", ...}
                         parsedMaterial = objectMaterial;
                     }
-                    
+
                     if (parsedMaterial != null)
                     {
                         collected.Add(parsedMaterial);
@@ -920,7 +920,7 @@ public class SpoolmanService : ISpoolmanService
         {
             int id = TryGetInt(el, "id");
             string name = TryGetString(el, "name") ?? string.Empty;
-            
+
             // Skip materials without required fields
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -989,7 +989,7 @@ public class SpoolmanService : ISpoolmanService
                     return ExpandCidrRange(network, prefixLength);
                 }
             }
-            
+
             // Handle range notation (e.g., "192.168.1.1-192.168.1.254")
             if (range.Contains('-'))
             {
@@ -1055,7 +1055,7 @@ public class SpoolmanService : ISpoolmanService
     {
         var start = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
         var end = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
-        
+
         // Limit range size to prevent excessive scanning
         if (end - start > 1024)
         {
@@ -1077,12 +1077,12 @@ public class SpoolmanService : ISpoolmanService
     {
         var url = $"http://{ip}:7912";
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        
+
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             using var combined = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-            
+
             // Try to get the Spoolman info endpoint
             var response = await http.GetAsync($"{url}/api/v1/info", combined.Token);
             stopwatch.Stop();

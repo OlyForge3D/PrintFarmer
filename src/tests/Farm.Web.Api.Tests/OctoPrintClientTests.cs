@@ -1,14 +1,14 @@
-using System.Net;
+﻿using System.Net;
+using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
 using Xunit;
-using FluentAssertions;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Farm.Web.Api.Tests;
 

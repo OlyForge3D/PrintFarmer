@@ -1,11 +1,11 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
-using Farm.Web.Shared;
-using FluentAssertions;
-using Xunit;
-using Microsoft.Extensions.DependencyInjection;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Tests.Infrastructure;
+using Farm.Web.Shared;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Farm.Web.Api.Tests;
 

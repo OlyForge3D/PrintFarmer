@@ -1,7 +1,7 @@
+﻿using Farm.Web.Api.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Data;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -27,7 +27,10 @@ public class SchemaHealthController : ControllerBase
             cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Printers';";
             var result = await cmd.ExecuteScalarAsync(ct);
             if (result != null && result.ToString() == "Printers")
+            {
                 return Ok(new { ready = true });
+            }
+
             return StatusCode(503, new { ready = false, reason = "Printers table missing" });
         }
         catch (Exception ex)
