@@ -19,13 +19,6 @@ public class OctoPrintIntegrationTests : CustomDbHeavyTestBase
     public async Task Create_OctoPrint_printer_and_get_status()
     {
 
-        // Ensure the test database is created before running the test
-        var scopeFactory = _factory.Services.GetService<IServiceScopeFactory>();
-        using (var scope = scopeFactory!.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Database.EnsureCreatedAsync();
-        }
 
         var client = _factory.CreateClient();
         var createDto = new CreatePrinterDto
