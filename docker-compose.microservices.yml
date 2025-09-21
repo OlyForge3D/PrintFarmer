@@ -164,7 +164,8 @@ services:
       - printfarmer-network
     environment:
       - VITE_API_BASE_URL=http://localhost:5001/api
-      - VITE_SIGNALR_URL=http://localhost:5001/hubs/printers
+      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5001/hubs/printers
+      - VITE_SIGNALR_HARVEST_URL=http://localhost:5001/hubs/harvest
       - NGINX_PROXY_API=http://api:8080
     depends_on:
       api:

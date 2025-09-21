@@ -400,7 +400,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             <button
               onClick={handleDeleteSelected}
               disabled={deleteMutation.isPending}
-              className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
+              className="px-3 py-1 bg-pf-error text-white text-sm rounded hover:bg-pf-error-dark disabled:opacity-50"
             >Delete Selected ({selectedFiles.length})</button>
           )}
           {selectedFiles.length > 1 && (
@@ -431,7 +431,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   toast.error((e as Error)?.message || 'Duplicate scan failed');
                 }
               }}
-              className="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:opacity-50"
+              className="px-3 py-1 bg-pf-accent text-white text-sm rounded hover:bg-pf-accent-dark disabled:opacity-50"
             >Find Duplicates ({selectedFiles.length})</button>
           )}
           {hasPermission('gcode_harvest', 'create') && (
@@ -440,7 +440,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 const name = prompt('New directory name');
                 if (name) mkdirMutation.mutate(name);
               }}
-              className="px-3 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300 disabled:opacity-50"
+              className="px-3 py-1 bg-pf-bg-1 text-sm rounded hover:bg-pf-hover disabled:opacity-50"
               disabled={mkdirMutation.isPending}
             >New Folder</button>
           )}
@@ -541,7 +541,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 <span className="text-xs font-medium text-pf-text-secondary">Uploads</span>
                 <div className="flex gap-2">
                   <button
-                    className="text-xs px-2 py-0.5 border rounded hover:bg-gray-50"
+                    className="text-xs px-2 py-0.5 border border-pf-border rounded hover:bg-pf-hover"
                     onClick={() => {
                       abortAllRef.current = true;
                       currentXhrRef.current?.abort();
@@ -554,7 +554,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     }}
                   >Cancel All</button>
                   <button
-                    className="text-xs px-2 py-0.5 border rounded hover:bg-gray-50"
+                    className="text-xs px-2 py-0.5 border border-pf-border rounded hover:bg-pf-hover"
                     onClick={() => setUploadQueue([])}
                   >Clear</button>
                 </div>
@@ -584,7 +584,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   </span>
                   {item.status === 'error' && item.error && (
                     <button
-                      className="text-yellow-600 hover:text-yellow-700"
+                      className="text-pf-warning hover:text-pf-warning-dark"
                       title={item.error + ' - retry'}
                       onClick={() => {
                         // Reset and requeue as queued (will start on next mutate call or manual retry process)
@@ -596,7 +596,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   )}
                   {item.isChunked && (item.status === 'uploading' || item.status === 'queued') && (
                     <button
-                      className="text-gray-400 hover:text-orange-600"
+                      className="text-pf-text-tertiary hover:text-pf-warning"
                       title={item.paused ? 'Resume upload' : 'Pause upload'}
                       onClick={async () => {
                         if (!item.uploadId) return;
@@ -618,7 +618,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   )}
                   {(item.status === 'uploading' || item.status === 'queued') && (
                     <button
-                      className="text-gray-400 hover:text-red-600"
+                      className="text-pf-text-tertiary hover:text-pf-error"
                       title="Cancel upload"
                       onClick={() => {
                         setUploadQueue(q => q.map(it => it.id === item.id ? { ...it, cancelRequested: true } : it));
@@ -629,7 +629,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     >✕</button>
                   )}
                   {item.finalHash && (
-                    <span className="text-gray-400" title={item.finalHash}>{item.finalHash.slice(0,8)}…</span>
+                    <span className="text-pf-text-tertiary" title={item.finalHash}>{item.finalHash.slice(0,8)}…</span>
                   )}
                 </div>
               ))}
@@ -642,13 +642,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
       {isLoading ? (
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-16 bg-gray-200 rounded animate-pulse" />
+            <div key={i} className="h-16 bg-pf-bg-1 rounded animate-pulse" />
           ))}
         </div>
   ) : files && files.files && files.files.length > 0 ? (
         <div className="bg-white rounded-lg shadow">
           {/* Table header */}
-          <div className="px-4 py-3 border-b border-gray-200 flex items-center">
+          <div className="px-4 py-3 border-b border-pf-border flex items-center">
             <input
               type="checkbox"
               title="Select all files"
@@ -658,7 +658,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               className="mr-4"
             />
             
-            <div className="flex-1 grid grid-cols-12 gap-4 text-sm font-medium text-gray-500">
+            <div className="flex-1 grid grid-cols-12 gap-4 text-sm font-medium text-pf-text-secondary">
               <div className="col-span-5">Name</div>
               <div className="col-span-2">Size</div>
               <div className="col-span-3">Modified</div>
@@ -667,7 +667,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
 
           {/* File rows */}
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-pf-border">
             {files.files?.map((file: GcodeFile) => (
               <FileRow
                 key={file.path}
@@ -699,14 +699,14 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+  <div className="bg-pf-bg-0 rounded-lg shadow p-8 text-center text-pf-text-secondary">
           {searchTerm ? 'No files match your search' : 'No files found'}
         </div>
       )}
 
       {/* File count and size */}
       {files && (
-        <div className="flex flex-col gap-2 text-sm text-gray-500">
+  <div className="flex flex-col gap-2 text-sm text-pf-text-secondary">
           <div>
             {files.totalFiles} files • {formatBytes(files.totalSize)}
           </div>
@@ -715,19 +715,19 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             <button
               disabled={page === 1}
               onClick={() => setPage(p => Math.max(1, p - 1))}
-              className="px-2 py-1 border border-gray-300 rounded disabled:opacity-40"
+              className="px-2 py-1 border border-pf-border rounded disabled:opacity-40"
             >Prev</button>
             <span>Page {(files.page ?? page)} of {(files.totalPages ?? '?')}</span>
             <button
               disabled={files.totalPages ? page >= (files.totalPages ?? 1) : ((files.files?.length ?? 0) < pageSize)}
               onClick={() => setPage(p => p + 1)}
-              className="px-2 py-1 border border-gray-300 rounded disabled:opacity-40"
+              className="px-2 py-1 border border-pf-border rounded disabled:opacity-40"
             >Next</button>
             <select
               aria-label="Select page size"
               value={pageSize}
               onChange={e => { setPageSize(Number(e.target.value)); setPage(1);} }
-              className="px-2 py-1 border border-gray-300 rounded"
+              className="px-2 py-1 border border-pf-border rounded"
             >
               {[25,50,100,200,500].map(size => <option key={size} value={size}>{size}/page</option>)}
             </select>

@@ -9,14 +9,34 @@ import { apiClient } from '@/services/api';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
+type HarvestFileProgress = {
+  operationId: string;
+  fileName: string;
+  bytesCopied: number;
+  totalBytes: number;
+  percent: number;
+};
+type HarvestFileProgressCallback = (progress: HarvestFileProgress) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
 type ConnectionStateCallback = (connected: boolean) => void;
 type DiscoveryProgressCallback = (progress: DiscoveryProgressDto) => void;
 type DiscoveryPrinterFoundCallback = (found: DiscoveryPrinterFoundDto) => void;
 type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
+// HarvestFileDiscovered event type
+export type HarvestFileDiscoveredEvent = {
+  operationId: string;
+  fileId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  status?: string;
+  error?: string;
+};
+type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
 export class SignalRService {
   private connection: HubConnection | null = null;
+  private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
@@ -26,6 +46,7 @@ export class SignalRService {
   // Event handlers
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
   private harvestUpdateCallbacks: HarvestUpdateCallback[] = [];
+  private harvestFileProgressCallbacks: HarvestFileProgressCallback[] = [];
   private jobQueueUpdateCallbacks: JobQueueUpdateCallback[] = [];
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
   private discoveryProgressCallbacks: DiscoveryProgressCallback[] = [];
@@ -73,18 +94,11 @@ export class SignalRService {
   }
 
   private buildConnection(): void {
-    // Use environment variable for SignalR URL, fallback to relative path for monolithic deployment
-    const signalrUrl = import.meta.env.VITE_SIGNALR_URL || '/hubs/printers';
-    
-    console.info('[SignalR] Building connection with URL:', signalrUrl);
-    console.info('[SignalR] Environment variables:', { 
-      VITE_SIGNALR_URL: import.meta.env.VITE_SIGNALR_URL,
-      MODE: import.meta.env.MODE,
-      DEV: import.meta.env.DEV
-    });
-    
+    // Use environment variable for harvest hub, fallback to default
+    const harvestSignalrUrl = import.meta.env.VITE_SIGNALR_HARVEST_URL || 'http://localhost:5245/hubs/harvest';
+    console.info('[SignalR] Building connection with URL:', harvestSignalrUrl);
     this.connection = new HubConnectionBuilder()
-      .withUrl(signalrUrl)
+      .withUrl(harvestSignalrUrl)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           // Exponential backoff with jitter
@@ -99,15 +113,36 @@ export class SignalRService {
       })
       .configureLogging(this.getLogLevel())
       .build();
-
     // Set up event handlers
     this.setupEventHandlers();
   }
 
+
+  // ============ Harvest File Discovered Event Subscription ============
+  onHarvestFileDiscovered(callback: HarvestFileDiscoveredCallback): () => void {
+    this.harvestFileDiscoveredCallbacks.push(callback);
+    return () => {
+      const index = this.harvestFileDiscoveredCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestFileDiscoveredCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // Connection lifecycle events
   private setupEventHandlers(): void {
     if (!this.connection) return;
+    // HarvestFileDiscovered event
+    this.connection.on('HarvestFileDiscovered', (evt: HarvestFileDiscoveredEvent) => {
+      this.harvestFileDiscoveredCallbacks.forEach(callback => {
+        try {
+          callback(evt);
+        } catch (error) {
+          console.error('Error in HarvestFileDiscovered callback:', error);
+        }
+      });
+    });
 
-    // Connection lifecycle events
     this.connection.onclose((error) => {
       console.warn('SignalR connection closed', error);
       this.notifyConnectionState(false);
@@ -135,7 +170,7 @@ export class SignalRService {
       });
     });
 
-  this.connection.on('HarvestUpdate', (operationId: string, status: HarvestUpdateDto) => {
+    this.connection.on('HarvestUpdate', (operationId: string, status: HarvestUpdateDto) => {
       this.harvestUpdateCallbacks.forEach(callback => {
         try {
           callback(operationId, status);
@@ -145,7 +180,18 @@ export class SignalRService {
       });
     });
 
-  this.connection.on('JobQueueUpdate', (update: JobQueueUpdateDto) => {
+    // NEW: Per-file progress event
+    this.connection.on('HarvestFileProgress', (progress: HarvestFileProgress) => {
+      this.harvestFileProgressCallbacks.forEach(callback => {
+        try {
+          callback(progress);
+        } catch (error) {
+          console.error('Error in harvest file progress callback:', error);
+        }
+      });
+    });
+
+    this.connection.on('JobQueueUpdate', (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach(callback => {
         try {
           callback(update);
@@ -185,6 +231,39 @@ export class SignalRService {
         }
       });
     });
+  }
+  // ============ Harvest File Progress Event Subscription ============
+  onHarvestFileProgress(callback: HarvestFileProgressCallback): () => void {
+    this.harvestFileProgressCallbacks.push(callback);
+    return () => {
+      const index = this.harvestFileProgressCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestFileProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Group Methods ============
+  // Helper to parse string to Guid (if not already Guid)
+  private toGuid(id: string): string {
+    // If already in Guid format, return as is
+    if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)) {
+      return id;
+    }
+    // Otherwise, try to parse or throw
+    throw new Error('Invalid operationId for SignalR group: ' + id);
+  }
+
+  async joinHarvestGroup(operationId: string): Promise<void> {
+    if (this.connection && this.connection.state === HubConnectionState.Connected) {
+      await this.connection.invoke('JoinHarvestGroupAsync', this.toGuid(operationId));
+    }
+  }
+
+  async leaveHarvestGroup(operationId: string): Promise<void> {
+    if (this.connection && this.connection.state === HubConnectionState.Connected) {
+      await this.connection.invoke('LeaveHarvestGroupAsync', this.toGuid(operationId));
+    }
   }
 
   private notifyConnectionState(connected: boolean): void {
@@ -396,7 +475,9 @@ export class SignalRService {
   // Clean up all resources
   dispose(): void {
     this.printerStatusCallbacks = [];
-    this.harvestUpdateCallbacks = [];
+  this.harvestUpdateCallbacks = [];
+  this.harvestFileProgressCallbacks = [];
+    this.harvestFileDiscoveredCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
     this.discoveryProgressCallbacks = [];

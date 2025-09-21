@@ -2,10 +2,13 @@
 FROM node:18-alpine AS build
 
 # Build-time configuration (can be overridden with --build-arg)
+
 ARG VITE_API_BASE_URL=http://localhost:5001/api
-ARG VITE_SIGNALR_URL=http://localhost:5001/hubs/printers
+ARG VITE_SIGNALR_PRINTERS_URL=http://localhost:5001/hubs/printers
+ARG VITE_SIGNALR_HARVEST_URL=http://localhost:5001/hubs/harvest
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
-    VITE_SIGNALR_URL=${VITE_SIGNALR_URL}
+    VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL} \
+    VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}
 
 WORKDIR /app
 
@@ -16,7 +19,7 @@ RUN npm install --silent
 # Copy source and build
 COPY src/Web/ReactApp/ ./
 # Vite reads VITE_* vars at build time; ensure they are present now.
-RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL VITE_SIGNALR_URL=$VITE_SIGNALR_URL" && npm run build
+RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL VITE_SIGNALR_PRINTERS_URL=$VITE_SIGNALR_PRINTERS_URL VITE_SIGNALR_HARVEST_URL=$VITE_SIGNALR_HARVEST_URL" && npm run build
 
 # Production stage with Nginx
 FROM nginx:alpine

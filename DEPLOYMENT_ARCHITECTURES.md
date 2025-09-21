@@ -64,11 +64,13 @@ docker compose -f docker-compose.microservices.yml up -d
 
 ### Environment Variables
 
+
 **Monolithic (.env.monolithic):**
 ```bash
 # API base URL (relative for same origin when served behind same host)
 VITE_API_BASE_URL=http://localhost:8080/api
-VITE_SIGNALR_URL=http://localhost:8080/hubs/printers
+VITE_SIGNALR_PRINTERS_URL=http://localhost:8080/hubs/printers
+VITE_SIGNALR_HARVEST_URL=http://localhost:8080/hubs/harvest
 
 # Deployment mode (omit or set to anything except "microservices")
 # DEPLOYMENT_MODE=monolithic
@@ -79,11 +81,13 @@ VITE_SIGNALR_URL=http://localhost:8080/hubs/printers
 # SPA_PROXY_PROBE_TIMEOUT_MS=500
 ```
 
+
 **Microservices (.env.microservices):**
 ```bash
 # API base URL (cross-origin)
 VITE_API_BASE_URL=http://localhost:5000
-VITE_SIGNALR_URL=http://localhost:5000/hubs/printers
+VITE_SIGNALR_PRINTERS_URL=http://localhost:5000/hubs/printers
+VITE_SIGNALR_HARVEST_URL=http://localhost:5000/hubs/harvest
 
 # Deployment mode
 DEPLOYMENT_MODE=microservices

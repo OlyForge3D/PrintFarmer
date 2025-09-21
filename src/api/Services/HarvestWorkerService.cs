@@ -3,10 +3,12 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services;
 
@@ -19,16 +21,19 @@ public partial class HarvestWorkerService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<HarvestWorkerService> _logger;
     private readonly SemaphoreSlim _workerSemaphore;
+    private readonly IHubContext<HarvestHub> _harvestHub;
     private const int MaxConcurrentWorkers = 3; // Configurable
 
     public HarvestWorkerService(
         IHarvestQueue queue,
         IServiceProvider serviceProvider,
-        ILogger<HarvestWorkerService> logger)
+        ILogger<HarvestWorkerService> logger,
+        IHubContext<HarvestHub> harvestHub)
     {
         _queue = queue;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _harvestHub = harvestHub;
         _workerSemaphore = new SemaphoreSlim(MaxConcurrentWorkers, MaxConcurrentWorkers);
     }
 
@@ -256,6 +261,21 @@ public partial class HarvestWorkerService : BackgroundService
             db.DiscoveredGcodeFiles.Add(discoveredFile);
             await db.SaveChangesAsync(ct);
 
+            // Emit per-file progress event with discovered file info
+            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestFileDiscovered", new
+            {
+                operationId = job.OperationId,
+                fileId = discoveredFile.Id,
+                fileName = discoveredFile.FileName,
+                filePath = discoveredFile.PrinterPath,
+                fileSize = discoveredFile.FileSizeBytes,
+                status = discoveredFile.ProcessingFailed ? "error" : (discoveredFile.AlreadyInLibrary ? "skipped" : "added"),
+                error = discoveredFile.ErrorMessage,
+                // thumbnailUrl intentionally omitted if not available
+                extractedSlicer = discoveredFile.ExtractedSlicerName,
+                extractedMaterial = discoveredFile.ExtractedMaterial
+            }, ct);
+
             _logger.LogInformation("Successfully processed file {FileName} for operation {OperationId}",
                 job.FileName, job.OperationId);
 
@@ -278,6 +298,18 @@ public partial class HarvestWorkerService : BackgroundService
             _logger.LogError(ex, "Failed to process file job {FileName} for operation {OperationId}",
                 job.FileName, job.OperationId);
             await RecordFileErrorAsync(db, job.OperationId, job.FileName, ex.Message);
+            // Emit error event for this file
+            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestFileDiscovered", new
+            {
+                operationId = job.OperationId,
+                fileId = Guid.NewGuid(),
+                fileName = job.FileName,
+                filePath = job.FilePath,
+                fileSize = job.FileSize,
+                status = "error",
+                error = ex.Message
+                // thumbnailUrl, extractedSlicer, extractedMaterial omitted if not available
+            }, ct);
         }
     }
 

@@ -122,14 +122,14 @@ public class GcodeFilesController(
     [HttpGet]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
     public ActionResult<GcodeFileListResponse> List(
-        [FromQuery] string? path = "/",
-        [FromQuery] string? sortBy = "name",
-        [FromQuery] string? sortOrder = "asc",
-        [FromQuery] string? search = null,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 100,
-        [FromQuery] Guid? harvestId = null, // presently unused – placeholder for future DB correlation
-        [FromQuery] Guid? printerId = null  // presently unused
+    [FromQuery] string? path = "/",
+    [FromQuery] string? sortBy = "name",
+    [FromQuery] string? sortOrder = "asc",
+    [FromQuery] string? search = null,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 100,
+    [FromQuery] Guid? harvestId = null, // now used to filter files by harvest session
+    [FromQuery] Guid? printerId = null  // presently unused
     )
     {
         try
@@ -205,6 +205,12 @@ public class GcodeFilesController(
                     catch (Exception ex)
                     {
                         logger.LogDebug(ex, "Non-fatal DB correlation failure for file {File}", file.FullName);
+                    }
+
+                    // If harvestId is specified, only include files with matching HarvestOperationId
+                    if (harvestId.HasValue && harvestOpId != harvestId)
+                    {
+                        continue;
                     }
 
                     entries.Add(new GcodeFileEntryDto(

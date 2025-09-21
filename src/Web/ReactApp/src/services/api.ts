@@ -434,6 +434,28 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Skip a file in a harvest operation (mark as skipped and emit update)
+   * @param operationId The harvest operation ID
+   * @param fileId The file ID to skip
+   * @returns Promise<boolean> indicating success
+   */
+  async skipHarvestFile(operationId: string, fileId: string): Promise<boolean> {
+    const response = await this.client.post<boolean>(`/gcode-harvest/operations/${operationId}/files/${fileId}/skip`);
+    return response.data === true;
+  }
+
+  /**
+   * Retry a file in a harvest operation (reset error and reprocess)
+   * @param operationId The harvest operation ID
+   * @param fileId The file ID to retry
+   * @returns Promise<boolean> indicating success
+   */
+  async retryHarvestFile(operationId: string, fileId: string): Promise<boolean> {
+    const response = await this.client.post<boolean>(`/gcode-harvest/operations/${operationId}/files/${fileId}/retry`);
+    return response.data === true;
+  }
+
   async getGcodeFilesWithFilter(request: Record<string, unknown>): Promise<GetGcodeFilesResponse> {
     const response = await this.client.get<GetGcodeFilesResponse>('/gcode-files', { params: request });
     return response.data;

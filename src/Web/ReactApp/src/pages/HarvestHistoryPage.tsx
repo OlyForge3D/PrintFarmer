@@ -2,11 +2,14 @@ import { apiClient } from '@/services/api';
 import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
 import { Link } from 'react-router-dom';
+
 
 export function HarvestHistoryPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [printerFilter, setPrinterFilter] = useState<string>('');
+  const [detailsOperation, setDetailsOperation] = useState<GcodeHarvestOperation | null>(null);
 
   const { data: operations = [], isLoading, error, refetch } = useQuery({
     queryKey: ['harvest-operations', printerFilter, statusFilter],
@@ -241,12 +244,13 @@ export function HarvestHistoryPage() {
                       {operation.filesAdded}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <Link
-                        to={`/harvest?operation=${operation.id}`}
-                        className="text-pf-accent hover:text-pf-accent-dark font-medium"
+                      <button
+                        type="button"
+                        className="text-pf-accent hover:text-pf-accent-dark font-medium underline"
+                        onClick={() => setDetailsOperation(operation)}
                       >
                         View Details
-                      </Link>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -288,6 +292,13 @@ export function HarvestHistoryPage() {
           </div>
         </div>
       )}
-    </div>
+    {/* Details Modal */}
+    {detailsOperation && (
+      <HarvestOperationDetails
+        operation={detailsOperation}
+        onClose={() => setDetailsOperation(null)}
+      />
+    )}
+  </div>
   );
 }

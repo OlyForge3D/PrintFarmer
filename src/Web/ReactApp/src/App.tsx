@@ -23,6 +23,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { HarvestedFilesLibrary } from './pages/HarvestedFilesLibrary';
 import { Toaster } from 'sonner';
 import './App.css';
 
@@ -132,7 +133,7 @@ function App() {
           <QueryClientProvider client={queryClient}>
             <Router>
               <Routes>
-                <Route path="/" element={<Layout />}>
+                <Route path="/*" element={<Layout />}>
                   <Route index element={<PrinterDashboard />} />
                   <Route path="dashboard" element={<PrinterDashboard />} />
                   <Route path="printers" element={<PrintersPage />} />
@@ -140,6 +141,7 @@ function App() {
                   <Route path="harvest">
                     <Route index element={<HarvestPage />} />
                     <Route path="history" element={<HarvestHistoryPage />} />
+                    <Route path="library" element={<HarvestedFilesLibrary />} />
                   </Route>
                   <Route path="files" element={<FilesPage />} />
                   <Route path="catalog" element={<CatalogPage />} />

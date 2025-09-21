@@ -8,6 +8,15 @@ namespace Farm.Web.Api.Services.Interfaces;
 public interface IGcodeHarvestService
 {
     /// <summary>
+    /// Skip a discovered file in a harvest operation
+    /// </summary>
+    Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retry a failed discovered file in a harvest operation
+    /// </summary>
+    Task<bool> RetryDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default);
+    /// <summary>
     /// Start a harvest operation for a specific printer
     /// </summary>
     Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default);

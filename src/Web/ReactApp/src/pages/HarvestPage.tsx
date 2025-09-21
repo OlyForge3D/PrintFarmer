@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 // Icons removed (unused after refactor)
@@ -16,10 +16,31 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/signalr';
 import { apiClient } from '@/services/api';
 import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
-import { HarvestProgressModal } from '@/components/harvest/HarvestProgressModal';
+import { HarvestProgressCard } from '@/components/harvest/HarvestProgressCard';
+// import { IndexedFilesList } from '@/components/harvest/IndexedFilesList';
 import { AccessDenied } from '@/components/common/AccessDenied';
 
 export const HarvestPage: React.FC = () => {
+  // Per-operation per-file progress state
+  const [perFileProgressMap, setPerFileProgressMap] = useState<
+    Record<string, Record<string, { fileName: string; percent: number; status: 'processing' | 'completed' | 'skipped' | 'errored' }>>
+  >({});
+
+  // Handler to update per-file progress for a specific operation
+  const handleFileProgressUpdate = (
+    operationId: string,
+    fileName: string,
+    percent: number,
+    status: 'processing' | 'completed' | 'skipped' | 'errored'
+  ) => {
+    setPerFileProgressMap(prev => ({
+      ...prev,
+      [operationId]: {
+        ...(prev[operationId] || {}),
+        [fileName]: { fileName, percent, status }
+      }
+    }));
+  };
   const { hasPermission } = useAuth();
   // const queryClient = useQueryClient(); // not used here currently
   const [selectedPrinters, setSelectedPrinters] = useState<string[]>([]);
@@ -32,7 +53,7 @@ export const HarvestPage: React.FC = () => {
   });
   // Optimistic operations started on client before server push/update arrives
   const [optimisticOps, setOptimisticOps] = useState<GcodeHarvestOperation[]>([]);
-  const [selectedOperationForModal, setSelectedOperationForModal] = useState<GcodeHarvestOperation | null>(null);
+  // const [selectedOperationForModal, setSelectedOperationForModal] = useState<GcodeHarvestOperation | null>(null);
 
   const { data: printers } = usePrinters();
   // Real-time printer status (SignalR)
@@ -62,18 +83,51 @@ export const HarvestPage: React.FC = () => {
     }
   });
 
-  // Set up real-time updates for harvest progress
+  // Set up real-time updates for harvest progress and per-file progress
   useEffect(() => {
     signalRService.connect();
-    
-    const unsubscribe = signalRService.onHarvestUpdate(() => {
+
+    // Join SignalR group for each running operation
+    const joinedOps = new Set<string>();
+    if (harvestOperations) {
+      for (const op of harvestOperations) {
+        if (op.status === GcodeHarvestStatus.Running && op.id) {
+          signalRService.joinHarvestGroup(op.id);
+          joinedOps.add(op.id);
+        }
+      }
+    }
+
+    // Subscribe to per-file progress events
+    const unsubscribeFileProgress = signalRService.onHarvestFileProgress(progress => {
+      // progress: { operationId, fileName, percent, ... }
+      handleFileProgressUpdate(
+        progress.operationId,
+        progress.fileName,
+        progress.percent,
+        progress.percent >= 100 ? 'completed' : 'processing'
+      );
+    });
+
+    // Also subscribe to harvest update for total progress (existing logic)
+    const unsubscribe = signalRService.onHarvestUpdate((operationId, status) => {
       refetchOperations();
+      if (status.currentFile && typeof status.progressPercent === 'number') {
+        let fileStatus: 'processing' | 'completed' | 'skipped' | 'errored' = 'processing';
+        if (status.phase === 'completing' || status.progressPercent >= 100) fileStatus = 'completed';
+        if (status.filesSkipped > 0 && status.progressPercent >= 100) fileStatus = 'skipped';
+        if (status.filesErrored > 0 && status.progressPercent >= 100) fileStatus = 'errored';
+        handleFileProgressUpdate(operationId, status.currentFile, status.progressPercent, fileStatus);
+      }
     });
 
     return () => {
       unsubscribe();
+      unsubscribeFileProgress();
+      // Leave SignalR group for each joined operation
+      joinedOps.forEach(opId => signalRService.leaveHarvestGroup(opId));
     };
-  }, [refetchOperations]); // Include refetchOperations for ESLint compliance (stable from useQuery)
+  }, [refetchOperations, harvestOperations]);
 
   // Clean up optimistic operations when real operations appear
   useEffect(() => {
@@ -141,9 +195,7 @@ export const HarvestPage: React.FC = () => {
     return [...filteredOptimisticOps, ...realRunningOps];
   })();
 
-  const completedOperations = harvestOperations?.filter(op =>
-    op.status === GcodeHarvestStatus.Completed || op.status === GcodeHarvestStatus.Failed
-  )?.slice(0, 10) || [];
+
 
   // Merge live status into base printer data
   const printersWithLive = (printers || []).map(p => {
@@ -170,8 +222,10 @@ export const HarvestPage: React.FC = () => {
   // const reachableSelectedCount = selectedPrinters.filter(id => printersWithLive.find(p => p.id === id && (p.isReachable || p.isOnline))).length;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <Routes>
+      <Route path="*" element={
+        <div className="p-6 space-y-6">
+  <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-pf-text-primary">G-code Harvest</h1>
         
         {hasPermission('gcode_harvest', 'create') && (
@@ -371,60 +425,29 @@ export const HarvestPage: React.FC = () => {
                     key={operation.id}
                     operation={operation}
                     showProgress={true}
-                    onViewDetails={setSelectedOperationForModal}
+                    // onViewDetails removed: modal logic no longer needed
                   />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Recent Operations */}
-          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
-            <div className="p-4 border-b border-pf-border flex items-center justify-between">
-              <h3 className="font-medium text-pf-text-primary">Recent Operations</h3>
-              
-              {hasPermission('gcode_harvest', 'read') && (
-                <Link to="/harvest/history" className="text-sm text-pf-link hover:text-pf-accent">
-                  View All History
-                </Link>
-              )}
-            </div>
-            
-            <div className="divide-y divide-pf-border">
-              {completedOperations.length > 0 ? (
-                completedOperations.map(operation => (
-                  <HarvestOperationCard
-                    key={operation.id}
-                    operation={operation}
-                    showProgress={false}
-                  />
-                ))
-              ) : (
-                <div className="p-8 text-center text-pf-text-tertiary">
-                  No harvest operations yet
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
       
-      {/* Harvest Progress Modal */}
-      {selectedOperationForModal && (
-        <HarvestProgressModal
-          isOpen={true}
-          onClose={() => setSelectedOperationForModal(null)}
-          operation={selectedOperationForModal}
-          onOperationUpdate={() => {
-            refetchOperations();
-            // Update the selected operation with latest data
-            const updated = harvestOperations?.find(op => op.id === selectedOperationForModal.id);
-            if (updated) {
-              setSelectedOperationForModal(updated);
-            }
-          }}
-        />
-      )}
-    </div>
+      {/* Inline Harvest Progress Cards for all active operations */}
+      <div className="space-y-6">
+        {activeOperations.map(operation => (
+          <HarvestProgressCard
+            key={operation.id}
+            operation={operation}
+            onOperationUpdate={refetchOperations}
+            perFileProgress={perFileProgressMap[operation.id]}
+          />
+        ))}
+      </div>
+        </div>
+      } />
+    </Routes>
   );
 };

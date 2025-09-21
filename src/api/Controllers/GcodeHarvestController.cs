@@ -324,5 +324,57 @@ public class GcodeHarvestController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Skip a discovered file in a harvest operation
+    /// </summary>
+    /// <param name="operationId">The harvest operation ID</param>
+    /// <param name="fileId">The discovered file ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">File skipped successfully</response>
+    /// <response code="404">Operation or file not found</response>
+    [HttpPost("operations/{operationId:guid}/files/{fileId:guid}/skip")]
+    [ProducesResponseType(typeof(bool), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<bool>> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct)
+    {
+        try
+        {
+            bool result = await _harvestService.SkipDiscoveredFileAsync(operationId, fileId, ct);
+            return result ? Ok(true) : NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to skip file {FileId} in operation {OperationId}", fileId, operationId);
+            return StatusCode(500, "Failed to skip file");
+        }
+    }
+
+    /// <summary>
+    /// Retry a failed discovered file in a harvest operation
+    /// </summary>
+    /// <param name="operationId">The harvest operation ID</param>
+    /// <param name="fileId">The discovered file ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">File retry started successfully</response>
+    /// <response code="404">Operation or file not found</response>
+    [HttpPost("operations/{operationId:guid}/files/{fileId:guid}/retry")]
+    [ProducesResponseType(typeof(bool), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<bool>> RetryDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct)
+    {
+        try
+        {
+            bool result = await _harvestService.RetryDiscoveredFileAsync(operationId, fileId, ct);
+            return result ? Ok(true) : NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retry file {FileId} in operation {OperationId}", fileId, operationId);
+            return StatusCode(500, "Failed to retry file");
+        }
+    }
+
     // Diagnostics and test endpoints moved to GcodeHarvestDiagnosticsController
 }

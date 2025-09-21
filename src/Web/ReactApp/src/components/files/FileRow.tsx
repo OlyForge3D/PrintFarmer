@@ -75,26 +75,26 @@ export const FileRow: React.FC<FileRowProps> = ({
   };
 
   return (
-  <div className="px-4 py-3 hover:bg-gray-50 flex items-center" onContextMenu={onContextMenu}>
+  <div className="px-4 py-3 hover:bg-pf-hover flex items-center" onContextMenu={onContextMenu}>
       <input
         type="checkbox"
         aria-label={`Select ${file.name}`}
         title={`Select ${file.name}`}
         checked={selected}
         onChange={(e) => onSelect(e.target.checked)}
-        className="mr-4"
+  className="mr-4 accent-pf-accent"
         onClick={(e) => e.stopPropagation()}
       />
       <div
-        className="flex-1 grid grid-cols-12 gap-4 text-sm cursor-pointer"
+  className="flex-1 grid grid-cols-12 gap-4 text-sm cursor-pointer"
         onClick={handleRowClick}
       >
         {/* Name */}
-        <div className="col-span-5 flex items-center space-x-3">
+  <div className="col-span-5 flex items-center space-x-3">
           {file.isDirectory ? (
-            <FolderIcon className="w-5 h-5 text-blue-500" />
+            <FolderIcon className="w-5 h-5 text-pf-accent" />
           ) : (
-            <DocumentIcon className="w-5 h-5 text-gray-400" />
+            <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
           )}
           <div className="flex flex-col">
             {renaming ? (
@@ -116,41 +116,41 @@ export const FileRow: React.FC<FileRowProps> = ({
                   onChange={e => setNameInput(e.target.value)}
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Escape') { setRenaming(false); setNameInput(file.name); } }}
-                  className="px-1 py-0.5 border border-gray-300 rounded text-sm"
+                  className="px-1 py-0.5 border border-pf-border rounded text-sm bg-pf-bg-0 text-pf-text-primary"
                 />
-                <button type="submit" className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded">Save</button>
-                <button type="button" onClick={() => { setRenaming(false); setNameInput(file.name); }} className="text-xs px-2 py-0.5 border rounded">Cancel</button>
+                <button type="submit" className="text-xs px-2 py-0.5 bg-pf-accent text-white rounded hover:bg-pf-accent-dark">Save</button>
+                <button type="button" onClick={() => { setRenaming(false); setNameInput(file.name); }} className="text-xs px-2 py-0.5 border border-pf-border rounded bg-pf-bg-1 hover:bg-pf-hover">Cancel</button>
               </form>
             ) : (
-              <div className="font-medium text-gray-900 truncate flex items-center gap-2">
+              <div className="font-medium text-pf-text-primary truncate flex items-center gap-2">
                 <span>{file.name}</span>
                 {file.isDirectory && hasPermission('gcode_harvest', 'update') && onRename && (
                   <button
                     type="button"
-                    className="text-xs text-blue-600 hover:underline"
+                    className="text-xs text-pf-accent hover:underline"
                     onClick={(e) => { e.stopPropagation(); setRenaming(true); }}
                   >Rename</button>
                 )}
               </div>
             )}
             {!file.isDirectory && hashValue && (
-              <div className="text-[10px] font-mono text-gray-500" title={hashValue}>{hashValue.slice(0,16)}…</div>
+              <div className="text-[10px] font-mono text-pf-text-tertiary" title={hashValue}>{hashValue.slice(0,16)}…</div>
             )}
             {file.isDirectory && (
-              <div className="text-xs text-gray-500">Folder</div>
+              <div className="text-xs text-pf-text-tertiary">Folder</div>
             )}
           </div>
         </div>
         {/* Size */}
-        <div className="col-span-2 text-gray-600">{file.isDirectory ? '—' : formatBytes(file.size)}</div>
+  <div className="col-span-2 text-pf-text-secondary">{file.isDirectory ? '—' : formatBytes(file.size)}</div>
         {/* Modified */}
-        <div className="col-span-3 text-gray-600">{formatDistanceToNow(file.modifiedAt, { addSuffix: true })}</div>
+  <div className="col-span-3 text-pf-text-secondary">{formatDistanceToNow(file.modifiedAt, { addSuffix: true })}</div>
         {/* Actions */}
-        <div className="col-span-2 flex items-center space-x-2">
+  <div className="col-span-2 flex items-center space-x-2">
           {!file.isDirectory && onDownload && hasPermission('gcode_harvest', 'read') && (
             <button
               onClick={(e) => { e.stopPropagation(); onDownload(); }}
-              className="p-1 text-gray-400 hover:text-blue-600"
+              className="p-1 text-pf-text-tertiary hover:text-pf-accent"
               title="Download file"
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
@@ -159,13 +159,13 @@ export const FileRow: React.FC<FileRowProps> = ({
           {!file.isDirectory && hasPermission('gcode_harvest', 'read') && (
             <button
               onClick={fetchHash}
-              className="p-1 text-gray-400 hover:text-green-600 relative"
+              className="p-1 text-pf-text-tertiary hover:text-pf-success relative"
               title={hashValue ? `Hash: ${hashValue}` : (hashing ? 'Computing hash…' : `Compute & copy ${hashAlgo.toUpperCase()} hash`)}
             >
               <ClipboardIcon className={`w-4 h-4 ${hashing ? 'opacity-40' : ''}`} />
               {hashing && (
                 <span className="absolute inset-0 flex items-center justify-center">
-                  <svg className="w-3 h-3 animate-spin text-green-600" viewBox="0 0 24 24">
+                  <svg className="w-3 h-3 animate-spin text-pf-success" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                   </svg>
@@ -176,7 +176,7 @@ export const FileRow: React.FC<FileRowProps> = ({
           {onDelete && hasPermission('gcode_harvest', 'delete') && (
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="p-1 text-gray-400 hover:text-red-600"
+              className="p-1 text-pf-text-tertiary hover:text-pf-error"
               title="Delete file"
             >
               <TrashIcon className="w-4 h-4" />

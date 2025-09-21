@@ -86,7 +86,8 @@ services:
     environment:
       # Point directly at API (no nginx proxy needed in local dev stack script)
       - VITE_API_BASE_URL=http://localhost:5001/api
-      - VITE_SIGNALR_URL=http://localhost:5001/hubs/printers
+      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5001/hubs/printers
+      - VITE_SIGNALR_HARVEST_URL=http://localhost:5001/hubs/harvest
     depends_on:
       api:
         condition: service_healthy

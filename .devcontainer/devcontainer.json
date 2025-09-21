@@ -101,8 +101,9 @@
     "ASPNETCORE_ENVIRONMENT": "Development",
     "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
     // Used by vite build/preview (not needed for vite dev due to proxy)
-    "VITE_API_BASE_URL": "http://localhost:5245",
-    "VITE_SIGNALR_URL": "http://localhost:5245/hubs/printers"
+  "VITE_API_BASE_URL": "http://localhost:5245",
+  "VITE_SIGNALR_PRINTERS_URL": "http://localhost:5245/hubs/printers",
+  "VITE_SIGNALR_HARVEST_URL": "http://localhost:5245/hubs/harvest"
   },
   "remoteUser": "node",
   "postCreateCommand": "bash .devcontainer/post-create.sh",

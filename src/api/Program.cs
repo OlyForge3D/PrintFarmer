@@ -859,6 +859,7 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
+app.MapHub<Farm.Web.Api.Hubs.HarvestHub>("/hubs/harvest");
 
 // Health checks
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions

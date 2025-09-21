@@ -1,31 +1,32 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { HubConnectionState } from '@microsoft/signalr';
-import { signalRService } from '@/services/signalr';
+import { signalRService as harvestSignalRService } from '@/services/signalr';
+import { printerSignalRService } from '@/services/printer-signalr';
 import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
 
 // ============ Connection Hook ============
 
 export function useSignalRConnection() {
   const [connectionState, setConnectionState] = useState<HubConnectionState>(
-    signalRService.connectionState
+    harvestSignalRService.connectionState
   );
   const [connectionId, setConnectionId] = useState<string | null>(
-    signalRService.connectionId
+    harvestSignalRService.connectionId
   );
 
   useEffect(() => {
     // Connect on mount
-    signalRService.connect();
+    harvestSignalRService.connect();
 
     // Subscribe to connection state changes
-    const unsubscribe = signalRService.onConnectionStateChange(() => {
-      setConnectionState(signalRService.connectionState);
-      setConnectionId(signalRService.connectionId);
+    const unsubscribe = harvestSignalRService.onConnectionStateChange(() => {
+      setConnectionState(harvestSignalRService.connectionState);
+      setConnectionId(harvestSignalRService.connectionId);
     });
 
     // Update initial state
-    setConnectionState(signalRService.connectionState);
-    setConnectionId(signalRService.connectionId);
+    setConnectionState(harvestSignalRService.connectionState);
+    setConnectionId(harvestSignalRService.connectionId);
 
     return () => {
       unsubscribe();
@@ -46,13 +47,10 @@ export function useSignalRConnection() {
 
 export function usePrinterStatusUpdates(
   onUpdate?: (status: PrinterStatusUpdate) => void,
-  printerIds?: string[] // Optional: only listen to specific printers
+  printerIds?: string[]
 ) {
   const [latestUpdate, setLatestUpdate] = useState<PrinterStatusUpdate | null>(null);
-  const [printerStatuses, setPrinterStatuses] = useState<Map<string, PrinterStatusUpdate>>(
-    new Map()
-  );
-
+  const [printerStatuses, setPrinterStatuses] = useState<Map<string, PrinterStatusUpdate>>(new Map());
   const onUpdateRef = useRef(onUpdate);
   const printerIdsRef = useRef(printerIds);
 
@@ -60,32 +58,25 @@ export function usePrinterStatusUpdates(
   useEffect(() => {
     onUpdateRef.current = onUpdate;
   }, [onUpdate]);
-
   useEffect(() => {
     printerIdsRef.current = printerIds;
   }, [printerIds]);
 
   useEffect(() => {
+    printerSignalRService.connect();
     const handleStatusUpdate = (status: PrinterStatusUpdate) => {
-      // Filter by printer IDs if specified
-      if (printerIdsRef.current && !printerIdsRef.current.includes(status.id)) {
-        return;
-      }
-
+      if (printerIdsRef.current && !printerIdsRef.current.includes(status.id)) return;
       setLatestUpdate(status);
       setPrinterStatuses(prev => new Map(prev.set(status.id, status)));
       onUpdateRef.current?.(status);
     };
-
-    const unsubscribe = signalRService.onPrinterStatusUpdate(handleStatusUpdate);
-
+    const unsubscribe = printerSignalRService.onPrinterStatusUpdate(handleStatusUpdate);
     return unsubscribe;
   }, []);
 
   const getPrinterStatus = useCallback((printerId: string): PrinterStatusUpdate | undefined => {
     return printerStatuses.get(printerId);
   }, [printerStatuses]);
-
   const clearPrinterStatus = useCallback((printerId: string) => {
     setPrinterStatuses(prev => {
       const newMap = new Map(prev);
@@ -93,12 +84,10 @@ export function usePrinterStatusUpdates(
       return newMap;
     });
   }, []);
-
   const clearAllStatuses = useCallback(() => {
     setPrinterStatuses(new Map());
     setLatestUpdate(null);
   }, []);
-
   return {
     latestUpdate,
     printerStatuses,
@@ -139,7 +128,7 @@ export function useHarvestUpdates(
       onUpdateRef.current?.(operationId, status);
     };
 
-    const unsubscribe = signalRService.onHarvestUpdate(handleHarvestUpdate);
+  const unsubscribe = harvestSignalRService.onHarvestUpdate(handleHarvestUpdate);
 
     return unsubscribe;
   }, []);
@@ -172,7 +161,7 @@ export function useJobQueueUpdates(onUpdate?: (update: JobQueueUpdateDto) => voi
       onUpdateRef.current?.(update);
     };
 
-    const unsubscribe = signalRService.onJobQueueUpdate(handleJobQueueUpdate);
+  const unsubscribe = harvestSignalRService.onJobQueueUpdate(handleJobQueueUpdate);
 
     return unsubscribe;
   }, []);
@@ -197,7 +186,7 @@ export function usePrinterGroup(printerId: string | null, autoJoin = true) {
     if (!targetId) return;
 
     try {
-      await signalRService.joinPrinterGroup(targetId);
+  await harvestSignalRService.joinPrinterGroup(targetId);
       setIsInGroup(true);
     } catch (error) {
       console.error('Failed to join printer group:', error);
@@ -209,7 +198,7 @@ export function usePrinterGroup(printerId: string | null, autoJoin = true) {
     if (!targetId) return;
 
     try {
-      await signalRService.leavePrinterGroup(targetId);
+  await harvestSignalRService.leavePrinterGroup(targetId);
       setIsInGroup(false);
     } catch (error) {
       console.error('Failed to leave printer group:', error);
@@ -221,7 +210,7 @@ export function usePrinterGroup(printerId: string | null, autoJoin = true) {
     if (!targetId) return;
 
     try {
-      await signalRService.requestPrinterStatus(targetId);
+  await harvestSignalRService.requestPrinterStatus(targetId);
     } catch (error) {
       console.error('Failed to request printer status:', error);
     }
@@ -236,7 +225,7 @@ export function usePrinterGroup(printerId: string | null, autoJoin = true) {
     };
 
     // Only join when connected
-    if (signalRService.isConnected) {
+  if (harvestSignalRService.isConnected) {
       handleJoin();
     }
 
@@ -302,7 +291,7 @@ export function useDiscoveryProgress(
       return;
     }
 
-    const unsubscribe = signalRService.onDiscoveryProgress((progressUpdate) => {
+  const unsubscribe = harvestSignalRService.onDiscoveryProgress((progressUpdate) => {
       if (progressUpdate.sessionId === sessionId) {
         setProgress(progressUpdate);
         onProgress?.(progressUpdate);
@@ -328,7 +317,7 @@ export function useDiscoveryPrinterFound(
       return;
     }
 
-    const unsubscribe = signalRService.onDiscoveryPrinterFound((found) => {
+  const unsubscribe = harvestSignalRService.onDiscoveryPrinterFound((found) => {
       if (found.sessionId === sessionId) {
         setFoundPrinters(prev => [...prev, found.printer]);
         onPrinterFound?.(found);
@@ -354,7 +343,7 @@ export function useDiscoveryCompleted(
       return;
     }
 
-    const unsubscribe = signalRService.onDiscoveryCompleted((completedUpdate) => {
+  const unsubscribe = harvestSignalRService.onDiscoveryCompleted((completedUpdate) => {
       if (completedUpdate.sessionId === sessionId) {
         setCompleted(completedUpdate);
         onCompleted?.(completedUpdate);
@@ -386,7 +375,7 @@ export function useDiscoveryStream(sessionId?: string) {
     (async () => {
       try {
         console.debug('[Discovery] Joining SignalR discovery group', { sessionId });
-        await signalRService.joinDiscoveryGroup(sessionId);
+  await harvestSignalRService.joinDiscoveryGroup(sessionId);
       } catch (err) {
         if (!cancelled) {
           console.warn('[Discovery] Failed to join discovery group, will retry on next connection state change', err);
@@ -398,7 +387,7 @@ export function useDiscoveryStream(sessionId?: string) {
       cancelled = true;
       if (isConnected) {
         console.debug('[Discovery] Leaving SignalR discovery group', { sessionId });
-        signalRService.leaveDiscoveryGroup(sessionId);
+  harvestSignalRService.leaveDiscoveryGroup(sessionId);
       }
     };
   }, [sessionId, isConnected, connectionState]);

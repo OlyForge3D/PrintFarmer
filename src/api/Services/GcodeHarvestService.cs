@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿// ...existing code...
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -7,6 +8,8 @@ using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.SignalR;
+using Farm.Web.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -16,6 +19,72 @@ namespace Farm.Web.Api.Services;
 /// </summary>
 public partial class GcodeHarvestService : IGcodeHarvestService
 {
+    public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
+    {
+        // Find the discovered file
+        var file = await _db.DiscoveredGcodeFiles.FirstOrDefaultAsync(f => f.Id == fileId && f.HarvestOperationId == operationId, ct);
+        if (file == null)
+        {
+            return false;
+        }
+
+        // Mark as skipped (set ProcessingFailed and ErrorMessage, or add a Skipped flag if needed)
+        file.ProcessingFailed = true;
+        file.ErrorMessage = "Skipped by user";
+        await _db.SaveChangesAsync(ct);
+
+        // Emit SignalR update to clients
+        await _harvestHub.Clients.Group($"harvest-{operationId}")
+            .SendAsync("HarvestFileUpdated", MapToDto(file), ct);
+
+        return true;
+    }
+
+    public async Task<bool> RetryDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
+    {
+        // Find the discovered file
+        var file = await _db.DiscoveredGcodeFiles.FirstOrDefaultAsync(f => f.Id == fileId && f.HarvestOperationId == operationId, ct);
+        if (file == null)
+        {
+            return false;
+        }
+
+        // Clear error and mark as not failed
+        file.ProcessingFailed = false;
+        file.ErrorMessage = null;
+        await _db.SaveChangesAsync(ct);
+
+        // Re-queue the file for processing (simulate as if it was just discovered)
+        var op = await _db.GcodeHarvestOperations.FirstOrDefaultAsync(o => o.Id == operationId, ct);
+        if (op == null)
+        {
+            return false;
+        }
+
+        var printer = await _db.Printers.FirstOrDefaultAsync(p => p.Id == op.PrinterId, ct);
+        if (printer == null)
+        {
+            return false;
+        }
+
+        HarvestFileJob job = new()
+        {
+            OperationId = operationId,
+            PrinterId = printer.Id,
+            ServerUrl = printer.ServerUrl,
+            FilePath = file.PrinterPath,
+            FileName = file.FileName,
+            FileSize = file.FileSizeBytes,
+            ModifiedAt = file.ModifiedAt
+        };
+        await _harvestQueue.EnqueueAsync(job);
+
+        // Emit SignalR update to clients
+        await _harvestHub.Clients.Group($"harvest-{operationId}")
+            .SendAsync("HarvestFileUpdated", MapToDto(file), ct);
+
+        return true;
+    }
     private readonly AppDbContext _db;
     private readonly IMoonrakerClient _moonraker;
     private readonly IPrusaLinkClient _prusa;
@@ -24,6 +93,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly IHarvestQueue _harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
+    private readonly IHubContext<HarvestHub> _harvestHub;
 
     private const string GcodeStoragePath = "gcode-library";
     private static readonly string[] sourceArray = { "gcode" };
@@ -35,7 +105,8 @@ public partial class GcodeHarvestService : IGcodeHarvestService
         ISdcpClient sdcp,
         ILogger<GcodeHarvestService> logger,
         IServiceScopeFactory serviceScopeFactory,
-        IHarvestQueue harvestQueue)
+        IHarvestQueue harvestQueue,
+        IHubContext<HarvestHub> harvestHub)
     {
         _db = db;
         _moonraker = moonraker;
@@ -44,6 +115,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
         _logger = logger;
         _serviceScopeFactory = serviceScopeFactory;
         _harvestQueue = harvestQueue;
+        _harvestHub = harvestHub;
     }
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
@@ -590,7 +662,32 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                 await using (FileStream fileStream = File.Create(filePath))
                 {
                     gcodeContent.Position = 0;
-                    await gcodeContent.CopyToAsync(fileStream, ct);
+                    const int bufferSize = 64 * 1024; // 64KB
+                    byte[] buffer = new byte[bufferSize];
+                    long totalBytes = gcodeContent.Length;
+                    long bytesCopied = 0;
+                    int read;
+                    while ((read = await gcodeContent.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+                    {
+                        await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                        bytesCopied += read;
+                        // Emit progress update every 512KB or on completion
+                        if (bytesCopied == totalBytes || bytesCopied % (512 * 1024) < bufferSize)
+                        {
+                            await _harvestHub.Clients.Group($"harvest-{operation.Id}")
+                                .SendAsync(
+                                    "HarvestFileProgress",
+                                    new {
+                                        operationId = operation.Id,
+                                        fileName = discoveredFile.FileName,
+                                        bytesCopied,
+                                        totalBytes,
+                                        percent = totalBytes > 0 ? (bytesCopied * 100.0 / totalBytes) : 0
+                                    },
+                                    ct
+                                );
+                        }
+                    }
                 }
 
                 // Create library entry
