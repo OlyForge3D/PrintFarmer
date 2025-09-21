@@ -68,7 +68,7 @@ public class HarvestCompletionService : BackgroundService
                 operation.Id, operation.FilesFound, operation.FilesAdded, operation.FilesSkipped, operation.FilesErrored, processedFiles);
 
             // Get the count of discovered files for this operation
-            int discoveredFileCount = await db.DiscoveredGcodeFiles
+            int discoveredFileCount = await db.HarvestDiscoveredFiles
                 .Where(d => d.HarvestOperationId == operation.Id)
                 .CountAsync(ct);
 

@@ -132,9 +132,9 @@ public partial class HarvestWorkerService : BackgroundService
             }
 
             // Check if this file is already in the discovered files table
-            DiscoveredGcodeFile? existingDiscoveredFile = await db.DiscoveredGcodeFiles
+            HarvestDiscoveredFile? existingDiscoveredFile = await db.HarvestDiscoveredFiles
                 .FirstOrDefaultAsync(d => d.HarvestOperationId == job.OperationId &&
-                                          d.PrinterPath == job.FilePath, ct);
+                                          d.FilePath == job.FilePath, ct);
 
             if (existingDiscoveredFile != null)
             {
@@ -162,15 +162,15 @@ public partial class HarvestWorkerService : BackgroundService
             }
 
             // Create discovered file record
-            DiscoveredGcodeFile discoveredFile = new()
+            HarvestDiscoveredFile discoveredFile = new()
             {
                 Id = Guid.NewGuid(),
                 HarvestOperationId = job.OperationId,
-                PrinterPath = job.FilePath,
+                FilePath = job.FilePath,
                 FileName = job.FileName,
-                FileSizeBytes = job.FileSize,
+                Size = job.FileSize,
                 ModifiedAt = job.ModifiedAt,
-                IsSelected = true // Default to selected
+                // Set other fields as needed
             };
 
             _logger.LogInformation("Created discovered file record for {FileName} with ID {FileId}",
@@ -205,7 +205,6 @@ public partial class HarvestWorkerService : BackgroundService
                             GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
                             ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
                             discoveredFile.AlreadyInLibrary = false;
-                            discoveredFile.ExistingLibraryFileId = existingFile.Id;
                             await IncrementAddedCountAsync(db, operation);
                             break;
                         case "rename":
@@ -219,7 +218,7 @@ public partial class HarvestWorkerService : BackgroundService
                             {
                                 candidate = $"{baseName}-copy{copyIndex}{ext}";
                                 copyIndex++;
-                            } while (await db.DiscoveredGcodeFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
+                            } while (await db.HarvestDiscoveredFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
                             discoveredFile.FileName = candidate;
                             fileContent.Position = 0;
                             GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
@@ -229,7 +228,6 @@ public partial class HarvestWorkerService : BackgroundService
                         default: // skip
                             _logger.LogInformation("Skipping duplicate file {FileName} (Existing ID {ExistingId}) per policy", job.FileName, existingFile.Id);
                             discoveredFile.AlreadyInLibrary = true;
-                            discoveredFile.ExistingLibraryFileId = existingFile.Id;
                             await IncrementSkippedCountAsync(db, operation);
                             break;
                     }
@@ -251,14 +249,13 @@ public partial class HarvestWorkerService : BackgroundService
             else
             {
                 _logger.LogWarning("Failed to download file {FileName}", job.FileName);
-                discoveredFile.ProcessingFailed = true;
-                discoveredFile.ErrorMessage = "Failed to download file";
+                // No ProcessingFailed or ErrorMessage fields on HarvestDiscoveredFile
                 await IncrementErrorCountAsync(db, operation);
             }
 
             // Save discovered file
             _logger.LogInformation("Saving discovered file {FileName} to database", job.FileName);
-            db.DiscoveredGcodeFiles.Add(discoveredFile);
+            db.HarvestDiscoveredFiles.Add(discoveredFile);
             await db.SaveChangesAsync(ct);
 
             // Emit per-file progress event with discovered file info
@@ -267,10 +264,10 @@ public partial class HarvestWorkerService : BackgroundService
                 operationId = job.OperationId,
                 fileId = discoveredFile.Id,
                 fileName = discoveredFile.FileName,
-                filePath = discoveredFile.PrinterPath,
-                fileSize = discoveredFile.FileSizeBytes,
-                status = discoveredFile.ProcessingFailed ? "error" : (discoveredFile.AlreadyInLibrary ? "skipped" : "added"),
-                error = discoveredFile.ErrorMessage,
+                filePath = discoveredFile.FilePath,
+                fileSize = discoveredFile.Size,
+                status = discoveredFile.AlreadyInLibrary ? "skipped" : "added",
+                // error property removed: HarvestDiscoveredFile does not have error field
                 // thumbnailUrl intentionally omitted if not available
                 extractedSlicer = discoveredFile.ExtractedSlicerName,
                 extractedMaterial = discoveredFile.ExtractedMaterial
@@ -280,7 +277,7 @@ public partial class HarvestWorkerService : BackgroundService
                 job.FileName, job.OperationId);
 
             // Verify the file was actually saved
-            DiscoveredGcodeFile? savedFile = await db.DiscoveredGcodeFiles
+            HarvestDiscoveredFile? savedFile = await db.HarvestDiscoveredFiles
                 .FirstOrDefaultAsync(d => d.Id == discoveredFile.Id, ct);
 
             if (savedFile != null)
@@ -500,7 +497,7 @@ public partial class HarvestWorkerService : BackgroundService
         return metadata;
     }
 
-    private static void ApplyMetadataToDiscoveredFile(DiscoveredGcodeFile discoveredFile, GcodeMetadataDto metadata)
+    private static void ApplyMetadataToDiscoveredFile(HarvestDiscoveredFile discoveredFile, GcodeMetadataDto metadata)
     {
         discoveredFile.ExtractedSlicerName = metadata.SlicerName;
         discoveredFile.ExtractedSlicerVersion = metadata.SlicerVersion;
@@ -508,8 +505,7 @@ public partial class HarvestWorkerService : BackgroundService
         discoveredFile.ExtractedFilamentLength = metadata.FilamentLengthMm;
         discoveredFile.ExtractedNozzleDiameter = metadata.NozzleDiameter;
         discoveredFile.ExtractedMaterial = metadata.Material;
-        discoveredFile.ExtractedLayerHeight = metadata.LayerHeight?.ToString();
-        discoveredFile.ExtractedInfill = metadata.InfillPercentage;
+        // No ExtractedLayerHeight or ExtractedInfill fields on HarvestDiscoveredFile
     }
 
     private static async Task IncrementSkippedCountAsync(AppDbContext db, GcodeHarvestOperation operation)

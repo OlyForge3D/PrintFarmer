@@ -22,15 +22,15 @@ public partial class GcodeHarvestService : IGcodeHarvestService
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
         // Find the discovered file
-        var file = await _db.DiscoveredGcodeFiles.FirstOrDefaultAsync(f => f.Id == fileId && f.HarvestOperationId == operationId, ct);
+        var file = await _db.HarvestDiscoveredFiles.FirstOrDefaultAsync(f => f.Id == fileId && f.HarvestOperationId == operationId, ct);
         if (file == null)
         {
             return false;
         }
 
-        // Mark as skipped (set ProcessingFailed and ErrorMessage, or add a Skipped flag if needed)
-        file.ProcessingFailed = true;
-        file.ErrorMessage = "Skipped by user";
+        // Mark as skipped
+        file.Status = HarvestFileStatus.Skipped;
+        file.Error = "Skipped by user";
         await _db.SaveChangesAsync(ct);
 
         // Emit SignalR update to clients
@@ -43,15 +43,15 @@ public partial class GcodeHarvestService : IGcodeHarvestService
     public async Task<bool> RetryDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
         // Find the discovered file
-        var file = await _db.DiscoveredGcodeFiles.FirstOrDefaultAsync(f => f.Id == fileId && f.HarvestOperationId == operationId, ct);
+        var file = await _db.HarvestDiscoveredFiles.FirstOrDefaultAsync(f => f.Id == fileId && f.HarvestOperationId == operationId, ct);
         if (file == null)
         {
             return false;
         }
 
-        // Clear error and mark as not failed
-        file.ProcessingFailed = false;
-        file.ErrorMessage = null;
+        // Clear error and mark as pending
+        file.Status = HarvestFileStatus.Pending;
+        file.Error = null;
         await _db.SaveChangesAsync(ct);
 
         // Re-queue the file for processing (simulate as if it was just discovered)
@@ -72,10 +72,10 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             OperationId = operationId,
             PrinterId = printer.Id,
             ServerUrl = printer.ServerUrl,
-            FilePath = file.PrinterPath,
+            FilePath = file.FilePath,
             FileName = file.FileName,
-            FileSize = file.FileSizeBytes,
-            ModifiedAt = file.ModifiedAt
+            FileSize = file.Size,
+            ModifiedAt = file.ModifiedAt ?? DateTime.UtcNow
         };
         await _harvestQueue.EnqueueAsync(job);
 
@@ -369,7 +369,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                 queuedCount, operation.Id);
 
             // Check how many discovered files already exist
-            int existingFiles = await scopedDb.DiscoveredGcodeFiles
+            int existingFiles = await scopedDb.HarvestDiscoveredFiles
                 .Where(d => d.HarvestOperationId == operation.Id)
                 .CountAsync();
 
@@ -552,10 +552,10 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             operationId, operation.Status, operation.FilesFound);
 
         // Get files with explicit logging
-        DiscoveredGcodeFile[] files = await _db.DiscoveredGcodeFiles
-            .Where(d => d.HarvestOperationId == operationId)
-            .OrderBy(d => d.FileName)
-            .ToArrayAsync(ct);
+        HarvestDiscoveredFile[] files = await _db.HarvestDiscoveredFiles
+                .Where(d => d.HarvestOperationId == operationId)
+                .OrderBy(d => d.FileName)
+                .ToArrayAsync(ct);
 
         _logger.LogInformation("Found {FileCount} discovered files for operation {OperationId}",
             files.Length, operationId);
@@ -578,7 +578,7 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             pageSize = 500; // guardrail
         }
 
-        IQueryable<DiscoveredGcodeFile> baseQuery = _db.DiscoveredGcodeFiles.AsQueryable().Where(d => d.HarvestOperationId == operationId);
+        IQueryable<HarvestDiscoveredFile> baseQuery = _db.HarvestDiscoveredFiles.AsQueryable().Where(d => d.HarvestOperationId == operationId);
         if (!string.IsNullOrWhiteSpace(search))
         {
             string term = search.Trim();
@@ -596,11 +596,11 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             page = totalPages;
         }
 
-        DiscoveredGcodeFile[] items = await baseQuery
-            .OrderBy(d => d.FileName)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToArrayAsync(ct);
+        HarvestDiscoveredFile[] items = await baseQuery
+                .OrderBy(d => d.FileName)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToArrayAsync(ct);
 
         return new PagedResult<DiscoveredGcodeFileDto>(
             items.Select(MapToDto).ToList(),
@@ -622,14 +622,14 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             return new GcodeHarvestResultDto(request.HarvestOperationId, false, "Harvest operation not found");
         }
 
-        DiscoveredGcodeFile[] selectedFiles = await _db.DiscoveredGcodeFiles
-            .Where(d => request.SelectedFileIds.Contains(d.Id))
-            .ToArrayAsync(ct);
+        HarvestDiscoveredFile[] selectedFiles = await _db.HarvestDiscoveredFiles
+                .Where(d => request.SelectedFileIds.Contains(d.Id))
+                .ToArrayAsync(ct);
 
         List<string> errors = new();
         int importedCount = 0;
 
-        foreach (DiscoveredGcodeFile? discoveredFile in selectedFiles)
+        foreach (HarvestDiscoveredFile? discoveredFile in selectedFiles)
         {
             try
             {
@@ -637,6 +637,13 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                 {
                     continue; // Skip files already in library
                 }
+
+                // Mark as in progress and emit update
+                discoveredFile.Status = HarvestFileStatus.InProgress;
+                discoveredFile.StartedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+                await _harvestHub.Clients.Group($"harvest-{operation.Id}")
+                    .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
 
                 // Create storage directory if needed
                 using IServiceScope serviceScope = _serviceScopeFactory.CreateScope();
@@ -650,10 +657,16 @@ public partial class GcodeHarvestService : IGcodeHarvestService
 
                 // Download file from printer
                 PrinterBackend backend = (PrinterBackend)operation.Printer.Backend;
-                using MemoryStream? gcodeContent = await DownloadFileAsync(backend, operation.Printer, discoveredFile.PrinterPath);
+                using MemoryStream? gcodeContent = await DownloadFileAsync(backend, operation.Printer, discoveredFile.FilePath);
 
                 if (gcodeContent == null)
                 {
+                    discoveredFile.Status = HarvestFileStatus.Failed;
+                    discoveredFile.Error = $"Failed to download {discoveredFile.FileName}";
+                    discoveredFile.CompletedAt = DateTime.UtcNow;
+                    await _db.SaveChangesAsync(ct);
+                    await _harvestHub.Clients.Group($"harvest-{operation.Id}")
+                        .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
                     errors.Add($"Failed to download {discoveredFile.FileName}");
                     continue;
                 }
@@ -677,7 +690,8 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                             await _harvestHub.Clients.Group($"harvest-{operation.Id}")
                                 .SendAsync(
                                     "HarvestFileProgress",
-                                    new {
+                                    new
+                                    {
                                         operationId = operation.Id,
                                         fileName = discoveredFile.FileName,
                                         bytesCopied,
@@ -690,6 +704,13 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                     }
                 }
 
+                // Mark as complete and emit update
+                discoveredFile.Status = HarvestFileStatus.Complete;
+                discoveredFile.CompletedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+                await _harvestHub.Clients.Group($"harvest-{operation.Id}")
+                    .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
+
                 // Create library entry
                 GcodeFile gcodeFile = new()
                 {
@@ -697,12 +718,12 @@ public partial class GcodeHarvestService : IGcodeHarvestService
                     OriginalFileName = discoveredFile.FileName,
                     DisplayName = Path.GetFileNameWithoutExtension(discoveredFile.FileName),
                     FilePath = filePath,
-                    FileSizeBytes = discoveredFile.FileSizeBytes,
+                    FileSizeBytes = discoveredFile.Size,
                     FileHash = discoveredFile.FileHash ?? "",
                     UploadedAt = DateTime.UtcNow,
                     Source = GcodeSource.Harvested,
                     SourcePrinterId = operation.PrinterId,
-                    OriginalPrinterPath = discoveredFile.PrinterPath,
+                    OriginalPrinterPath = discoveredFile.FilePath,
                     LastSeenOnPrinter = DateTime.UtcNow,
                     RequiredNozzleDiameter = discoveredFile.ExtractedNozzleDiameter,
                     RequiredMaterial = discoveredFile.ExtractedMaterial,
@@ -718,6 +739,12 @@ public partial class GcodeHarvestService : IGcodeHarvestService
             }
             catch (Exception ex)
             {
+                discoveredFile.Status = HarvestFileStatus.Failed;
+                discoveredFile.Error = $"Failed to import {discoveredFile.FileName}: {ex.Message}";
+                discoveredFile.CompletedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+                await _harvestHub.Clients.Group($"harvest-{operation.Id}")
+                    .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
                 _logger.LogError(ex, "Failed to import file {FileName}", discoveredFile.FileName);
                 errors.Add($"Failed to import {discoveredFile.FileName}: {ex.Message}");
             }
@@ -1170,29 +1197,30 @@ public partial class GcodeHarvestService : IGcodeHarvestService
         };
     }
 
-    private static DiscoveredGcodeFileDto MapToDto(DiscoveredGcodeFile file)
+    private static DiscoveredGcodeFileDto MapToDto(HarvestDiscoveredFile file)
     {
         return new DiscoveredGcodeFileDto(
             file.Id,
             file.HarvestOperationId,
-            file.PrinterPath,
+            file.FilePath, // PrinterPath
             file.FileName,
-            file.FileSizeBytes,
-            file.ModifiedAt,
-            file.FileHash,
-            file.IsSelected,
-            file.AlreadyInLibrary,
-            file.ExistingLibraryFileId,
-            file.ProcessingFailed,
-            file.ErrorMessage,
+            file.Size, // FileSizeBytes
+            file.ModifiedAt, // ModifiedAt
+            file.FileHash, // FileHash
+            false, // IsSelected (not persisted, always false from backend)
+            file.AlreadyInLibrary, // AlreadyInLibrary
+            null, // ExistingLibraryFileId (not available)
+            file.Status == HarvestFileStatus.Failed, // ProcessingFailed
+            file.Error, // ErrorMessage
             file.ExtractedSlicerName,
             file.ExtractedSlicerVersion,
             file.ExtractedPrintTime,
             file.ExtractedFilamentLength,
             file.ExtractedNozzleDiameter,
             file.ExtractedMaterial,
-            file.ExtractedLayerHeight,
-            file.ExtractedInfill);
+            null, // ExtractedLayerHeight (not available)
+            null  // ExtractedInfill (not available)
+        );
     }
 
     // Helper class for file information

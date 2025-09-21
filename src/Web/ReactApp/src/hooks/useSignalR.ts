@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { HubConnectionState } from '@microsoft/signalr';
-import { signalRService as harvestSignalRService } from '@/services/signalr';
+import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { printerSignalRService } from '@/services/printer-signalr';
 import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
 
@@ -291,14 +291,13 @@ export function useDiscoveryProgress(
       return;
     }
 
-  const unsubscribe = harvestSignalRService.onDiscoveryProgress((progressUpdate) => {
-      if (progressUpdate.sessionId === sessionId) {
-        setProgress(progressUpdate);
-        onProgress?.(progressUpdate);
-      }
-    });
-
-    return unsubscribe;
+  const unsubscribe = printerSignalRService.onDiscoveryProgress?.((progressUpdate) => {
+    if (progressUpdate.sessionId === sessionId) {
+      setProgress(progressUpdate);
+      onProgress?.(progressUpdate);
+    }
+  });
+  return unsubscribe;
   }, [sessionId, onProgress]);
 
   return { progress };
@@ -317,14 +316,13 @@ export function useDiscoveryPrinterFound(
       return;
     }
 
-  const unsubscribe = harvestSignalRService.onDiscoveryPrinterFound((found) => {
-      if (found.sessionId === sessionId) {
-        setFoundPrinters(prev => [...prev, found.printer]);
-        onPrinterFound?.(found);
-      }
-    });
-
-    return unsubscribe;
+  const unsubscribe = printerSignalRService.onDiscoveryPrinterFound?.((found) => {
+    if (found.sessionId === sessionId) {
+      setFoundPrinters(prev => [...prev, found.printer]);
+      onPrinterFound?.(found);
+    }
+  });
+  return unsubscribe;
   }, [sessionId, onPrinterFound]);
 
   return { foundPrinters, setFoundPrinters };
@@ -343,14 +341,13 @@ export function useDiscoveryCompleted(
       return;
     }
 
-  const unsubscribe = harvestSignalRService.onDiscoveryCompleted((completedUpdate) => {
-      if (completedUpdate.sessionId === sessionId) {
-        setCompleted(completedUpdate);
-        onCompleted?.(completedUpdate);
-      }
-    });
-
-    return unsubscribe;
+  const unsubscribe = printerSignalRService.onDiscoveryCompleted?.((completedUpdate) => {
+    if (completedUpdate.sessionId === sessionId) {
+      setCompleted(completedUpdate);
+      onCompleted?.(completedUpdate);
+    }
+  });
+  return unsubscribe;
   }, [sessionId, onCompleted]);
 
   return { completed };
@@ -358,36 +355,42 @@ export function useDiscoveryCompleted(
 
 export function useDiscoveryStream(sessionId?: string) {
   // Ensure we have a connection state to react to (will trigger connect on mount)
-  const { isConnected, connectionState } = useSignalRConnection();
+
+  // Use printerSignalRService connection state for discovery
+  const [connectionState, setConnectionState] = useState(printerSignalRService.connectionState);
+  const [isConnected, setIsConnected] = useState(printerSignalRService.isConnected);
+  useEffect(() => {
+    printerSignalRService.connect();
+    const unsubscribe = printerSignalRService.onConnectionStateChange((connected) => {
+      setConnectionState(printerSignalRService.connectionState);
+      setIsConnected(connected);
+    });
+    return unsubscribe;
+  }, []);
+
   const { progress } = useDiscoveryProgress(sessionId);
   const { foundPrinters, setFoundPrinters } = useDiscoveryPrinterFound(sessionId);
   const { completed } = useDiscoveryCompleted(sessionId);
 
-  // Attempt to join discovery group when we have both a sessionId and an active connection.
   useEffect(() => {
     if (!sessionId) return;
-    if (!isConnected) {
-      // Wait until connection is established
-      return;
-    }
-
+    if (!isConnected) return;
     let cancelled = false;
     (async () => {
       try {
         console.debug('[Discovery] Joining SignalR discovery group', { sessionId });
-  await harvestSignalRService.joinDiscoveryGroup(sessionId);
+        await printerSignalRService.joinDiscoveryGroup?.(sessionId);
       } catch (err) {
         if (!cancelled) {
           console.warn('[Discovery] Failed to join discovery group, will retry on next connection state change', err);
         }
       }
     })();
-
     return () => {
       cancelled = true;
       if (isConnected) {
         console.debug('[Discovery] Leaving SignalR discovery group', { sessionId });
-  harvestSignalRService.leaveDiscoveryGroup(sessionId);
+        printerSignalRService.leaveDiscoveryGroup?.(sessionId);
       }
     };
   }, [sessionId, isConnected, connectionState]);

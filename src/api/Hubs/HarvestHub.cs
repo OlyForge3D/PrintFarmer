@@ -10,7 +10,7 @@ public class HarvestHub : Hub
     public async Task BroadcastFileProgressAsync(Guid operationId, string fileName, long bytesCopied, long totalBytes)
     {
         double percent = totalBytes > 0 ? (bytesCopied * 100.0 / totalBytes) : 0;
-        await Clients.Group($"harvest-{operationId}").SendAsync("HarvestFileProgress", new
+        await Clients.Group($"harvest-{operationId}").SendAsync("harvestfileprogress", new
         {
             operationId,
             fileName,

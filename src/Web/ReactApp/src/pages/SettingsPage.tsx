@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
-import { signalRService } from '@/services/signalr';
+import { signalRService } from '@/services/harvest-signalr';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { normalizeSpoolmanBaseUrl, isValidCidr, findOverlappingCidrRanges, suggestCorrectNetworkAddress } from '@/utils/validation';
 import { Save, TestTube, Plus, X, ExternalLink, RefreshCw, Edit2, Trash2, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
@@ -142,8 +142,8 @@ export function SettingsPage() {
       
       // Load network discovery settings from backend
       try {
-        const nd = await apiClient.getNetworkDiscoverySettings();
-        const ranges = nd.networkRanges.map(r => ({ cidr: r }));
+  const nd = await apiClient.getNetworkDiscoverySettings();
+  const ranges = nd.networkRanges.map((r: string) => ({ cidr: r }));
         setNetworkRanges(ranges);
         setDiscoveryTimeout(nd.timeoutMs);
         setMaxConcurrentScans(nd.maxConcurrentScans);

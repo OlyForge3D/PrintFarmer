@@ -1,3 +1,52 @@
+// DTO for a discovered file in a harvest operation
+// DTO for importing selected discovered files
+export interface ImportSelectedGcodeFilesDto {
+  harvestOperationId: string;
+  fileIds: string[];
+}
+
+// Result DTO for G-code harvest import
+export interface GcodeHarvestResultDto {
+  operationId: string;
+  importedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  importedFileIds: string[];
+  skippedFileIds: string[];
+  failedFileIds: string[];
+  errors?: Record<string, string>;
+}
+export interface DiscoveredGcodeFileDto {
+  id: string;
+  harvestOperationId: string;
+  filePath: string;
+  fileName: string;
+  size: number;
+  thumbnailUrl?: string;
+  status: HarvestFileStatus;
+  error?: string;
+  discoveredAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  alreadyInLibrary: boolean;
+  fileHash?: string;
+  extractedNozzleDiameter?: number;
+  extractedMaterial?: string;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  modifiedAt?: string;
+}
+
+export enum HarvestFileStatus {
+  Pending = 0,
+  InProgress = 1,
+  Complete = 2,
+  Failed = 3,
+  Cancelled = 4,
+  Skipped = 5
+}
 // PrintJobStatusDto for Moonraker print job status
 export interface PrintJobStatusDto {
   state: string;

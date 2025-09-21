@@ -1,6 +1,7 @@
-import type { PrintJobStatusDto } from '@/types/api';
+  // Get hash for a G-code file (returns string)
 import {
   ApiError,
+  PrintJobStatusDto,
   AuthenticationResult,
   CommandResult,
   CreateFilamentTypeRequest,
@@ -34,7 +35,9 @@ import {
   UpdateFilamentTypeRequest,
   UpdateModelRequest,
   UpdatePrinterDto,
-  UserDto
+  UserDto,
+  DiscoveredGcodeFileDto,
+  GcodeHarvestResultDto
 } from '@/types/api';
 import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';
@@ -83,6 +86,37 @@ export class ApiClient {
         return Promise.reject(apiError);
       }
     );
+  }
+
+  // ===== Harvest/discovered file API methods =====
+  // Get discovered G-code files for a harvest operation
+  async getDiscoveredGcodeFiles(harvestOperationId: string): Promise<DiscoveredGcodeFileDto[]> {
+  const resp = await this.client.get<DiscoveredGcodeFileDto[]>(`/gcode-harvest/operations/${harvestOperationId}/files`);
+  return resp.data;
+  }
+
+  // Import selected discovered G-code files
+  async importSelectedGcodeFiles(dto: { harvestOperationId: string; fileIds: string[] }): Promise<GcodeHarvestResultDto> {
+    const resp = await this.client.post<GcodeHarvestResultDto>(`/harvest/import-selected`, dto);
+    return resp.data;
+  }
+
+  // Skip a discovered G-code file
+  async skipDiscoveredGcodeFile(fileId: string): Promise<DiscoveredGcodeFileDto> {
+    const resp = await this.client.post<DiscoveredGcodeFileDto>(`/harvest/discovered-files/${fileId}/skip`, {});
+    return resp.data;
+  }
+
+  // Retry a discovered G-code file
+  async retryDiscoveredGcodeFile(fileId: string): Promise<DiscoveredGcodeFileDto> {
+    const resp = await this.client.post<DiscoveredGcodeFileDto>(`/harvest/discovered-files/${fileId}/retry`, {});
+    return resp.data;
+  }
+
+  // Get hash for a G-code file (returns string)
+  async getGcodeFileHash(path: string, algorithm: 'sha256' | 'sha1' = 'sha256'): Promise<string> {
+    const resp = await this.client.get<{ hash: string }>(`/gcode-files/hash`, { params: { path, algorithm } });
+    return resp.data.hash;
   }
 
   // ============ Printer API methods ============
@@ -429,6 +463,7 @@ export class ApiClient {
     return response.data;
   }
 
+
   async cancelHarvestOperation(operationId: string): Promise<boolean> {
     const response = await this.client.post<boolean>(`/gcode-harvest/operations/${operationId}/cancel`);
     return response.data;
@@ -515,10 +550,6 @@ export class ApiClient {
     return resp.data as { path: string; isDirectory: boolean; };
   }
 
-  async getGcodeFileHash(virtualPath: string, algorithm: 'sha256' | 'sha1' = 'sha256'): Promise<{ fileName: string; size: number; algorithm: string; hash: string; }> {
-    const resp = await this.client.get('/gcode-files/hash', { params: { path: virtualPath, algorithm } });
-    return resp.data as { fileName: string; size: number; algorithm: string; hash: string; };
-  }
 
   // ============ Job Queue methods ============
 

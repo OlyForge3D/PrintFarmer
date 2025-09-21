@@ -1,47 +1,47 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { apiClient } from '@/services/api';
-import { GcodeFile } from '@/types/api';
+import { DiscoveredGcodeFileDto, HarvestFileStatus } from '@/types/api';
+import type { HarvestFileDiscoveredEvent, HarvestFileProgress } from '@/services/harvest-signalr';
 import { toast } from 'sonner';
-import { signalRService as harvestSignalRService } from '@/services/signalr';
+import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 
-// Extend GcodeFile for UI status/error
-interface GcodeFileWithStatus extends GcodeFile {
-  status?: string;
-  error?: string;
-  percent?: number; // For progress
-  bytesCopied?: number;
-  totalBytes?: number;
-}
+
 
 interface IndexedFilesListProps {
   operationId: string;
 }
 
 export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId }) => {
-  const [files, setFiles] = useState<GcodeFileWithStatus[]>([]);
+  const [files, setFiles] = useState<DiscoveredGcodeFileDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // const [copying, setCopying] = useState(false);
-  const filesRef = useRef<GcodeFile[]>([]);
+  const filesRef = useRef<DiscoveredGcodeFileDto[]>([]);
 
-  // Copy selected files logic (stub)
-  const handleCopySelected = () => {
-    toast.info('Copy selected files: ' + Array.from(selected).join(', '));
-  };
-
-  // Retry a file (call backend and update UI)
-  const handleRetryFile = async (fileId: string) => {
+  // Import selected files logic
+  const handleImportSelected = async () => {
+    if (selected.size === 0) return;
     try {
-      const ok = await apiClient.retryHarvestFile(operationId, fileId);
-      if (ok) {
-        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'in-progress', error: '' } : f));
-        toast.success('Retry requested for file: ' + fileId);
-      } else {
-        toast.error('Failed to retry file: ' + fileId);
-      }
-    } catch (e: any) {
-      toast.error('Error retrying file: ' + (e?.message || fileId));
+      const fileIds = Array.from(selected);
+      const result = await apiClient.importSelectedGcodeFiles({
+        harvestOperationId: operationId,
+        fileIds,
+      });
+      toast.success(`Imported: ${result.importedCount}, Skipped: ${result.skippedCount}, Failed: ${result.failedCount}`);
+      setFiles(prev => prev.map(f =>
+        result.importedFileIds.includes(f.id)
+          ? { ...f, status: HarvestFileStatus.Complete, error: '' }
+          : result.skippedFileIds.includes(f.id)
+            ? { ...f, status: HarvestFileStatus.Skipped, error: '' }
+            : result.failedFileIds.includes(f.id)
+              ? { ...f, status: HarvestFileStatus.Failed, error: result.errors?.[f.id] || f.error }
+              : f
+      ));
+      setSelected(new Set());
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : 'Unknown error';
+      toast.error('Import failed: ' + (msg || 'Unknown error'));
     }
   };
 
@@ -50,26 +50,86 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
     try {
       const ok = await apiClient.skipHarvestFile(operationId, fileId);
       if (ok) {
-        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'skipped', error: '' } : f));
+        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: HarvestFileStatus.Skipped, error: '' } : f));
         toast.success('File skipped: ' + fileId);
       } else {
         toast.error('Failed to skip file: ' + fileId);
       }
-    } catch (e: any) {
-      toast.error('Error skipping file: ' + (e?.message || fileId));
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : fileId;
+      toast.error('Error skipping file: ' + (msg || fileId));
+    }
+  };
+
+  // Retry a file (call backend and update UI)
+  const handleRetryFile = async (fileId: string) => {
+    try {
+      const ok = await apiClient.retryHarvestFile(operationId, fileId);
+      if (ok) {
+        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: HarvestFileStatus.InProgress, error: '' } : f));
+        toast.success('Retry requested for file: ' + fileId);
+      } else {
+        toast.error('Failed to retry file: ' + fileId);
+      }
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : fileId;
+      toast.error('Error retrying file: ' + (msg || fileId));
     }
   };
 
   // Fetch initial files and set up SignalR real-time updates
   useEffect(() => {
     setLoading(true);
-    let unsubDiscovered: (() => void) | undefined;
-    let unsubProgress: (() => void) | undefined;
 
-    apiClient.getGcodeFilesWithFilter({ harvestId: operationId })
+  const unsubDiscovered = harvestSignalRService.onHarvestFileDiscovered((evt: HarvestFileDiscoveredEvent) => {
+    if (evt.operationId !== operationId) return;
+    setFiles(prev => {
+      const idx = prev.findIndex(f => f.id === evt.fileId || f.filePath === evt.filePath);
+      // Map evt.status string to HarvestFileStatus enum if needed
+      let status: HarvestFileStatus | undefined = undefined;
+      if (typeof evt.status === 'string') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        status = (HarvestFileStatus as any)[evt.status] ?? undefined;
+      } else if (typeof evt.status === 'number') {
+        status = evt.status;
+      }
+      const updated: Partial<DiscoveredGcodeFileDto> = {
+        id: evt.fileId,
+        filePath: evt.filePath,
+        fileName: evt.fileName,
+        size: evt.fileSize,
+        status,
+        error: evt.error
+      };
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...updated };
+        return next;
+      } else {
+        return [...prev, { ...updated } as DiscoveredGcodeFileDto];
+      }
+    });
+  });
+
+  const unsubProgress = harvestSignalRService.onHarvestFileProgress((progress: HarvestFileProgress) => {
+    if (progress.operationId !== operationId) return;
+    setFiles(prev => {
+      const idx = prev.findIndex(f => f.fileName === progress.fileName);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        status: progress.percent === 100 ? HarvestFileStatus.Complete : HarvestFileStatus.InProgress,
+      };
+      return next;
+    });
+  });
+
+
+  apiClient.getDiscoveredGcodeFiles(operationId)
       .then(res => {
-        setFiles(res.files);
-        filesRef.current = res.files;
+        setFiles(res);
+        filesRef.current = res;
         setError(null);
       })
       .catch((e: Error) => setError(e.message || 'Failed to load files'))
@@ -80,46 +140,6 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       harvestSignalRService.joinHarvestGroup(operationId);
     });
 
-    // Listen for real-time discovered files
-    unsubDiscovered = harvestSignalRService.onHarvestFileDiscovered((evt) => {
-      if (evt.operationId !== operationId) return;
-      setFiles(prev => {
-        const idx = prev.findIndex(f => f.id === evt.fileId || f.path === evt.filePath);
-        const updated: Partial<GcodeFileWithStatus> = {
-          id: evt.fileId,
-          path: evt.filePath,
-          name: evt.fileName,
-          size: evt.fileSize,
-          status: evt.status ?? '',
-          error: evt.error ?? ''
-        };
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = { ...next[idx], ...updated };
-          return next;
-        } else {
-          return [...prev, { ...updated } as GcodeFileWithStatus];
-        }
-      });
-    });
-
-    // Listen for real-time per-file progress updates
-    unsubProgress = harvestSignalRService.onHarvestFileProgress((progress) => {
-      if (progress.operationId !== operationId) return;
-      setFiles(prev => {
-        const idx = prev.findIndex(f => f.name === progress.fileName);
-        if (idx === -1) return prev;
-        const next = [...prev];
-        next[idx] = {
-          ...next[idx],
-          percent: progress.percent,
-          bytesCopied: progress.bytesCopied,
-          totalBytes: progress.totalBytes,
-          status: progress.percent === 100 ? 'completed' : 'in-progress',
-        };
-        return next;
-      });
-    });
 
     return () => {
       if (unsubDiscovered) unsubDiscovered();
@@ -170,19 +190,19 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
           <thead className="bg-pf-table-header text-pf-table-header-text">
             <tr>
               <th className="p-2 border-b border-pf-border"><input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" /></th>
-              <th className="p-2 border-b border-pf-border text-left">Name</th>
+              <th className="p-2 border-b border-pf-border text-left">File</th>
               <th className="p-2 border-b border-pf-border text-right">Size</th>
               <th className="p-2 border-b border-pf-border text-center">Status</th>
               <th className="p-2 border-b border-pf-border text-center">Error</th>
               <th className="p-2 border-b border-pf-border text-center">Modified</th>
+              <th className="p-2 border-b border-pf-border text-center">Meta</th>
             </tr>
           </thead>
           <tbody>
             {files.map(file => {
-              const status = file.status || '';
+              const status = file.status;
               const error = file.error || '';
-              // Use file.id if available, otherwise fallback to file.path for key
-              const key = file.id || file.path || file.name;
+              const key = file.id || file.filePath || file.fileName;
               return (
                 <tr
                   key={key}
@@ -190,27 +210,43 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                     `${selected.has(file.id) ? 'bg-pf-accent-bg' : 'hover:bg-pf-hover transition'} ${error ? 'border-l-4 border-pf-error' : ''}`
                   }
                   tabIndex={0}
-                  aria-label={`File ${file.name}, status: ${status}${error ? ', error: ' + error : ''}`}
+                  aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
                   <td className="p-2 border-b border-pf-border text-center">
-                    <input type="checkbox" checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.name}`} aria-label={`Select file ${file.name}`} />
+                    <input type="checkbox" checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
                   </td>
-                  <td className="p-2 border-b border-pf-border font-mono text-pf-primary" title={file.path}>{file.name}</td>
+                  <td className="p-2 border-b border-pf-border font-mono text-pf-primary flex items-center gap-2" title={file.filePath}>
+                    {file.thumbnailUrl && (
+                      <img
+                        src={file.thumbnailUrl}
+                        alt={file.fileName + ' thumbnail'}
+                        className="w-8 h-8 min-w-[32px] min-h-[32px] rounded shadow border border-pf-border bg-pf-surface object-cover"
+                        loading="lazy"
+                      />
+                    )}
+                    <span>{file.fileName}</span>
+                  </td>
                   <td className="p-2 border-b border-pf-border text-right text-pf-muted">
                     {(file.size / 1024).toFixed(1)} KB
-                    {typeof file.percent === 'number' && file.status === 'in-progress' && (
-                      <span className="ml-2 text-xs text-pf-accent">{file.percent.toFixed(0)}%</span>
-                    )}
                   </td>
                   <td className="p-2 border-b border-pf-border text-center">
-                    {status && (
-                      <span className={
-                        status === 'completed' ? 'inline-block px-2 py-0.5 rounded bg-pf-success-bg text-pf-success' :
-                        status === 'in-progress' ? 'inline-block px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent' :
-                        status === 'error' ? 'inline-block px-2 py-0.5 rounded bg-pf-error-bg text-pf-error' :
-                        'inline-block px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted'
-                      }>
-                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                    {status !== undefined && (
+                      <span
+                        className={
+                          status === HarvestFileStatus.Complete ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-success-bg text-pf-success' :
+                          status === HarvestFileStatus.InProgress ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent' :
+                          status === HarvestFileStatus.Failed ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-error-bg text-pf-error' :
+                          status === HarvestFileStatus.Skipped ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
+                          'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted'
+                        }
+                        title={HarvestFileStatus[status]}
+                        aria-label={HarvestFileStatus[status]}
+                      >
+                        {status === HarvestFileStatus.Complete && <span title="Complete" aria-label="Complete">✔️</span>}
+                        {status === HarvestFileStatus.InProgress && <span title="In Progress" aria-label="In Progress">⏳</span>}
+                        {status === HarvestFileStatus.Failed && <span title="Failed" aria-label="Failed">❌</span>}
+                        {status === HarvestFileStatus.Skipped && <span title="Skipped" aria-label="Skipped">⏭️</span>}
+                        {HarvestFileStatus[status] ?? ''}
                       </span>
                     )}
                   </td>
@@ -239,7 +275,26 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                       </>
                     )}
                   </td>
-                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">{new Date(file.modifiedAt).toLocaleString()}</td>
+                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">{file.modifiedAt ? new Date(file.modifiedAt).toLocaleString() : ''}</td>
+                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">
+                    <div className="flex flex-col items-center gap-1">
+                      {file.extractedSlicerName && (
+                        <span className="text-xs" title={`Slicer: ${file.extractedSlicerName}${file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}`}>🖨️ {file.extractedSlicerName}{file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}</span>
+                      )}
+                      {file.extractedMaterial && (
+                        <span className="text-xs" title={`Material: ${file.extractedMaterial}`}>🧵 {file.extractedMaterial}</span>
+                      )}
+                      {file.extractedNozzleDiameter && (
+                        <span className="text-xs" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>⌀ {file.extractedNozzleDiameter}mm</span>
+                      )}
+                      {file.extractedPrintTime && (
+                        <span className="text-xs" title={`Est. print time: ${file.extractedPrintTime} min`}>⏱️ {file.extractedPrintTime} min</span>
+                      )}
+                      {file.extractedFilamentLength && (
+                        <span className="text-xs" title={`Filament: ${file.extractedFilamentLength}m`}>📏 {file.extractedFilamentLength}m</span>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
@@ -250,9 +305,9 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         <button
           className={`btn btn-primary bg-pf-accent text-white hover:bg-pf-accent-dark focus:ring-2 focus:ring-pf-accent focus:outline-none px-4 py-2 rounded shadow disabled:opacity-50 disabled:cursor-not-allowed`}
           disabled={selected.size === 0}
-          onClick={handleCopySelected}
+          onClick={handleImportSelected}
         >
-          <>Copy Selected <span className="ml-1 font-bold">({selected.size})</span></>
+          <>Import Selected <span className="ml-1 font-bold">({selected.size})</span></>
         </button>
         <span className="text-pf-muted text-xs">Tip: Use checkboxes to select files to import.</span>
       </div>

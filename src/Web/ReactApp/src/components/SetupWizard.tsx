@@ -354,7 +354,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   if (loading) {
     return (
       <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center">
-  <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+        <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
       </div>
     );
   }
@@ -648,12 +648,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           // Show initialization spinner
           <div className="text-center py-16">
             <div className="flex items-center justify-center gap-4 mb-6">
-              <div className="flex items-center justify-center w-14 h-14 bg-pf-accent bg-opacity-15 rounded-full">
-                <Shield className="h-7 w-7 text-pf-accent" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
-                <p className="text-pf-text-secondary text-sm">Initializing system...</p>
+              <div className="flex items-center gap-3">
+                <img
+                  src="/printfarmer-logo.svg"
+                  alt="PrintFarmer Logo"
+                  className="h-14 w-14"
+                />
+                <div className="flex flex-col items-start">
+                  <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
+                  <p className="text-pf-text-secondary text-sm">Initializing system...</p>
+                </div>
               </div>
             </div>
             <div className="flex items-center justify-center gap-3 mb-4">
@@ -674,12 +678,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           // Show setup wizard once initialized
           <>
             <div className="flex items-center gap-4 mb-6">
-              <div className="flex items-center justify-center w-14 h-14 bg-pf-accent bg-opacity-15 rounded-full">
-                <Shield className="h-7 w-7 text-pf-accent" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
-                <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>
+              <div className="flex items-center gap-3">
+                <img
+                  src="/printfarmer-logo.svg"
+                  alt="PrintFarmer Logo"
+                  className="h-14 w-14"
+                />
+                <div className="flex flex-col items-start">
+                  <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
+                  <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>
+                </div>
               </div>
             </div>
             <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">

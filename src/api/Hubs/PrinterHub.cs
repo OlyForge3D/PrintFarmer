@@ -19,7 +19,7 @@ public class PrinterHub(IDiscoveryProgressCache progressCache) : Hub
         {
             if (progressCache.TryGet(sessionId, out DiscoveryProgressDto? progress) && progress != null)
             {
-                await Clients.Caller.SendAsync("DiscoveryProgress", progress);
+                await Clients.Caller.SendAsync("discoveryprogress", progress);
                 break;
             }
             // If cancelled/connection aborted stop early

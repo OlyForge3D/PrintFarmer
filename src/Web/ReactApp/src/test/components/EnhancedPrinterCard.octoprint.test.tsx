@@ -1,9 +1,9 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { EnhancedPrinterCard } from '@/components/EnhancedPrinterCard';
-import { PrinterBackend, type Printer } from '@/types/api';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { EnhancedPrinterCard } from '../../components/EnhancedPrinterCard';
+import { PrinterBackend, type Printer } from '../../types/api';
+import { AuthProvider } from '../../contexts/AuthContext';
 
 const basePrinter: Printer = {
   id: 'octo-2',

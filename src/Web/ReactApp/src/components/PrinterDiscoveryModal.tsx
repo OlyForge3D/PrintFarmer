@@ -5,7 +5,7 @@ import { useDiscoveryStream } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-import { signalRService } from '@/services/signalr';
+import { signalRService } from '@/services/harvest-signalr';
 import { X, Search } from 'lucide-react';
 
 interface PrinterDiscoveryModalProps {

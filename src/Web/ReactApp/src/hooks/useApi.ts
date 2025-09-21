@@ -434,7 +434,10 @@ export function useImportFilamentTypesFromSpoolman() {
 export function useGcodeFiles(page = 1, pageSize = 50, options?: UseQueryOptions<GcodeFile[], ApiError>) {
   return useQuery({
     queryKey: queryKeys.gcodeFiles(page, pageSize),
-    queryFn: () => apiClient.getGcodeFiles(page, pageSize),
+    queryFn: async () => {
+  const resp = await apiClient.getGcodeFiles(page, pageSize);
+  return resp;
+    },
     staleTime: 60000, // 1 minute
     ...options,
   });

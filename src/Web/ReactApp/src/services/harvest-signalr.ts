@@ -9,7 +9,7 @@ import { apiClient } from '@/services/api';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
-type HarvestFileProgress = {
+export type HarvestFileProgress = {
   operationId: string;
   fileName: string;
   bytesCopied: number;
@@ -36,6 +36,7 @@ type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
 export class SignalRService {
   private connection: HubConnection | null = null;
+  private discoveryConnection: HubConnection | null = null;
   private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -94,19 +95,18 @@ export class SignalRService {
   }
 
   private buildConnection(): void {
-    // Use environment variable for harvest hub, fallback to default
+    // Use harvest hub for harvest events, printers hub for discovery
     const harvestSignalrUrl = import.meta.env.VITE_SIGNALR_HARVEST_URL || 'http://localhost:5245/hubs/harvest';
-    console.info('[SignalR] Building connection with URL:', harvestSignalrUrl);
+    const printersSignalrUrl = import.meta.env.VITE_SIGNALR_PRINTERS_URL || 'http://localhost:5245/hubs/printers';
+    console.info('[SignalR] Building harvest connection with URL:', harvestSignalrUrl);
     this.connection = new HubConnectionBuilder()
       .withUrl(harvestSignalrUrl)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
-          // Exponential backoff with jitter
           const delay = Math.min(
             this.reconnectDelay * Math.pow(2, retryContext.previousRetryCount),
             this.maxReconnectDelay
           );
-          // Add jitter (±10%)
           const jitter = delay * 0.1 * (Math.random() - 0.5);
           return Math.max(1000, delay + jitter);
         }
@@ -115,6 +115,7 @@ export class SignalRService {
       .build();
     // Set up event handlers
     this.setupEventHandlers();
+
   }
 
 
@@ -132,8 +133,8 @@ export class SignalRService {
   // Connection lifecycle events
   private setupEventHandlers(): void {
     if (!this.connection) return;
-    // HarvestFileDiscovered event
-    this.connection.on('HarvestFileDiscovered', (evt: HarvestFileDiscoveredEvent) => {
+    // Harvest events (harvest hub)
+  this.connection.on('harvestfilediscovered', (evt: HarvestFileDiscoveredEvent) => {
       this.harvestFileDiscoveredCallbacks.forEach(callback => {
         try {
           callback(evt);
@@ -159,8 +160,8 @@ export class SignalRService {
       this.notifyConnectionState(true);
     });
 
-    // Business event handlers
-    this.connection.on('PrinterUpdated', (status: PrinterStatusUpdate) => {
+    // Business event handlers (harvest hub)
+  this.connection.on('printerupdated', (status: PrinterStatusUpdate) => {
       this.printerStatusCallbacks.forEach(callback => {
         try {
           callback(status);
@@ -170,7 +171,7 @@ export class SignalRService {
       });
     });
 
-    this.connection.on('HarvestUpdate', (operationId: string, status: HarvestUpdateDto) => {
+  this.connection.on('harvestupdate', (operationId: string, status: HarvestUpdateDto) => {
       this.harvestUpdateCallbacks.forEach(callback => {
         try {
           callback(operationId, status);
@@ -181,7 +182,7 @@ export class SignalRService {
     });
 
     // NEW: Per-file progress event
-    this.connection.on('HarvestFileProgress', (progress: HarvestFileProgress) => {
+  this.connection.on('harvestfileprogress', (progress: HarvestFileProgress) => {
       this.harvestFileProgressCallbacks.forEach(callback => {
         try {
           callback(progress);
@@ -191,7 +192,7 @@ export class SignalRService {
       });
     });
 
-    this.connection.on('JobQueueUpdate', (update: JobQueueUpdateDto) => {
+  this.connection.on('jobqueueupdate', (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach(callback => {
         try {
           callback(update);
@@ -201,36 +202,7 @@ export class SignalRService {
       });
     });
 
-    // Discovery event handlers
-    this.connection.on('DiscoveryProgress', (progress: DiscoveryProgressDto) => {
-      this.discoveryProgressCallbacks.forEach(callback => {
-        try {
-          callback(progress);
-        } catch (error) {
-          console.error('Error in discovery progress callback:', error);
-        }
-      });
-    });
-
-    this.connection.on('DiscoveryPrinterFound', (found: DiscoveryPrinterFoundDto) => {
-      this.discoveryPrinterFoundCallbacks.forEach(callback => {
-        try {
-          callback(found);
-        } catch (error) {
-          console.error('Error in discovery printer found callback:', error);
-        }
-      });
-    });
-
-    this.connection.on('DiscoveryCompleted', (completed: DiscoveryCompletedDto) => {
-      this.discoveryCompletedCallbacks.forEach(callback => {
-        try {
-          callback(completed);
-        } catch (error) {
-          console.error('Error in discovery completed callback:', error);
-        }
-      });
-    });
+    // Discovery event handlers (printers hub)
   }
   // ============ Harvest File Progress Event Subscription ============
   onHarvestFileProgress(callback: HarvestFileProgressCallback): () => void {
@@ -277,47 +249,58 @@ export class SignalRService {
   }
 
   async connect(): Promise<void> {
-    if (!this.connection) {
+    if (!this.connection || !this.discoveryConnection) {
       this.buildConnection();
     }
 
-    if (this.connection!.state === HubConnectionState.Connected) {
-      console.info('SignalR already connected');
-      return;
-    }
-
-    if (this.connection!.state === HubConnectionState.Connecting) {
-      console.info('SignalR already connecting, waiting...');
-      return;
-    }
-
-    // Only start if we're in Disconnected state
-    if (this.connection!.state !== HubConnectionState.Disconnected) {
-      console.warn('SignalR connection is in unexpected state:', this.connection!.state);
-      return;
-    }
-
-    try {
-      await this.connection!.start();
-      console.info('SignalR connected');
-      this.reconnectAttempts = 0;
-      this.notifyConnectionState(true);
-    } catch (error) {
-      console.error('SignalR connection failed:', error);
-      this.notifyConnectionState(false);
-      
-      // Retry with exponential backoff
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        const delay = Math.min(
-          this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
-          this.maxReconnectDelay
-        );
-        this.reconnectAttempts++;
-        
-        console.info(`Retrying SignalR connection in ${delay}ms (attempt ${this.reconnectAttempts})`);
-        setTimeout(() => this.connect(), delay);
+    // Start main connection if needed
+    if (this.connection) {
+      if (this.connection.state === HubConnectionState.Disconnected) {
+        try {
+          await this.connection.start();
+          console.info('SignalR (harvest) connected');
+          this.reconnectAttempts = 0;
+          this.notifyConnectionState(true);
+        } catch (error) {
+          console.error('SignalR (harvest) connection failed:', error);
+          this.notifyConnectionState(false);
+          // Retry with exponential backoff
+          if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            const delay = Math.min(
+              this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
+              this.maxReconnectDelay
+            );
+            this.reconnectAttempts++;
+            console.info(`Retrying SignalR (harvest) connection in ${delay}ms (attempt ${this.reconnectAttempts})`);
+            setTimeout(() => this.connect(), delay);
+          } else {
+            console.error('Max reconnection attempts reached');
+          }
+        }
+      } else if (this.connection.state === HubConnectionState.Connected) {
+        console.info('SignalR (harvest) already connected');
+      } else if (this.connection.state === HubConnectionState.Connecting) {
+        console.info('SignalR (harvest) already connecting, waiting...');
       } else {
-        console.error('Max reconnection attempts reached');
+        console.warn('SignalR (harvest) connection is in unexpected state:', this.connection.state);
+      }
+    }
+
+    // Start discovery connection if needed
+    if (this.discoveryConnection) {
+      if (this.discoveryConnection.state === HubConnectionState.Disconnected) {
+        try {
+          await this.discoveryConnection.start();
+          console.info('SignalR (discovery) connected');
+        } catch (error) {
+          console.error('SignalR (discovery) connection failed:', error);
+        }
+      } else if (this.discoveryConnection.state === HubConnectionState.Connected) {
+        console.info('SignalR (discovery) already connected');
+      } else if (this.discoveryConnection.state === HubConnectionState.Connecting) {
+        console.info('SignalR (discovery) already connecting, waiting...');
+      } else {
+        console.warn('SignalR (discovery) connection is in unexpected state:', this.discoveryConnection.state);
       }
     }
   }
@@ -460,17 +443,6 @@ export class SignalRService {
 
   // ============ Discovery Group Methods ============
 
-  async joinDiscoveryGroup(sessionId: string): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.invoke('JoinDiscoveryGroupAsync', sessionId);
-    }
-  }
-
-  async leaveDiscoveryGroup(sessionId: string): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.invoke('LeaveDiscoveryGroupAsync', sessionId);
-    }
-  }
 
   // Clean up all resources
   dispose(): void {

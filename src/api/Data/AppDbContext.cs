@@ -20,7 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<PrinterCapabilities> PrinterCapabilities => Set<PrinterCapabilities>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
-    public DbSet<DiscoveredGcodeFile> DiscoveredGcodeFiles => Set<DiscoveredGcodeFile>();
+    public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
 
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
@@ -294,30 +294,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(h => h.Status);
         });
 
-        // Discovered G-code File Entity Configuration
-        modelBuilder.Entity<DiscoveredGcodeFile>(b =>
+        // HarvestDiscoveredFile Entity Configuration
+        modelBuilder.Entity<HarvestDiscoveredFile>(b =>
         {
-            b.HasKey(d => d.Id);
-            b.Property(d => d.PrinterPath).IsRequired().HasMaxLength(512);
-            b.Property(d => d.FileName).IsRequired().HasMaxLength(255);
-            b.Property(d => d.FileHash).HasMaxLength(64);
-            b.Property(d => d.ExtractedSlicerName).HasMaxLength(128);
-            b.Property(d => d.ExtractedSlicerVersion).HasMaxLength(64);
-            b.Property(d => d.ExtractedMaterial).HasMaxLength(64);
-            b.Property(d => d.ExtractedLayerHeight).HasMaxLength(32);
-            b.Property(d => d.ExtractedInfill).HasMaxLength(32);
-
-            // Foreign Key
-            b.HasOne(d => d.HarvestOperation)
-                .WithMany()
-                .HasForeignKey(d => d.HarvestOperationId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Indexes
-            b.HasIndex(d => d.HarvestOperationId);
-            b.HasIndex(d => d.FileHash);
-            b.HasIndex(d => d.IsSelected);
-            b.HasIndex(d => d.AlreadyInLibrary);
+            b.HasKey(f => f.Id);
+            b.Property(f => f.HarvestOperationId).IsRequired();
+            b.Property(f => f.FilePath).IsRequired().HasMaxLength(512);
+            b.Property(f => f.FileName).IsRequired().HasMaxLength(256);
+            b.Property(f => f.Size).IsRequired();
+            b.Property(f => f.ThumbnailUrl).HasMaxLength(512);
+            b.Property(f => f.Status).IsRequired();
+            b.Property(f => f.Error).HasMaxLength(512);
+            b.Property(f => f.DiscoveredAt).IsRequired();
+            b.Property(f => f.StartedAt);
+            b.Property(f => f.CompletedAt);
+            b.HasIndex(f => f.HarvestOperationId);
         });
 
         // User Entity Configuration
@@ -508,6 +499,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(s => s.PerEngineJson).HasColumnType("TEXT");
             b.Property(s => s.UpdatedAt).IsRequired();
             b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
+        });
+ 
+        // HarvestDiscoveredFile Entity Configuration
+        modelBuilder.Entity<HarvestDiscoveredFile>(b =>
+        {
+            b.HasKey(f => f.Id);
+            b.Property(f => f.HarvestOperationId).IsRequired();
+            b.Property(f => f.FilePath).IsRequired().HasMaxLength(512);
+            b.Property(f => f.FileName).IsRequired().HasMaxLength(256);
+            b.Property(f => f.Size).IsRequired();
+            b.Property(f => f.ThumbnailUrl).HasMaxLength(512);
+            b.Property(f => f.Status).IsRequired();
+            b.Property(f => f.Error).HasMaxLength(512);
+            b.Property(f => f.DiscoveredAt).IsRequired();
+            b.Property(f => f.StartedAt);
+            b.Property(f => f.CompletedAt);
+            b.HasIndex(f => f.HarvestOperationId);
         });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)

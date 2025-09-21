@@ -12,13 +12,8 @@ export function HarvestHistoryPage() {
   const [detailsOperation, setDetailsOperation] = useState<GcodeHarvestOperation | null>(null);
 
   const { data: operations = [], isLoading, error, refetch } = useQuery({
-    queryKey: ['harvest-operations', printerFilter, statusFilter],
-    queryFn: () => apiClient.getHarvestOperations(
-      printerFilter || undefined, 
-      statusFilter || undefined, 
-      100, // limit
-      0 // offset
-    ),
+    queryKey: ['harvest-operations', printerFilter],
+    queryFn: () => apiClient.getHarvestOperations(printerFilter || undefined),
     refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
   });
 

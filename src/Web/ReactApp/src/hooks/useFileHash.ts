@@ -27,15 +27,16 @@ export function useFileHash(path: string | undefined, algorithm: 'sha256' | 'sha
       }
     } catch { /* ignore */ }
   }
-  return useQuery<{ fileName: string; size: number; algorithm: string; hash: string; }>({
+  return useQuery<HashData>({
     queryKey: ['gcode-file-hash', path, algorithm],
     queryFn: async () => {
-      const resp = await apiClient.getGcodeFileHash(path!, algorithm);
+      const hash = await apiClient.getGcodeFileHash(path!, algorithm);
+      const result: HashData = { fileName: path!, size: 0, algorithm, hash };
       // Persist
       try {
         const raw = localStorage.getItem(storageKey);
         const map = raw ? (JSON.parse(raw) as Record<string, CacheEntry>) : {};
-        map[`${algorithm}:${path}`] = { d: resp, t: Date.now() };
+        map[`${algorithm}:${path}`] = { d: result, t: Date.now() };
         // Optional: cap size to 500 entries
         const entries = Object.entries(map);
         if (entries.length > 500) {
@@ -48,7 +49,7 @@ export function useFileHash(path: string | undefined, algorithm: 'sha256' | 'sha
           localStorage.setItem(storageKey, JSON.stringify(map));
         }
       } catch { /* ignore persistence errors */ }
-      return resp;
+      return result;
     },
     enabled,
     staleTime: 1000 * 60 * 60, // 1 hour
