@@ -26,6 +26,7 @@ interface HarvestProgressCardProps {
   operation: GcodeHarvestOperation;
   onOperationUpdate?: () => void;
   perFileProgress?: Record<string, FileProgress>;
+  onViewDetails?: (operation: GcodeHarvestOperation) => void;
 }
 
 const formatBytes = (bytes: number): string => {
@@ -39,7 +40,8 @@ const formatBytes = (bytes: number): string => {
 export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
   operation,
   onOperationUpdate,
-  perFileProgress
+  perFileProgress,
+  onViewDetails
 }) => {
   const { hasPermission } = useAuth();
   const cancelMutation = useCancelHarvestOperation();
@@ -70,7 +72,13 @@ export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow border border-gray-200 mb-6">
+    <div
+      className={
+        'bg-white rounded-lg shadow border border-gray-200 mb-6' +
+        (onViewDetails ? ' cursor-pointer' : '')
+      }
+      onClick={onViewDetails ? () => onViewDetails(operation) : undefined}
+    >
       <div className="flex items-center justify-between p-4 border-b border-gray-100">
         <div className="flex items-center space-x-3">
           <config.icon className={`w-6 h-6 ${config.textColor}`} />

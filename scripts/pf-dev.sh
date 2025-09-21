@@ -63,7 +63,7 @@ bootstrap(){
   require_cmd dotnet; require_cmd npm; require_cmd git
   pushd "$SRC_DIR" >/dev/null
   info "Restoring .NET solution"; dotnet restore ./farm-web.sln
-  if [[ -d "$REACT_DIR" ]]; then pushd "$REACT_DIR" >/dev/null; info "Installing npm deps"; npm install; popd >/dev/null; fi
+  if [[ -d "$REACT_DIR" ]]; then pushd "$REACT_DIR" >/dev/null; info "Installing npm deps"; npm install --legacy-peer-deps; popd >/dev/null; fi
   popd >/dev/null
   if [[ ! -f "$ROOT_DIR/.env" && -f "$ROOT_DIR/.env.template" ]]; then cp "$ROOT_DIR/.env.template" "$ROOT_DIR/.env"; success "Created .env from template"; fi
   
@@ -121,7 +121,7 @@ EOF
   info "Starting React dev server (logs: $VITE_LOG)"
   (
     cd "$REACT_DIR"
-    npm install >/dev/null 2>&1 || true
+  npm install --legacy-peer-deps >/dev/null 2>&1 || true
     npm run dev >>"$VITE_LOG" 2>&1 & echo $! > "$PID_DIR/printfarmer-vite.pid"
   ) &
   info "Starting API server (logs: $API_LOG)"

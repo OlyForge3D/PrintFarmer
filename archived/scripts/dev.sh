@@ -45,7 +45,7 @@ else
     # Start both API and React in parallel
     echo "🚀 Starting React development server..."
     cd src/Web/ClientApp
-    npm install
+    npm install --legacy-peer-deps
     npm run dev &
     REACT_PID=$!
 

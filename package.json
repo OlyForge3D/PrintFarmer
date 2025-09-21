@@ -1,6 +1,8 @@
 {
   "devDependencies": {
     "@apidevtools/swagger-parser": "^12.0.0",
+    "@vitejs/plugin-react": "^5.0.3",
+    "jsdom": "^27.0.0",
     "vitest": "^3.2.4"
   }
 }

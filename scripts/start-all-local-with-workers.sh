@@ -320,7 +320,7 @@ fi
 cd "$REACT_DIR"
 if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
   info "Installing React dependencies..."
-  npm install
+  npm install --legacy-peer-deps
 fi
 
 # Create/update React .env for development with distributed workers

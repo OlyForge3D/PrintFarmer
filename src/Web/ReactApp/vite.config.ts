@@ -1,6 +1,7 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tsconfigPaths from 'vite-tsconfig-paths';
 import path from 'path';
 import { execSync } from 'node:child_process';
 
@@ -10,12 +11,9 @@ try {
 } catch { /* ignore: git not available */ }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tsconfigPaths()],
   resolve: {
-    alias: [
-      { find: /^@\/(.*)/, replacement: path.resolve(__dirname, 'src/$1') },
-      { find: '@', replacement: path.resolve(__dirname, 'src') },
-    ],
+    // alias removed, handled by vite-tsconfig-paths
   },
   optimizeDeps: {
     include: [
@@ -53,7 +51,7 @@ export default defineConfig({
   build: {
     sourcemap: true,
     outDir: 'dist',
-  chunkSizeWarningLimit: 1200,
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -78,9 +76,6 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
-    alias: [
-      { find: /^@\/(.*)/, replacement: path.resolve(__dirname, 'src/$1') },
-      { find: '@', replacement: path.resolve(__dirname, 'src') },
-    ],
+    // vite-tsconfig-paths will handle aliases for tests too
   },
 });
