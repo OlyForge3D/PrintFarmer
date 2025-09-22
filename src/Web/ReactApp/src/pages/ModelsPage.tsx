@@ -3,10 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
-import type { ModelViewerProps } from '@/components/3d/ModelViewer';
+import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
 import type { GCodeViewerProps } from '@/components/3d/GCodeViewer';
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
-  () => import('@/components/3d/ModelViewer').then(m => ({ default: m.ModelViewer }))
+  () => import('@/components/3d/ModelViewer3D').then(m => ({ default: m.ModelViewer }))
 );
 const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
   () => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer }))
