@@ -53,8 +53,8 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
     public override void Write(Utf8JsonWriter writer, PrinterBackend value, JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        // Preserve existing string enum behavior (exact enum name)
-        writer.WriteStringValue(value.ToString());
+        // Serialize as integer for frontend compatibility
+        writer.WriteNumberValue((int)value);
     }
 }
 

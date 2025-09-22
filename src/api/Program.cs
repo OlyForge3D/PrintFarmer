@@ -58,11 +58,11 @@ builder.Services.AddControllers(options =>
     })
     .AddJsonOptions(o =>
     {
-        // Keep default string enum converter for most enums
-        o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
-        // Add permissive converters for enums that have been causing deserialization failures in tests
+        // Register custom converters first so they take precedence
         o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrinterBackendJsonConverter());
         o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrintJobStatusJsonConverter());
+        // Default string enum converter for all other enums
+        o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     })
     .AddJsonOptions(options =>
     {

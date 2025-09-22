@@ -12,8 +12,11 @@ export function HarvestHistoryPage() {
   const [detailsOperation, setDetailsOperation] = useState<GcodeHarvestOperation | null>(null);
 
   const { data: operations = [], isLoading, error, refetch } = useQuery({
-    queryKey: ['harvest-operations', printerFilter],
-    queryFn: () => apiClient.getHarvestOperations(printerFilter || undefined),
+    queryKey: ['harvest-operations', printerFilter, statusFilter],
+    queryFn: () => apiClient.getHarvestOperations(
+      printerFilter || undefined,
+      statusFilter || undefined
+    ),
     refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
   });
 
@@ -69,7 +72,15 @@ export function HarvestHistoryPage() {
     }
   };
 
-  const uniquePrinters = [...new Set(operations.map(op => op.printerName))];
+  // Build unique printers as array of { id, name }
+  const uniquePrinters = Array.from(
+    operations.reduce((map, op) => {
+      if (op.printerId && op.printerName && !map.has(op.printerId)) {
+        map.set(op.printerId, op.printerName);
+      }
+      return map;
+    }, new Map<string, string>())
+  ).map(([id, name]) => ({ id, name }));
 
   if (isLoading) {
     return (
@@ -114,6 +125,9 @@ export function HarvestHistoryPage() {
     );
   }
 
+  // Optionally filter in-memory for status if backend doesn't support it
+  // const filteredOperations = statusFilter ? operations.filter(op => getStatusString(op.status) === statusFilter) : operations;
+  // Use operations directly if backend supports status param
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -127,6 +141,39 @@ export function HarvestHistoryPage() {
           </Link>
         </div>
       </div>
+
+      {/* Summary - moved to top */}
+      {operations.length > 0 && (
+        <div className="bg-pf-bg-1 rounded-lg p-4 border border-pf-border">
+          <h3 className="text-lg font-medium text-pf-text-0 mb-3">Summary</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <div className="text-2xl font-bold text-pf-text-0">
+                {operations.length}
+              </div>
+              <div className="text-sm text-pf-text-1">Total Operations</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-pf-text-0">
+                {operations.filter(op => op.status === GcodeHarvestStatus.Running).length}
+              </div>
+              <div className="text-sm text-pf-text-1">Currently Running</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-pf-text-0">
+                {operations.reduce((sum, op) => sum + op.filesFound, 0)}
+              </div>
+              <div className="text-sm text-pf-text-1">Total Files Found</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-pf-text-0">
+                {operations.reduce((sum, op) => sum + op.filesAdded, 0)}
+              </div>
+              <div className="text-sm text-pf-text-1">Total Files Added</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-pf-bg-1 rounded-lg p-4 border border-pf-border">
@@ -159,9 +206,9 @@ export function HarvestHistoryPage() {
               aria-label="Filter by printer"
             >
               <option value="">All Printers</option>
-              {uniquePrinters.map((printerName) => (
-                <option key={printerName} value={printerName}>
-                  {printerName}
+              {uniquePrinters.map((printer) => (
+                <option key={printer.id} value={printer.id}>
+                  {printer.name}
                 </option>
               ))}
             </select>
@@ -255,45 +302,16 @@ export function HarvestHistoryPage() {
         )}
       </div>
 
-      {/* Summary */}
-      {operations.length > 0 && (
-        <div className="bg-pf-bg-1 rounded-lg p-4 border border-pf-border">
-          <h3 className="text-lg font-medium text-pf-text-0 mb-3">Summary</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <div className="text-2xl font-bold text-pf-text-0">
-                {operations.length}
-              </div>
-              <div className="text-sm text-pf-text-1">Total Operations</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-pf-text-0">
-                {operations.filter(op => op.status === GcodeHarvestStatus.Running).length}
-              </div>
-              <div className="text-sm text-pf-text-1">Currently Running</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-pf-text-0">
-                {operations.reduce((sum, op) => sum + op.filesFound, 0)}
-              </div>
-              <div className="text-sm text-pf-text-1">Total Files Found</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-pf-text-0">
-                {operations.reduce((sum, op) => sum + op.filesAdded, 0)}
-              </div>
-              <div className="text-sm text-pf-text-1">Total Files Added</div>
-            </div>
-          </div>
+      {/* Details Table (inline, below printers table) */}
+      {detailsOperation && (
+        <div className="mt-6">
+          <HarvestOperationDetails
+            operation={detailsOperation}
+            onClose={() => setDetailsOperation(null)}
+            inline
+          />
         </div>
       )}
-    {/* Details Modal */}
-    {detailsOperation && (
-      <HarvestOperationDetails
-        operation={detailsOperation}
-        onClose={() => setDetailsOperation(null)}
-      />
-    )}
-  </div>
+    </div>
   );
 }

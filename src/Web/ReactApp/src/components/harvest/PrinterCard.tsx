@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Printer, GcodeHarvestOperation } from '@/types/api';
 
 export interface PrinterCardProps {
   printer: Printer;
   operation?: GcodeHarvestOperation; // Current/active harvest operation for this printer, if any
-  onStartHarvest?: (printerId: string) => void;
+  onStartHarvest?: (printerId: string, options: any) => void;
   onCancelHarvest?: (operationId: string) => void;
   onSettings?: (printerId: string) => void;
   onViewDetails?: (operation: GcodeHarvestOperation) => void;
@@ -21,6 +21,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
   onViewDetails,
   compact = false
 }) => {
+
   // Status color and label
   const statusColor = printer.isOnline ? 'text-green-600' : 'text-gray-400';
   const statusLabel = printer.isOnline ? 'Online' : 'Offline';
@@ -32,6 +33,14 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
   const progress = isRunning && operation.filesFound > 0
     ? Math.round((operation.filesProcessed / operation.filesFound) * 100)
     : 0;
+
+  // Per-card harvest options state
+  const [options, setOptions] = useState({
+    includeSubfolders: true,
+    fileTypes: ['gcode', 'gco', 'g'],
+    minFileSize: 1024,
+    duplicateHandling: 'skip',
+  });
 
   return (
     <div
@@ -65,6 +74,68 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
         <span className={`font-medium ${statusColor} ${compact ? 'text-[10px]' : 'text-xs'}`}>{statusLabel}</span>
         {printer.state && <span className={compact ? 'text-[10px] text-pf-muted' : 'text-xs text-pf-muted'}>• {printer.state}</span>}
       </div>
+      {/* Harvest options UI (only when not running) */}
+      {!isRunning && (
+        <form className={compact ? 'mb-1' : 'mb-2 space-y-1'} onSubmit={e => { e.preventDefault(); onStartHarvest?.(printer.id, options); }}>
+          <div className="flex flex-wrap gap-1 items-center">
+            <label className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={options.includeSubfolders}
+                onChange={e => setOptions(o => ({ ...o, includeSubfolders: e.target.checked }))}
+                className="mr-1"
+              />
+              Subfolders
+            </label>
+            <span className="text-xs text-pf-muted">Types:</span>
+            {['gcode', 'gco', 'g'].map(ext => (
+              <label key={ext} className="flex items-center gap-0.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={options.fileTypes.includes(ext)}
+                  onChange={e => {
+                    setOptions(o => e.target.checked
+                      ? { ...o, fileTypes: [...o.fileTypes, ext] }
+                      : { ...o, fileTypes: o.fileTypes.filter(t => t !== ext) }
+                    );
+                  }}
+                  className="mr-0.5"
+                />
+                .{ext}
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1 items-center text-xs">
+            <label>
+              Min Size:
+              <select
+                value={options.minFileSize}
+                onChange={e => setOptions(o => ({ ...o, minFileSize: parseInt(e.target.value) }))}
+                className="ml-1 px-1 py-0.5 border rounded"
+              >
+                <option value={0}>No min</option>
+                <option value={1024}>1 KB</option>
+                <option value={10240}>10 KB</option>
+                <option value={102400}>100 KB</option>
+                <option value={1048576}>1 MB</option>
+              </select>
+            </label>
+            <label>
+              Duplicates:
+              <select
+                value={options.duplicateHandling}
+                onChange={e => setOptions(o => ({ ...o, duplicateHandling: e.target.value }))}
+                className="ml-1 px-1 py-0.5 border rounded"
+              >
+                <option value="skip">Skip</option>
+                <option value="overwrite">Overwrite</option>
+                <option value="rename">Rename</option>
+              </select>
+            </label>
+          </div>
+        </form>
+      )}
+
       {isRunning && operation && (
         <div className={compact ? 'mb-1' : 'mb-2'}>
           <div className={`flex items-center justify-between ${compact ? 'text-[10px] mb-0' : 'text-xs mb-1'}`}>
@@ -91,7 +162,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
         {!isRunning && (
           <button
             className={`pf-btn pf-btn-primary flex-1 ${compact ? 'text-xs py-1 px-2' : ''}`}
-            onClick={() => onStartHarvest?.(printer.id)}
+            onClick={() => onStartHarvest?.(printer.id, options)}
             disabled={!printer.isOnline}
             aria-label={`Start harvest on ${printer.name}`}
             tabIndex={0}

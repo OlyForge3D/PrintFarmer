@@ -10,7 +10,7 @@ import styles from './VirtualizedPrinterGrid.module.css';
 interface VirtualizedPrinterGridProps {
   printers: PrinterCardProps['printer'][];
   operations: Record<string, PrinterCardProps['operation'] | undefined>;
-  onStartHarvest: (id: string) => void;
+  onStartHarvest: (printerId: string, options: any) => void;
   onCancelHarvest: (opId: string) => void;
   onSettings: (id: string) => void;
   onViewDetails: (op: any) => void;
