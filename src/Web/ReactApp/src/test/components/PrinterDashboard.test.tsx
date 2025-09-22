@@ -4,9 +4,7 @@ import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-// @ts-expect-error: alias module resolution handled by Vite test environment
 import { PrinterDashboard } from '@/components/PrinterDashboard';
-// @ts-expect-error: alias module resolution handled by Vite test environment
 import type { Printer } from '@/types/api';
 
 // Mock the API hooks
@@ -46,7 +44,6 @@ vi.mock('@/hooks/useSignalR', () => ({
 }));
 
 // dynamic import after mocks
-// @ts-expect-error: dynamic alias import resolved by Vite
 const { usePrintersWithCameraUrls } = await import('@/hooks/useApi');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {

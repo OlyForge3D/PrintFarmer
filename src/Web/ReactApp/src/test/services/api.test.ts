@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-// @ts-expect-error: alias resolved by Vite during tests
 import { ApiClient } from '@/services/api';
-// @ts-expect-error: alias resolved by Vite during tests
 import { PrinterBackend } from '@/types/api';
 
 // Mock axios
