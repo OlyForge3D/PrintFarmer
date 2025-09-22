@@ -4,12 +4,12 @@ import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
 import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
-import type { GCodeViewerProps } from '@/components/3d/GCodeViewer';
+import type { GCodeViewerProps } from '@/components/3d/GCodeViewer3D';
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
   () => import('@/components/3d/ModelViewer3D').then(m => ({ default: m.ModelViewer }))
 );
 const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
-  () => import('@/components/3d/GCodeViewer').then(m => ({ default: m.GCodeViewer }))
+  () => import('@/components/3d/GCodeViewer3D').then(m => ({ default: m.GCodeViewer }))
 );
 const SlicerConfigModal = lazyWithPreload<{
   isOpen: boolean;

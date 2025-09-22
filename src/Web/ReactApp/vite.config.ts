@@ -60,8 +60,8 @@ export default defineConfig({
           three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib'],
           viewers: [
             // Heavy 3D viewer components (ensure paths resolved at build time)
-            '@/components/3d/ModelViewer',
-            '@/components/3d/GCodeViewer'
+            '@/components/3d/ModelViewer3D',
+            '@/components/3d/GCodeViewer3D'
           ]
         }
       }
