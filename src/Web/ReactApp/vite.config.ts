@@ -58,11 +58,11 @@ export default defineConfig({
           routing: ['react-router-dom'],
           vendor_misc: ['axios', '@tanstack/react-query'],
           three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib'],
-          viewers: [
-            // Heavy 3D viewer components (ensure paths resolved at build time)
-            '@/components/3d/ModelViewer3D',
-            '@/components/3d/GCodeViewer3D'
-          ]
+            viewers: [
+              // Heavy 3D viewer components (ensure paths resolved at build time)
+              'src/components/3d/ModelViewer3D.tsx',
+              'src/components/3d/GCodeViewer3D.tsx'
+            ]
         }
       }
     }
