@@ -166,7 +166,6 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           </GizmoHelper>
         )}
       </Canvas>
-
       {/* Model info overlay */}
       <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-2 rounded-lg text-sm">
         <div className="font-medium">{fileType.toUpperCase()} Model</div>
