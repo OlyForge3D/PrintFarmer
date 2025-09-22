@@ -4,7 +4,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { 
   Printer, 
-  HarvestOptions, 
   GcodeHarvestStatus,
   GcodeHarvestOperation
 } from '@/types/api';
@@ -16,7 +15,6 @@ import { apiClient } from '@/services/api';
 import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
 import { HarvestProgressCard } from '@/components/harvest/HarvestProgressCard';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
-import { PrinterCard } from '@/components/harvest/PrinterCard';
 import { VirtualizedPrinterGrid } from '@/components/harvest/VirtualizedPrinterGrid';
 import { AccessDenied } from '@/components/common/AccessDenied';
 // import { IndexedFilesList } from '@/components/harvest/IndexedFilesList';
@@ -30,7 +28,6 @@ export const HarvestPage: React.FC = () => {
   const [compact, setCompact] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [backendFilter, setBackendFilter] = useState<string>('');
-  const [groupBy, setGroupBy] = useState<string>('');
   const cancelHarvestMutation = useCancelHarvestOperation();
   const { hasPermission } = useAuth();
   const [optimisticOps, setOptimisticOps] = useState<GcodeHarvestOperation[]>([]);
@@ -187,11 +184,6 @@ export const HarvestPage: React.FC = () => {
       );
     }
     if (backendFilter) {
-      // Debug output
-      // eslint-disable-next-line no-console
-      console.log('Backend filter value:', backendFilter, 'Type:', typeof backendFilter);
-      // eslint-disable-next-line no-console
-      console.log('Printer backend values:', result.map(p => ({ id: p.id, backend: p.backend, name: p.name })));
       result = result.filter((p: Printer) => p.backend === Number(backendFilter));
     }
     // Grouping logic can be added here if needed

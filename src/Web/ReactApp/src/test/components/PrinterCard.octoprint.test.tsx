@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
+import { screen } from '@testing-library/dom';
 import { PrinterCard } from '../../components/PrinterCard';
 import { PrinterBackend, type Printer } from '../../types/api';
 import { AuthProvider } from '../../contexts/AuthContext';

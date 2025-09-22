@@ -97,7 +97,6 @@ export class SignalRService {
   private buildConnection(): void {
     // Use harvest hub for harvest events, printers hub for discovery
     const harvestSignalrUrl = import.meta.env.VITE_SIGNALR_HARVEST_URL || 'http://localhost:5245/hubs/harvest';
-    const printersSignalrUrl = import.meta.env.VITE_SIGNALR_PRINTERS_URL || 'http://localhost:5245/hubs/printers';
     console.info('[SignalR] Building harvest connection with URL:', harvestSignalrUrl);
     this.connection = new HubConnectionBuilder()
       .withUrl(harvestSignalrUrl)

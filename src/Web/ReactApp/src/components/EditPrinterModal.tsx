@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertCircle, Check } from 'lucide-react';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes } from '@/hooks/useApi';
-import type { UpdatePrinterDto, PrinterBackend } from '@/types/api';
+import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
 
@@ -166,6 +166,48 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   <option value={2}>SDCP</option>
                 </select>
               </div>
+            {/* Moonraker/PrusaLink port/API key fields */}
+            {formData.backend === PrinterBackend.Moonraker && (
+              <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend Port (API)</label>
+                  <input
+                    type="number"
+                    value={formData.backendPort ?? 7125}
+                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || 7125)}
+                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                    placeholder="7125"
+                    min={1}
+                    max={65535}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Frontend Port (UI)</label>
+                  <input
+                    type="number"
+                    value={formData.frontendPort ?? 80}
+                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10) || 80)}
+                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                    placeholder="80"
+                    min={1}
+                    max={65535}
+                  />
+                </div>
+              </div>
+            )}
+            {formData.backend === PrinterBackend.PrusaLink && (
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-pf-text-secondary mb-1">API Key (PrusaLink)</label>
+                <input
+                  type="text"
+                  value={formData.apiKey || ''}
+                  onChange={e => handleInputChange('apiKey', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                  placeholder="Enter PrusaLink API Key"
+                  title="PrusaLink API Key"
+                />
+              </div>
+            )}
             </div>
             <div>
               <label className="block text-sm font-medium text-pf-text-secondary mb-1">Notes</label>
@@ -204,19 +246,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </select>
               </div>
             </div>
-            {formData.backend === 1 && (
-              <div>
-                <label className="block text-sm font-medium text-pf-text-secondary mb-1">API Key (PrusaLink)</label>
-                <input
-                  type="text"
-                  value={formData.apiKey || ''}
-                  onChange={e => handleInputChange('apiKey', e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
-                  placeholder="Enter PrusaLink API Key"
-                  title="PrusaLink API Key"
-                />
-              </div>
-            )}
 
             {/* Printer Type & Build Volume Section */}
             <div className="border-t pt-5 mt-5">

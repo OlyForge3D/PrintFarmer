@@ -84,6 +84,9 @@ export interface Printer {
   originalServerUrl?: string;
   ipAddress?: string;
   spoolInfo?: PrinterSpoolInfo;
+  backendPort?: number;
+  frontendPort?: number;
+  inMaintenance?: boolean;
 }
 
 export interface PrinterCameraUrls {
@@ -106,6 +109,8 @@ export interface PrinterFast {
   apiKey?: string;
   originalServerUrl?: string;
   ipAddress?: string;
+  backendPort?: number;
+  frontendPort?: number;
 }
 
 export enum PrinterBackend {
@@ -164,6 +169,8 @@ export interface PrinterBasic {
   apiKey?: string;
   originalServerUrl?: string;
   ipAddress?: string;
+  backendPort?: number;
+  frontendPort?: number;
 }
 
 // Live status info
@@ -222,6 +229,8 @@ export interface CreatePrinterDto {
   apiKey?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
+  backendPort?: number;
+  frontendPort?: number;
 }
 
 export interface UpdatePrinterDto {
@@ -254,6 +263,8 @@ export interface UpdatePrinterDto {
   maxBedTemp?: number;
   supportsAutoLeveling?: boolean;
   maxPrintSpeed?: number;
+  backendPort?: number;
+  frontendPort?: number;
 }
 
 export interface ManufacturerDto {

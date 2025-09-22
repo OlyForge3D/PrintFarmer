@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
 import { ColorFamilySelect } from '@/components/ColorFamilySelect';
 
 // Basic options sample

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
+import { waitFor } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
+import { act } from '@testing-library/react';
 import { useCreatePrinter, useQueuePrintJob, queryKeys } from '../../hooks/useApi';
 import { apiClient } from '../../services/api';
 import { PrinterBackend, JobQueueStatus, Printer, JobQueuePrintJob } from '../../types/api';
@@ -37,7 +39,19 @@ describe('optimistic printer create', () => {
     const createSpy = vi.spyOn(apiClient, 'createPrinter').mockImplementation(async () => {
       // simulate network delay
       await new Promise(r => setTimeout(r, 5));
-      return finalPrinter;
+      // Return a fully-typed Printer object
+      return {
+        id: 'real-123',
+        name: 'My Printer',
+        serverUrl: 'http://p.local',
+        notes: undefined,
+        isOnline: false,
+        isReachable: false,
+        backend: PrinterBackend.Moonraker,
+        originalServerUrl: 'http://p.local',
+        state: 'Unknown',
+        // Add any other required fields for Printer type here
+      } as Printer;
     });
 
     const { result } = renderHook(() => useCreatePrinter(), { wrapper });

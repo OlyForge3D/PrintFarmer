@@ -56,12 +56,11 @@ export function PrinterTableViewPage() {
 
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
-      // TODO: Implement maintenance status API calls
       await Promise.all(printers.map(printer => 
         fetch(`/api/printers/${printer.id}/maintenance`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ inMaintenance })
+          body: JSON.stringify(inMaintenance)
         })
       ));
       refetch();

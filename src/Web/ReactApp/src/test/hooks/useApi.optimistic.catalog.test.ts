@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
+import { waitFor } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
+import { act } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys, useCancelJob, useCreateManufacturer, useCreateModel, useDeleteJob, useQueuePrintJob } from '../../hooks/useApi';

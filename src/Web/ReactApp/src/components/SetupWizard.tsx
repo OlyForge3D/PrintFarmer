@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info, Search, Wifi } from 'lucide-react';
+import { User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info, Search, Wifi } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthContext';
 import { useHealthStatus } from '@/hooks/useApi';

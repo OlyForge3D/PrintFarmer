@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { useThemeToggle, ThemeProvider, type ThemeName } from '../../contexts/ThemeContext';
 import { ReactNode } from 'react';

@@ -297,11 +297,15 @@ export function PrinterTableView({
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
                       <button
-                        onClick={() => onManage(printer)}
-                        className="p-2 text-pf-text-tertiary hover:text-pf-accent transition-colors rounded-md hover:bg-pf-bg-2"
-                        title="Manage printer"
+                        onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
+                        className={`p-2 transition-colors rounded-md ${printer.inMaintenance ? 'text-pf-warning hover:text-pf-success hover:bg-pf-bg-2' : 'text-pf-text-tertiary hover:text-pf-warning hover:bg-pf-bg-2'}`}
+                        title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
                       >
-                        <Wrench className="w-4 h-4" />
+                        {printer.inMaintenance ? (
+                          <span className="flex items-center"><Wrench className="w-4 h-4 mr-1" />Exit Maintenance</span>
+                        ) : (
+                          <span className="flex items-center"><Wrench className="w-4 h-4 mr-1" />Maintenance</span>
+                        )}
                       </button>
                       
                       {hasPermission('printers', 'update') && (

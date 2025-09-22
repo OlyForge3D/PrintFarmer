@@ -273,7 +273,6 @@ export function PrinterCard({
               printer={printer}
               onEdit={onEdit}
               onDelete={() => onDelete(printer)}
-              onManage={onManage}
             />
           )}
         </div>

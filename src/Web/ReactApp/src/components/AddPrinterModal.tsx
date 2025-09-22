@@ -2,28 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { X, AlertCircle, Check } from 'lucide-react';
-import type { PrinterModelDto } from '@/types/api';
+import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 
 interface ManufacturerDto {
   id: string;
   name: string;
 }
 
-interface CreatePrinterDto {
-  name: string;
-  serverUrl: string;
-  originalServerUrl?: string;
-  notes?: string;
-  manufacturerId?: string;
-  modelId?: string;
-  newManufacturerName?: string;
-  newModelName?: string;
-  dateAcquired?: string;
-  backend: number;
-  apiKey?: string;
-  cameraStreamUrl?: string;
-  cameraSnapshotUrl?: string;
-}
 
 interface AddPrinterModalProps {
   isOpen: boolean;
@@ -44,12 +29,14 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     serverUrl: '',
     backend: PrinterBackends.Moonraker,
     notes: '',
-    dateAcquired: new Date().toISOString().split('T')[0], // Default to today's date
+    dateAcquired: new Date(), // Default to today's date
     manufacturerId: undefined,
     modelId: undefined,
     apiKey: undefined,
     cameraStreamUrl: '',
     cameraSnapshotUrl: '',
+    backendPort: 7125,
+    frontendPort: 80,
   });
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
   const [models, setModels] = useState<PrinterModelDto[]>([]);
@@ -101,7 +88,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     }
   };
 
-  const handleInputChange = (field: keyof CreatePrinterDto, value: string | number) => {
+  const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -190,7 +177,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
       serverUrl: '',
       backend: PrinterBackends.Moonraker,
       notes: '',
-      dateAcquired: new Date().toISOString().split('T')[0], // Reset to today's date
+      dateAcquired: new Date(), // Reset to today's date
       manufacturerId: undefined,
       modelId: undefined,
       apiKey: undefined,
@@ -314,6 +301,40 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               </div>
             )}
 
+            {/* Show backend/frontend port fields for Moonraker */}
+            {formData.backend === PrinterBackends.Moonraker && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
+                    Backend Port (API)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.backendPort ?? 7125}
+                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || 7125)}
+                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                    placeholder="7125"
+                    min={1}
+                    max={65535}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
+                    Frontend Port (UI)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.frontendPort ?? 80}
+                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10) || 80)}
+                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
+                    placeholder="80"
+                    min={1}
+                    max={65535}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Camera URLs (for OctoPrint) */}
             {formData.backend === PrinterBackends.OctoPrint && (
               <>
@@ -391,8 +412,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               <div className="relative">
                 <input
                   type="date"
-                  value={formData.dateAcquired || ''}
-                  onChange={(e) => handleInputChange('dateAcquired', e.target.value)}
+                  value={formData.dateAcquired ? (typeof formData.dateAcquired === 'string' ? formData.dateAcquired : formData.dateAcquired.toISOString().split('T')[0]) : ''}
+                  onChange={(e) => handleInputChange('dateAcquired', e.target.value ? new Date(e.target.value) : undefined)}
                   className={`w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent ${styles.dateInputDark}`}
                   max={new Date().toISOString().split('T')[0]}
                   title="Click to open date picker"
@@ -400,7 +421,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                 />
               </div>
               {formData.dateAcquired && (
-                <p className="mt-1 text-xs text-pf-text-secondary">✅ Selected: {formData.dateAcquired}</p>
+                <p className="mt-1 text-xs text-pf-text-secondary">✅ Selected: {typeof formData.dateAcquired === 'string' ? formData.dateAcquired : formData.dateAcquired.toISOString().split('T')[0]}</p>
               )}
               {validationErrors.dateAcquired && (
                 <p className="mt-1 text-sm text-pf-error-text">{validationErrors.dateAcquired[0]}</p>

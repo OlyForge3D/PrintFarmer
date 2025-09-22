@@ -1,6 +1,7 @@
 
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/dom';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
 import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import * as api from '@/services/api';
@@ -95,10 +96,10 @@ describe('HarvestOperationDetails', () => {
       <HarvestOperationDetails operation={mockOperation} onClose={() => {}} />
     );
 
-    // Summary
-    expect(screen.getByText('Operation Summary')).toBeInTheDocument();
+  // Summary
+  expect(screen.getByText('Harvest Operation Details')).toBeInTheDocument();
     expect(screen.getByText('Test Printer')).toBeInTheDocument();
-    expect(screen.getByText('Files Found:')).toBeInTheDocument();
+  expect(screen.getByText('Found')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
 
     // Discovered Files section

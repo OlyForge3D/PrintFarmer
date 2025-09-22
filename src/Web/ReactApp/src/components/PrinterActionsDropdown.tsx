@@ -1,15 +1,14 @@
 import { useState, useCallback } from 'react';
 import { Printer } from '@/types/api';
-import { MoreVertical, Edit, Trash2, Wrench } from 'lucide-react';
+import { MoreVertical, Edit, Trash2 } from 'lucide-react';
 
 interface PrinterActionsDropdownProps {
   printer: Printer;
   onEdit: (printer: Printer) => void;
   onDelete: (printer: Printer) => void;
-  onManage: (printer: Printer) => void;
 }
 
-export function PrinterActionsDropdown({ printer, onEdit, onDelete, onManage }: PrinterActionsDropdownProps) {
+export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterActionsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const toggleDropdown = useCallback(() => {
@@ -42,13 +41,6 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete, onManage }: 
           {/* Dropdown Menu */}
           <div className="absolute right-0 top-full mt-1 w-48 bg-pf-panel border border-pf-border rounded-lg shadow-lg z-20">
             <div className="py-1">
-              <button
-                onClick={() => handleAction(() => onManage(printer))}
-                className="w-full px-4 py-2 text-left text-sm text-pf-text-primary hover:bg-pf-bg-2 flex items-center transition-colors"
-              >
-                <Wrench className="w-4 h-4 mr-3" />
-                Manage Printer
-              </button>
               
               <button
                 onClick={() => handleAction(() => onEdit(printer))}

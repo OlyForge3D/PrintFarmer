@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render } from '@testing-library/react';
+import { screen } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
+import { act } from '@testing-library/react';
 import { ThemeProvider, useTheme, useComputedTheme, useAccessibilityPreferences } from '@/contexts/ThemeContext';
 import { ReactNode } from 'react';
 
@@ -58,7 +60,7 @@ const renderWithThemeProvider = (
   { defaultTheme = 'dark', storageKey = 'test-theme' } = {}
 ) => {
   return render(
-    <ThemeProvider defaultTheme={defaultTheme} storageKey={storageKey}>
+  <ThemeProvider defaultTheme={defaultTheme as any} storageKey={storageKey}>
       {ui}
     </ThemeProvider>
   );
@@ -241,7 +243,7 @@ describe('ThemeContext', () => {
       // Simulate system theme change
       const mediaQueryList = mockMatchMedia.mock.results[0].value;
       const changeHandler = mediaQueryList.addEventListener.mock.calls.find(
-        call => call[0] === 'change'
+  (call: any) => call[0] === 'change'
       )?.[1];
       
       if (changeHandler) {

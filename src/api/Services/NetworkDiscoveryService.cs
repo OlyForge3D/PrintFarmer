@@ -1,4 +1,7 @@
-﻿using System.Net;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
 using System.Net.NetworkInformation;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Hubs;
@@ -626,7 +629,7 @@ public partial class NetworkDiscoveryService(
         try
         {
             LogAttemptingDiscovery(logger, baseUrl);
-            // Test Moonraker first (port 7125) or PrusaLink (port 80)
+            // Only allow Moonraker discovery on port 7125
             if (port == 7125)
             {
                 LogTestingMoonraker(logger, baseUrl);
@@ -643,6 +646,7 @@ public partial class NetworkDiscoveryService(
             }
             else if (port == 80)
             {
+                // Only allow PrusaLink on port 80. Ignore Moonraker on port 80.
                 LogTestingPrusaLink(logger, baseUrl);
                 PrinterInfo? prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (prusaInfo != null)
@@ -653,19 +657,7 @@ public partial class NetworkDiscoveryService(
                 else
                 {
                     LogNoPrusaLinkResponse(logger, baseUrl);
-
-                    // Also test if this might be a Moonraker on port 80
-                    LogTestingMoonrakerPort80(logger, baseUrl);
-                    PrinterInfo? moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
-                    if (moonrakerInfo != null)
-                    {
-                        LogDiscoveredMoonrakerPort80(logger, baseUrl);
-                        return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
-                    }
-                    else
-                    {
-                        LogNoMoonrakerResponsePort80(logger, baseUrl);
-                    }
+                    // Do NOT test for Moonraker on port 80 anymore. Intentionally skip.
                 }
             }
         }
@@ -787,6 +779,8 @@ public partial class NetworkDiscoveryService(
         {
             IpAddress = ipAddress,
             Port = port,
+            BackendPort = backend == PrinterBackend.Moonraker ? 7125 : port,
+            FrontendPort = backend == PrinterBackend.Moonraker ? 80 : port,
             ServerUrl = serverUrl,
             Backend = backend,
             Name = info.Name ?? $"Printer-{ipAddress}",

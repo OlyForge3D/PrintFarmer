@@ -968,28 +968,67 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.AsNoTracking().Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
-        return p is null
-            ? NotFound()
-            : new PrinterDetailsDto(
+        Printer? p = await db.Printers.AsNoTracking()
+            .Include(x => x.Manufacturer)
+            .Include(x => x.Model)
+            .Include(x => x.Capabilities)
+            .FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null)
+        {
+            return NotFound();
+        }
+
+        PrinterCapabilitiesDto? capabilitiesDto = null;
+        if (p.Capabilities != null)
+        {
+            capabilitiesDto = new PrinterCapabilitiesDto(
+                p.Capabilities.Id,
+                p.Capabilities.PrinterId,
+                p.Name,
+                p.Capabilities.NozzleDiameter,
+                p.Capabilities.SupportedMaterials,
+                p.Capabilities.MaxBuildVolumeX,
+                p.Capabilities.MaxBuildVolumeY,
+                p.Capabilities.MaxBuildVolumeZ,
+                p.Capabilities.HasHeatedBed,
+                p.Capabilities.HasEnclosure,
+                p.Capabilities.MultiMaterial,
+                p.Capabilities.NumberOfExtruders,
+                p.Capabilities.MinHotendTemp,
+                p.Capabilities.MaxHotendTemp,
+                p.Capabilities.MinBedTemp,
+                p.Capabilities.MaxBedTemp,
+                p.Capabilities.CurrentMaterial,
+                p.Capabilities.CurrentSpoolId,
+                p.Capabilities.IsAvailable,
+                p.Capabilities.LastUpdated
+            );
+        }
+
+        return new PrinterDetailsDto(
             p.Id,
             p.Name,
             p.ServerUrl,
             p.Notes,
-        p.ManufacturerId,
-        p.Manufacturer?.Name,
-        p.ModelId,
-        p.Model?.Name,
-        p.Model?.MotionType != null ? (MotionType)p.Model.MotionType.Value : (MotionType?)null,
-        p.Model?.MaxX,
-        p.Model?.MaxY,
-        p.Model?.MaxZ,
-        p.DateAcquired,
-        (PrinterBackend)p.Backend,
-        p.ApiKey,
-        p.OriginalServerUrl,
-        p.IpAddress
-    );
+            p.ManufacturerId,
+            p.Manufacturer?.Name,
+            p.ModelId,
+            p.Model?.Name,
+            p.Model?.MotionType != null ? (MotionType)p.Model.MotionType.Value : (MotionType?)null,
+            p.Model?.MaxX,
+            p.Model?.MaxY,
+            p.Model?.MaxZ,
+            p.DateAcquired,
+            (PrinterBackend)p.Backend,
+            p.ApiKey,
+            null, // CameraStreamUrl (not available here)
+            null, // CameraSnapshotUrl (not available here)
+            p.OriginalServerUrl,
+            p.IpAddress,
+            p.BackendPort,
+            p.FrontendPort,
+            capabilitiesDto
+        );
     }
 
     /// <summary>
@@ -1197,6 +1236,72 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         );
 
         return CreatedAtRoute("GetPrinterById", new { id = p.Id }, printerDto);
+    }
+
+    /// <summary>
+    /// Sets the maintenance mode for a printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="inMaintenance">True to enable maintenance mode, false to disable</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The updated printer DTO</returns>
+    /// <response code="200">Returns the updated printer</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error updating the printer</response>
+    [HttpPut("{id:guid}/maintenance")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterDto>> SetMaintenanceModeAsync(Guid id, [FromBody] bool inMaintenance, CancellationToken ct)
+    {
+        var printer = await db.Printers.FindAsync([id], ct);
+        if (printer is null)
+        {
+            return NotFound();
+        }
+        printer.InMaintenance = inMaintenance;
+        await db.SaveChangesAsync(ct);
+
+        // Optionally, you may want to return the updated DTO with more info
+        string? manufacturerName = null;
+        string? modelName = null;
+        if (printer.ManufacturerId != Guid.Empty)
+        {
+            Manufacturer? man = await db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(m => m.Id == printer.ManufacturerId, ct);
+            manufacturerName = man?.Name;
+        }
+        if (printer.ModelId != Guid.Empty)
+        {
+            PrinterModel? mod = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == printer.ModelId, ct);
+            modelName = mod?.Name;
+        }
+        var dto = new PrinterDto(
+            Id: printer.Id,
+            Name: printer.Name,
+            ServerUrl: printer.ServerUrl,
+            Notes: printer.Notes,
+            IsOnline: false,
+            State: "Unknown",
+            ManufacturerName: manufacturerName,
+            ModelName: modelName,
+            Progress: null,
+            JobName: null,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            CameraSnapshotUrl: null,
+            X: null,
+            Y: null,
+            Z: null,
+            HotendTemp: null,
+            BedTemp: null,
+            HotendTarget: null,
+            BedTarget: null,
+            Backend: (PrinterBackend)printer.Backend,
+            ApiKey: printer.ApiKey,
+            OriginalServerUrl: printer.OriginalServerUrl,
+            IpAddress: printer.IpAddress
+        );
+        return Ok(dto);
     }
 
     /// <summary>

@@ -5,15 +5,16 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { PrinterCard, PrinterCardProps } from './PrinterCard';
+import { HarvestOptions, GcodeHarvestOperation } from '@/types/api';
 import styles from './VirtualizedPrinterGrid.module.css';
 
 interface VirtualizedPrinterGridProps {
   printers: PrinterCardProps['printer'][];
   operations: Record<string, PrinterCardProps['operation'] | undefined>;
-  onStartHarvest: (printerId: string, options: any) => void;
+  onStartHarvest: (printerId: string, options: HarvestOptions) => void;
   onCancelHarvest: (opId: string) => void;
   onSettings: (id: string) => void;
-  onViewDetails: (op: any) => void;
+  onViewDetails: (op: GcodeHarvestOperation) => void;
   columnCount?: number;
   cardHeight?: number;
   cardWidth?: number;
@@ -67,7 +68,7 @@ export const VirtualizedPrinterGrid: React.FC<VirtualizedPrinterGridProps> = (pr
             className={styles.printerGridRow}
             style={{
               // Use CSS custom property for transform
-              ['--row-translate' as any]: `translateY(${row.start}px)`
+              ['--row-translate' as string]: `translateY(${row.start}px)`
             }}
           >
             {Array.from({ length: columnCount }).map((_, columnIndex) => {
@@ -80,8 +81,8 @@ export const VirtualizedPrinterGrid: React.FC<VirtualizedPrinterGridProps> = (pr
                   className={styles.printerGridCell + ' ' + styles.printerGridCellFixed}
                   key={printer.id}
                   style={{
-                    ['--cell-width' as any]: cardWidth + 'px',
-                    ['--cell-height' as any]: cardHeight + 'px',
+                    ['--cell-width' as string]: cardWidth + 'px',
+                    ['--cell-height' as string]: cardHeight + 'px',
                   }}
                 >
                   <PrinterCard

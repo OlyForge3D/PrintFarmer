@@ -103,7 +103,9 @@ public partial record PrinterDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
-    PrinterSpoolInfoDto? SpoolInfo = null);
+    PrinterSpoolInfoDto? SpoolInfo = null,
+    int? BackendPort = null,
+    int? FrontendPort = null);
 
 // Non-breaking typed accessors for URL-like fields (ignored in JSON)
 public partial record PrinterDto
@@ -128,7 +130,9 @@ public partial record PrinterBasicDto(
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null);
+    string? IpAddress = null,
+    int? BackendPort = null,
+    int? FrontendPort = null);
 
 public partial record PrinterBasicDto
 {
@@ -167,7 +171,9 @@ public partial record PrinterFastDto(
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null);
+    string? IpAddress = null,
+    int? BackendPort = null,
+    int? FrontendPort = null);
 
 public partial record PrinterFastDto
 {
@@ -244,6 +250,8 @@ public class CreatePrinterDto
     public string? ApiKey { get; set; }
     public string? CameraStreamUrl { get; set; }
     public string? CameraSnapshotUrl { get; set; }
+    public int? BackendPort { get; set; }
+    public int? FrontendPort { get; set; }
 }
 
 /// <summary>
@@ -451,7 +459,10 @@ public record PrinterDetailsDto(
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null);
+    string? IpAddress = null,
+    int? BackendPort = null,
+    int? FrontendPort = null,
+    PrinterCapabilitiesDto? Capabilities = null);
 
 // Filament temperature presets (admin-configurable) - now dynamic
 /// <summary>
@@ -477,6 +488,8 @@ public class DiscoveredPrinterDto
 {
     public string IpAddress { get; set; } = string.Empty;
     public int Port { get; set; }
+    public int? BackendPort { get; set; }
+    public int? FrontendPort { get; set; }
     public string ServerUrl { get; set; } = string.Empty;
     public PrinterBackend Backend { get; set; }
     public string Name { get; set; } = string.Empty;

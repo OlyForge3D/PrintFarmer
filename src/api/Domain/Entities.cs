@@ -12,6 +12,9 @@ public class Printer
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use OriginalServerUri for typed access")]
     public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
+    // Moonraker: BackendPort = API (default 7125), FrontendPort = UI (default 80, user-overridable)
+    public int? BackendPort { get; set; } // null for non-Moonraker, 7125 for Moonraker by default
+    public int? FrontendPort { get; set; } // null for non-Moonraker, 80 for Moonraker by default
 
     [NotMapped]
     public Uri? ServerUri
@@ -45,6 +48,9 @@ public class Printer
 
     // Navigation property for capabilities
     public PrinterCapabilities? Capabilities { get; set; }
+
+    // Indicates if the printer is in maintenance mode
+    public bool InMaintenance { get; set; } = false;
 }
 
 public class Spool
