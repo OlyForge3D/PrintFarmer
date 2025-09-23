@@ -4,7 +4,7 @@ import { Printer, GcodeHarvestOperation } from '@/types/api';
 export interface PrinterCardProps {
   printer: Printer;
   operation?: GcodeHarvestOperation; // Current/active harvest operation for this printer, if any
-  onStartHarvest?: (printerId: string, options: any) => void;
+  onStartHarvest?: (printerId: string, options: Record<string, unknown>) => void;
   onCancelHarvest?: (operationId: string) => void;
   onSettings?: (printerId: string) => void;
   onViewDetails?: (operation: GcodeHarvestOperation) => void;

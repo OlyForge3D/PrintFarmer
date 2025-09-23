@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
-import { screen, waitFor } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
+import { screen, waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { BrowserRouter } from 'react-router-dom';

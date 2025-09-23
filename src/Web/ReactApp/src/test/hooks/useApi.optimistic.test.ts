@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { renderHook } from '@testing-library/react';
-import { waitFor } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
+import { waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
 import { useCreatePrinter, useQueuePrintJob, queryKeys } from '../../hooks/useApi';
 import { apiClient } from '../../services/api';
@@ -24,17 +24,7 @@ describe('optimistic printer create', () => {
     const client = createTestClient();
     const wrapper = wrapperFactory(client);
 
-  const finalPrinter: Partial<Printer> & { id: string } = {
-      id: 'real-123',
-      name: 'My Printer',
-      serverUrl: 'http://p.local',
-      notes: undefined,
-      isOnline: false,
-      isReachable: false,
-      backend: PrinterBackend.Moonraker,
-      originalServerUrl: 'http://p.local',
-      state: 'Unknown'
-  }; // minimal shape used in test
+
 
     const createSpy = vi.spyOn(apiClient, 'createPrinter').mockImplementation(async () => {
       // simulate network delay

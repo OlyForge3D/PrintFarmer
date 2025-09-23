@@ -19,10 +19,11 @@ module.exports = {
   ignorePatterns: ["dist", "node_modules"],
   extends: [
     'eslint:recommended',
-    'plugin:react-hooks/recommended'
+    'plugin:react-hooks/recommended',
+    'plugin:import/recommended'
   ],
   parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint', 'react-refresh'],
+  plugins: ['@typescript-eslint', 'react-refresh', 'import'],
   parserOptions: {
     ecmaVersion: 2022,
     sourceType: 'module',
@@ -34,7 +35,7 @@ module.exports = {
   rules: {
     'react-refresh/only-export-components': ['error', { allowConstantExport: true }],
     'no-restricted-imports': ['error', { paths: restrictedImports }],
-    '@typescript-eslint/no-explicit-any': ['error', { ignoreRestArgs: false }]
+  '@typescript-eslint/no-explicit-any': ['error', { ignoreRestArgs: false }],
   },
   overrides: [
     {

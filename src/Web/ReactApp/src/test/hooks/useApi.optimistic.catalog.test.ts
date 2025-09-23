@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook } from '@testing-library/react';
-import { waitFor } from '@testing-library/dom'; // eslint-disable-line import/no-unresolved
+import { waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';

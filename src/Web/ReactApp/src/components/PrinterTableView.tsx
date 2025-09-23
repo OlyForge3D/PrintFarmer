@@ -11,16 +11,14 @@ interface PrinterTableViewProps {
   printers: Printer[];
   onEdit: (printer: Printer) => void;
   onDelete: (printers: Printer[]) => void;
-  onManage: (printer: Printer) => void;
   onBulkSetMaintenance: (printers: Printer[], inMaintenance: boolean) => void;
 }
 
-export function PrinterTableView({ 
-  printers, 
-  onEdit, 
-  onDelete, 
-  onManage,
-  onBulkSetMaintenance 
+export function PrinterTableView({
+  printers,
+  onEdit,
+  onDelete,
+  onBulkSetMaintenance
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
   const { getPrinterStatus } = usePrinterStatusUpdates();

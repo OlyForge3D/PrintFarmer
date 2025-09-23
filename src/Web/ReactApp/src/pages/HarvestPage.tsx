@@ -12,8 +12,8 @@ import { usePrinters, useCancelHarvestOperation } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/harvest-signalr';
 import { apiClient } from '@/services/api';
-import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
-import { HarvestProgressCard } from '@/components/harvest/HarvestProgressCard';
+// import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
+// import { HarvestProgressCard } from '@/components/harvest/HarvestProgressCard';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
 import { VirtualizedPrinterGrid } from '@/components/harvest/VirtualizedPrinterGrid';
 import { AccessDenied } from '@/components/common/AccessDenied';
@@ -22,8 +22,9 @@ import { AccessDenied } from '@/components/common/AccessDenied';
 export const HarvestPage: React.FC = () => {
   // All hooks must be above any early return!
   const [selectedOperation, setSelectedOperation] = useState<GcodeHarvestOperation | null>(null);
+  // Per-file progress: operationId -> fileName -> progress info
   const [perFileProgressMap, setPerFileProgressMap] = useState<
-    Record<string, Record<string, { fileName: string; percent: number; status: 'processing' | 'completed' | 'skipped' | 'errored' }>>
+    Record<string, Record<string, import('@/services/harvest-signalr').HarvestFileProgress>>
   >({});
   const [compact, setCompact] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -47,108 +48,11 @@ export const HarvestPage: React.FC = () => {
       toast.success('Harvest operations started successfully');
       setTimeout(() => setOptimisticOps([]), 2000);
     },
-    onError: (error) => {
+    onError: () => {
       setOptimisticOps([]);
       toast.error('Failed to start harvest operations');
-      console.error('Harvest error:', error);
     }
   });
-
-  // Handler to update per-file progress for a specific operation
-  const handleFileProgressUpdate = (
-    operationId: string,
-    fileName: string,
-    percent: number,
-    status: 'processing' | 'completed' | 'skipped' | 'errored'
-  ) => {
-    setPerFileProgressMap(prev => ({
-      ...prev,
-      [operationId]: {
-        ...(prev[operationId] || {}),
-        [fileName]: { fileName, percent, status }
-      }
-    }));
-  };
-
-  // Early return must come after all hooks
-  if (!hasPermission('gcode_harvest', 'execute')) {
-    return <AccessDenied />;
-  }
-
-
-  // Set up real-time updates for harvest progress and per-file progress
-  useEffect(() => {
-    signalRService.connect();
-
-    // Join SignalR group for each running operation
-    const joinedOps = new Set<string>();
-    if (harvestOperations) {
-      for (const op of harvestOperations) {
-        if (op.status === GcodeHarvestStatus.Running && op.id) {
-          signalRService.joinHarvestGroup(op.id);
-          joinedOps.add(op.id);
-        }
-      }
-    }
-
-    // Subscribe to per-file progress events
-    const unsubscribeFileProgress = signalRService.onHarvestFileProgress(progress => {
-      // progress: { operationId, fileName, percent, ... }
-      handleFileProgressUpdate(
-        progress.operationId,
-        progress.fileName,
-        progress.percent,
-        progress.percent >= 100 ? 'completed' : 'processing'
-      );
-    });
-
-    // Also subscribe to harvest update for total progress (existing logic)
-    const unsubscribe = signalRService.onHarvestUpdate((operationId, status) => {
-      refetchOperations();
-      if (status.currentFile && typeof status.progressPercent === 'number') {
-        let fileStatus: 'processing' | 'completed' | 'skipped' | 'errored' = 'processing';
-        if (status.phase === 'completing' || status.progressPercent >= 100) fileStatus = 'completed';
-        if (status.filesSkipped > 0 && status.progressPercent >= 100) fileStatus = 'skipped';
-        if (status.filesErrored > 0 && status.progressPercent >= 100) fileStatus = 'errored';
-        handleFileProgressUpdate(operationId, status.currentFile, status.progressPercent, fileStatus);
-      }
-    });
-
-    return () => {
-      unsubscribe();
-      unsubscribeFileProgress();
-      // Leave SignalR group for each joined operation
-      joinedOps.forEach(opId => signalRService.leaveHarvestGroup(opId));
-    };
-  }, [refetchOperations, harvestOperations]);
-
-  // Clean up optimistic operations when real operations appear
-  useEffect(() => {
-    if (harvestOperations && optimisticOps.length > 0) {
-      const realRunningOps = harvestOperations.filter(op => op.status === GcodeHarvestStatus.Running);
-      const realPrinterIds = new Set(realRunningOps.map(op => op.printerId));
-      
-      // If we have real operations for any of our optimistic operations, clean up optimistic ones
-      if (optimisticOps.some(op => realPrinterIds.has(op.printerId))) {
-        setOptimisticOps(prev => prev.filter(op => !realPrinterIds.has(op.printerId)));
-      }
-    }
-  }, [harvestOperations, optimisticOps]);
-
-
-  const activeOperations = (() => {
-    const realRunningOps = harvestOperations?.filter(op => 
-      op.status === GcodeHarvestStatus.Running
-    ) || [];
-    
-    // If we have real operations, filter out optimistic ones for the same printers
-    const realPrinterIds = new Set(realRunningOps.map(op => op.printerId));
-    const filteredOptimisticOps = optimisticOps.filter(op => !realPrinterIds.has(op.printerId));
-    
-    // Combine filtered optimistic ops with real operations
-    return [...filteredOptimisticOps, ...realRunningOps];
-  })();
-
 
 
   // Merge live status into base printer data
@@ -159,7 +63,6 @@ export const HarvestPage: React.FC = () => {
       ...p,
       isOnline: status.isOnline,
       isReachable: status.isOnline || p.isReachable, // preserve reachable if previously true
-      state: status.state ?? p.state,
       progress: status.progress ?? p.progress,
       jobName: status.jobName ?? p.jobName,
       hotendTemp: status.hotendTemp ?? p.hotendTemp,
@@ -190,6 +93,77 @@ export const HarvestPage: React.FC = () => {
     return result;
   }, [printersWithLive, searchTerm, backendFilter]);
 
+
+  // All hooks must be called before any return (including useEffect)
+
+  // Set up real-time updates for harvest progress and per-file progress
+  useEffect(() => {
+    signalRService.connect();
+
+    // Join SignalR group for each running operation
+    const joinedOps = new Set<string>();
+    if (harvestOperations) {
+      for (const op of harvestOperations) {
+        if (op.status === GcodeHarvestStatus.Running && op.id) {
+          signalRService.joinHarvestGroup(op.id);
+          joinedOps.add(op.id);
+        }
+      }
+    }
+
+    // Subscribe to per-file progress events
+    const unsubscribeFileProgress = signalRService.onHarvestFileProgress((progress) => {
+      setPerFileProgressMap(prev => {
+        const opMap = prev[progress.operationId] ? { ...prev[progress.operationId] } : {};
+        opMap[progress.fileName] = progress;
+        return { ...prev, [progress.operationId]: opMap };
+      });
+    });
+
+    // Also subscribe to harvest update for total progress (existing logic)
+    const unsubscribe = signalRService.onHarvestUpdate(() => {
+      refetchOperations();
+      // No-op: fileStatus and progress are not used
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeFileProgress();
+      // Leave SignalR group for each joined operation
+      joinedOps.forEach(opId => signalRService.leaveHarvestGroup(opId));
+    };
+  }, [refetchOperations, harvestOperations]);
+
+  // Clean up optimistic operations when real operations appear
+  useEffect(() => {
+    if (harvestOperations && optimisticOps.length > 0) {
+      const realRunningOps = harvestOperations.filter(op => op.status === GcodeHarvestStatus.Running);
+      const realPrinterIds = new Set(realRunningOps.map(op => op.printerId));
+      // If we have real operations for any of our optimistic operations, clean up optimistic ones
+      if (optimisticOps.some(op => realPrinterIds.has(op.printerId))) {
+        setOptimisticOps(prev => prev.filter(op => !realPrinterIds.has(op.printerId)));
+      }
+    }
+  }, [harvestOperations, optimisticOps]);
+
+  // Early return for permission check (must be after all hooks and effects)
+  if (!hasPermission('gcode_harvest', 'execute')) {
+    return <AccessDenied />;
+  }
+
+  const activeOperations = (() => {
+    const realRunningOps = harvestOperations?.filter(op => 
+      op.status === GcodeHarvestStatus.Running
+    ) || [];
+    
+    // If we have real operations, filter out optimistic ones for the same printers
+    const realPrinterIds = new Set(realRunningOps.map(op => op.printerId));
+    const filteredOptimisticOps = optimisticOps.filter(op => !realPrinterIds.has(op.printerId));
+    
+    // Combine filtered optimistic ops with real operations
+    return [...filteredOptimisticOps, ...realRunningOps];
+  })();
+
   // Recompute selected printers if a printer went offline (keep selection but disable start button logic uses isReachable)
   // const reachableSelectedCount = selectedPrinters.filter(id => printersWithLive.find(p => p.id === id && (p.isReachable || p.isOnline))).length;
 
@@ -202,6 +176,7 @@ export const HarvestPage: React.FC = () => {
             <HarvestOperationDetails
               operation={selectedOperation}
               onClose={() => setSelectedOperation(null)}
+              perFileProgress={perFileProgressMap[selectedOperation.id] || {}}
             />
           )}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -217,7 +192,7 @@ export const HarvestPage: React.FC = () => {
                         await cancelHarvestMutation.mutateAsync(op.id);
                         toast.success(`Cancelled: ${op.printerName}`);
                         successCount++;
-                      } catch (err) {
+                      } catch {
                         toast.error(`Failed to cancel: ${op.printerName}`);
                         errorCount++;
                       }

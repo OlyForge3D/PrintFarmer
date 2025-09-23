@@ -88,8 +88,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       // Map evt.status string to HarvestFileStatus enum if needed
       let status: HarvestFileStatus | undefined = undefined;
       if (typeof evt.status === 'string') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        status = (HarvestFileStatus as any)[evt.status] ?? undefined;
+        // Map evt.status string to HarvestFileStatus enum
+        status = ((HarvestFileStatus as unknown) as Record<string, HarvestFileStatus>)[evt.status] ?? undefined;
       } else if (typeof evt.status === 'number') {
         status = evt.status;
       }
