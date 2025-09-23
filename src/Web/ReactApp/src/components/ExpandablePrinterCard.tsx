@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import { PrinterBackend } from '@/types/api';
@@ -207,7 +210,9 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   // Function to check if an axis is homed based on the homedAxes string from Moonraker
   const isAxisHomed = (axis: string): boolean => {
     const homedAxes = status?.homedAxes || '';
-    console.log(`[DEBUG] Checking axis ${axis}, homedAxes from status:`, homedAxes);
+    if (window.PrintFarmerDebug?.expandablePrinterCard) {
+      console.log(`[PrintFarmer] ExpandablePrinterCard: Checking axis ${axis}, homedAxes from status:`, homedAxes);
+    }
     return homedAxes.includes(axis.toLowerCase());
   };
 
@@ -905,7 +910,11 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               <button 
                 className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
                 disabled={isPrinting}
-                onClick={() => console.log('Moving to', moveX, moveY, moveZ)}
+                onClick={() => {
+                  if (window.PrintFarmerDebug?.expandablePrinterCard) {
+                    console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
+                  }
+                }}
               >
                 GO
               </button>

@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import React, { useMemo, useState } from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
@@ -55,6 +58,10 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 }
 
 export function PrinterDashboard() {
+  // Conditional debug logging for PrinterDashboard
+  if (window.PrintFarmerDebug?.printerDashboard) {
+    console.log('[PrintFarmer] PrinterDashboard render');
+  }
   const { 
     data: printers, 
     isLoading, 

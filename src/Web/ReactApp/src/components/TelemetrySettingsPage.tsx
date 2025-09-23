@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import { useState, useEffect } from 'react';
 import { useTelemetry } from '../telemetry/useTelemetry';
 import { isTelemetryInitialized } from '../telemetry/config';
@@ -60,7 +63,9 @@ export function TelemetrySettingsPage() {
     });
     
     // In a real application, these settings would be persisted
-    console.log('Telemetry settings saved:', settings);
+    if (window.PrintFarmerDebug?.telemetrySettingsPage) {
+      console.log('[PrintFarmer] TelemetrySettingsPage: Telemetry settings saved:', settings);
+    }
   };
 
   const telemetryStatus = isTelemetryInitialized();

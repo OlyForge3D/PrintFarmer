@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import React, { useState, useEffect } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
@@ -22,7 +25,9 @@ interface PrinterConfiguration {
 }
 
 export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDiscoveryModalProps) {
-  console.log('PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+  if (window.PrintFarmerDebug?.printerDiscoveryModal) {
+    console.log('[PrintFarmer] PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+  }
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [printerConfigs, setPrinterConfigs] = useState<Record<string, PrinterConfiguration>>({});
@@ -54,10 +59,14 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const handleStartDiscovery = async () => {
     try {
-      console.log('handleStartDiscovery called - starting network scan');
+      if (window.PrintFarmerDebug?.printerDiscoveryModal) {
+        console.log('[PrintFarmer] PrinterDiscoveryModal: handleStartDiscovery called - starting network scan');
+      }
       resetDiscovery(); // Clear previous results
       const result = await startDiscoveryMutation.mutateAsync();
-      console.log('Discovery stream started with sessionId:', result.sessionId);
+      if (window.PrintFarmerDebug?.printerDiscoveryModal) {
+        console.log('[PrintFarmer] PrinterDiscoveryModal: Discovery stream started with sessionId:', result.sessionId);
+      }
       setSessionId(result.sessionId);
       setSelectedPrinters(new Set());
     } catch (error) {

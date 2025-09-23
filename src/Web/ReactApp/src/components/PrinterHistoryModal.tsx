@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import { usePrinterHistory, usePrinterHistoryTotals } from '@/hooks/useApi';
 import type { HistoryJob, Printer } from '@/types/api';
 import { 
@@ -91,12 +94,15 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   const [limit, setLimit] = useState(50);
   const [order, setOrder] = useState<string>('desc');
   
-  // Debug logging
-  console.log('PrinterHistoryModal render:', { 
-    isOpen, 
-    printerName: printer.name, 
-    printerId: printer.id 
-  });
+  // Conditional debug logging for PrinterHistoryModal
+  if (window.PrintFarmerDebug?.printerHistory) {
+    console.log('[PrintFarmer] PrinterHistoryModal render:', {
+      isOpen,
+      printerName: printer.name,
+      printerId: printer.id,
+      printer
+    });
+  }
 
   const { 
     data: historyData, 
@@ -114,11 +120,16 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   } = usePrinterHistoryTotals(printer.id);
 
   if (!isOpen) {
-    console.log('Modal not open, returning null');
+    if (window.PrintFarmerDebug?.printerHistory) {
+      console.log('[PrintFarmer] PrinterHistoryModal: Modal not open, returning null');
+    }
     return null;
   }
 
   console.log('Modal is open, rendering modal with portal');
+  if (window.PrintFarmerDebug?.printerHistory) {
+    console.log('[PrintFarmer] PrinterHistoryModal: Modal is open, rendering modal with portal');
+  }
 
   const modalContent = (
     <div className="fixed inset-0 z-50 overflow-y-auto">

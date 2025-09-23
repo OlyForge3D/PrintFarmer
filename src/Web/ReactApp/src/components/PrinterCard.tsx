@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
@@ -28,6 +31,16 @@ export function PrinterCard({
   const { hasPermission } = useAuth();
   const { getPrinterStatus } = usePrinterStatusUpdates();
   const realtimeStatus = getPrinterStatus(printer.id);
+
+  // Conditional debug logging for PrinterCard
+  if (window.PrintFarmerDebug?.printerCard) {
+    console.log('[PrintFarmer] PrinterCard:', {
+      printerId: printer.id,
+      printerName: printer.name,
+      printer,
+      realtimeStatus
+    });
+  }
 
   // State for print job status (Moonraker only)
   const [printJobStatus, setPrintJobStatus] = useState<PrintJobStatusDto | null>(null);

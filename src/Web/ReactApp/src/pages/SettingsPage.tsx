@@ -1370,6 +1370,78 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+      <DebugLoggingControls />
+    </div>
+  );
+}
+
+// DebugLoggingControls: Persist PrintFarmerDebug toggles in localStorage
+function DebugLoggingControls() {
+  const debugKeys = {
+    printerCard: 'Printer Card',
+    printerHistory: 'Printer History',
+    printerRealtime: 'Printer Realtime',
+    printerBulkActions: 'Printer Bulk Actions',
+    printerSelection: 'Printer Selection',
+    printerDashboard: 'Printer Dashboard',
+    expandablePrinterCard: 'Expandable Printer Card',
+    printerDiscoveryModal: 'Printer Discovery Modal',
+    telemetrySettingsPage: 'Telemetry Settings Page',
+  };
+
+  // Local state mirrors window.PrintFarmerDebug
+  const [debugState, setDebugState] = useState(() => {
+    try {
+      const raw = localStorage.getItem('PrintFarmerDebug');
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore localStorage error */ }
+    return window.PrintFarmerDebug || {};
+  });
+
+  useEffect(() => {
+    if (!window.PrintFarmerDebug) window.PrintFarmerDebug = {};
+    Object.assign(window.PrintFarmerDebug, debugState);
+    try {
+      localStorage.setItem('PrintFarmerDebug', JSON.stringify(debugState));
+    } catch { /* ignore localStorage error */ }
+  }, [debugState]);
+
+  const handleToggle = (key: string, checked: boolean) => {
+    setDebugState((prev: Record<string, boolean>) => ({ ...prev, [key]: checked }));
+  };
+
+  const handleReset = () => {
+    setDebugState({});
+  };
+
+  return (
+    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6 mt-8">
+      <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Debug Logging Controls</h2>
+      <p className="text-sm text-pf-text-secondary mb-4">Enable or disable informational logging for specific UI components. Changes are saved and persist across reloads.</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {Object.entries(debugKeys).map(([key, label]) => (
+          <div key={key} className="flex items-center gap-2">
+            <input
+              id={`pfdebug-${key}`}
+              type="checkbox"
+              checked={!!debugState[key]}
+              onChange={e => handleToggle(key, e.target.checked)}
+              className="h-4 w-4"
+            />
+            <label htmlFor={`pfdebug-${key}`} className="text-sm text-pf-text-primary">{label}</label>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          onClick={handleReset}
+          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+        >
+          Reset All
+        </button>
+      </div>
+      <p className="text-xs text-pf-text-secondary mt-4">These toggles control live debug logging for development and troubleshooting. Settings are persisted in your browser and will remain after reload.</p>
     </div>
   );
 }

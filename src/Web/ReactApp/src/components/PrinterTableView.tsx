@@ -1,3 +1,6 @@
+if (!window.PrintFarmerDebug) {
+  window.PrintFarmerDebug = {};
+}
 import { useState, useCallback } from 'react';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
@@ -203,6 +206,16 @@ export function PrinterTableView({
                 hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
                 bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
               };
+
+              // Conditional debug logging for realtime updates
+              if (window.PrintFarmerDebug?.printerRealtime) {
+                console.log('[PrintFarmer] PrinterTableView realtime:', {
+                  printerId: printer.id,
+                  printerName: printer.name,
+                  currentStatus,
+                  realtimeStatus
+                });
+              }
 
               return (
                 <tr 
