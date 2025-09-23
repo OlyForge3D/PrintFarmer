@@ -49,10 +49,6 @@ export function PrinterTableViewPage() {
     }
   };
 
-  const handleManagePrinter = (printer: Printer) => {
-    console.log('Manage printer:', printer.name);
-    // TODO: Navigate to manage page or open management modal
-  };
 
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
@@ -150,7 +146,6 @@ export function PrinterTableViewPage() {
           printers={printers}
           onEdit={handleEditPrinter}
           onDelete={handleDeletePrinters}
-          onManage={handleManagePrinter}
           onBulkSetMaintenance={handleBulkSetMaintenance}
         />
       ) : (

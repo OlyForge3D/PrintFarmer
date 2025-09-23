@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Printer, GcodeHarvestOperation } from '@/types/api';
+import { Printer, GcodeHarvestOperation, HarvestOptions } from '@/types/api';
 
 export interface PrinterCardProps {
   printer: Printer;
   operation?: GcodeHarvestOperation; // Current/active harvest operation for this printer, if any
-  onStartHarvest?: (printerId: string, options: Record<string, unknown>) => void;
+  onStartHarvest?: (printerId: string, options: HarvestOptions) => void;
   onCancelHarvest?: (operationId: string) => void;
   onSettings?: (printerId: string) => void;
   onViewDetails?: (operation: GcodeHarvestOperation) => void;
@@ -35,7 +35,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
     : 0;
 
   // Per-card harvest options state
-  const [options, setOptions] = useState({
+  const [options, setOptions] = useState<HarvestOptions>({
     includeSubfolders: true,
     fileTypes: ['gcode', 'gco', 'g'],
     minFileSize: 1024,
@@ -124,7 +124,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
               Duplicates:
               <select
                 value={options.duplicateHandling}
-                onChange={e => setOptions(o => ({ ...o, duplicateHandling: e.target.value }))}
+                onChange={e => setOptions(o => ({ ...o, duplicateHandling: e.target.value as 'skip' | 'overwrite' | 'rename' }))}
                 className="ml-1 px-1 py-0.5 border rounded"
               >
                 <option value="skip">Skip</option>
