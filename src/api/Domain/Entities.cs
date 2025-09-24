@@ -3,6 +3,16 @@ using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Domain;
+// ...existing entity classes...
+
+public class SystemLog
+{
+    public Guid Id { get; set; }
+    public DateTime Timestamp { get; set; }
+    public string Type { get; set; } = string.Empty; // e.g., Info, Warning, Error, Telemetry
+    public string Message { get; set; } = string.Empty;
+    public string? MetadataJson { get; set; } // Optional: extra details as JSON
+}
 
 public class Printer
 {

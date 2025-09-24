@@ -41,6 +41,34 @@ interface TelemetrySettings {
 // (SettingsData interface removed - unused)
 
 export function SettingsPage() {
+  // SystemLogs persistence settings (connected to backend)
+  const [logRetentionDays, setLogRetentionDays] = useState<number>(30);
+  const [persistedLogTypes, setPersistedLogTypes] = useState<string[]>(['Info', 'Warning', 'Error']);
+  const [logSettingsLoading, setLogSettingsLoading] = useState(true);
+  const [logSettingsSaving, setLogSettingsSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setLogSettingsLoading(true);
+      try {
+        const settings = await apiClient.getSystemLogSettings();
+        setLogRetentionDays(settings.retentionDays);
+        setPersistedLogTypes(settings.persistedLogTypes);
+      } catch (err) {
+        toast.error('Failed to load log settings');
+      } finally {
+        setLogSettingsLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (logSettingsLoading) return;
+    setLogSettingsSaving(true);
+    apiClient.setSystemLogSettings({ retentionDays: logRetentionDays, persistedLogTypes })
+      .catch(() => toast.error('Failed to save log settings'))
+      .finally(() => setLogSettingsSaving(false));
+  }, [logRetentionDays, persistedLogTypes]);
   const [spoolmanBase, setSpoolmanBase] = useState('');
   const [networkRanges, setNetworkRanges] = useState<NetworkRange[]>([]);
   const [networkValidation, setNetworkValidation] = useState<NetworkValidationState>({ ranges: [], overlapping: [], hasErrors: false });
@@ -1415,33 +1443,74 @@ function DebugLoggingControls() {
   };
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6 mt-8">
-      <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Debug Logging Controls</h2>
-      <p className="text-sm text-pf-text-secondary mb-4">Enable or disable informational logging for specific UI components. Changes are saved and persist across reloads.</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {Object.entries(debugKeys).map(([key, label]) => (
-          <div key={key} className="flex items-center gap-2">
-            <input
-              id={`pfdebug-${key}`}
-              type="checkbox"
-              checked={!!debugState[key]}
-              onChange={e => handleToggle(key, e.target.checked)}
-              className="h-4 w-4"
-            />
-            <label htmlFor={`pfdebug-${key}`} className="text-sm text-pf-text-primary">{label}</label>
-          </div>
-        ))}
+    <>
+      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6 mt-8">
+        <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Debug Logging Controls</h2>
+        <p className="text-sm text-pf-text-secondary mb-4">Enable or disable informational logging for specific UI components. Changes are saved and persist across reloads.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Object.entries(debugKeys).map(([key, label]) => (
+            <div key={key} className="flex items-center gap-2">
+              <input
+                id={`pfdebug-${key}`}
+                type="checkbox"
+                checked={!!debugState[key]}
+                onChange={e => handleToggle(key, e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor={`pfdebug-${key}`} className="text-sm text-pf-text-primary">{label}</label>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={handleReset}
+            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+          >
+            Reset All
+          </button>
+        </div>
+        <p className="text-xs text-pf-text-secondary mt-4">These toggles control live debug logging for development and troubleshooting. Settings are persisted in your browser and will remain after reload.</p>
       </div>
-      <div className="mt-4 flex gap-2">
-        <button
-          type="button"
-          onClick={handleReset}
-          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-        >
-          Reset All
-        </button>
+
+      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6 mt-8">
+        <h2 className="text-xl font-semibold text-pf-text-primary mb-4">System Log Persistence</h2>
+        <p className="text-sm text-pf-text-secondary mb-4">Configure which types of logs to persist and how long to retain them in the backend database.</p>
+        <div className="mb-4">
+          <label htmlFor="logRetentionDays" className="block text-sm font-medium text-pf-text-primary mb-2">Retention Period (days)</label>
+          <input
+            id="logRetentionDays"
+            type="number"
+            min={1}
+            max={365}
+            value={logRetentionDays}
+            onChange={e => setLogRetentionDays(Number(e.target.value))}
+            className="w-24 px-2 py-1 border rounded"
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-pf-text-primary mb-2">Log Types to Persist</label>
+          {['Info', 'Warning', 'Error', 'Telemetry'].map(type => (
+            <div key={type} className="flex items-center gap-2 mb-1">
+              <input
+                id={`persist-type-${type}`}
+                type="checkbox"
+                checked={persistedLogTypes.includes(type)}
+                onChange={e => {
+                  setPersistedLogTypes((prev: string[]) =>
+                    e.target.checked
+                      ? [...prev, type]
+                      : prev.filter((t: string) => t !== type)
+                  );
+                }}
+                className="h-4 w-4"
+              />
+              <label htmlFor={`persist-type-${type}`} className="text-sm text-pf-text-primary">{type}</label>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-pf-text-secondary mt-4">Only selected log types will be persisted. Retention period controls automatic cleanup of old logs.</p>
       </div>
-      <p className="text-xs text-pf-text-secondary mt-4">These toggles control live debug logging for development and troubleshooting. Settings are persisted in your browser and will remain after reload.</p>
-    </div>
+    </>
   );
 }

@@ -7,6 +7,7 @@ namespace Farm.Web.Api.Data;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
+    public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<Printer> Printers => Set<Printer>();
     public DbSet<Spool> Spools => Set<Spool>();
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();

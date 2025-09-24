@@ -36,6 +36,8 @@ using Swashbuckle.AspNetCore.Swagger;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+// Register SystemLogCleanupService for periodic log cleanup
+builder.Services.AddHostedService<SystemLogCleanupService>();
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
 try

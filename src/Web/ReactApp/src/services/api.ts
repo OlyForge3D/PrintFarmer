@@ -43,6 +43,15 @@ import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';
 
 export class ApiClient {
+  // SystemLogSettings API
+  async getSystemLogSettings() {
+    const res = await this.client.get('/systemlogsettings');
+    return res.data;
+  }
+
+  async setSystemLogSettings(settings: { retentionDays: number; persistedLogTypes: string[] }) {
+    await this.client.post('/systemlogsettings', settings);
+  }
   private client: AxiosInstance;
 
   constructor() {
