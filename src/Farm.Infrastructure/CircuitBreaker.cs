@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Farm.Infrastructure.Telemetry;
+
 namespace Farm.Infrastructure;
 
 public class CircuitBreaker
@@ -18,7 +20,7 @@ public class CircuitBreaker
         _failureThreshold = failureThreshold;
         _timeout = timeout ?? TimeSpan.FromMinutes(1);
         _retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
-        _logger = logger ?? new UnifiedLoggingService();
+        _logger = logger ?? new NullLoggingService();
     }
 
     public string Name { get; set; } = "CircuitBreaker";

@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using Farm.Infrastructure.Telemetry;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Data;
@@ -18,19 +19,19 @@ namespace Farm.Web.Api.Services;
 public partial class HarvestWorkerService(
     IHarvestQueue queue,
     IServiceProvider serviceProvider,
-    ILogger<HarvestWorkerService> logger,
+    IUnifiedLoggingService logger,
     IHubContext<HarvestHub> harvestHub) : BackgroundService
 {
     private readonly IHarvestQueue _queue = queue;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
-    private readonly ILogger<HarvestWorkerService> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly SemaphoreSlim _workerSemaphore = new SemaphoreSlim(MaxConcurrentWorkers, MaxConcurrentWorkers);
     private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
     private const int MaxConcurrentWorkers = 3; // Configurable
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("HarvestWorkerService started with {MaxWorkers} concurrent workers", MaxConcurrentWorkers);
+        _logger.LogInformation($"HarvestWorkerService started with {MaxConcurrentWorkers} concurrent workers");
 
         // List to track running tasks
         List<Task> runningTasks = new();
@@ -45,16 +46,13 @@ public partial class HarvestWorkerService(
                     await _workerSemaphore.WaitAsync(stoppingToken);
                     try
                     {
-                        _logger.LogInformation("Starting processing of file {FileName} for operation {OperationId}",
-                            job.FileName, job.OperationId);
+                        _logger.LogInformation($"Starting processing of file {job.FileName} for operation {job.OperationId}");
                         await ProcessFileJobAsync(job, stoppingToken);
-                        _logger.LogInformation("Completed processing of file {FileName} for operation {OperationId}",
-                            job.FileName, job.OperationId);
+                        _logger.LogInformation($"Completed processing of file {job.FileName} for operation {job.OperationId}");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error processing file {FileName} for operation {OperationId}",
-                            job.FileName, job.OperationId);
+                        _logger.LogError(ex, $"Error processing file {job.FileName} for operation {job.OperationId}");
                     }
                     finally
                     {
@@ -70,25 +68,22 @@ public partial class HarvestWorkerService(
 
                 if (runningTasks.Count % 10 == 0)
                 {
-                    _logger.LogInformation("Currently tracking {TaskCount} active processing tasks", runningTasks.Count);
+                    _logger.LogInformation($"Currently tracking {runningTasks.Count} active processing tasks");
                 }
             }
 
             // Wait for all remaining tasks to complete
-            _logger.LogInformation("Queue enumeration complete. Waiting for {TaskCount} remaining tasks to complete",
-                runningTasks.Count);
+            _logger.LogInformation($"Queue enumeration complete. Waiting for {runningTasks.Count} remaining tasks to complete");
             await Task.WhenAll(runningTasks);
             _logger.LogInformation("All harvest processing tasks have completed");
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("HarvestWorkerService stopping due to cancellation. {TaskCount} tasks still running",
-                runningTasks.Count);
+            _logger.LogInformation($"HarvestWorkerService stopping due to cancellation. {runningTasks.Count} tasks still running");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "HarvestWorkerService encountered an error with {TaskCount} tasks still running",
-                runningTasks.Count);
+            _logger.LogError(ex, $"HarvestWorkerService encountered an error with {runningTasks.Count} tasks still running");
         }
     }
 
@@ -100,7 +95,7 @@ public partial class HarvestWorkerService(
         IPrusaLinkClient prusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
         ISdcpClient sdcp = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
 
-        _logger.LogDebug("Processing file job: {Job}", job);
+        _logger.LogDebug($"Processing file job: {job}");
 
         try
         {
@@ -110,15 +105,13 @@ public partial class HarvestWorkerService(
 
             if (operation == null)
             {
-                _logger.LogWarning("Operation {OperationId} not found for job {FileName}",
-                    job.OperationId, job.FileName);
+                _logger.LogWarning($"Operation {job.OperationId} not found for job {job.FileName}");
                 return;
             }
 
             if (operation.Status == GcodeHarvestStatus.Cancelled)
             {
-                _logger.LogDebug("Skipping job {FileName} - operation {OperationId} was cancelled",
-                    job.FileName, job.OperationId);
+                _logger.LogDebug($"Skipping job {job.FileName} - operation {job.OperationId} was cancelled");
                 return;
             }
 
@@ -129,8 +122,7 @@ public partial class HarvestWorkerService(
 
             if (existingDiscoveredFile != null)
             {
-                _logger.LogInformation("File {FileName} already exists in discovered files table for operation {OperationId}",
-                    job.FileName, job.OperationId);
+                _logger.LogInformation($"File {job.FileName} already exists in discovered files table for operation {job.OperationId}");
                 return;
             }
 
@@ -138,8 +130,7 @@ public partial class HarvestWorkerService(
             Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == job.PrinterId, ct);
             if (printer == null)
             {
-                _logger.LogWarning("Printer {PrinterId} not found for job {FileName}",
-                    job.PrinterId, job.FileName);
+                _logger.LogWarning($"Printer {job.PrinterId} not found for job {job.FileName}");
                 await RecordFileErrorAsync(db, job.OperationId, job.FileName, "Printer not found");
                 return;
             }
@@ -147,7 +138,7 @@ public partial class HarvestWorkerService(
             // Apply operation filters
             if (!ShouldProcessFile(job, operation))
             {
-                _logger.LogDebug("Skipping file {FileName} due to operation filters", job.FileName);
+                _logger.LogDebug($"Skipping file {job.FileName} due to operation filters");
                 await IncrementSkippedCountAsync(db, operation);
                 return;
             }
@@ -164,8 +155,7 @@ public partial class HarvestWorkerService(
                 // Set other fields as needed
             };
 
-            _logger.LogInformation("Created discovered file record for {FileName} with ID {FileId}",
-                job.FileName, discoveredFile.Id);
+            _logger.LogInformation($"Created discovered file record for {job.FileName} with ID {discoveredFile.Id}");
 
             // Download and process file
             PrinterBackend backend = (PrinterBackend)printer.Backend;
@@ -173,8 +163,7 @@ public partial class HarvestWorkerService(
 
             if (fileContent != null)
             {
-                _logger.LogInformation("Successfully downloaded file {FileName} ({Size} bytes)",
-                    job.FileName, fileContent.Length);
+                _logger.LogInformation($"Successfully downloaded file {job.FileName} ({fileContent.Length} bytes)");
 
                 // Calculate hash
                 fileContent.Position = 0;
@@ -190,7 +179,7 @@ public partial class HarvestWorkerService(
                     switch (handling)
                     {
                         case "overwrite":
-                            _logger.LogInformation("Overwriting duplicate file {FileName} (Existing ID {ExistingId}) per policy", job.FileName, existingFile.Id);
+                            _logger.LogInformation($"Overwriting duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy");
                             // Treat as added (new metadata snapshot) but reference existing file id
                             fileContent.Position = 0;
                             GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
@@ -199,7 +188,7 @@ public partial class HarvestWorkerService(
                             await IncrementAddedCountAsync(db, operation);
                             break;
                         case "rename":
-                            _logger.LogInformation("Renaming duplicate file {FileName} per policy", job.FileName);
+                            _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy");
                             // Generate a new unique name with -copy suffix (in discovered scope)
                             string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
                             string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
@@ -217,7 +206,7 @@ public partial class HarvestWorkerService(
                             await IncrementAddedCountAsync(db, operation);
                             break;
                         default: // skip
-                            _logger.LogInformation("Skipping duplicate file {FileName} (Existing ID {ExistingId}) per policy", job.FileName, existingFile.Id);
+                            _logger.LogInformation($"Skipping duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy");
                             discoveredFile.AlreadyInLibrary = true;
                             await IncrementSkippedCountAsync(db, operation);
                             break;
@@ -231,21 +220,20 @@ public partial class HarvestWorkerService(
                     ApplyMetadataToDiscoveredFile(discoveredFile, metadata);
                     await IncrementAddedCountAsync(db, operation);
 
-                    _logger.LogInformation("Extracted metadata from file {FileName}: Slicer={Slicer}, Material={Material}",
-                        job.FileName, discoveredFile.ExtractedSlicerName ?? "Unknown", discoveredFile.ExtractedMaterial ?? "Unknown");
+                    _logger.LogInformation($"Extracted metadata from file {job.FileName}: Slicer={discoveredFile.ExtractedSlicerName ?? "Unknown"}, Material={discoveredFile.ExtractedMaterial ?? "Unknown"}");
                 }
 
                 operation.TotalBytesProcessed += job.FileSize;
             }
             else
             {
-                _logger.LogWarning("Failed to download file {FileName}", job.FileName);
+                _logger.LogWarning($"Failed to download file {job.FileName}");
                 // No ProcessingFailed or ErrorMessage fields on HarvestDiscoveredFile
                 await IncrementErrorCountAsync(db, operation);
             }
 
             // Save discovered file
-            _logger.LogInformation("Saving discovered file {FileName} to database", job.FileName);
+            _logger.LogInformation($"Saving discovered file {job.FileName} to database");
             db.HarvestDiscoveredFiles.Add(discoveredFile);
             await db.SaveChangesAsync(ct);
 
@@ -264,8 +252,7 @@ public partial class HarvestWorkerService(
                 extractedMaterial = discoveredFile.ExtractedMaterial
             }, ct);
 
-            _logger.LogInformation("Successfully processed file {FileName} for operation {OperationId}",
-                job.FileName, job.OperationId);
+            _logger.LogInformation($"Successfully processed file {job.FileName} for operation {job.OperationId}");
 
             // Verify the file was actually saved
             HarvestDiscoveredFile? savedFile = await db.HarvestDiscoveredFiles
@@ -273,18 +260,16 @@ public partial class HarvestWorkerService(
 
             if (savedFile != null)
             {
-                _logger.LogInformation("Verified file {FileName} was saved with ID {FileId}", job.FileName, savedFile.Id);
+                _logger.LogInformation($"Verified file {job.FileName} was saved with ID {savedFile.Id}");
             }
             else
             {
-                _logger.LogWarning("File {FileName} with ID {FileId} was NOT found in database after save",
-                    job.FileName, discoveredFile.Id);
+                _logger.LogWarning($"File {job.FileName} with ID {discoveredFile.Id} was NOT found in database after save");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to process file job {FileName} for operation {OperationId}",
-                job.FileName, job.OperationId);
+            _logger.LogError(ex, $"Failed to process file job {job.FileName} for operation {job.OperationId}");
             await RecordFileErrorAsync(db, job.OperationId, job.FileName, ex.Message);
             // Emit error event for this file
             await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestFileDiscovered", new
@@ -339,7 +324,7 @@ public partial class HarvestWorkerService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to download file {FilePath} from {ServerUrl}", filePath, printer.ServerUrl);
+            _logger.LogError(ex, $"Failed to download file {filePath} from {printer.ServerUrl}");
             return null;
         }
     }
@@ -354,12 +339,12 @@ public partial class HarvestWorkerService(
                 return new MemoryStream(bytes);
             }
 
-            _logger.LogWarning("Failed to download file {FilePath} from Moonraker at {ServerUrl}", filePath, serverUrl);
+            _logger.LogWarning($"Failed to download file {filePath} from Moonraker at {serverUrl}");
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download file {FilePath} from Moonraker at {ServerUrl}", filePath, serverUrl);
+            _logger.LogError(ex, $"Failed to download file {filePath} from Moonraker at {serverUrl}");
             return null;
         }
     }
@@ -369,13 +354,13 @@ public partial class HarvestWorkerService(
         try
         {
             // PrusaLink file download implementation would go here
-            _logger.LogInformation("PrusaLink file download not yet implemented for {FilePath} at {ServerUrl}", filePath, serverUrl);
+            _logger.LogInformation($"PrusaLink file download not yet implemented for {filePath} at {serverUrl}");
             await Task.Delay(1); // Prevent compiler warning
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download file {FilePath} from PrusaLink at {ServerUrl}", filePath, serverUrl);
+            _logger.LogError(ex, $"Failed to download file {filePath} from PrusaLink at {serverUrl}");
             return null;
         }
     }
@@ -393,13 +378,13 @@ public partial class HarvestWorkerService(
         try
         {
             // SDCP file download implementation would go here
-            _logger.LogInformation("SDCP file download not yet implemented for {FilePath} at {ServerUrl}", filePath, serverUrl);
+            _logger.LogInformation($"SDCP file download not yet implemented for {filePath} at {serverUrl}");
             await Task.Delay(1); // Prevent compiler warning
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download file {FilePath} from SDCP at {ServerUrl}", filePath, serverUrl);
+            _logger.LogError(ex, $"Failed to download file {filePath} from SDCP at {serverUrl}");
             return null;
         }
     }

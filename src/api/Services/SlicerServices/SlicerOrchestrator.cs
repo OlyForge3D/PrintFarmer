@@ -1,4 +1,5 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -6,27 +7,17 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// <summary>
 /// Orchestrator service for managing slicer operations and job distribution
 /// </summary>
-public class SlicerOrchestrator : ISlicerOrchestrator
+public class SlicerOrchestrator(
+    ISlicerJobQueue jobQueue,
+    ISlicerFileStorage fileStorage,
+    ISlicerProgressNotifier progressNotifier,
+    IUnifiedLoggingService logger) : ISlicerOrchestrator
 {
-    private readonly ISlicerJobQueue _jobQueue;
-    private readonly ISlicerFileStorage _fileStorage;
-    private readonly ISlicerProgressNotifier _progressNotifier;
-    private readonly ILogger<SlicerOrchestrator> _logger;
-    private readonly Dictionary<SlicerEngineType, EngineMetadata> _engineCatalog;
-
-    public SlicerOrchestrator(
-        ISlicerJobQueue jobQueue,
-        ISlicerFileStorage fileStorage,
-        ISlicerProgressNotifier progressNotifier,
-        ILogger<SlicerOrchestrator> logger)
-    {
-        _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
-        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
-        _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        _engineCatalog = BuildStaticCatalog();
-    }
+    private readonly ISlicerJobQueue _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
+    private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
+    private readonly ISlicerProgressNotifier _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly Dictionary<SlicerEngineType, EngineMetadata> _engineCatalog = BuildStaticCatalog();
 
     public async Task<SlicingJobResponse> SubmitJobAsync(SlicingJobRequest request, CancellationToken cancellationToken = default)
     {
@@ -44,8 +35,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             DistributedSlicingJob? existingJob = await _jobQueue.FindExistingJobAsync(envelope.CorrelationId, envelope.Checksum, cancellationToken);
             if (existingJob != null)
             {
-                _logger.LogInformation("Found existing job {JobId} for correlation {CorrelationId}, returning existing response",
-                    existingJob.Id, envelope.CorrelationId);
+                _logger.LogInformation($"Found existing job {existingJob.Id} for correlation {envelope.CorrelationId}, returning existing response");
 
                 // Return existing job response
                 SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
@@ -84,7 +74,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not get file metadata for {ModelFileUrl}", request.ModelFileUrl);
+                _logger.LogWarning(ex, $"Could not get file metadata for {request.ModelFileUrl}");
             }
 
             // Enqueue the job
@@ -94,8 +84,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             SlicerQueueStats queueStatsForNew = await _jobQueue.GetQueueStatsAsync(request.SlicerEngine, cancellationToken);
             DateTime estimatedCompletion = DateTime.UtcNow.Add(queueStatsForNew.EstimatedWaitTime ?? TimeSpan.Zero);
 
-            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {CorrelationId}) for user {UserId} with engine {SlicerEngine}",
-                job.Id, envelope.CorrelationId, request.UserId, request.SlicerEngine);
+            _logger.LogInformation($"Submitted new slicing job {job.Id} (correlation {envelope.CorrelationId}) for user {request.UserId} with engine {request.SlicerEngine}");
 
             return new SlicingJobResponse
             {
@@ -108,7 +97,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to submit slicing job for user {UserId}", userIdForLog);
+            _logger.LogError(ex, $"Failed to submit slicing job for user {userIdForLog}");
             throw;
         }
     }
@@ -150,7 +139,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get job status for {JobId}", jobId);
+            _logger.LogError(ex, $"Failed to get job status for {jobId}");
             throw;
         }
     }
@@ -162,13 +151,13 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             DistributedSlicingJob? job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
             if (job == null)
             {
-                _logger.LogWarning("Cannot cancel job {JobId} - job not found", jobId);
+                _logger.LogWarning($"Cannot cancel job {jobId} - job not found");
                 return false;
             }
 
             if (job.Status == SlicingJobStatus.Completed || job.Status == SlicingJobStatus.Error || job.Status == SlicingJobStatus.Cancelled)
             {
-                _logger.LogWarning("Cannot cancel job {JobId} - job is already in final state: {Status}", jobId, job.Status);
+                _logger.LogWarning($"Cannot cancel job {jobId} - job is already in final state: {job.Status}");
                 return false;
             }
 
@@ -177,12 +166,12 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             // Notify about cancellation
             await _progressNotifier.NotifyFailureAsync(job, "Job cancelled by user", cancellationToken);
 
-            _logger.LogInformation("Cancelled slicing job {JobId}", jobId);
+            _logger.LogInformation($"Cancelled slicing job {jobId}");
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cancel job {JobId}", jobId);
+            _logger.LogError(ex, $"Failed to cancel job {jobId}");
             throw;
         }
     }
@@ -212,7 +201,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             catch (Exception ex)
             {
                 failures++;
-                _logger.LogWarning(ex, "Queue stats retrieval failed for engine {Engine}", meta.EngineType);
+                _logger.LogWarning(ex, $"Queue stats retrieval failed for engine {meta.EngineType}");
                 // Return an unhealthy placeholder so the UI can still show engine availability and degraded status
                 engineInfos.Add(new SlicerEngineInfo
                 {
@@ -293,7 +282,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get user jobs for {UserId}", userId);
+            _logger.LogError(ex, $"Failed to get user jobs for {userId}");
             throw;
         }
     }
@@ -331,7 +320,7 @@ public class SlicerOrchestrator : ISlicerOrchestrator
             catch (Exception ex)
             {
                 engineFailures++;
-                _logger.LogWarning(ex, "Health check failed for engine {Engine}", meta.EngineType);
+                _logger.LogWarning(ex, $"Health check failed for engine {meta.EngineType}");
                 health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,

@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using Farm.Infrastructure.Telemetry;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
@@ -14,19 +15,18 @@ public class PrinterCapabilityDiscoveryService(
     AppDbContext context,
     IMoonrakerClient moonrakerClient,
     IPrusaLinkClient prusaClient,
-    // ISdcpClient sdcpClient, // removed unused parameter
-    ILogger<PrinterCapabilityDiscoveryService> logger) : IPrinterCapabilityDiscoveryService
+    IUnifiedLoggingService logger) : IPrinterCapabilityDiscoveryService
 {
     private readonly AppDbContext _context = context;
     private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
     private readonly IPrusaLinkClient _prusaClient = prusaClient;
-    private readonly ILogger<PrinterCapabilityDiscoveryService> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task<PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
     {
         try
         {
-            _logger.LogInformation("Starting capability discovery for printer {PrinterId} ({PrinterName})", printer.Id, printer.Name);
+            _logger.LogInformation($"Starting capability discovery for printer {printer.Id} ({printer.Name})");
 
             // Start with model defaults
             PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer);
@@ -48,11 +48,11 @@ public class PrinterCapabilityDiscoveryService(
             if (discovered != null)
             {
                 ApplyDiscoveredCapabilities(capabilities, discovered);
-                _logger.LogInformation("Successfully discovered capabilities from printer API for {PrinterName}", printer.Name);
+                _logger.LogInformation($"Successfully discovered capabilities from printer API for {printer.Name}");
             }
             else
             {
-                _logger.LogWarning("Failed to discover capabilities from printer API for {PrinterName}, using model defaults only", printer.Name);
+                _logger.LogWarning($"Failed to discover capabilities from printer API for {printer.Name}, using model defaults only");
             }
 
             capabilities.LastUpdated = DateTime.UtcNow;
@@ -62,7 +62,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error discovering capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error discovering capabilities for printer {printer.Id}");
             return null;
         }
     }
@@ -71,7 +71,7 @@ public class PrinterCapabilityDiscoveryService(
     {
         try
         {
-            _logger.LogInformation("Refreshing capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogInformation($"Refreshing capabilities for printer {printer.Id}");
 
             DiscoveredCapabilities? discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
             if (discovered != null)
@@ -88,14 +88,14 @@ public class PrinterCapabilityDiscoveryService(
                 capabilities.LastUpdated = DateTime.UtcNow;
                 capabilities.UpdatedAt = DateTime.UtcNow;
 
-                _logger.LogInformation("Successfully refreshed capabilities for printer {PrinterId}", printer.Id);
+                _logger.LogInformation($"Successfully refreshed capabilities for printer {printer.Id}");
             }
 
             return capabilities;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error refreshing capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error refreshing capabilities for printer {printer.Id}");
             return capabilities;
         }
     }
@@ -171,7 +171,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error validating capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error validating capabilities for printer {printer.Id}");
             result._errors.Add("Failed to validate capabilities due to internal error");
             result.IsValid = false;
         }
@@ -242,7 +242,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting model default capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error getting model default capabilities for printer {printer.Id}");
             return null;
         }
     }
@@ -263,7 +263,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to discover capabilities from {Backend} API for printer {PrinterId}", backend, printer.Id);
+            _logger.LogError(ex, $"Failed to discover capabilities from {backend} API for printer {printer.Id}");
             return null;
         }
     }
@@ -311,7 +311,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Moonraker capability discovery failed (non-fatal) for printer {PrinterId}", printer.Id);
+            _logger.LogDebug(ex, $"Moonraker capability discovery failed (non-fatal) for printer {printer.Id}");
             return null;
         }
     }
@@ -392,7 +392,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error discovering capabilities from PrusaLink for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error discovering capabilities from PrusaLink for printer {printer.Id}");
             return null;
         }
     }

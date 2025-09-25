@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Data;
 using Farm.Web.Api.Services; // added for IGcodeUploadSettings & quota services

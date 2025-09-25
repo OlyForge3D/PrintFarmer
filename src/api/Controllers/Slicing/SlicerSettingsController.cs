@@ -5,14 +5,9 @@ namespace Farm.Web.Api.Controllers.Slicing;
 
 [ApiController]
 [Route("api/slicer/settings")]
-public class SlicerSettingsController : ControllerBase
+public class SlicerSettingsController(ISlicerSettingsService settingsService) : ControllerBase
 {
-    private readonly ISlicerSettingsService _settingsService;
-
-    public SlicerSettingsController(ISlicerSettingsService settingsService)
-    {
-        _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
-    }
+    private readonly ISlicerSettingsService _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
 
     [HttpGet]
     public ActionResult<SlicerSettingsDto> Get()

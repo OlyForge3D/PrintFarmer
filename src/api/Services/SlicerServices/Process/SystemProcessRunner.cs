@@ -10,14 +10,9 @@ public class SystemProcessRunner : IProcessRunner
         return new SystemProcessHandle(proc);
     }
 
-    private sealed class SystemProcessHandle : IProcessHandle
+    private sealed class SystemProcessHandle(System.Diagnostics.Process proc) : IProcessHandle
     {
-        private readonly System.Diagnostics.Process _proc;
-
-        public SystemProcessHandle(System.Diagnostics.Process proc)
-        {
-            _proc = proc;
-        }
+        private readonly System.Diagnostics.Process _proc = proc;
 
         public System.IO.StreamReader StandardOutput => _proc.StandardOutput;
         public System.IO.StreamReader StandardError => _proc.StandardError;

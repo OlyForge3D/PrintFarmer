@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
@@ -24,52 +25,16 @@ public record PrinterCompositeStatus(
     double? BedTarget = null);
 #pragma warning restore CA1056 // URI-like properties should not be strings
 
-public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger) : PrinterClientBase, IMoonrakerClient
+public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
 {
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get printer status from {BaseUrl}")]
-    private static partial void LogStatusError(ILogger logger, Exception exception, string baseUrl);
+    private readonly HttpClient _http;
+    private readonly IUnifiedLoggingService _logger;
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get printer info from {BaseUrl}")]
-    private static partial void LogPrinterInfoError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get job info from {BaseUrl}")]
-    private static partial void LogJobError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get composite status from {BaseUrl}")]
-    private static partial void LogCompositeStatusError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to start metadata scan for {Filename} at {BaseUrl}")]
-    private static partial void LogMetadataScanError(ILogger logger, Exception exception, string filename, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URLs from {BaseUrl}")]
-    private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Error parsing directory info from REST API: {ErrorMessage}")]
-    private static partial void LogDirectoryParseError(ILogger logger, Exception exception, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "JSON-RPC error: {ErrorMessage} (Code: {ErrorCode})")]
-    private static partial void LogJsonRpcError(ILogger logger, string errorMessage, int errorCode);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "JSON parsing error: {ErrorMessage}")]
-    private static partial void LogJsonParseError(ILogger logger, Exception exception, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Error in GetDirectoryAsync: {ErrorMessage}")]
-    private static partial void LogGetDirectoryError(ILogger logger, Exception exception, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get history list from {BaseUrl}: {ErrorMessage}")]
-    private static partial void LogHistoryListError(ILogger logger, Exception exception, string baseUrl, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get history job {JobId} from {BaseUrl}: {ErrorMessage}")]
-    private static partial void LogHistoryJobError(ILogger logger, Exception exception, string jobId, string baseUrl, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to delete history job {JobId} from {BaseUrl}: {ErrorMessage}")]
-    private static partial void LogDeleteHistoryJobError(ILogger logger, Exception exception, string jobId, string baseUrl, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get history totals from {BaseUrl}: {ErrorMessage}")]
-    private static partial void LogHistoryTotalsError(ILogger logger, Exception exception, string baseUrl, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to reset history totals from {BaseUrl}: {ErrorMessage}")]
-    private static partial void LogResetHistoryTotalsError(ILogger logger, Exception exception, string baseUrl, string errorMessage);
+    public MoonrakerClient(HttpClient http, IUnifiedLoggingService logger)
+    {
+        _http = http;
+        _logger = logger;
+    }
 
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 7125);
 
@@ -81,7 +46,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "printer/info");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return new PrinterStatus(false, null);
@@ -110,22 +75,22 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (HttpRequestException ex)
         {
-            LogStatusError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer status from {baseUrl}");
             return new PrinterStatus(false, null);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogStatusError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer status from {baseUrl}");
             return new PrinterStatus(false, null);
         }
         catch (JsonException ex)
         {
-            LogStatusError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer status from {baseUrl}");
             return new PrinterStatus(false, null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogStatusError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer status from {baseUrl}");
             return new PrinterStatus(false, null);
         }
     }
@@ -138,7 +103,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "printer/info");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -164,22 +129,22 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (HttpRequestException ex)
         {
-            LogPrinterInfoError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
             return null;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogPrinterInfoError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
             return null;
         }
         catch (JsonException ex)
         {
-            LogPrinterInfoError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogPrinterInfoError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
             return null;
         }
     }
@@ -192,7 +157,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "printer/objects/query?print_stats&display_status&job_queue");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -269,7 +234,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 {
                     Uri baseUri3 = new(NormalizeBaseUrl(baseUrl));
                     Uri metaUri = new(baseUri3, $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
-                    using HttpResponseMessage mresp = await http.GetAsync(metaUri, cts.Token);
+                    using HttpResponseMessage mresp = await _http.GetAsync(metaUri, cts.Token);
                     if (mresp.IsSuccessStatusCode)
                     {
                         await using Stream mstream = await mresp.Content.ReadAsStreamAsync(cts.Token);
@@ -308,7 +273,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri listUri = new(baseUri, "server/webcams/list");
-            using HttpResponseMessage resp = await http.GetAsync(listUri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(listUri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -371,7 +336,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                     {
                         try
                         {
-                            using HttpResponseMessage tresp = await http.PostAsync(testUri, content: null, cts.Token);
+                            using HttpResponseMessage tresp = await _http.PostAsync(testUri, content: null, cts.Token);
                             if (tresp.IsSuccessStatusCode)
                             {
                                 await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
@@ -414,7 +379,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            using HttpResponseMessage resp = await http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -437,7 +402,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri posUri = new(baseUri, "printer/objects/query?toolhead=position");
-            using HttpResponseMessage resp = await http.GetAsync(posUri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(posUri, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
                 await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
@@ -472,7 +437,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts2.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri2 = new(NormalizeBaseUrl(baseUrl));
             Uri tempsUri = new(baseUri2, "printer/objects/query?extruder&heater_bed");
-            using HttpResponseMessage resp2 = await http.GetAsync(tempsUri, cts2.Token);
+            using HttpResponseMessage resp2 = await _http.GetAsync(tempsUri, cts2.Token);
             if (resp2.IsSuccessStatusCode)
             {
                 await using Stream stream2 = await resp2.Content.ReadAsStreamAsync(cts2.Token);
@@ -618,7 +583,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri4 = new(NormalizeBaseUrl(baseUrl));
             Uri scriptUri = new(baseUri4, "printer/gcode/script");
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -638,7 +603,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri listUri = new(baseUri, "server/webcams/list");
-            using HttpResponseMessage resp = await http.GetAsync(listUri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(listUri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return (null, null);
@@ -694,7 +659,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 {
                     try
                     {
-                        using HttpResponseMessage tresp = await http.PostAsync(testUri, content: null, cts.Token);
+                        using HttpResponseMessage tresp = await _http.PostAsync(testUri, content: null, cts.Token);
                         if (tresp.IsSuccessStatusCode)
                         {
                             await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
@@ -766,19 +731,19 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (HttpRequestException ex)
         {
-            LogCameraUrlError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogCameraUrlError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
         }
         catch (JsonException ex)
         {
-            LogCameraUrlError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogCameraUrlError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
         }
         return (stream, snapshot);
     }
@@ -799,7 +764,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             formContent.Add(streamContent, "file", fileName);
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
 
-            using HttpResponseMessage resp = await http.PostAsync(uri, formContent, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -819,7 +784,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri uri = new(baseUri, "printer/print/start");
             var payload = new { filename = fileName };
 
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, payload, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, payload, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -837,7 +802,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "server/files/list?root=gcodes");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return Array.Empty<string>();
@@ -888,7 +853,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "server/files/roots");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return Array.Empty<FileRoot>();
@@ -918,7 +883,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}");
 
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
                 try
@@ -931,7 +896,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 }
                 catch (JsonException ex)
                 {
-                    LogDirectoryParseError(logger, ex, ex.Message);
+                    _logger.LogDebug($"Error parsing directory info from REST API: {ex.Message}");
                     // Continue to fallback method
                 }
             }
@@ -952,7 +917,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
             using StringContent content = new(jsonContent, Encoding.UTF8, "application/json");
 
-            using HttpResponseMessage jsonRpcResp = await http.PostAsync(jsonRpcUri, content, cts.Token);
+            using HttpResponseMessage jsonRpcResp = await _http.PostAsync(jsonRpcUri, content, cts.Token);
             if (!jsonRpcResp.IsSuccessStatusCode)
             {
                 return null;
@@ -966,7 +931,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
                 if (jsonRpcResponse?.Error != null)
                 {
-                    LogJsonRpcError(logger, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
+                    _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
 
                     // Special handling for URL parameter error
                     if (jsonRpcResponse.Error.Message.Contains("No data for argument: url") ||
@@ -983,7 +948,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                         jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
                         using StringContent retryContent = new(jsonContent, Encoding.UTF8, "application/json");
 
-                        using HttpResponseMessage retryResp = await http.PostAsync(jsonRpcUri, retryContent, cts.Token);
+                        using HttpResponseMessage retryResp = await _http.PostAsync(jsonRpcUri, retryContent, cts.Token);
                         if (!retryResp.IsSuccessStatusCode)
                         {
                             return null;
@@ -994,7 +959,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
                         if (jsonRpcResponse?.Error != null)
                         {
-                            LogJsonRpcError(logger, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
+                            _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
                             return null;
                         }
                     }
@@ -1016,7 +981,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
             catch (JsonException jex)
             {
-                LogJsonParseError(logger, jex, jex.Message);
+                _logger.LogDebug(jex, $"Failed to parse JSON response: {jex.Message}");
                 return null;
             }
         }
@@ -1027,18 +992,18 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (HttpRequestException ex)
         {
-            LogGetDirectoryError(logger, ex, ex.Message);
+            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
             return null;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogGetDirectoryError(logger, ex, ex.Message);
+            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Catch any remaining exceptions (JSON serialization errors, etc.) to ensure method resilience
-            LogGetDirectoryError(logger, ex, ex.Message);
+            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
             return null;
         }
     }
@@ -1056,7 +1021,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri uri = new(baseUri, "server/files/directory");
             DirectoryCreateRequest request = new()
             { Path = path };
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1084,7 +1049,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string encodedPath = Uri.EscapeDataString(path);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&force={force.ToString().ToLowerInvariant()}");
-            using HttpResponseMessage resp = await http.DeleteAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1106,7 +1071,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri uri = new(baseUri, "server/files/move");
             FileMoveRequest request = new()
             { Source = source, Dest = dest };
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1128,7 +1093,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri uri = new(baseUri, "server/files/copy");
             FileCopyRequest request = new()
             { Source = source, Dest = dest };
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1150,7 +1115,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/metadata?filename={encodedFilename}");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1178,7 +1143,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri uri = new(baseUri, "server/files/metascan");
             MetadataScanRequest request = new()
             { Filename = filename };
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1188,17 +1153,17 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (HttpRequestException ex)
         {
-            LogMetadataScanError(logger, ex, filename, baseUrl);
+            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
             return false;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogMetadataScanError(logger, ex, filename, baseUrl);
+            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogMetadataScanError(logger, ex, filename, baseUrl);
+            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
             return false;
         }
     }
@@ -1216,7 +1181,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/thumbs/{encodedFilename}");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1243,7 +1208,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1281,7 +1246,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 formContent.Add(new StringContent("true"), "print");
             }
 
-            using HttpResponseMessage resp = await http.PostAsync(uri, formContent, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1322,7 +1287,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 formContent.Add(new StringContent("true"), "print");
             }
 
-            using HttpResponseMessage resp = await http.PostAsync(uri, formContent, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1354,7 +1319,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
 
             Uri uri = new(baseUri, relative);
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return [];
@@ -1382,7 +1347,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string encodedPath = Uri.EscapeDataString(path);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedPath}");
-            using HttpResponseMessage resp = await http.DeleteAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1404,7 +1369,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
-            using HttpResponseMessage resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1466,7 +1431,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             }
 
             Uri uri = new(baseUri, relative);
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1477,7 +1442,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            LogHistoryListError(logger, ex, baseUrl, ex.Message);
+            _logger.LogDebug(ex, $"Failed to get history list from {baseUrl}: {ex.Message}");
             return null;
         }
     }
@@ -1494,7 +1459,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1505,7 +1470,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            LogHistoryJobError(logger, ex, jobId, baseUrl, ex.Message);
+            _logger.LogDebug(ex, $"Failed to get history job {jobId} from {baseUrl}: {ex.Message}");
             return null;
         }
     }
@@ -1522,12 +1487,12 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
-            using HttpResponseMessage resp = await http.DeleteAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {
-            LogDeleteHistoryJobError(logger, ex, jobId, baseUrl, ex.Message);
+            _logger.LogDebug(ex, $"Failed to delete history job {jobId} from {baseUrl}: {ex.Message}");
             return false;
         }
     }
@@ -1544,7 +1509,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "server/history/totals");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1555,7 +1520,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
         }
         catch (Exception ex)
         {
-            LogHistoryTotalsError(logger, ex, baseUrl, ex.Message);
+            _logger.LogDebug(ex, $"Failed to get history totals from {baseUrl}: {ex.Message}");
             return null;
         }
     }
@@ -1572,12 +1537,12 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "server/history/reset_totals");
-            using HttpResponseMessage resp = await http.PostAsync(uri, null, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsync(uri, null, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {
-            LogResetHistoryTotalsError(logger, ex, baseUrl, ex.Message);
+            _logger.LogDebug(ex, $"Failed to reset history totals from {baseUrl}: {ex.Message}");
             return false;
         }
     }
@@ -1596,7 +1561,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "server/spoolman/status");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1623,7 +1588,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
 
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
             Uri uri = new(baseUri, "server/spoolman/spool_id");
-            using HttpResponseMessage resp = await http.GetAsync(uri, cts.Token);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -1651,7 +1616,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
             Uri uri = new(baseUri, "server/spoolman/spool_id");
             SpoolmanSpoolIdRequest request = new()
             { SpoolId = spoolId };
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -1681,7 +1646,7 @@ public partial class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> l
                 UseV2Response = useV2Response
             };
 
-            using HttpResponseMessage resp = await http.PostAsJsonAsync(uri, request, cts.Token);
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Farm.Infrastructure.Telemetry;
+
 namespace Farm.Infrastructure.Normalization;
 
 public interface INormalizationEventLogger

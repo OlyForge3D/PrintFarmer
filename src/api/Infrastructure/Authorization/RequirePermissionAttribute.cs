@@ -4,26 +4,15 @@ using Microsoft.AspNetCore.Authorization;
 namespace Farm.Web.Api.Infrastructure.Authorization;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public sealed class RequirePermissionAttribute : Attribute, IAuthorizationRequirement
+public sealed class RequirePermissionAttribute(string resource, string action) : Attribute, IAuthorizationRequirement
 {
-    public string Resource { get; }
-    public string Action { get; }
-
-    public RequirePermissionAttribute(string resource, string action)
-    {
-        Resource = resource;
-        Action = action;
-    }
+    public string Resource { get; } = resource;
+    public string Action { get; } = action;
 }
 
-public class PermissionAuthorizationHandler : AuthorizationHandler<RequirePermissionAttribute>
+public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandler> logger) : AuthorizationHandler<RequirePermissionAttribute>
 {
-    private readonly ILogger<PermissionAuthorizationHandler> _logger;
-
-    public PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandler> logger)
-    {
-        _logger = logger;
-    }
+    private readonly ILogger<PermissionAuthorizationHandler> _logger = logger;
 
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,

@@ -1,7 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace Farm.Web.Api.Services.Telemetry;
+namespace Farm.Infrastructure.Telemetry;
 
 public interface IPrintFarmerTelemetryService
 {

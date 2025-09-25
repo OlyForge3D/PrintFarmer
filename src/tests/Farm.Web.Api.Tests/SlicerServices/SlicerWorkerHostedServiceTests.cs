@@ -1,7 +1,7 @@
 ﻿using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.SlicerServices.Process;
-using Farm.Web.Api.Services.Telemetry;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

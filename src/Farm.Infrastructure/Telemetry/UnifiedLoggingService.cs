@@ -1,12 +1,16 @@
-﻿using System.Diagnostics;
+using System;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Telemetry;
+namespace Farm.Infrastructure.Telemetry;
 
 public interface IUnifiedLoggingService
 {
     void LogDebug(string message, params object[] args);
+    void LogDebug(Exception exception, string message, params object[] args);
     void LogInformation(string message, params object[] args);
     void LogWarning(string message, params object[] args);
+    void LogWarning(Exception exception, string message, params object[] args);
     void LogError(string message, params object[] args);
     void LogError(Exception exception, string message, params object[] args);
     void LogCritical(string message, params object[] args);
@@ -33,6 +37,11 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         LogWithTelemetry(LogLevel.Debug, "Debug", message, args);
     }
 
+    public void LogDebug(Exception exception, string message, params object[] args)
+    {
+        LogWithTelemetry(LogLevel.Debug, "Debug", message, args, exception);
+    }
+
     public void LogInformation(string message, params object[] args)
     {
         LogWithTelemetry(LogLevel.Information, "Information", message, args);
@@ -43,6 +52,10 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         LogWithTelemetry(LogLevel.Warning, "Warning", message, args);
     }
 
+    public void LogWarning(Exception exception, string message, params object[] args)
+    {
+        LogWithTelemetry(LogLevel.Warning, "Warning", message, args, exception);
+    }
     public void LogError(string message, params object[] args)
     {
         LogWithTelemetry(LogLevel.Error, "Error", message, args);

@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -12,9 +13,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Job Queue Management")]
-public class QueueController(ILogger<QueueController> logger, AppDbContext context) : ControllerBase
+
+public class QueueController(IUnifiedLoggingService logger, AppDbContext context) : ControllerBase
 {
-    private readonly ILogger<QueueController> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly AppDbContext _context = context;
 
     /// <summary>
@@ -123,7 +125,7 @@ public class QueueController(ILogger<QueueController> logger, AppDbContext conte
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get printer queue for printer {PrinterId}", printerId);
+            _logger.LogError(ex, $"Failed to get printer queue for printer {printerId}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get printer queue");
         }
     }
@@ -203,7 +205,7 @@ public class QueueController(ILogger<QueueController> logger, AppDbContext conte
                 UpdatedAt = printJob.UpdatedAt
             };
 
-            _logger.LogInformation("Job added to queue: {JobId} for printer {PrinterId}", printJob.Id, assignedPrinterId);
+            _logger.LogInformation($"Job added to queue: {printJob.Id} for printer {assignedPrinterId}");
             return Created($"/api/queue/jobs/{printJob.Id}", result);
         }
         catch (Exception ex)
@@ -287,12 +289,12 @@ public class QueueController(ILogger<QueueController> logger, AppDbContext conte
             _context.PrintJobs.Remove(job);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Job removed from queue: {JobId}", id);
+            _logger.LogInformation($"Job removed from queue: {id}");
             return NoContent();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to remove job from queue: {JobId}", id);
+            _logger.LogError(ex, $"Failed to remove job from queue: {id}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to remove job from queue");
         }
     }
@@ -344,12 +346,12 @@ public class QueueController(ILogger<QueueController> logger, AppDbContext conte
                 UpdatedAt = job.UpdatedAt
             };
 
-            _logger.LogInformation("Job priority updated: {JobId} to {Priority}", id, request.Priority);
+            _logger.LogInformation($"Job priority updated: {id} to {request.Priority}");
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to update job priority: {JobId}", id);
+            _logger.LogError(ex, $"Failed to update job priority: {id}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to update job priority");
         }
     }

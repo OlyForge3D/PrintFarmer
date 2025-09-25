@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure;
+﻿using Farm.Infrastructure.Telemetry;
 using System.Security.Claims;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;

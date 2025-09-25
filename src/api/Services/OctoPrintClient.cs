@@ -4,16 +4,11 @@ using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
-public class OctoPrintClient : IOctoPrintClient
+public class OctoPrintClient(HttpClient httpClient) : IOctoPrintClient
 {
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient _httpClient = httpClient;
     // Expose HttpClient for plugin integration (internal use only)
     internal HttpClient HttpClient => _httpClient;
-
-    public OctoPrintClient(HttpClient httpClient)
-    {
-        _httpClient = httpClient;
-    }
 
     public async Task<bool> TestConnectionAsync(string baseUrl, string apiKey)
     {

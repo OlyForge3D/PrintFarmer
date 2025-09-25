@@ -6,20 +6,14 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// <summary>
 /// SignalR-based progress notifier for slicer operations
 /// </summary>
-public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
+public class SignalRSlicerProgressNotifier(
+    IHubContext<SlicerProgressHub> hubContext,
+    ILogger<SignalRSlicerProgressNotifier> logger) : ISlicerProgressNotifier
 {
-    private readonly IHubContext<SlicerProgressHub> _hubContext;
-    private readonly ILogger<SignalRSlicerProgressNotifier> _logger;
+    private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+    private readonly ILogger<SignalRSlicerProgressNotifier> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = [];
     private readonly object _lockObject = new();
-
-    public SignalRSlicerProgressNotifier(
-        IHubContext<SlicerProgressHub> hubContext,
-        ILogger<SignalRSlicerProgressNotifier> logger)
-    {
-        _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     public async Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
     {
@@ -210,16 +204,10 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 /// <summary>
 /// SignalR Hub for slicer progress updates
 /// </summary>
-public class SlicerProgressHub : Hub
+public class SlicerProgressHub(ILogger<SlicerProgressHub> logger, ISlicerProgressNotifier progressNotifier) : Hub
 {
-    private readonly ILogger<SlicerProgressHub> _logger;
-    private readonly ISlicerProgressNotifier _progressNotifier;
-
-    public SlicerProgressHub(ILogger<SlicerProgressHub> logger, ISlicerProgressNotifier progressNotifier)
-    {
-        _logger = logger;
-        _progressNotifier = progressNotifier;
-    }
+    private readonly ILogger<SlicerProgressHub> _logger = logger;
+    private readonly ISlicerProgressNotifier _progressNotifier = progressNotifier;
 
     public async Task SubscribeToJobAsync(Guid jobId)
     {

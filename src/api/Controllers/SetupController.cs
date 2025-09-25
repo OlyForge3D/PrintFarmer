@@ -4,7 +4,7 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 

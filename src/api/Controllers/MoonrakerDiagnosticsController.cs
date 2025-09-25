@@ -10,18 +10,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/moonraker-test")]
 [Tags("Moonraker Diagnostics")]
-public class MoonrakerDiagnosticsController : ControllerBase
+public class MoonrakerDiagnosticsController(
+    IMoonrakerClient moonrakerClient,
+    ILogger<MoonrakerDiagnosticsController> logger) : ControllerBase
 {
-    private readonly IMoonrakerClient _moonrakerClient;
-    private readonly ILogger<MoonrakerDiagnosticsController> _logger;
-
-    public MoonrakerDiagnosticsController(
-        IMoonrakerClient moonrakerClient,
-        ILogger<MoonrakerDiagnosticsController> logger)
-    {
-        _moonrakerClient = moonrakerClient;
-        _logger = logger;
-    }
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly ILogger<MoonrakerDiagnosticsController> _logger = logger;
 
     /// <summary>
     /// Test endpoint to invoke GetFileRootsAsync directly

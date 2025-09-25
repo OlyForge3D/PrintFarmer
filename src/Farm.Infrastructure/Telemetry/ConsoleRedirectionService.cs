@@ -1,6 +1,7 @@
-﻿using System.Text;
+using System.Text;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Telemetry;
+namespace Farm.Infrastructure.Telemetry;
 
 public interface IConsoleRedirectionService
 {

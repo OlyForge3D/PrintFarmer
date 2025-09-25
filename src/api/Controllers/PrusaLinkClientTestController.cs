@@ -9,18 +9,12 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/client-test/prusalink")]
-public class PrusaLinkClientTestController : ControllerBase
+public class PrusaLinkClientTestController(
+    ILogger<PrusaLinkClientTestController> logger,
+    IPrusaLinkClient prusaLinkClient) : ControllerBase
 {
-    private readonly ILogger<PrusaLinkClientTestController> _logger;
-    private readonly IPrusaLinkClient _prusaLinkClient;
-
-    public PrusaLinkClientTestController(
-        ILogger<PrusaLinkClientTestController> logger,
-        IPrusaLinkClient prusaLinkClient)
-    {
-        _logger = logger;
-        _prusaLinkClient = prusaLinkClient;
-    }
+    private readonly ILogger<PrusaLinkClientTestController> _logger = logger;
+    private readonly IPrusaLinkClient _prusaLinkClient = prusaLinkClient;
 
     /// <summary>
     /// Test endpoint to fetch printer status from a PrusaLink instance

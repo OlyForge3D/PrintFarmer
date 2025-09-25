@@ -1,5 +1,7 @@
-﻿using System.Net;
+﻿
+using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -7,7 +9,7 @@ namespace Farm.Web.Api.Middleware;
 /// Global exception handling middleware that provides consistent error responses
 /// and structured logging for all unhandled exceptions
 /// </summary>
-public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
+public class GlobalExceptionMiddleware(RequestDelegate next, IUnifiedLoggingService logger)
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -15,8 +17,9 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
         WriteIndented = false,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
-    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}")]
-    private static partial void LogUnhandledException(ILogger logger, Exception exception, string method, string path, string correlationId);
+
+    private readonly RequestDelegate _next = next ?? throw new ArgumentNullException(nameof(next));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -24,16 +27,14 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
 
         try
         {
-            await next(context);
+            await _next(context);
         }
         // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application
         // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
         {
             string correlationId = context.TraceIdentifier;
-
-            LogUnhandledException(logger, ex, context.Request.Method, context.Request.Path, correlationId);
-
+            _logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}");
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }

@@ -4,16 +4,10 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.Web.Api.Health;
 
-public class SpoolmanHealthCheck : IHealthCheck
+public class SpoolmanHealthCheck(SpoolmanService spoolmanService, IHttpClientFactory httpClientFactory) : IHealthCheck
 {
-    private readonly SpoolmanService _spoolmanService;
-    private readonly IHttpClientFactory _httpClientFactory;
-
-    public SpoolmanHealthCheck(SpoolmanService spoolmanService, IHttpClientFactory httpClientFactory)
-    {
-        _spoolmanService = spoolmanService;
-        _httpClientFactory = httpClientFactory;
-    }
+    private readonly SpoolmanService _spoolmanService = spoolmanService;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {

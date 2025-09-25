@@ -1,18 +1,12 @@
 ﻿using System.Diagnostics;
-using Farm.Web.Api.Services.Telemetry;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Middleware;
 
-public class TelemetryMiddleware
+public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryService telemetryService)
 {
-    private readonly RequestDelegate _next;
-    private readonly IPrintFarmerTelemetryService _telemetryService;
-
-    public TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryService telemetryService)
-    {
-        _next = next;
-        _telemetryService = telemetryService;
-    }
+    private readonly RequestDelegate _next = next;
+    private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
 
     public async Task InvokeAsync(HttpContext context)
     {

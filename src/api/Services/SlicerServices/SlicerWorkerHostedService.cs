@@ -2,7 +2,7 @@
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Api.Services.SlicerServices.Progress;
-using Farm.Web.Api.Services.Telemetry;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;

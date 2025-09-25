@@ -9,18 +9,11 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// SlicerExecutables:{EngineName}:Path
 /// SlicerExecutables:{EngineName}:ArgsTemplate  (optional, {input} and {output} placeholders recommended)
 /// </summary>
-public class SlicerExecutableManager : ISlicerExecutableManager
+public class SlicerExecutableManager(IConfiguration config, ILogger<SlicerExecutableManager> logger, ISlicerSettingsService? settingsService = null) : ISlicerExecutableManager
 {
-    private readonly IConfiguration _config;
-    private readonly ILogger<SlicerExecutableManager> _logger;
-    private readonly ISlicerSettingsService? _settingsService;
-
-    public SlicerExecutableManager(IConfiguration config, ILogger<SlicerExecutableManager> logger, ISlicerSettingsService? settingsService = null)
-    {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _settingsService = settingsService;
-    }
+    private readonly IConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
+    private readonly ILogger<SlicerExecutableManager> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ISlicerSettingsService? _settingsService = settingsService;
 
     public bool TryGetExecutable(SlicerEngineType engine, out string? executablePath, out string? argsTemplate)
     {

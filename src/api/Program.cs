@@ -1,4 +1,5 @@
-﻿// Global using cleanup handled by project settings; explicit System removed.
+﻿using Farm.Infrastructure;
+// Global using cleanup handled by project settings; explicit System removed.
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
@@ -20,7 +21,7 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Startup;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Normalization;
 using Farm.Web.Shared;
 using FluentValidation;
@@ -353,7 +354,7 @@ ActivitySource activitySource = new("PrintFarmer.API");
 builder.Services.AddSingleton(activitySource);
 
 // Register custom telemetry service
-builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IPrintFarmerTelemetryService, Farm.Web.Api.Services.Telemetry.PrintFarmerTelemetryService>();
+builder.Services.AddSingleton<Farm.Infrastructure.Telemetry.IPrintFarmerTelemetryService, Farm.Infrastructure.Telemetry.PrintFarmerTelemetryService>();
 
 // Register unified logging services
 
@@ -478,7 +479,7 @@ builder.Services.AddHostedService<GracefulShutdownService>();
 // Register ChunkUploadCleanupService with required dependencies
 builder.Services.AddHostedService(provider =>
     new Farm.Infrastructure.ChunkUploadCleanupService(
-        provider.GetRequiredService<Farm.Infrastructure.IUnifiedLoggingService>(),
+    provider.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(),
         builder.Environment.WebRootPath
     )
 );

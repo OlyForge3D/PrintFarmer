@@ -1,25 +1,19 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
 /// <summary>
 /// Hosted service that integrates with ASP.NET Core's application lifecycle to properly await completion of background harvest tasks during shutdown
 /// </summary>
-public class GracefulShutdownService : IHostedService
+public class GracefulShutdownService(
+    IServiceProvider serviceProvider,
+    IHostApplicationLifetime appLifetime,
+    IUnifiedLoggingService logger) : IHostedService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly IHostApplicationLifetime _appLifetime;
-    private readonly ILogger<GracefulShutdownService> _logger;
-
-    public GracefulShutdownService(
-        IServiceProvider serviceProvider,
-        IHostApplicationLifetime appLifetime,
-        ILogger<GracefulShutdownService> logger)
-    {
-        _serviceProvider = serviceProvider;
-        _appLifetime = appLifetime;
-        _logger = logger;
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IHostApplicationLifetime _appLifetime = appLifetime;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {

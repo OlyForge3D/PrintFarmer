@@ -23,20 +23,12 @@ public sealed class SpaProxyActivationState
 /// <summary>
 /// Background watcher that periodically probes the SPA dev server and activates proxying when reachable.
 /// </summary>
-public sealed class SpaDevServerWatcher : BackgroundService
+public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, ILogger<SpaDevServerWatcher> logger, IConfiguration config) : BackgroundService
 {
-    private readonly SpaProxyActivationState _state;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<SpaDevServerWatcher> _logger;
-    private readonly int _intervalMs;
-
-    public SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, ILogger<SpaDevServerWatcher> logger, IConfiguration config)
-    {
-        _state = state;
-        _httpClientFactory = httpClientFactory;
-        _logger = logger;
-        _intervalMs = config.GetValue<int?>("SPA_PROXY_POLL_INTERVAL_MS") ?? 1500;
-    }
+    private readonly SpaProxyActivationState _state = state;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly ILogger<SpaDevServerWatcher> _logger = logger;
+    private readonly int _intervalMs = config.GetValue<int?>("SPA_PROXY_POLL_INTERVAL_MS") ?? 1500;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -71,19 +63,12 @@ public sealed class SpaDevServerWatcher : BackgroundService
 /// <summary>
 /// Middleware that proxies unknown GET/HEAD requests to the dev server after activation.
 /// </summary>
-public sealed class SpaDynamicProxyMiddleware
+public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state, ILogger<SpaDynamicProxyMiddleware> logger)
 {
     private static readonly HttpClient s_client = new();
-    private readonly RequestDelegate _next;
-    private readonly SpaProxyActivationState _state;
-    private readonly ILogger<SpaDynamicProxyMiddleware> _logger;
-
-    public SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state, ILogger<SpaDynamicProxyMiddleware> logger)
-    {
-        _next = next;
-        _state = state;
-        _logger = logger;
-    }
+    private readonly RequestDelegate _next = next;
+    private readonly SpaProxyActivationState _state = state;
+    private readonly ILogger<SpaDynamicProxyMiddleware> _logger = logger;
 
     public async Task InvokeAsync(HttpContext context)
     {

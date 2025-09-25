@@ -7,16 +7,10 @@ namespace Farm.Web.Api.Services;
 /// Handles URL rewriting for external services based on the runtime environment.
 /// This allows the same configuration to work across Docker, native execution, and different platforms.
 /// </summary>
-public class NetworkUrlRewriteService
+public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, IConfiguration configuration)
 {
-    private readonly ILogger<NetworkUrlRewriteService> _logger;
-    private readonly IConfiguration _configuration;
-
-    public NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, IConfiguration configuration)
-    {
-        _logger = logger;
-        _configuration = configuration;
-    }
+    private readonly ILogger<NetworkUrlRewriteService> _logger = logger;
+    private readonly IConfiguration _configuration = configuration;
 
     /// <summary>
     /// Rewrites a URL to make it accessible from the current runtime environment.
