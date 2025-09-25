@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain; // for SlicerType enum if namespace differs
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Farm.Infrastructure;
