@@ -16,18 +16,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Catalog")]
-public class CatalogController : ControllerBase
+public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly Farm.Infrastructure.Normalization.INormalizationEventLogger _normLogger;
-    private readonly ICatalogCache _catalogCache;
+    private readonly AppDbContext _db = db;
+    private readonly Farm.Infrastructure.Normalization.INormalizationEventLogger _normLogger = normLogger;
+    private readonly ICatalogCache _catalogCache = catalogCache;
 
-    public CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache)
-    {
-        _db = db;
-        _normLogger = normLogger;
-        _catalogCache = catalogCache;
-    }
     /// <summary>
     /// Gets all available printer manufacturers.
     /// </summary>

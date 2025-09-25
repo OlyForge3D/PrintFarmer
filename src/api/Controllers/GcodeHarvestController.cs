@@ -11,18 +11,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-harvest")]
 [Tags("G-code Harvesting")]
-public class GcodeHarvestController : ControllerBase
+public class GcodeHarvestController(
+    IGcodeHarvestService harvestService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IGcodeHarvestService _harvestService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public GcodeHarvestController(
-        IGcodeHarvestService harvestService,
-        IUnifiedLoggingService logger)
-    {
-        _harvestService = harvestService;
-        _logger = logger;
-    }
+    private readonly IGcodeHarvestService _harvestService = harvestService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Start a G-code harvest operation for a specific printer

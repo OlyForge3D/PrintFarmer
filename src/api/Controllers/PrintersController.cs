@@ -30,34 +30,20 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Printers")]
-public class PrintersController : ControllerBase
+public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
 {
-    private readonly AppDbContext db;
-    private readonly IMoonrakerClient moon;
-    private readonly IPrusaLinkClient prusa;
-    private readonly ISdcpClient sdcp;
-    private readonly IOctoPrintClient octoprint;
-    private readonly INetworkDiscoveryService networkDiscovery;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IValidator<CreatePrinterDto> validator;
-    private readonly ICircuitBreakerService circuitBreaker;
-    private readonly IPrinterCapabilityDiscoveryService capabilityDiscovery;
-    private readonly IDefaultCatalogService defaultCatalog;
+    private readonly AppDbContext db = db;
+    private readonly IMoonrakerClient moon = moon;
+    private readonly IPrusaLinkClient prusa = prusa;
+    private readonly ISdcpClient sdcp = sdcp;
+    private readonly IOctoPrintClient octoprint = octoprint;
+    private readonly INetworkDiscoveryService networkDiscovery = networkDiscovery;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IValidator<CreatePrinterDto> validator = validator;
+    private readonly ICircuitBreakerService circuitBreaker = circuitBreaker;
+    private readonly IPrinterCapabilityDiscoveryService capabilityDiscovery = capabilityDiscovery;
+    private readonly IDefaultCatalogService defaultCatalog = defaultCatalog;
 
-    public PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog)
-    {
-        this.db = db;
-        this.moon = moon;
-        this.prusa = prusa;
-        this.sdcp = sdcp;
-        this.octoprint = octoprint;
-        this.networkDiscovery = networkDiscovery;
-        this._logger = logger;
-        this.validator = validator;
-        this.circuitBreaker = circuitBreaker;
-        this.capabilityDiscovery = capabilityDiscovery;
-        this.defaultCatalog = defaultCatalog;
-    }
     // Feature flag: when enabled we swallow transient startup DB errors for /fast endpoint and return empty list.
     private static readonly bool FastEndpointDefensive =
         (Environment.GetEnvironmentVariable("PF_FAST_ENDPOINT_DEFENSIVE") ?? "true")

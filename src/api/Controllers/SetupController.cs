@@ -14,24 +14,16 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class SetupController : ControllerBase
+public class SetupController(
+    AppDbContext db,
+    IAuthenticationService authService,
+    IPasswordHashingService passwordHashingService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly IAuthenticationService _authService;
-    private readonly IPasswordHashingService _passwordHashingService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public SetupController(
-        AppDbContext db,
-        IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        IUnifiedLoggingService logger)
-    {
-        _db = db;
-        _authService = authService;
-        _passwordHashingService = passwordHashingService;
-        _logger = logger;
-    }
+    private readonly AppDbContext _db = db;
+    private readonly IAuthenticationService _authService = authService;
+    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Checks if the application needs initial setup.

@@ -10,16 +10,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Authentication")]
-public class AuthController : ControllerBase
+public class AuthController(IAuthenticationService authService, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IAuthenticationService _authService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public AuthController(IAuthenticationService authService, IUnifiedLoggingService logger)
-    {
-        _authService = authService;
-        _logger = logger;
-    }
+    private readonly IAuthenticationService _authService = authService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)

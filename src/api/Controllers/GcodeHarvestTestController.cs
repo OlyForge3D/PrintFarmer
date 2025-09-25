@@ -9,18 +9,12 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/gcode-harvest/test/moonraker")]
-public class GcodeHarvestTestController : ControllerBase
+public class GcodeHarvestTestController(
+    IUnifiedLoggingService logger,
+    IMoonrakerClient moonrakerClient) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IMoonrakerClient _moonrakerClient;
-
-    public GcodeHarvestTestController(
-        IUnifiedLoggingService logger,
-        IMoonrakerClient moonrakerClient)
-    {
-        _logger = logger;
-        _moonrakerClient = moonrakerClient;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
 
     /// <summary>
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync

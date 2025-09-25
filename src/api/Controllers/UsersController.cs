@@ -17,24 +17,16 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Roles = "farm_admin")]
-public class UsersController : ControllerBase
+public class UsersController(
+    AppDbContext db,
+    IAuthenticationService authService,
+    IPasswordHashingService passwordHashingService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly IAuthenticationService _authService;
-    private readonly IPasswordHashingService _passwordHashingService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public UsersController(
-        AppDbContext db,
-        IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        IUnifiedLoggingService logger)
-    {
-        _db = db;
-        _authService = authService;
-        _passwordHashingService = passwordHashingService;
-        _logger = logger;
-    }
+    private readonly AppDbContext _db = db;
+    private readonly IAuthenticationService _authService = authService;
+    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Gets all users in the system.

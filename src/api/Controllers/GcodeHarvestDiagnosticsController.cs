@@ -11,18 +11,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-harvest")]
 [Tags("G-code Harvesting Diagnostics")]
-public class GcodeHarvestDiagnosticsController : ControllerBase
+public class GcodeHarvestDiagnosticsController(
+IUnifiedLoggingService logger,
+IGcodeHarvestService harvestService) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IGcodeHarvestService _harvestService;
-
-    public GcodeHarvestDiagnosticsController(
-    IUnifiedLoggingService logger,
-    IGcodeHarvestService harvestService)
-    {
-        _logger = logger;
-        _harvestService = harvestService;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IGcodeHarvestService _harvestService = harvestService;
 
     /// <summary>
     /// Extract metadata from an uploaded G-code file

@@ -10,18 +10,12 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/client-test/moonraker")]
-public class MoonrakerClientTestController : ControllerBase
+public class MoonrakerClientTestController(
+    IUnifiedLoggingService logger,
+    IMoonrakerClient moonrakerClient) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IMoonrakerClient _moonrakerClient;
-
-    public MoonrakerClientTestController(
-        IUnifiedLoggingService logger,
-        IMoonrakerClient moonrakerClient)
-    {
-        _logger = logger;
-        _moonrakerClient = moonrakerClient;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
 
     /// <summary>
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync

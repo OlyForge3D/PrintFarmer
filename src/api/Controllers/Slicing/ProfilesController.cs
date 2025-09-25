@@ -10,16 +10,10 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
-public class ProfilesController : ControllerBase
+public class ProfilesController(AppDbContext context, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _context;
-    private readonly IUnifiedLoggingService _logger;
-
-    public ProfilesController(AppDbContext context, IUnifiedLoggingService logger)
-    {
-        _context = context;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     [HttpPost]
     [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status201Created)]
