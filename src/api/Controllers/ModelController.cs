@@ -7,6 +7,7 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -17,14 +18,14 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
 public class ModelController : ControllerBase
 {
-    private readonly ILogger<ModelController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly AppDbContext _context;
     private readonly string _modelsPath;
     private readonly IModelAnalysisService _analysisService;
     private readonly IVirusScanner _virusScanner;
     private readonly IThumbnailGenerationService _thumbnailService;
 
-    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner, IThumbnailGenerationService thumbnailService)
+    public ModelController(IUnifiedLoggingService logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner, IThumbnailGenerationService thumbnailService)
     {
         _logger = logger;
         _context = context;
@@ -108,14 +109,14 @@ public class ModelController : ControllerBase
                         System.IO.File.Delete(filePath);
                     }
 
-                    _logger.LogWarning("Upload rejected - file {FileName} flagged as infected", originalName);
+                    _logger.LogWarning($"Upload rejected - file {originalName} flagged as infected");
                     return BadRequest("Uploaded file failed security scan");
                 }
             }
             catch (Exception ex)
             {
                 // Don't fail the upload if the scanner is unavailable — log and continue
-                _logger.LogWarning(ex, "Virus scanner failed or unavailable; continuing without scan for {FileName}", originalName);
+                _logger.LogWarning($"Virus scanner failed or unavailable; continuing without scan for {originalName}: {ex.Message}");
             }
 
             // Analyze model metadata (dimensions, triangle count) where possible
@@ -126,7 +127,7 @@ public class ModelController : ControllerBase
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Model analysis failed for {FileName}; marking model as valid but without metadata", originalName);
+                _logger.LogWarning($"Model analysis failed for {originalName}; marking model as valid but without metadata: {ex.Message}");
             }
 
             // Duplicate handling strategy (test-aligned):
@@ -226,16 +227,16 @@ public class ModelController : ControllerBase
                     {
                         model.ThumbnailPath = thumbnailPath;
                         await _context.SaveChangesAsync();
-                        _logger.LogDebug("Thumbnail generated for model {ModelId}", modelId);
+                        _logger.LogDebug($"Thumbnail generated for model {modelId}");
                     }
                     else
                     {
-                        _logger.LogWarning("Failed to generate thumbnail for model {ModelId}", modelId);
+                        _logger.LogWarning($"Failed to generate thumbnail for model {modelId}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Exception during thumbnail generation for model {ModelId}", modelId);
+                    _logger.LogWarning($"Exception during thumbnail generation for model {modelId}: {ex.Message}");
                     // Don't fail the upload if thumbnail generation fails
                 }
             }
@@ -252,15 +253,14 @@ public class ModelController : ControllerBase
                 Url = $"/api/3d-models/{modelId}/file"
             };
 
-            _logger.LogInformation("Model uploaded: {ModelId} ({FileName}, {FileSize} bytes)",
-                modelId, modelFile.FileName, modelFile.Length);
+            _logger.LogInformation($"Model uploaded: {modelId} ({modelFile.FileName}, {modelFile.Length} bytes)");
 
             // Use named route to ensure reliable URL generation after switching to explicit plural base route
             return CreatedAtRoute("GetModel", new { id = modelId }, result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to upload model file: {FileName}", modelFile.FileName);
+            _logger.LogError($"Failed to upload model file: {modelFile.FileName}: {ex.Message}");
 
             // Clean up file if it was partially created
             if (IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
@@ -302,7 +302,7 @@ public class ModelController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to list models");
+            _logger.LogError($"Failed to list models: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
         }
     }
@@ -443,13 +443,13 @@ public class ModelController : ControllerBase
             // Remove from database
             _context.Models3D.Remove(model);
             await _context.SaveChangesAsync();
-
-            _logger.LogInformation("Model deleted: {ModelId}", id);
+            _logger.LogInformation($"Model deleted: {id}");
+            _logger.LogInformation($"Model deleted: {id}");
             return NoContent();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete model: {ModelId}", id);
+            _logger.LogError($"Failed to delete model: {id}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete model");
         }
     }

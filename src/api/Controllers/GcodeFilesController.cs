@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure;
 using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services; // added for IGcodeUploadSettings & quota services
@@ -26,7 +27,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/gcode-files")]
 public class GcodeFilesController(
     IWebHostEnvironment env,
-    ILogger<GcodeFilesController> logger,
+    IUnifiedLoggingService logger,
     AppDbContext db,
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService
@@ -111,7 +112,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to hash file {Path}", path);
+            logger.LogError($"Failed to hash file {path}: {ex.Message}");
             return Problem("Failed to compute hash", statusCode: 500);
         }
     }
@@ -204,7 +205,7 @@ public class GcodeFilesController(
                     }
                     catch (Exception ex)
                     {
-                        logger.LogDebug(ex, "Non-fatal DB correlation failure for file {File}", file.FullName);
+                        logger.LogDebug($"Non-fatal DB correlation failure for file {file.FullName}: {ex.Message}");
                     }
 
                     // If harvestId is specified, only include files with matching HarvestOperationId
@@ -254,7 +255,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error listing G-code files (path={Path})", path);
+            logger.LogError($"Error listing G-code files (path={path}): {ex.Message}");
             return Problem("Failed to retrieve files", statusCode: 500);
         }
     }
@@ -369,7 +370,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Chunk init failure for {File}", req.FileName);
+            logger.LogError($"Chunk init failure for {req.FileName}: {ex.Message}");
             return Problem("Failed to initialize chunked upload", statusCode: 500);
         }
     }
@@ -488,7 +489,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Chunk upload failure {UploadId}", uploadId);
+            logger.LogError($"Chunk upload failure {uploadId}: {ex.Message}");
             return Problem("Failed to append chunk", statusCode: 500);
         }
     }
@@ -569,7 +570,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Chunk resume failed {UploadId}", uploadId);
+            logger.LogDebug($"Chunk resume failed {uploadId}: {ex.Message}");
             return NotFound();
         }
     }
@@ -635,7 +636,7 @@ public class GcodeFilesController(
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Failed to delete temp file {File}", state.TempFilePath);
+                logger.LogDebug($"Failed to delete temp file {state.TempFilePath}: {ex.Message}");
             }
         }
         return NoContent();
@@ -673,7 +674,7 @@ public class GcodeFilesController(
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Validation failure while pre-scanning delete targets {Path}", virtualPath);
+                logger.LogDebug($"Validation failure while pre-scanning delete targets {virtualPath}: {ex.Message}");
                 skipped.Add(virtualPath);
             }
         }
@@ -699,7 +700,7 @@ public class GcodeFilesController(
                         }
                         catch (Exception exDel)
                         {
-                            logger.LogWarning(exDel, "Failed recursive delete for {Dir}", virtualPath);
+                            logger.LogWarning($"Failed recursive delete for {virtualPath}: {exDel.Message}");
                             failed.Add(virtualPath);
                         }
                     }
@@ -721,7 +722,7 @@ public class GcodeFilesController(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Failed to delete file {Path}", virtualPath);
+                logger.LogWarning($"Failed to delete file {virtualPath}: {ex.Message}");
                 failed.Add(virtualPath);
             }
         }
@@ -804,7 +805,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error downloading G-code file {Path}", path);
+            logger.LogError($"Error downloading G-code file {path}: {ex.Message}");
             return Problem("Failed to download file", statusCode: 500);
         }
     }
@@ -903,7 +904,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error uploading G-code file (path={Path})", path);
+            logger.LogError($"Error uploading G-code file (path={path}): {ex.Message}");
             return Problem("Failed to upload file", statusCode: 500);
         }
     }
@@ -968,7 +969,7 @@ public class GcodeFilesController(
                 }
                 catch (Exception exFile)
                 {
-                    logger.LogWarning(exFile, "Failed to save uploaded file {File}", f?.FileName);
+                    logger.LogWarning($"Failed to save uploaded file {f?.FileName}: {exFile.Message}");
                     failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), exFile.Message));
                 }
             }
@@ -978,7 +979,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Bulk upload failure (path={Path})", path);
+            logger.LogError($"Bulk upload failure (path={path}): {ex.Message}");
             return Problem("Failed to upload files", statusCode: 500);
         }
     }
@@ -1031,7 +1032,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to create directory (path={Path}, name={Name})", path, name);
+            logger.LogError($"Failed to create directory (path={path}, name={name}): {ex.Message}");
             return Problem("Failed to create directory", statusCode: 500);
         }
     }
@@ -1160,7 +1161,7 @@ public class GcodeFilesController(
         return (fullTarget, safeName);
     }
 
-    private static void PersistChunkState(ChunkUploadState state, ILogger logger)
+    private static void PersistChunkState(ChunkUploadState state, IUnifiedLoggingService logger)
     {
         try
         {
@@ -1187,7 +1188,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Failed to persist chunk state {Id}", state.Id);
+            logger.LogDebug($"Failed to persist chunk state {state.Id}: {ex.Message}");
         }
     }
 
@@ -1279,7 +1280,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Move failed {Source} -> {Dest}", request.SourcePath, request.DestinationPath);
+            logger.LogError($"Move failed {request.SourcePath} -> {request.DestinationPath}: {ex.Message}");
             return Problem("Failed to move", statusCode: 500);
         }
     }

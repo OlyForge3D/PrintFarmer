@@ -20,7 +20,8 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Startup;
-using Farm.Web.Api.Services.Telemetry;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Normalization;
 using Farm.Web.Shared;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
@@ -355,8 +356,10 @@ builder.Services.AddSingleton(activitySource);
 builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IPrintFarmerTelemetryService, Farm.Web.Api.Services.Telemetry.PrintFarmerTelemetryService>();
 
 // Register unified logging services
-builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IUnifiedLoggingService, Farm.Web.Api.Services.Telemetry.UnifiedLoggingService>();
-builder.Services.AddSingleton<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService, Farm.Web.Api.Services.Telemetry.ConsoleRedirectionService>();
+
+
+// Register unified logging service from Farm.Infrastructure
+builder.Services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
 
 // HTTP clients for external APIs
 builder.Services.AddHttpClient<MoonrakerClient>(client =>
@@ -408,6 +411,7 @@ builder.Services.AddHttpClient<SdcpClient>(client =>
 });
 
 builder.Services.AddScoped<ISdcpClient, SdcpClient>();
+builder.Services.AddSingleton<Farm.Infrastructure.Normalization.INormalizationEventLogger, Farm.Infrastructure.Normalization.NormalizationEventLogger>();
 builder.Services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
 builder.Services.AddSingleton<INormalizationEventLogger, NormalizationEventLogger>();
 builder.Services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
@@ -471,7 +475,13 @@ builder.Services.AddHostedService<MoonrakerSubscriptionService>();
 builder.Services.AddHostedService<HarvestWorkerService>();
 builder.Services.AddHostedService<HarvestCompletionService>();
 builder.Services.AddHostedService<GracefulShutdownService>();
-builder.Services.AddHostedService<Farm.Web.Api.Infrastructure.ChunkUploadCleanupService>();
+// Register ChunkUploadCleanupService with required dependencies
+builder.Services.AddHostedService(provider =>
+    new Farm.Infrastructure.ChunkUploadCleanupService(
+        provider.GetRequiredService<Farm.Infrastructure.IUnifiedLoggingService>(),
+        builder.Environment.WebRootPath
+    )
+);
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
@@ -656,10 +666,8 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
         try
         {
             using IServiceScope scope = app.Services.CreateScope();
-            IConsoleRedirectionService consoleRedirection = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Telemetry.IConsoleRedirectionService>();
-            Farm.Web.Api.Services.Telemetry.UnifiedConsole.Initialize(consoleRedirection);
-            consoleRedirection.RedirectConsoleOutput();
-            ILogger<Program> logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            // Console redirection service removed; not present in Farm.Infrastructure
+            IUnifiedLoggingService logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
             logger.LogInformation("[UnifiedLogging] Console redirection initialized (deferred) - Console output now captured in OpenTelemetry");
         }
         catch (Exception ex)
@@ -667,8 +675,8 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
             try
             {
                 using IServiceScope innerScope = app.Services.CreateScope();
-                ILogger<Program>? failLogger = innerScope.ServiceProvider.GetService<ILogger<Program>>();
-                failLogger?.LogWarning(ex, "[UnifiedLogging] Deferred console redirection failed");
+                IUnifiedLoggingService? failLogger = innerScope.ServiceProvider.GetService<IUnifiedLoggingService>();
+                failLogger?.LogWarning($"[UnifiedLogging] Deferred console redirection failed: {ex.Message}");
             }
             catch
             {

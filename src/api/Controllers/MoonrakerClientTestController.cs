@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,11 +12,11 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/client-test/moonraker")]
 public class MoonrakerClientTestController : ControllerBase
 {
-    private readonly ILogger<MoonrakerClientTestController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly IMoonrakerClient _moonrakerClient;
 
     public MoonrakerClientTestController(
-        ILogger<MoonrakerClientTestController> logger,
+        IUnifiedLoggingService logger,
         IMoonrakerClient moonrakerClient)
     {
         _logger = logger;
@@ -42,19 +43,17 @@ public class MoonrakerClientTestController : ControllerBase
         }
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
-                serverUrl, path, extended);
+            _logger.LogInformation($"Testing MoonrakerClient.GetDirectoryAsync with serverUrl={serverUrl}, path={path}, extended={extended}");
 
             Services.DirectoryInfo? directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
 
             if (directoryInfo == null)
             {
-                _logger.LogWarning("GetDirectoryAsync returned null result");
+                _logger.LogWarning($"GetDirectoryAsync returned null result");
                 return NotFound("Directory not found or error occurred");
             }
 
-            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories",
-                directoryInfo.Files?.Length ?? 0, directoryInfo.Dirs?.Length ?? 0);
+            _logger.LogInformation($"GetDirectoryAsync succeeded. Found {directoryInfo.Files?.Length ?? 0} files and {directoryInfo.Dirs?.Length ?? 0} directories");
 
             return Ok(new
             {
@@ -66,7 +65,7 @@ public class MoonrakerClientTestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetDirectoryAsync");
+            _logger.LogError($"Error testing MoonrakerClient.GetDirectoryAsync: {ex.Message}");
             return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
@@ -88,11 +87,11 @@ public class MoonrakerClientTestController : ControllerBase
         }
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
+            _logger.LogInformation($"Testing MoonrakerClient.GetFileListAsync with serverUrl={serverUrl}");
 
             string[] files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
 
-            _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
+            _logger.LogInformation($"GetFileListAsync succeeded. Found {files.Length} files");
 
             return Ok(new
             {
@@ -103,7 +102,7 @@ public class MoonrakerClientTestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetFileListAsync");
+            _logger.LogError($"Error testing MoonrakerClient.GetFileListAsync: {ex.Message}");
             return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
@@ -125,11 +124,11 @@ public class MoonrakerClientTestController : ControllerBase
         }
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetFileRootsAsync with serverUrl={ServerUrl}", serverUrl);
+            _logger.LogInformation($"Testing MoonrakerClient.GetFileRootsAsync with serverUrl={serverUrl}");
 
             FileRoot[] roots = await _moonrakerClient.GetFileRootsAsync(serverUrl, ct);
 
-            _logger.LogInformation("GetFileRootsAsync succeeded. Found {RootCount} roots", roots.Length);
+            _logger.LogInformation($"GetFileRootsAsync succeeded. Found {roots.Length} roots");
 
             return Ok(new
             {
@@ -140,7 +139,7 @@ public class MoonrakerClientTestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetFileRootsAsync");
+            _logger.LogError($"Error testing MoonrakerClient.GetFileRootsAsync: {ex.Message}");
             return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }

@@ -6,6 +6,7 @@ using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -21,13 +22,13 @@ public class UsersController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IAuthenticationService _authService;
     private readonly IPasswordHashingService _passwordHashingService;
-    private readonly ILogger<UsersController> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
     public UsersController(
         AppDbContext db,
         IAuthenticationService authService,
         IPasswordHashingService passwordHashingService,
-        ILogger<UsersController> logger)
+        IUnifiedLoggingService logger)
     {
         _db = db;
         _authService = authService;
@@ -149,8 +150,7 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("User {UserId} created new user {NewUserId} ({Username})",
-            currentUserId, user.Id, user.Username);
+        _logger.LogInformation($"User {currentUserId} created new user {user.Id} ({user.Username})");
 
         // Return the created user with roles and permissions
         UserDto? createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
@@ -220,8 +220,7 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("User {UserId} updated user {UpdatedUserId} ({Username})",
-            currentUserId, user.Id, user.Username);
+        _logger.LogInformation($"User {currentUserId} updated user {user.Id} ({user.Username})");
 
         // Return the updated user with roles and permissions
         UserDto? updatedUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
@@ -257,8 +256,7 @@ public class UsersController : ControllerBase
         _db.Users.Remove(user);
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("User {UserId} deleted user {DeletedUserId} ({Username})",
-            currentUserId, user.Id, user.Username);
+        _logger.LogInformation($"User {currentUserId} deleted user {user.Id} ({user.Username})");
 
         return NoContent();
     }

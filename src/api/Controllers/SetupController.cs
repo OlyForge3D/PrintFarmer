@@ -4,6 +4,7 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -18,13 +19,13 @@ public class SetupController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IAuthenticationService _authService;
     private readonly IPasswordHashingService _passwordHashingService;
-    private readonly ILogger<SetupController> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
     public SetupController(
         AppDbContext db,
         IAuthenticationService authService,
         IPasswordHashingService passwordHashingService,
-        ILogger<SetupController> logger)
+        IUnifiedLoggingService logger)
     {
         _db = db;
         _authService = authService;
@@ -192,7 +193,7 @@ public class SetupController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Initial admin user created: {Username} ({Email})", adminUser.Username, adminUser.Email);
+        _logger.LogInformation($"Initial admin user created: {adminUser.Username} ({adminUser.Email})");
 
         // Generate JWT token for immediate login
         string token = await _authService.GenerateJwtTokenAsync(adminUser);

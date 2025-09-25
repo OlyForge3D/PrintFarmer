@@ -86,7 +86,7 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
                 (HttpStatusCode.ServiceUnavailable, "Database service unavailable", null),
 
             // Circuit breaker
-            Farm.Web.Api.Infrastructure.CircuitBreakerOpenException =>
+            Farm.Infrastructure.CircuitBreakerOpenException =>
                 (HttpStatusCode.ServiceUnavailable, "Service temporarily unavailable", ex.Message),
 
             // Default for all other exceptions

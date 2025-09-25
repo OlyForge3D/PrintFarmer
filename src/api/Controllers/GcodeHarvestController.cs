@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,11 +14,11 @@ namespace Farm.Web.Api.Controllers;
 public class GcodeHarvestController : ControllerBase
 {
     private readonly IGcodeHarvestService _harvestService;
-    private readonly ILogger<GcodeHarvestController> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
     public GcodeHarvestController(
         IGcodeHarvestService harvestService,
-    ILogger<GcodeHarvestController> logger)
+        IUnifiedLoggingService logger)
     {
         _harvestService = harvestService;
         _logger = logger;
@@ -63,7 +64,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to start harvest for printer {PrinterId}", request.PrinterId);
+            _logger.LogError($"Failed to start harvest for printer {request.PrinterId}: {ex.Message}");
             return StatusCode(500, "Failed to start harvest operation");
         }
     }
@@ -90,7 +91,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get harvest operation {OperationId}", operationId);
+            _logger.LogError($"Failed to get harvest operation {operationId}: {ex.Message}");
             return StatusCode(500, "Failed to retrieve harvest operation");
         }
     }
@@ -117,7 +118,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get discovered files for operation {OperationId}", operationId);
+            _logger.LogError($"Failed to get discovered files for operation {operationId}: {ex.Message}");
             return StatusCode(500, "Failed to retrieve discovered files");
         }
     }
@@ -153,7 +154,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get paged discovered files for operation {OperationId}", operationId);
+            _logger.LogError($"Failed to get paged discovered files for operation {operationId}: {ex.Message}");
             return StatusCode(500, "Failed to retrieve discovered files (paged)");
         }
     }
@@ -186,8 +187,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to import selected files for operation {OperationId}",
-                request.HarvestOperationId);
+            _logger.LogError($"Failed to import selected files for operation {request.HarvestOperationId}: {ex.Message}");
             return StatusCode(500, "Failed to import selected files");
         }
     }
@@ -214,7 +214,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cancel harvest operation {OperationId}", operationId);
+            _logger.LogError($"Failed to cancel harvest operation {operationId}: {ex.Message}");
             return StatusCode(500, "Failed to cancel harvest operation");
         }
     }
@@ -239,7 +239,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get active harvest for printer {PrinterId}", printerId);
+            _logger.LogError($"Failed to get active harvest for printer {printerId}: {ex.Message}");
             return StatusCode(500, "Failed to retrieve active harvest");
         }
     }
@@ -266,7 +266,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get recent harvests for printer {PrinterId}", printerId);
+            _logger.LogError($"Failed to get recent harvests for printer {printerId}: {ex.Message}");
             return StatusCode(500, "Failed to retrieve recent harvests");
         }
     }
@@ -288,7 +288,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get active harvest operations");
+            _logger.LogError($"Failed to get active harvest operations: {ex.Message}");
             return StatusCode(500, "Failed to retrieve active harvest operations");
         }
     }
@@ -319,7 +319,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get harvest operations");
+            _logger.LogError($"Failed to get harvest operations: {ex.Message}");
             return StatusCode(500, "Failed to retrieve harvest operations");
         }
     }
@@ -345,7 +345,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to skip file {FileId} in operation {OperationId}", fileId, operationId);
+            _logger.LogError($"Failed to skip file {fileId} in operation {operationId}: {ex.Message}");
             return StatusCode(500, "Failed to skip file");
         }
     }
@@ -371,7 +371,7 @@ public class GcodeHarvestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retry file {FileId} in operation {OperationId}", fileId, operationId);
+            _logger.LogError($"Failed to retry file {fileId} in operation {operationId}: {ex.Message}");
             return StatusCode(500, "Failed to retry file");
         }
     }

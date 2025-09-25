@@ -19,10 +19,10 @@ namespace Farm.Web.Api.Controllers;
 public class CatalogController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly INormalizationEventLogger _normLogger;
+    private readonly Farm.Infrastructure.Normalization.INormalizationEventLogger _normLogger;
     private readonly ICatalogCache _catalogCache;
 
-    public CatalogController(AppDbContext db, INormalizationEventLogger normLogger, ICatalogCache catalogCache)
+    public CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache)
     {
         _db = db;
         _normLogger = normLogger;

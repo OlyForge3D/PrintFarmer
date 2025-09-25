@@ -1,5 +1,6 @@
 ﻿using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Controllers.Slicing;
 
@@ -8,12 +9,12 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Tags("Slicer Jobs")]
 public class SlicingJobsController : ControllerBase
 {
-    private readonly ILogger<SlicingJobsController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly string _tempRoot;
 
-    public SlicingJobsController(ILogger<SlicingJobsController> logger, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
+    public SlicingJobsController(IUnifiedLoggingService logger, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
     {
         _logger = logger;
         _tempPathProvider = tempPathProvider;
@@ -86,7 +87,7 @@ public class SlicingJobsController : ControllerBase
 
         job.Status = SlicingJobStatus.Cancelled;
         job.Message = "Cancelled by user";
-        _logger.LogInformation("Cancelled slicing job {JobId}", jobId);
+    _logger.LogInformation($"Cancelled slicing job {jobId}");
         return Ok(new { success = true, message = "Job cancelled successfully" });
     }
 

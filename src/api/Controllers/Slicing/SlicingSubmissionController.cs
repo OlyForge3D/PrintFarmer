@@ -4,6 +4,7 @@ using Farm.Web.Api.Data;
 using Farm.Web.Api.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -15,12 +16,12 @@ public class SlicingSubmissionController : ControllerBase
 {
     private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
     private readonly ISlicerFileStorage _fileStorage;
-    private readonly ILogger<SlicingSubmissionController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
     private readonly AppDbContext _context;
 
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env, AppDbContext context)
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, IUnifiedLoggingService logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env, AppDbContext context)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(tempPathProvider);
@@ -203,7 +204,7 @@ public class SlicingSubmissionController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to enqueue slicing job");
+            _logger.LogError($"Failed to enqueue slicing job: {ex.Message}", ex);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }
@@ -229,7 +230,7 @@ public class SlicingSubmissionController : ControllerBase
         // Validate that the model file exists on disk
         if (!System.IO.File.Exists(model.FilePath))
         {
-            _logger.LogError("Model file not found on disk: {FilePath} for model {ModelId}", model.FilePath, modelId);
+            _logger.LogError($"Model file not found on disk: {model.FilePath} for model {modelId}");
             return NotFound("Model file not found on disk");
         }
 
@@ -347,13 +348,13 @@ public class SlicingSubmissionController : ControllerBase
                 SlicingJobStore.Add(storeJob);
             }
 
-            _logger.LogInformation("Slicing job submitted for uploaded model {ModelId} ({OriginalFileName})", modelId, model.OriginalFileName);
+            _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.OriginalFileName})");
 
             return Accepted(sliceResult);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to enqueue slicing job for uploaded model {ModelId}", modelId);
+            _logger.LogError($"Failed to enqueue slicing job for uploaded model {modelId}: {ex.Message}", ex);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }

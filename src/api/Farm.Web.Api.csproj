@@ -46,6 +46,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\Farm.Infrastructure\Farm.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

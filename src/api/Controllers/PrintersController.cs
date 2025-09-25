@@ -13,6 +13,7 @@ using Farm.Web.Api.Domain;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Infrastructure;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using FluentValidation;
@@ -29,8 +30,34 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Printers")]
-public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, ILogger<PrintersController> logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
+public class PrintersController : ControllerBase
 {
+    private readonly AppDbContext db;
+    private readonly IMoonrakerClient moon;
+    private readonly IPrusaLinkClient prusa;
+    private readonly ISdcpClient sdcp;
+    private readonly IOctoPrintClient octoprint;
+    private readonly INetworkDiscoveryService networkDiscovery;
+    private readonly IUnifiedLoggingService _logger;
+    private readonly IValidator<CreatePrinterDto> validator;
+    private readonly ICircuitBreakerService circuitBreaker;
+    private readonly IPrinterCapabilityDiscoveryService capabilityDiscovery;
+    private readonly IDefaultCatalogService defaultCatalog;
+
+    public PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog)
+    {
+        this.db = db;
+        this.moon = moon;
+        this.prusa = prusa;
+        this.sdcp = sdcp;
+        this.octoprint = octoprint;
+        this.networkDiscovery = networkDiscovery;
+        this._logger = logger;
+        this.validator = validator;
+        this.circuitBreaker = circuitBreaker;
+        this.capabilityDiscovery = capabilityDiscovery;
+        this.defaultCatalog = defaultCatalog;
+    }
     // Feature flag: when enabled we swallow transient startup DB errors for /fast endpoint and return empty list.
     private static readonly bool FastEndpointDefensive =
         (Environment.GetEnvironmentVariable("PF_FAST_ENDPOINT_DEFENSIVE") ?? "true")
@@ -121,7 +148,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error getting print job status for printer {PrinterId}", p.Id);
+            _logger.LogWarning($"Error getting print job status for printer {p.Id}: {ex.Message}");
             return StatusCode(500, new Farm.Web.Shared.PrintJobStatusDto { State = "error", Error = ex.Message });
         }
     }
@@ -467,13 +494,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             }
             catch (OperationCanceledException) when (fastTimeoutCts.Token.IsCancellationRequested)
             {
-                logger.FastTimeout(p.Name, p.Id);
+                _logger.LogWarning($"Fast timeout occurred for printer {p.Name} ({p.Id})");
                 // Return offline printer for timeout cases
                 return CreateOfflinePrinterDto(p);
             }
             catch (Exception ex)
             {
-                logger.ErrorGettingStatus(ex, p.Name, p.Id);
+                _logger.LogError($"Error getting status for printer {p.Name} ({p.Id}): {ex.Message}");
                 // Return offline printer for any error
                 return CreateOfflinePrinterDto(p);
             }
@@ -569,7 +596,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             // During early startup the DB might not yet be fully initialised (e.g. migrations running).
             // Instead of surfacing a 500 to the UI, return an empty list so the UI can retry shortly.
-            logger.LogDebug(ex, "Printers fast endpoint accessed before startup completed; returning empty list.");
+            _logger.LogDebug($"Printers fast endpoint accessed before startup completed; returning empty list. Exception: {ex.Message}");
             return Ok(Array.Empty<PrinterFastDto>());
         }
     }
@@ -613,7 +640,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
         {
-            logger.LogDebug(ex, "Printers camera-urls endpoint accessed before startup completed; returning empty list.");
+            _logger.LogDebug($"Printers camera-urls endpoint accessed before startup completed; returning empty list. Exception: {ex.Message}");
             return Ok(Array.Empty<PrinterCameraUrlsDto>());
         }
     }
@@ -655,7 +682,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (Exception ex)
         {
             // Log the exception for debugging but don't expose it
-            logger.LogDebug(ex, "Camera availability check failed for printer {ServerUrl} (backend {Backend})", serverUrl, backend);
+            _logger.LogDebug($"Camera availability check failed for printer {serverUrl} (backend {backend}): {ex.Message}");
             return false;
         }
     }
@@ -816,7 +843,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (OperationCanceledException) when (statusCts.Token.IsCancellationRequested)
         {
-            logger.StatusTimeout(p.Id);
+            _logger.LogWarning($"Status timeout for printer {p.Id}");
             // Return offline status for timeout cases
             return new PrinterStatusDto(
                 Id: p.Id,
@@ -832,7 +859,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error getting status for printer {PrinterId}", p.Id);
+            _logger.LogWarning($"Error getting status for printer {p.Id}: {ex.Message}");
             // Return offline status if there's any error
             return new PrinterStatusDto(
                 Id: p.Id,
@@ -1053,8 +1080,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         ValidationResult validationResult = await validator.ValidateAsync(dto, ct);
         if (!validationResult.IsValid)
         {
-            logger.LogWarning("Printer creation validation failed: {Errors}",
-                string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage)));
+            _logger.LogWarning($"Printer creation validation failed: {string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage))}");
 
             foreach (ValidationFailure? error in validationResult.Errors)
             {
@@ -1063,7 +1089,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             return BadRequest(ModelState);
         }
 
-        logger.LogInformation("Creating new printer: {Name} ({Backend})", dto.Name, dto.Backend);
+        _logger.LogInformation($"Creating new printer: {dto.Name} ({dto.Backend})");
 
         // resolve or create manufacturer/model
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
@@ -1158,12 +1184,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         db.Printers.Add(p);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Successfully created printer: {Name} with ID {Id}", p.Name, p.Id);
+        _logger.LogInformation($"Successfully created printer: {p.Name} with ID {p.Id}");
 
         // Auto-discover capabilities for the newly created printer
         try
         {
-            logger.LogInformation("Starting capability discovery for newly created printer: {Name} ({Id})", p.Name, p.Id);
+            _logger.LogInformation($"Starting capability discovery for newly created printer: {p.Name} ({p.Id})");
 
             // Reload the printer with includes for proper discovery
             Printer? printerForDiscovery = await db.Printers
@@ -1176,17 +1202,17 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 PrinterCapabilities? discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
                 if (discoveredCapabilities != null)
                 {
-                    logger.LogInformation("Successfully discovered and saved capabilities for printer: {Name} ({Id})", p.Name, p.Id);
+                    _logger.LogInformation($"Successfully discovered and saved capabilities for printer: {p.Name} ({p.Id})");
                 }
                 else
                 {
-                    logger.LogWarning("Failed to discover capabilities for printer: {Name} ({Id}) - capabilities will need to be added manually", p.Name, p.Id);
+                    _logger.LogWarning($"Failed to discover capabilities for printer: {p.Name} ({p.Id}) - capabilities will need to be added manually");
                 }
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error during capability discovery for newly created printer: {Name} ({Id}) - printer was created successfully but capabilities discovery failed", p.Name, p.Id);
+            _logger.LogError($"Error during capability discovery for newly created printer: {p.Name} ({p.Id}) - printer was created successfully but capabilities discovery failed. Exception: {ex.Message}");
             // Don't fail the printer creation if capability discovery fails - user can manually add capabilities or trigger discovery later
         }
 
@@ -2146,33 +2172,31 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Input validation
         if (string.IsNullOrWhiteSpace(jobId))
         {
-            logger.LogWarning("GetHistoryJob called with null or empty jobId for printer {PrinterId}", id);
+            _logger.LogWarning($"GetHistoryJob called with null or empty jobId for printer {id}");
             return BadRequest("Job ID is required");
         }
 
         Printer? printer = await db.Printers.FindAsync(new object?[] { id, ct }, cancellationToken: ct);
         if (printer == null)
         {
-            logger.LogWarning("Printer {PrinterId} not found for history job request", id);
+            _logger.LogWarning($"Printer {id} not found for history job request");
             throw new PrinterNotFoundException($"Printer {id} not found");
         }
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
-            logger.LogWarning("History requested for non-Moonraker printer {PrinterId} (Backend={Backend})",
-                id, printer.Backend);
+            _logger.LogWarning($"History requested for non-Moonraker printer {id} (Backend={printer.Backend})");
             return BadRequest("History is only available for Moonraker printers");
         }
 
-        logger.LogDebug("Fetching history job {JobId} for printer {PrinterId} ({PrinterName})",
-            jobId, id, printer.Name);
+        _logger.LogDebug($"Fetching history job {jobId} for printer {id} ({printer.Name})");
 
         try
         {
             Services.HistoryJob? moonrakerJob = await moon.GetHistoryJobAsync(printer.ServerUrl, jobId, ct);
             if (moonrakerJob == null)
             {
-                logger.LogInformation("History job {JobId} not found for printer {PrinterId}", jobId, id);
+                _logger.LogInformation($"History job {jobId} not found for printer {id}");
                 return NotFound($"History job {jobId} not found");
             }
 
@@ -2200,18 +2224,17 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 }).ToArray()
             };
 
-            logger.LogDebug("Successfully retrieved history job {JobId} for printer {PrinterId}", jobId, id);
+            _logger.LogDebug($"Successfully retrieved history job {jobId} for printer {id}");
             return job;
         }
         catch (HttpRequestException ex)
         {
-            logger.LogError(ex, "Network error retrieving history job {JobId} for printer {PrinterId} from {ServerUrl}",
-                jobId, id, printer.ServerUrl);
+            _logger.LogError($"Network error retrieving history job {jobId} for printer {id} from {printer.ServerUrl}: {ex.Message}");
             return StatusCode(502, "Unable to connect to printer");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            logger.LogWarning(ex, "Timeout retrieving history job {JobId} for printer {PrinterId}", jobId, id);
+            _logger.LogWarning($"Timeout retrieving history job {jobId} for printer {id}: {ex.Message}");
             return StatusCode(408, "Request timeout");
         }
         // Let global exception handler catch other exceptions for consistent error responses
@@ -2229,11 +2252,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             return NotFound();
         }
 
-        logger.LogDebug("GetHistoryTotals called for printer {PrinterId} ({PrinterName}), backend: {Backend}", id, printer.Name, printer.Backend);
+        _logger.LogDebug($"GetHistoryTotals called for printer {id} ({printer.Name}), backend: {printer.Backend}");
 
         if (printer.Backend != (int)PrinterBackend.Moonraker)
         {
-            logger.LogInformation("Printer {PrinterId} is not Moonraker backend, returning empty totals", id);
+            _logger.LogInformation($"Printer {id} is not Moonraker backend, returning empty totals");
             // Return empty totals for non-Moonraker printers
             return new Farm.Web.Shared.HistoryTotals
             {
@@ -2243,15 +2266,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         try
         {
-            logger.LogDebug("Calling Moonraker API for totals at: {ServerUrl}", printer.ServerUrl);
+            _logger.LogDebug($"Calling Moonraker API for totals at: {printer.ServerUrl}");
             Services.HistoryTotals? moonrakerTotals = await moon.GetHistoryTotalsAsync(printer.ServerUrl, ct);
             if (moonrakerTotals == null)
             {
-                logger.LogWarning("Moonraker API returned null totals");
+                _logger.LogWarning($"Moonraker API returned null totals");
                 return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
             }
 
-            logger.LogDebug("Moonraker totals received - Jobs: {Jobs}, PrintTime: {PrintTime}, FilamentUsed: {Filament}", moonrakerTotals.JobTotals.TotalJobs, moonrakerTotals.JobTotals.TotalPrintTime, moonrakerTotals.JobTotals.TotalFilamentUsed);
+            _logger.LogDebug($"Moonraker totals received - Jobs: {moonrakerTotals.JobTotals.TotalJobs}, PrintTime: {moonrakerTotals.JobTotals.TotalPrintTime}, FilamentUsed: {moonrakerTotals.JobTotals.TotalFilamentUsed}");
 
             // Convert from Moonraker model to shared model
             Shared.HistoryTotals totals = new()
@@ -2274,12 +2297,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 }).ToArray()
             };
 
-            logger.LogDebug("Returning converted totals - Jobs: {Jobs}, PrintTime: {PrintTime}, FilamentUsed: {Filament}", totals.JobTotals.TotalJobs, totals.JobTotals.TotalPrintTime, totals.JobTotals.TotalFilamentUsed);
+            _logger.LogDebug($"Returning converted totals - Jobs: {totals.JobTotals.TotalJobs}, PrintTime: {totals.JobTotals.TotalPrintTime}, FilamentUsed: {totals.JobTotals.TotalFilamentUsed}");
             return totals;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to get history totals for printer {PrinterId}", id);
+            _logger.LogError($"Failed to get history totals for printer {id}: {ex.Message}");
             return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
         }
     }
@@ -2309,7 +2332,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to delete history job {JobId} for printer {PrinterId}", jobId, id);
+            _logger.LogError($"Failed to delete history job {jobId} for printer {id}: {ex.Message}");
             return StatusCode(500, "Failed to delete history job");
         }
     }
@@ -2651,13 +2674,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 // For bulk import, don't log individual success/failures to avoid log spam
                 if (discoveredCapabilities == null)
                 {
-                    logger.LogDebug("Could not discover capabilities for imported printer: {Name} ({Id})", p.Name, p.Id);
+                    _logger.LogDebug($"Could not discover capabilities for imported printer: {p.Name} ({p.Id})");
                 }
             }
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Error during capability discovery for imported printer: {Name} ({Id})", p.Name, p.Id);
+            _logger.LogDebug($"Error during capability discovery for imported printer: {p.Name} ({p.Id}) - {ex.Message}");
             // Don't fail the import if capability discovery fails
         }
 
@@ -2757,7 +2780,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(typeof(object), 200)]
     public IActionResult SimpleTest()
     {
-        logger.LogCritical("=== SIMPLE TEST ENDPOINT CALLED ===");
+        _logger.LogError($"=== SIMPLE TEST ENDPOINT CALLED ===");
         return Ok(new { message = "Simple test works!", timestamp = DateTime.UtcNow });
     }
 
@@ -2769,7 +2792,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         try
         {
-            logger.LogInformation("Starting network printer discovery...");
+            _logger.LogInformation($"Starting network printer discovery...");
 
             // Set timeout for network discovery - with 100ms per IP, 254 IPs * 2 ports = ~51 seconds + overhead
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -2793,19 +2816,18 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 .Where(d => !normalizedExistingUrls.Contains(NormalizeServerUrl(d.ServerUrl, 80)))
                 .ToList();
 
-            logger.LogInformation("Discovery completed. Found {TotalCount} printers, {NewCount} are new",
-                discovered.Count, newPrinters.Count);
+            _logger.LogInformation($"Discovery completed. Found {discovered.Count} printers, {newPrinters.Count} are new");
 
             return Ok(newPrinters);
         }
         catch (OperationCanceledException)
         {
-            logger.LogWarning("Printer discovery was cancelled");
+            _logger.LogWarning($"Printer discovery was cancelled");
             return StatusCode(408, "Discovery operation timed out");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to discover printers on network");
+            _logger.LogError($"Failed to discover printers on network: {ex.Message}");
             return StatusCode(500, "Failed to discover printers. Please try again.");
         }
     }
@@ -2821,7 +2843,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             // Generate a unique session ID for this discovery session
             string sessionId = Guid.NewGuid().ToString();
 
-            logger.LogInformation("Starting streaming network printer discovery with session ID: {SessionId}", sessionId);
+            _logger.LogInformation($"Starting streaming network printer discovery with session ID: {sessionId}");
 
             // Start the discovery process in the background
             // The progress and results will be sent via SignalR
@@ -2836,20 +2858,21 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 }
                 catch (OperationCanceledException)
                 {
-                    logger.LogWarning("Streaming printer discovery was cancelled for session {SessionId}", sessionId);
+                    _logger.LogWarning($"Streaming printer discovery was cancelled for session {sessionId}");
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Failed to discover printers in streaming mode for session {SessionId}", sessionId);
+                    _logger.LogError($"Failed to discover printers in streaming mode for session {sessionId}: {ex.Message}");
                 }
             }, ct);
 
             // Return the session ID immediately so client can join the SignalR group
             return Ok(new { sessionId, message = "Discovery started. Connect to SignalR hub to receive updates." });
         }
+
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to start streaming printer discovery");
+            _logger.LogError($"Failed to start streaming printer discovery: {ex.Message}");
             return StatusCode(500, "Failed to start discovery stream. Please try again.");
         }
     }
@@ -2858,7 +2881,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(typeof(object), 200)]
     public ActionResult TestSimple()
     {
-        logger.LogCritical("=== SIMPLE TEST CALLED ===");
+        _logger.LogError($"=== SIMPLE TEST CALLED ===");
         return Ok(new { message = "API is working!", timestamp = DateTime.UtcNow });
     }
 

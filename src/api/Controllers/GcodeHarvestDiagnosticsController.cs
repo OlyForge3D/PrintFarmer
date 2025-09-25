@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,11 +13,11 @@ namespace Farm.Web.Api.Controllers;
 [Tags("G-code Harvesting Diagnostics")]
 public class GcodeHarvestDiagnosticsController : ControllerBase
 {
-    private readonly ILogger<GcodeHarvestDiagnosticsController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly IGcodeHarvestService _harvestService;
 
     public GcodeHarvestDiagnosticsController(
-    ILogger<GcodeHarvestDiagnosticsController> logger,
+    IUnifiedLoggingService logger,
     IGcodeHarvestService harvestService)
     {
         _logger = logger;
@@ -52,7 +53,7 @@ public class GcodeHarvestDiagnosticsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to analyze G-code file {FileName}", file.FileName);
+            _logger.LogError($"Failed to analyze G-code file {file.FileName}: {ex.Message}", ex);
             return StatusCode(500, "Failed to analyze G-code file");
         }
     }
@@ -75,7 +76,7 @@ public class GcodeHarvestDiagnosticsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error enabling debug logs");
+            _logger.LogError($"Error enabling debug logs: {ex.Message}", ex);
             return StatusCode(500, new { success = false, error = ex.Message });
         }
     }

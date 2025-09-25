@@ -2,6 +2,7 @@
 using Farm.Web.Api.Domain; // for SlicerType enum if namespace differs
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -12,9 +13,9 @@ namespace Farm.Web.Api.Controllers.Slicing;
 public class ProfilesController : ControllerBase
 {
     private readonly AppDbContext _context;
-    private readonly ILogger<ProfilesController> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
-    public ProfilesController(AppDbContext context, ILogger<ProfilesController> logger)
+    public ProfilesController(AppDbContext context, IUnifiedLoggingService logger)
     {
         _context = context;
         _logger = logger;
@@ -85,7 +86,7 @@ public class ProfilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create profile");
+            _logger.LogError($"Failed to create profile: {ex.Message}", ex);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create profile");
         }
     }
@@ -225,7 +226,7 @@ public class ProfilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get profiles");
+            _logger.LogError($"Failed to get profiles: {ex.Message}", ex);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get available profiles");
         }
     }

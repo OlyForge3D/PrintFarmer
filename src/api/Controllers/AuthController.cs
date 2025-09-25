@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using Farm.Infrastructure;
+using System.Security.Claims;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -12,9 +13,9 @@ namespace Farm.Web.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthenticationService _authService;
-    private readonly ILogger<AuthController> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
-    public AuthController(IAuthenticationService authService, ILogger<AuthController> logger)
+    public AuthController(IAuthenticationService authService, IUnifiedLoggingService logger)
     {
         _authService = authService;
         _logger = logger;
@@ -72,7 +73,7 @@ public class AuthController : ControllerBase
     {
         // For JWT tokens, logout is typically handled client-side by removing the token
         // In the future, we could implement a token blacklist for enhanced security
-        _logger.LogInformation("User {UserId} logged out", User.FindFirstValue(ClaimTypes.NameIdentifier));
+        _logger.LogInformation($"User {User.FindFirstValue(ClaimTypes.NameIdentifier)} logged out");
 
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
@@ -82,7 +83,7 @@ public class AuthController : ControllerBase
     [Authorize]
     public Task<IActionResult> LogoutGetAsync()
     {
-        _logger.LogInformation("User {UserId} logged out (GET)", User.FindFirstValue(ClaimTypes.NameIdentifier));
+        _logger.LogInformation($"User {User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)} logged out (GET)");
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
 
