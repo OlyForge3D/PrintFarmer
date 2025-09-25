@@ -5,8 +5,8 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Text.Json;
 using Farm.Web.Api.Configuration;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
@@ -772,8 +772,8 @@ if (headlessCreateAdmin || headlessListUsers)
         // Ensure seed ran (roles etc.) already handled above.
         IPasswordHashingService hashing = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IPasswordHashingService>();
         IAuthenticationService authSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
-        Farm.Web.Api.Domain.Role? adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
-        if (adminRole == null)
+        Farm.Infrastructure.Domain.Role? adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+        if (adminRole is null)
         {
             await Console.Error.WriteLineAsync("Admin role not found; seeding failure.");
             return;
@@ -807,11 +807,11 @@ if (headlessCreateAdmin || headlessListUsers)
             UpdatedAt = DateTime.UtcNow
         };
         db.Users.Add(user);
-        db.UserRoles.Add(new Farm.Web.Api.Domain.UserRole
+        db.UserRoles.Add(new UserRole
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            RoleId = adminRole.Id,
+            RoleId = adminRole!.Id,
             AssignedAt = DateTime.UtcNow,
             IsActive = true
         });

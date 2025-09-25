@@ -1,8 +1,8 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
@@ -15,27 +15,18 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Background service that processes harvest file jobs from the queue
 /// </summary>
-public partial class HarvestWorkerService : BackgroundService
+public partial class HarvestWorkerService(
+    IHarvestQueue queue,
+    IServiceProvider serviceProvider,
+    ILogger<HarvestWorkerService> logger,
+    IHubContext<HarvestHub> harvestHub) : BackgroundService
 {
-    private readonly IHarvestQueue _queue;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<HarvestWorkerService> _logger;
-    private readonly SemaphoreSlim _workerSemaphore;
-    private readonly IHubContext<HarvestHub> _harvestHub;
+    private readonly IHarvestQueue _queue = queue;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILogger<HarvestWorkerService> _logger = logger;
+    private readonly SemaphoreSlim _workerSemaphore = new SemaphoreSlim(MaxConcurrentWorkers, MaxConcurrentWorkers);
+    private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
     private const int MaxConcurrentWorkers = 3; // Configurable
-
-    public HarvestWorkerService(
-        IHarvestQueue queue,
-        IServiceProvider serviceProvider,
-        ILogger<HarvestWorkerService> logger,
-        IHubContext<HarvestHub> harvestHub)
-    {
-        _queue = queue;
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-        _harvestHub = harvestHub;
-        _workerSemaphore = new SemaphoreSlim(MaxConcurrentWorkers, MaxConcurrentWorkers);
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

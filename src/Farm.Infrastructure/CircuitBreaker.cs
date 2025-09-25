@@ -123,17 +123,14 @@ public class CircuitBreaker
         }
     }
 
-    public CircuitBreakerMetrics GetMetrics()
+    public CircuitBreakerMetrics Metrics => new CircuitBreakerMetrics
     {
-        return new CircuitBreakerMetrics
-        {
-            Name = Name,
-            State = _state,
-            FailureCount = _failureCount,
-            LastFailureTime = _lastFailureTime,
-            FailureThreshold = _failureThreshold
-        };
-    }
+        Name = Name,
+        State = _state,
+        FailureCount = _failureCount,
+        LastFailureTime = _lastFailureTime,
+        FailureThreshold = _failureThreshold
+    };
 }
 
 public enum CircuitState
@@ -185,7 +182,7 @@ public class CircuitBreakerService : ICircuitBreakerService
 
     public IEnumerable<CircuitBreakerMetrics> GetAllMetrics()
     {
-        return _circuitBreakers.Values.Select(cb => cb.GetMetrics());
+        return _circuitBreakers.Values.Select(cb => cb.Metrics);
     }
 
     public void ResetAll()

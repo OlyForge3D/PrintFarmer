@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
@@ -17,7 +17,15 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Service for harvesting G-code files from registered printers
 /// </summary>
-public partial class GcodeHarvestService : IGcodeHarvestService
+public partial class GcodeHarvestService(
+    AppDbContext db,
+    IMoonrakerClient moonraker,
+    IPrusaLinkClient prusa,
+    ISdcpClient sdcp,
+    ILogger<GcodeHarvestService> logger,
+    IServiceScopeFactory serviceScopeFactory,
+    IHarvestQueue harvestQueue,
+    IHubContext<HarvestHub> harvestHub) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
@@ -85,38 +93,18 @@ public partial class GcodeHarvestService : IGcodeHarvestService
 
         return true;
     }
-    private readonly AppDbContext _db;
-    private readonly IMoonrakerClient _moonraker;
-    private readonly IPrusaLinkClient _prusa;
-    private readonly ISdcpClient _sdcp;
-    private readonly ILogger<GcodeHarvestService> _logger;
-    private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly IHarvestQueue _harvestQueue;
+    private readonly AppDbContext _db = db;
+    private readonly IMoonrakerClient _moonraker = moonraker;
+    private readonly IPrusaLinkClient _prusa = prusa;
+    private readonly ISdcpClient _sdcp = sdcp;
+    private readonly ILogger<GcodeHarvestService> _logger = logger;
+    private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
+    private readonly IHarvestQueue _harvestQueue = harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
-    private readonly IHubContext<HarvestHub> _harvestHub;
+    private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
 
     private const string GcodeStoragePath = "gcode-library";
     private static readonly string[] sourceArray = { "gcode" };
-
-    public GcodeHarvestService(
-        AppDbContext db,
-        IMoonrakerClient moonraker,
-        IPrusaLinkClient prusa,
-        ISdcpClient sdcp,
-        ILogger<GcodeHarvestService> logger,
-        IServiceScopeFactory serviceScopeFactory,
-        IHarvestQueue harvestQueue,
-        IHubContext<HarvestHub> harvestHub)
-    {
-        _db = db;
-        _moonraker = moonraker;
-        _prusa = prusa;
-        _sdcp = sdcp;
-        _logger = logger;
-        _serviceScopeFactory = serviceScopeFactory;
-        _harvestQueue = harvestQueue;
-        _harvestHub = harvestHub;
-    }
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
     {

@@ -1,8 +1,8 @@
 ﻿#pragma warning disable SA1402 // File may only contain a single type (or custom namespace warning)
 #pragma warning disable CS0136 // Suppress variable shadowing error in this file
 
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;

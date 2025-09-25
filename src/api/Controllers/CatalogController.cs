@@ -1,6 +1,6 @@
-﻿using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Exceptions;
 using Farm.Web.Api.Infrastructure.Normalization;

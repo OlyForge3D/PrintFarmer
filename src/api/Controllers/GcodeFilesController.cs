@@ -5,8 +5,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Data;
 using Farm.Web.Api.Services; // added for IGcodeUploadSettings & quota services
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;

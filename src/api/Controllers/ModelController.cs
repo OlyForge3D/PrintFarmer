@@ -1,8 +1,8 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text; // Needed for Encoding when deriving secondary hash
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;

@@ -2,8 +2,8 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;

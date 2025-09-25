@@ -19,14 +19,13 @@ public interface IUnifiedLoggingService
 public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 {
     private readonly ILogger<UnifiedLoggingService> _logger;
-    private readonly ActivitySource _activitySource;
+    private readonly IPrintFarmerTelemetryService _telemetryService;
+    private readonly ActivitySource _activitySource = new ActivitySource("PrintFarmer.Logging");
 
-    public UnifiedLoggingService(
-        ILogger<UnifiedLoggingService> logger,
-        IPrintFarmerTelemetryService telemetryService)
+    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, IPrintFarmerTelemetryService telemetryService)
     {
         _logger = logger;
-        _activitySource = new ActivitySource("PrintFarmer.Logging");
+        _telemetryService = telemetryService;
     }
 
     public void LogDebug(string message, params object[] args)

@@ -8,11 +8,10 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// <summary>
 /// Redis-based implementation of the slicer job queue
 /// </summary>
-public class RedisSlicerJobQueue : ISlicerJobQueue
+public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlicerJobQueue> logger) : ISlicerJobQueue
 {
-    private readonly IConnectionMultiplexer _redis;
-    private readonly IDatabase _database;
-    private readonly ILogger<RedisSlicerJobQueue> _logger;
+    private readonly IDatabase _database = redis.GetDatabase();
+    private readonly ILogger<RedisSlicerJobQueue> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Redis keys
     // Keys retained for future expansion (currently used in stats operations)
@@ -21,14 +20,6 @@ public class RedisSlicerJobQueue : ISlicerJobQueue
     private readonly string _processingKey = "slicer:processing";
     private readonly string _completedKey = "slicer:completed";
     private readonly string _failedKey = "slicer:failed";
-    // private readonly string _workersKey = "slicer:workers"; // reserved for future worker tracking
-
-    public RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlicerJobQueue> logger)
-    {
-        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
-        _database = redis.GetDatabase();
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     public async Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {

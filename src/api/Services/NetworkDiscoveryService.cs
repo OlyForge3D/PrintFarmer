@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Data;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
@@ -846,7 +846,7 @@ public partial class NetworkDiscoveryService(
         {
             // Prefer a fresh scope so we don't depend on the lifetime of the injected scoped context (especially for background discovery)
             using IServiceScope scope = scopeFactory.CreateScope();
-            AppDbContext ctx = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            AppDbContext ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             List<string> urls = ctx.Printers.Select(p => p.ServerUrl).ToList();
             foreach (string? p in urls)
             {

@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Linq;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

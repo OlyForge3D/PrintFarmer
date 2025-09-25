@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -14,16 +14,11 @@ public interface IDefaultCatalogService
     Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync();
 }
 
-public class DefaultCatalogService : IDefaultCatalogService
+public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogService
 {
-    private readonly AppDbContext _context;
+    private readonly AppDbContext _context = context;
     private Guid? _cachedUnknownManufacturerId;
     private Guid? _cachedUnknownModelId;
-
-    public DefaultCatalogService(AppDbContext context)
-    {
-        _context = context;
-    }
 
     public async Task<Guid> GetUnknownManufacturerIdAsync()
     {

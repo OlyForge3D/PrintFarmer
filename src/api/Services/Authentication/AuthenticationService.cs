@@ -1,32 +1,24 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Web.Api.Services.Authentication;
 
-public class AuthenticationService : IAuthenticationService
+public class AuthenticationService(
+    AppDbContext context,
+    IPasswordHashingService passwordHashing,
+    IConfiguration configuration,
+    ILogger<AuthenticationService> logger) : IAuthenticationService
 {
-    private readonly AppDbContext _context;
-    private readonly IPasswordHashingService _passwordHashing;
-    private readonly IConfiguration _configuration;
-    private readonly ILogger<AuthenticationService> _logger;
-
-    public AuthenticationService(
-        AppDbContext context,
-        IPasswordHashingService passwordHashing,
-        IConfiguration configuration,
-        ILogger<AuthenticationService> logger)
-    {
-        _context = context;
-        _passwordHashing = passwordHashing;
-        _configuration = configuration;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IPasswordHashingService _passwordHashing = passwordHashing;
+    private readonly IConfiguration _configuration = configuration;
+    private readonly ILogger<AuthenticationService> _logger = logger;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {

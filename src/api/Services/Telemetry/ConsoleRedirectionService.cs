@@ -10,21 +10,17 @@ public interface IConsoleRedirectionService
     void WriteError(string message);
 }
 
-public class ConsoleRedirectionService : IConsoleRedirectionService, IDisposable
+public class ConsoleRedirectionService(IUnifiedLoggingService unifiedLogger) : IConsoleRedirectionService, IDisposable
 {
-    private readonly IUnifiedLoggingService _unifiedLogger;
-    private readonly TextWriter _originalOut;
-    private readonly TextWriter _originalError;
+    private readonly IUnifiedLoggingService _unifiedLogger = unifiedLogger;
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2213:DisposableFieldsShouldBeDisposed", Justification = "Do not dispose system-owned Console.Out")]
+    private readonly TextWriter _originalOut = Console.Out;
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2213:DisposableFieldsShouldBeDisposed", Justification = "Do not dispose system-owned Console.Error")]
+    private readonly TextWriter _originalError = Console.Error;
     private UnifiedConsoleWriter? _consoleWriter;
     private UnifiedConsoleWriter? _errorWriter;
     private bool _disposed = false;
-
-    public ConsoleRedirectionService(IUnifiedLoggingService unifiedLogger)
-    {
-        _unifiedLogger = unifiedLogger;
-        _originalOut = Console.Out;
-        _originalError = Console.Error;
-    }
 
     public void RedirectConsoleOutput()
     {
@@ -60,24 +56,18 @@ public class ConsoleRedirectionService : IConsoleRedirectionService, IDisposable
             RestoreConsoleOutput();
             _consoleWriter?.Dispose();
             _errorWriter?.Dispose();
+            // Do NOT dispose _originalOut or _originalError (system resources)
             _disposed = true;
         }
     }
 }
 
-internal class UnifiedConsoleWriter : TextWriter
+internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLevel logLevel, string category) : TextWriter
 {
-    private readonly IUnifiedLoggingService _unifiedLogger;
-    private readonly LogLevel _logLevel;
-    private readonly string _category;
+    private readonly IUnifiedLoggingService _unifiedLogger = unifiedLogger;
+    private readonly LogLevel _logLevel = logLevel;
+    private readonly string _category = category;
     private readonly StringBuilder _buffer = new();
-
-    public UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLevel logLevel, string category)
-    {
-        _unifiedLogger = unifiedLogger;
-        _logLevel = logLevel;
-        _category = category;
-    }
 
     public override Encoding Encoding => Encoding.UTF8;
 

@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics.Metrics;
 using Farm.Web.Api.Configuration;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Data;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Startup;
@@ -115,7 +115,7 @@ public class StartupInitializationHostedService : IHostedService
             configurationValidator.ValidateConfiguration();
 
             AppDbContext db = services.GetRequiredService<AppDbContext>();
-            await Data.Seed.AuthenticationDataSeeder.SeedAsync(db);
+            await Farm.Web.Api.Data.Seed.AuthenticationDataSeeder.SeedAsync(db);
 
             _status.MarkReady();
             double elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;

@@ -8,8 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Controllers.Responses;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
@@ -494,7 +494,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return Ok(dtos);
     }
 
-    private static PrinterDto CreateOfflinePrinterDto(Domain.Printer p)
+    private static PrinterDto CreateOfflinePrinterDto(Printer p)
     {
         return new PrinterDto(
             Id: p.Id,

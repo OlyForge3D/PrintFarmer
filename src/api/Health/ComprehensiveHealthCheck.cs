@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 

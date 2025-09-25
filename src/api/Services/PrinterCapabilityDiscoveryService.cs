@@ -1,6 +1,6 @@
 ﻿using System.Text.RegularExpressions;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -10,27 +10,17 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Service for automatically discovering printer capabilities from various sources
 /// </summary>
-public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryService
+public class PrinterCapabilityDiscoveryService(
+    AppDbContext context,
+    IMoonrakerClient moonrakerClient,
+    IPrusaLinkClient prusaClient,
+    // ISdcpClient sdcpClient, // removed unused parameter
+    ILogger<PrinterCapabilityDiscoveryService> logger) : IPrinterCapabilityDiscoveryService
 {
-    private readonly AppDbContext _context;
-    private readonly IMoonrakerClient _moonrakerClient;
-    private readonly IPrusaLinkClient _prusaClient;
-    private readonly ISdcpClient _sdcpClient;
-    private readonly ILogger<PrinterCapabilityDiscoveryService> _logger;
-
-    public PrinterCapabilityDiscoveryService(
-        AppDbContext context,
-        IMoonrakerClient moonrakerClient,
-        IPrusaLinkClient prusaClient,
-        ISdcpClient sdcpClient,
-        ILogger<PrinterCapabilityDiscoveryService> logger)
-    {
-        _context = context;
-        _moonrakerClient = moonrakerClient;
-        _prusaClient = prusaClient;
-        _sdcpClient = sdcpClient;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly IPrusaLinkClient _prusaClient = prusaClient;
+    private readonly ILogger<PrinterCapabilityDiscoveryService> _logger = logger;
 
     public async Task<PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
     {

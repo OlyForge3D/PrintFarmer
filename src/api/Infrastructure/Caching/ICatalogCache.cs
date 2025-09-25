@@ -1,7 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -25,22 +25,15 @@ public sealed class CatalogCacheOptions
     public TimeSpan ListTtl { get; set; } = TimeSpan.FromMinutes(2);
 }
 
-internal sealed class CatalogCache : ICatalogCache
+internal sealed class CatalogCache(AppDbContext db, IMemoryCache cache, Microsoft.Extensions.Options.IOptions<CatalogCacheOptions> options) : ICatalogCache
 {
-    private readonly AppDbContext _db;
-    private readonly IMemoryCache _cache;
-    private readonly CatalogCacheOptions _options;
+    private readonly AppDbContext _db = db;
+    private readonly IMemoryCache _cache = cache;
+    private readonly CatalogCacheOptions _options = options.Value;
 
     private const string ManufacturersKey = "catalog:mfglst";
     private const string ModelsAllKey = "catalog:models:all";
     private static string ModelsKey(Guid id) => $"catalog:models:{id}";
-
-    public CatalogCache(AppDbContext db, IMemoryCache cache, Microsoft.Extensions.Options.IOptions<CatalogCacheOptions> options)
-    {
-        _db = db;
-        _cache = cache;
-        _options = options.Value;
-    }
 
     public async Task<(IReadOnlyList<ManufacturerDto> list, string etag)> GetManufacturersAsync(CancellationToken ct)
     {

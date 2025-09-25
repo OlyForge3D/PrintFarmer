@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Startup;
 using Farm.Web.Shared;

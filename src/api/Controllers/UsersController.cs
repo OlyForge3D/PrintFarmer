@@ -1,6 +1,6 @@
 ﻿using System.Security.Claims;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;

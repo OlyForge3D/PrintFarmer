@@ -87,7 +87,7 @@ public class SlicingJobsController : ControllerBase
 
         job.Status = SlicingJobStatus.Cancelled;
         job.Message = "Cancelled by user";
-    _logger.LogInformation($"Cancelled slicing job {jobId}");
+        _logger.LogInformation($"Cancelled slicing job {jobId}");
         return Ok(new { success = true, message = "Job cancelled successfully" });
     }
 

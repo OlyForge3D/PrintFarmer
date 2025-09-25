@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,16 +12,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Job Queue Management")]
-public class QueueController : ControllerBase
+public class QueueController(ILogger<QueueController> logger, AppDbContext context) : ControllerBase
 {
-    private readonly ILogger<QueueController> _logger;
-    private readonly AppDbContext _context;
-
-    public QueueController(ILogger<QueueController> logger, AppDbContext context)
-    {
-        _logger = logger;
-        _context = context;
-    }
+    private readonly ILogger<QueueController> _logger = logger;
+    private readonly AppDbContext _context = context;
 
     /// <summary>
     /// Get all printer queues with current jobs

@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Data.Seed;
@@ -52,7 +53,7 @@ public static class AuthenticationDataSeeder
         {
             if (!await context.Actions.AnyAsync(a => a.Name == action.Name))
             {
-                context.Actions.Add(new Domain.Action
+                context.Actions.Add(new Farm.Infrastructure.Domain.Action
                 {
                     Id = Guid.NewGuid(),
                     Name = action.Name,
@@ -137,11 +138,11 @@ public static class AuthenticationDataSeeder
         if (adminRole != null)
         {
             List<Resource> allResources = await context.Resources.ToListAsync();
-            Domain.Action? adminAction = await context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
+            Farm.Infrastructure.Domain.Action? adminAction = await context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
 
             if (adminAction != null)
             {
-                foreach (Resource? resource in allResources)
+                foreach (Resource resource in allResources)
                 {
                     if (!await context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == adminRole.Id && rp.ResourceId == resource.Id && rp.ActionId == adminAction.Id))
@@ -178,7 +179,7 @@ public static class AuthenticationDataSeeder
             foreach ((string? resourceName, string? actionName) in userPermissions)
             {
                 Resource? resource = await context.Resources.FirstOrDefaultAsync(r => r.Name == resourceName);
-                Domain.Action? action = await context.Actions.FirstOrDefaultAsync(a => a.Name == actionName);
+                Farm.Infrastructure.Domain.Action? action = await context.Actions.FirstOrDefaultAsync(a => a.Name == actionName);
 
                 if (resource != null && action != null)
                 {

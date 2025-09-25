@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -8,19 +8,13 @@ namespace Farm.Web.Api.Services;
 /// Background service to monitor harvest operations and mark them as completed
 /// when all files are processed
 /// </summary>
-public class HarvestCompletionService : BackgroundService
+public class HarvestCompletionService(
+    IServiceProvider serviceProvider,
+    ILogger<HarvestCompletionService> logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<HarvestCompletionService> _logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILogger<HarvestCompletionService> _logger = logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
-
-    public HarvestCompletionService(
-        IServiceProvider serviceProvider,
-        ILogger<HarvestCompletionService> logger)
-    {
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

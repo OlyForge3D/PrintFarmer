@@ -1,7 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Farm.Infrastructure;

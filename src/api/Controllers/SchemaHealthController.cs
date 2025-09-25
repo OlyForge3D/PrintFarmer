@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Data;
+﻿using Farm.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -7,13 +7,9 @@ namespace Farm.Web.Api.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class SchemaHealthController : ControllerBase
+public class SchemaHealthController(AppDbContext dbContext) : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
-    public SchemaHealthController(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+    private readonly AppDbContext _dbContext = dbContext;
 
     [HttpGet("ready")]
     public async Task<IActionResult> SchemaReadyAsync(CancellationToken ct)

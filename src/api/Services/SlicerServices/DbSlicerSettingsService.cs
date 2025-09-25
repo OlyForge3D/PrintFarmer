@@ -1,8 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.FileProviders;

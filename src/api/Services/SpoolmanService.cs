@@ -1,27 +1,19 @@
 ﻿using System.Globalization;
 using System.Net;
 using System.Text.Json;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
-public class SpoolmanService : ISpoolmanService
+public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanService> logger, INetworkDiscoverySettingsService networkSettings) : ISpoolmanService
 {
-    private readonly HttpClient http;
-    private readonly AppDbContext db;
-    private readonly ILogger<SpoolmanService> logger;
-    private readonly INetworkDiscoverySettingsService networkSettings;
-
-    public SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanService> logger, INetworkDiscoverySettingsService networkSettings)
-    {
-        this.http = http;
-        this.db = db;
-        this.logger = logger;
-        this.networkSettings = networkSettings;
-    }
+    private readonly HttpClient http = http;
+    private readonly AppDbContext db = db;
+    private readonly ILogger<SpoolmanService> logger = logger;
+    private readonly INetworkDiscoverySettingsService networkSettings = networkSettings;
 
     public SpoolmanConfigDto? GetConfig()
     {

@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;

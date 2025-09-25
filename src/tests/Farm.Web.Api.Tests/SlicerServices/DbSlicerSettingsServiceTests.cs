@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;

@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Farm.Infrastructure.Domain;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Data.Extensions;
 
@@ -14,7 +15,7 @@ public static class ModelBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         // Printer table optimizations
-        modelBuilder.Entity<Farm.Web.Api.Domain.Printer>(entity =>
+        modelBuilder.Entity<Printer>(entity =>
         {
             // Index for frequently queried fields
             entity.HasIndex(p => p.Backend)
@@ -41,7 +42,7 @@ public static class ModelBuilderExtensions
         });
 
         // Manufacturer table optimizations
-        modelBuilder.Entity<Farm.Web.Api.Domain.Manufacturer>(entity =>
+        modelBuilder.Entity<Manufacturer>(entity =>
         {
             entity.HasIndex(m => m.Name)
                   .IsUnique()
@@ -52,7 +53,7 @@ public static class ModelBuilderExtensions
         });
 
         // Model table optimizations
-        modelBuilder.Entity<Farm.Web.Api.Domain.PrinterModel>(entity =>
+        modelBuilder.Entity<PrinterModel>(entity =>
         {
             entity.HasIndex(m => m.ManufacturerId)
                   .HasDatabaseName("IX_Models_ManufacturerId");
@@ -111,11 +112,11 @@ public static class ModelBuilderExtensions
     private static void ConfigureSqlServerOptimizations(ModelBuilder modelBuilder)
     {
         // SQL Server-specific optimizations
-        modelBuilder.Entity<Farm.Web.Api.Domain.Printer>(entity =>
+        modelBuilder.Entity<Printer>(entity =>
         {
             // Use included columns for covering indexes (SQL Server specific)
             entity.HasIndex(p => p.Backend)
-                  .HasDatabaseName("IX_Printers_Backend_Covering");
+                .HasDatabaseName("IX_Printers_Backend_Covering");
         });
     }
 

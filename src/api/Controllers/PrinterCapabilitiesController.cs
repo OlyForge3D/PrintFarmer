@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;

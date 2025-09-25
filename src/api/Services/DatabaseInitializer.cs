@@ -1,5 +1,5 @@
-﻿using System.Data.Common;
-using Farm.Web.Api.Data;
+﻿using Farm.Infrastructure.Data;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -7,18 +7,11 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
-public class DatabaseInitializer
+public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializer> logger, DatabaseSeeder seeder)
 {
-    private readonly AppDbContext _context;
-    private readonly ILogger<DatabaseInitializer> _logger;
-    private readonly DatabaseSeeder _seeder;
-
-    public DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializer> logger, DatabaseSeeder seeder)
-    {
-        _context = context;
-        _logger = logger;
-        _seeder = seeder;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly ILogger<DatabaseInitializer> _logger = logger;
+    private readonly DatabaseSeeder _seeder = seeder;
 
     /// <summary>
     /// Initialize database with retry logic for container startup scenarios

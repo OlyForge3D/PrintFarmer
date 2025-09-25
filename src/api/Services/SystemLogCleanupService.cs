@@ -5,23 +5,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Data;
 
 namespace Farm.Web.Api.Services;
 
-public class SystemLogCleanupService : BackgroundService
+public class SystemLogCleanupService(IServiceProvider serviceProvider, ILogger<SystemLogCleanupService> logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<SystemLogCleanupService> _logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILogger<SystemLogCleanupService> _logger = logger;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(6); // Run every 6 hours
-    private readonly int _retentionDays;
-
-    public SystemLogCleanupService(IServiceProvider serviceProvider, ILogger<SystemLogCleanupService> logger)
-    {
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-        _retentionDays = 30; // Default retention, can be made configurable
-    }
+    private readonly int _retentionDays = 30;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -37,7 +30,7 @@ public class SystemLogCleanupService : BackgroundService
                 {
                     db.SystemLogs.RemoveRange(oldLogs);
                     await db.SaveChangesAsync(stoppingToken);
-                    _logger.LogInformation($"SystemLogCleanupService: Deleted {oldLogs.Count} logs older than {cutoff}");
+                    _logger.LogInformation("SystemLogCleanupService: Deleted {Count} logs older than {Cutoff}", oldLogs.Count, cutoff);
                 }
             }
             catch (Exception ex)

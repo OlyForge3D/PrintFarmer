@@ -1,6 +1,7 @@
 ﻿using System.Security.Cryptography;
 using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -118,13 +119,13 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
                 .Include(g => g.TargetModel)
                 .FirstOrDefaultAsync(g => g.Id == id);
 
-            if (file == null)
+            if (file is null)
             {
                 return NotFound($"G-code file with ID {id} not found");
             }
 
             return Ok(new GcodeFileDto(
-                Id: file.Id,
+                Id: file!.Id,
                 OriginalFileName: file.OriginalFileName,
                 DisplayName: file.DisplayName,
                 FileSizeBytes: file.FileSizeBytes,
@@ -198,7 +199,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
 
             // Check for duplicate
             GcodeFile? existing = await db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash);
-            if (existing != null)
+            if (existing is not null)
             {
                 return Conflict($"File already exists in library: {existing.DisplayName}");
             }

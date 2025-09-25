@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Telemetry;
 using Microsoft.EntityFrameworkCore;
@@ -10,22 +10,15 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Background service that periodically updates dynamic printer capabilities
 /// </summary>
-public class PrinterCapabilityUpdateService : BackgroundService
+public class PrinterCapabilityUpdateService(
+    IServiceProvider serviceProvider,
+    ILogger<PrinterCapabilityUpdateService> logger,
+    IPrintFarmerTelemetryService telemetry) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<PrinterCapabilityUpdateService> _logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILogger<PrinterCapabilityUpdateService> _logger = logger;
     private readonly TimeSpan _updateInterval = TimeSpan.FromMinutes(15); // Update every 15 minutes
-    private readonly IPrintFarmerTelemetryService _telemetry;
-
-    public PrinterCapabilityUpdateService(
-        IServiceProvider serviceProvider,
-        ILogger<PrinterCapabilityUpdateService> logger,
-        IPrintFarmerTelemetryService telemetry)
-    {
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-        _telemetry = telemetry;
-    }
+    private readonly IPrintFarmerTelemetryService _telemetry = telemetry;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
