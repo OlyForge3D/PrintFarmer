@@ -10,6 +10,7 @@ using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 using Farm.Web.Api.Hubs;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -22,7 +23,7 @@ public partial class GcodeHarvestService(
     IMoonrakerClient moonraker,
     IPrusaLinkClient prusa,
     ISdcpClient sdcp,
-    ILogger<GcodeHarvestService> logger,
+    IUnifiedLoggingService logger,
     IServiceScopeFactory serviceScopeFactory,
     IHarvestQueue harvestQueue,
     IHubContext<HarvestHub> harvestHub) : IGcodeHarvestService
@@ -97,7 +98,7 @@ public partial class GcodeHarvestService(
     private readonly IMoonrakerClient _moonraker = moonraker;
     private readonly IPrusaLinkClient _prusa = prusa;
     private readonly ISdcpClient _sdcp = sdcp;
-    private readonly ILogger<GcodeHarvestService> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IHarvestQueue _harvestQueue = harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
@@ -108,10 +109,10 @@ public partial class GcodeHarvestService(
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
     {
-        _logger.LogInformation("🔥 StartHarvestAsync CALLED for printer ID: {PrinterId}", request?.PrinterId);
+    _logger.LogInformation("🔥 StartHarvestAsync CALLED for printer ID: {PrinterId}", (object)(request?.PrinterId ?? Guid.Empty));
         ArgumentNullException.ThrowIfNull(request);
         Printer? printer = await _db.Printers.FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
-        _logger.LogInformation("🔍 Found printer: {PrinterName} (ID: {PrinterId})", printer?.Name ?? "NULL", printer?.Id);
+    _logger.LogInformation("🔍 Found printer: {PrinterName} (ID: {PrinterId})", (object)(printer?.Name ?? "NULL"), (object)(printer?.Id ?? Guid.Empty));
         if (printer == null)
         {
             return new GcodeHarvestResultDto(Guid.Empty, false, "Printer not found");
@@ -215,7 +216,7 @@ public partial class GcodeHarvestService(
         IMoonrakerClient scopedMoonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
         IPrusaLinkClient scopedPrusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
         ISdcpClient scopedSdcp = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
-        ILogger<GcodeHarvestService> scopedLogger = scope.ServiceProvider.GetRequiredService<ILogger<GcodeHarvestService>>();
+        var scopedLogger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
 
         try
         {
@@ -392,7 +393,7 @@ public partial class GcodeHarvestService(
 
     private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath, IMoonrakerClient? moonraker, IPrusaLinkClient? prusa, ISdcpClient? sdcp)
     {
-        ILogger<GcodeHarvestService> log = _logger;
+        IUnifiedLoggingService log = _logger;
         try
         {
             return backend switch
@@ -834,9 +835,9 @@ public partial class GcodeHarvestService(
 
     // (moved below to be adjacent to the other overload)
 
-    private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IMoonrakerClient? moonraker = null, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IMoonrakerClient? moonraker = null, IUnifiedLoggingService? logger = null)
     {
-        ILogger<GcodeHarvestService> log = logger ?? _logger;
+        IUnifiedLoggingService log = logger ?? _logger;
         IMoonrakerClient client = moonraker ?? _moonraker;
 
         try
@@ -859,9 +860,9 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private async Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string filePath, IPrusaLinkClient? prusa = null, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string filePath, IPrusaLinkClient? prusa = null, IUnifiedLoggingService? logger = null)
     {
-        ILogger<GcodeHarvestService> log = logger ?? _logger;
+        IUnifiedLoggingService log = logger ?? _logger;
         _ = prusa; // explicitly discard unused optional client parameter
 
         try
@@ -879,15 +880,15 @@ public partial class GcodeHarvestService(
     }
 
     // Overload to satisfy call sites that include an apiKey param (currently unused by implementation)
-    private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient? prusa = null, ILogger<GcodeHarvestService>? logger = null)
+    private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient? prusa = null, IUnifiedLoggingService? logger = null)
     {
         _ = apiKey; // explicitly discard unused
         return DownloadPrusaLinkFileAsync(serverUrl, filePath, prusa, logger);
     }
 
-    private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, IUnifiedLoggingService? logger = null)
     {
-        ILogger<GcodeHarvestService> log = logger ?? _logger;
+        IUnifiedLoggingService log = logger ?? _logger;
         try
         {
             // SDCP file download implementation would go here
@@ -903,17 +904,17 @@ public partial class GcodeHarvestService(
     }
 
     // Overload to satisfy call sites expecting a client and pass-through logger
-    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient? sdcp, ILogger<GcodeHarvestService>? logger = null)
+    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient? sdcp, IUnifiedLoggingService? logger = null)
     {
         _ = sdcp; // explicitly discard unused
         return DownloadSdcpFileAsync(serverUrl, filePath, logger);
     }
 
     // Helper methods for different printer backends
-    private async Task<List<PrinterFileInfo>> GetMoonrakerFilesAsync(string serverUrl, IMoonrakerClient? moonraker = null, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<List<PrinterFileInfo>> GetMoonrakerFilesAsync(string serverUrl, IMoonrakerClient? moonraker = null, IUnifiedLoggingService? logger = null)
     {
         IMoonrakerClient client = moonraker ?? _moonraker;
-        ILogger<GcodeHarvestService> log = logger ?? _logger;
+        IUnifiedLoggingService log = logger ?? _logger;
 
         try
         {
@@ -924,7 +925,7 @@ public partial class GcodeHarvestService(
             log.LogInformation("Calling GetDirectoryAsync for gcodes directory with retry");
             DirectoryInfo? directoryInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
                 () => client.GetDirectoryAsync(serverUrl, "gcodes", extended: true),
-                logger: log,
+                logger: null,
                 operationName: $"GetDirectoryAsync for gcodes directory at {serverUrl}");
 
             log.LogInformation("GetDirectoryAsync completed, directoryInfo is {IsNull}", directoryInfo == null ? "null" : "not null");
@@ -950,7 +951,7 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private static async Task CollectFilesRecursivelyWithRetryAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient client, ILogger log)
+    private static async Task CollectFilesRecursivelyWithRetryAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient client, IUnifiedLoggingService log)
     {
         log.LogInformation("🔍 CollectFilesRecursivelyWithRetryAsync called for {BasePath}, starting with {CurrentFileCount} files", basePath, files.Count);
 
@@ -993,7 +994,7 @@ public partial class GcodeHarvestService(
                     // Get subdirectory info with retry
                     DirectoryInfo? subDirInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
                         () => client.GetDirectoryAsync(serverUrl, subDirPath, extended: true),
-                        logger: log,
+                        logger: null,
                         operationName: $"GetDirectoryAsync for subdirectory {subDirPath}");
 
                     if (subDirInfo != null)
@@ -1060,7 +1061,7 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private static async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient moonraker, ILogger<GcodeHarvestService> logger)
+    private static async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient moonraker, IUnifiedLoggingService logger)
     {
         // Add files from current directory
         if (directory.Files != null)
@@ -1099,10 +1100,10 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private async Task<List<PrinterFileInfo>> GetPrusaLinkFilesAsync(string serverUrl, string? apiKey, IPrusaLinkClient? prusa = null, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<List<PrinterFileInfo>> GetPrusaLinkFilesAsync(string serverUrl, string? apiKey, IPrusaLinkClient? prusa = null, IUnifiedLoggingService? logger = null)
     {
         IPrusaLinkClient client = prusa ?? _prusa;
-        ILogger<GcodeHarvestService> log = logger ?? _logger;
+        IUnifiedLoggingService log = logger ?? _logger;
 
         try
         {
@@ -1125,9 +1126,9 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private async Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ILogger<GcodeHarvestService>? logger = null)
+    private async Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, IUnifiedLoggingService? logger = null)
     {
-        ILogger<GcodeHarvestService> log = logger ?? _logger;
+        IUnifiedLoggingService log = logger ?? _logger;
         try
         {
             // SDCP implementation would go here
@@ -1143,7 +1144,7 @@ public partial class GcodeHarvestService(
     }
 
     // Overload to satisfy call sites expecting a client and pass-through logger
-    private Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ISdcpClient? sdcp, ILogger<GcodeHarvestService>? logger = null)
+    private Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ISdcpClient? sdcp, IUnifiedLoggingService? logger = null)
     {
         _ = sdcp; // explicitly discard unused
         return GetSdcpFilesAsync(serverUrl, logger);

@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.Authentication;
 
@@ -13,12 +14,12 @@ public class AuthenticationService(
     AppDbContext context,
     IPasswordHashingService passwordHashing,
     IConfiguration configuration,
-    ILogger<AuthenticationService> logger) : IAuthenticationService
+    IUnifiedLoggingService logger) : IAuthenticationService
 {
     private readonly AppDbContext _context = context;
     private readonly IPasswordHashingService _passwordHashing = passwordHashing;
     private readonly IConfiguration _configuration = configuration;
-    private readonly ILogger<AuthenticationService> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {
@@ -144,7 +145,7 @@ public class AuthenticationService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during registration for username: {Username}", request?.Username);
+            _logger.LogError(ex, "Error during registration for username: {Username}", (object)(request?.Username ?? "NULL"));
             return new AuthenticationResult(false, Error: "Registration service error");
         }
     }

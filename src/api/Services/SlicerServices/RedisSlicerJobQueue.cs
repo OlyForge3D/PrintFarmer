@@ -1,6 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Web.Shared;
+using Farm.Infrastructure.Telemetry;
 using StackExchange.Redis;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -8,10 +9,10 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// <summary>
 /// Redis-based implementation of the slicer job queue
 /// </summary>
-public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlicerJobQueue> logger) : ISlicerJobQueue
+public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingService logger) : ISlicerJobQueue
 {
     private readonly IDatabase _database = redis.GetDatabase();
-    private readonly ILogger<RedisSlicerJobQueue> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Redis keys
     // Keys retained for future expansion (currently used in stats operations)
@@ -84,12 +85,11 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
                 await _database.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
             }
 
-            _logger.LogInformation("Enqueued slicing job {JobId} with priority {Priority} for engine {Engine} (correlation {CorrelationId})",
-                job.Id, job.Priority, job.SlicerEngine, job.CorrelationId);
+            _logger.LogInformation($"Enqueued slicing job {job.Id} with priority {job.Priority} for engine {job.SlicerEngine} (correlation {job.CorrelationId})");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to enqueue slicing job {JobId}", job.Id);
+            _logger.LogError(ex, $"Failed to enqueue slicing job {job.Id}");
             throw;
         }
     }
@@ -133,14 +133,14 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
 
                 await UpdateJobAsync(job);
 
-                _logger.LogInformation("Dequeued slicing job {JobId} for worker {WorkerId}", job.Id, workerId);
+                _logger.LogInformation($"Dequeued slicing job {job.Id} for worker {workerId}");
             }
 
             return job;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to dequeue job for worker {WorkerId}", workerId);
+            _logger.LogError(ex, $"Failed to dequeue job for worker {workerId}");
             throw;
         }
     }
@@ -169,11 +169,11 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
 
             await UpdateJobAsync(job);
 
-            _logger.LogInformation("Completed slicing job {JobId} with status {Status}", job.Id, job.Status);
+            _logger.LogInformation($"Completed slicing job {job.Id} with status {job.Status}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to complete job {JobId}", job.Id);
+            _logger.LogError(ex, $"Failed to complete job {job.Id}");
             throw;
         }
     }
@@ -185,7 +185,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
             DistributedSlicingJob? job = await GetJobAsync(jobId, cancellationToken);
             if (job == null)
             {
-                _logger.LogWarning("Cannot fail job {JobId} - job not found", jobId);
+                _logger.LogWarning($"Cannot fail job {jobId} - job not found");
                 return;
             }
 
@@ -195,7 +195,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fail job {JobId}", jobId);
+            _logger.LogError(ex, $"Failed to fail job {jobId}");
             throw;
         }
     }
@@ -226,11 +226,11 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
                 await UpdateJobAsync(job);
             }
 
-            _logger.LogDebug("Updated progress for job {JobId}: {Progress}%", jobId, progress);
+            _logger.LogDebug($"Updated progress for job {jobId}: {progress}%");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to update progress for job {JobId}", jobId);
+            _logger.LogError(ex, $"Failed to update progress for job {jobId}");
             throw;
         }
     }
@@ -249,7 +249,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get job {JobId}", jobId);
+            _logger.LogError(ex, $"Failed to get job {jobId}");
             throw;
         }
     }
@@ -261,7 +261,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
             DistributedSlicingJob? job = await GetJobAsync(jobId, cancellationToken);
             if (job == null)
             {
-                _logger.LogWarning("Cannot cancel job {JobId} - job not found", jobId);
+                _logger.LogWarning($"Cannot cancel job {jobId} - job not found");
                 return;
             }
 
@@ -277,11 +277,11 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
 
             await UpdateJobAsync(job);
 
-            _logger.LogInformation("Cancelled slicing job {JobId}", jobId);
+            _logger.LogInformation($"Cancelled slicing job {jobId}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cancel job {JobId}", jobId);
+            _logger.LogError(ex, $"Failed to cancel job {jobId}");
             throw;
         }
     }
@@ -337,7 +337,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get user jobs for {UserId}", userId);
+            _logger.LogError(ex, $"Failed to get user jobs for {userId}");
             throw;
         }
     }
@@ -351,8 +351,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
             long removedCompleted = await _database.SortedSetRemoveRangeByScoreAsync(_completedKey, 0, cutoffTimestamp);
             long removedFailed = await _database.SortedSetRemoveRangeByScoreAsync(_failedKey, 0, cutoffTimestamp);
 
-            _logger.LogInformation("Cleaned up {CompletedCount} completed and {FailedCount} failed jobs older than {MaxAge}",
-                removedCompleted, removedFailed, maxAge);
+            _logger.LogInformation($"Cleaned up {removedCompleted} completed and {removedFailed} failed jobs older than {maxAge}");
         }
         catch (Exception ex)
         {
@@ -385,7 +384,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
                 }
             }
 
-            _logger.LogInformation("Requeued {Count} failed jobs for retry", requeuedCount);
+            _logger.LogInformation($"Requeued {requeuedCount} failed jobs for retry");
         }
         catch (Exception ex)
         {
@@ -451,7 +450,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
                 double jitterFactor = minFactor + ((RandomNumberGenerator.GetInt32(0, 1_000_000) / 1_000_000.0) * (maxFactor - minFactor));
                 int scheduledSeconds = Math.Max(1, (int)Math.Round(baseSeconds * jitterFactor));
                 job.ScheduledAt = DateTime.UtcNow.AddSeconds(scheduledSeconds);
-                _logger.LogDebug("Applied jitter to scheduled retry for job {JobId}: base={BaseSeconds}s jitterPercent={JitterPercent}% jitterFactor={JitterFactor:F2} scheduledIn={ScheduledSeconds}s", job.Id, baseSeconds, jitter * 100.0, jitterFactor, scheduledSeconds);
+                _logger.LogDebug($"Applied jitter to scheduled retry for job {job.Id}: base={baseSeconds}s jitterPercent={jitter * 100.0}% jitterFactor={jitterFactor:F2} scheduledIn={scheduledSeconds}s");
             }
             else
             {
@@ -461,11 +460,11 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
             // Enqueue with updated scheduledAt which influences priority score and thus acts as a delayed enqueue
             await EnqueueAsync(job, cancellationToken);
 
-            _logger.LogInformation("Requeued job {JobId} for retry (retryCount={RetryCount}, scheduledInSeconds={Delay})", job.Id, job.RetryCount, delay?.TotalSeconds ?? 0);
+            _logger.LogInformation($"Requeued job {job.Id} for retry (retryCount={job.RetryCount}, scheduledInSeconds={delay?.TotalSeconds ?? 0})");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to requeue job {JobId}", job.Id);
+            _logger.LogError(ex, $"Failed to requeue job {job.Id}");
             throw;
         }
     }
@@ -524,7 +523,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to find existing job for correlation {CorrelationId}", correlationId);
+            _logger.LogError(ex, $"Failed to find existing job for correlation {correlationId}");
             throw;
         }
     }
@@ -538,7 +537,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, ILogger<RedisSlic
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to check job existence for correlation {CorrelationId}", correlationId);
+            _logger.LogError(ex, $"Failed to check job existence for correlation {correlationId}");
             throw;
         }
     }

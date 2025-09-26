@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
@@ -109,20 +110,11 @@ public class SdcpAckResult
     public int Ack { get; set; }
 }
 
-public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger) : PrinterClientBase, ISdcpClient
+
+public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient
 {
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera URL for {BaseUrl}")]
-    private static partial void LogCameraUrlError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get camera snapshot URL for {BaseUrl}")]
-    private static partial void LogCameraSnapshotUrlError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to send SDCP command {Command} to {BaseUrl}")]
-    private static partial void LogCommandError(ILogger logger, Exception exception, int command, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to get SDCP status from {BaseUrl}")]
-    private static partial void LogStatusError(ILogger logger, Exception exception, string baseUrl);
-
+    private readonly HttpClient httpClient = httpClient;
+    private readonly IUnifiedLoggingService _logger = logger;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP
@@ -503,7 +495,7 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogCameraUrlError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "Failed to get camera URL for {BaseUrl}", baseUrl);
         }
         return null;
     }
@@ -580,7 +572,7 @@ public sealed partial class SdcpClient(HttpClient httpClient, ILogger<SdcpClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogCameraSnapshotUrlError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "Failed to get camera snapshot URL for {BaseUrl}", baseUrl);
         }
         return null;
     }

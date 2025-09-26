@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
@@ -24,99 +25,24 @@ public partial class NetworkDiscoveryService(
     IHubContext<PrinterHub> hubContext,
     IDiscoveryProgressCache progressCache,
     IServiceScopeFactory scopeFactory,
-    ILogger<NetworkDiscoveryService> logger) : INetworkDiscoveryService
+    IUnifiedLoggingService logger) : INetworkDiscoveryService
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Starting printer network discovery...")]
-    private static partial void LogDiscoveryStarting(ILogger logger);
+    private readonly MoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly PrusaLinkClient _prusaLinkClient = prusaLinkClient;
+    private readonly INetworkDiscoverySettingsService _settingsService = settingsService;
+    private readonly IHubContext<PrinterHub> _hubContext = hubContext;
+    private readonly IDiscoveryProgressCache _progressCache = progressCache;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+    private readonly IUnifiedLoggingService _logger = logger;
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}")]
-    private static partial void LogDiscoverySettings(ILogger logger, string networks, int timeoutMs, int maxScans, string ports);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Scanning network: {Network}")]
-    private static partial void LogScanningNetwork(ILogger logger, string network);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Network {Network} scan completed. Found {Count} printers")]
-    private static partial void LogNetworkScanCompleted(ILogger logger, string network, int count);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Network discovery completed. Found {Count} printers")]
-    private static partial void LogDiscoveryCompleted(ILogger logger, int count);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Network {Network} contains {HostCount} hosts to scan")]
-    private static partial void LogNetworkHostCount(ILogger logger, string network, int hostCount);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Scanning host: {Host}")]
-    private static partial void LogScanningHost(ILogger logger, string host);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Found printer at {Host}:{Port} - {Name} ({Backend})")]
-    private static partial void LogFoundPrinter(ILogger logger, string host, int port, string name, PrinterBackend backend);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to scan network: {Network}")]
-    private static partial void LogNetworkScanError(ILogger logger, Exception exception, string network);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to scan host {Host}")]
-    private static partial void LogHostScanError(ILogger logger, Exception exception, string host);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Attempting discovery at {BaseUrl}")]
-    private static partial void LogAttemptingDiscovery(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Testing Moonraker at {BaseUrl}")]
-    private static partial void LogTestingMoonraker(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered Moonraker printer at {BaseUrl}")]
-    private static partial void LogDiscoveredMoonraker(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "No Moonraker response from {BaseUrl}")]
-    private static partial void LogNoMoonrakerResponse(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Testing PrusaLink at {BaseUrl}")]
-    private static partial void LogTestingPrusaLink(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered PrusaLink printer at {BaseUrl}")]
-    private static partial void LogDiscoveredPrusaLink(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "No PrusaLink response from {BaseUrl}")]
-    private static partial void LogNoPrusaLinkResponse(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Testing Moonraker on port 80 at {BaseUrl}")]
-    private static partial void LogTestingMoonrakerPort80(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully discovered Moonraker printer on port 80 at {BaseUrl}")]
-    private static partial void LogDiscoveredMoonrakerPort80(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "No Moonraker response on port 80 from {BaseUrl}")]
-    private static partial void LogNoMoonrakerResponsePort80(ILogger logger, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to discover printer at {BaseUrl}")]
-    private static partial void LogDiscoveryError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Moonraker discovery failed for {BaseUrl}")]
-    private static partial void LogMoonrakerDiscoveryError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink discovery failed for {BaseUrl}")]
-    private static partial void LogPrusaLinkDiscoveryError(ILogger logger, Exception exception, string baseUrl);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Starting multi-network scan for {NetworkCount} networks: {Networks}")]
-    private static partial void LogMultiNetworkScanStarting(ILogger logger, int networkCount, string networks);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Progress after {Network}: {ScannedIps}/{TotalIps} IPs ({Progress:F1}%), {FoundPrinters} total")]
-    private static partial void LogNetworkProgress(ILogger logger, string network, int scannedIps, int totalIps, double progress, int foundPrinters);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Discovery cancelled during {Network} scan after {ScannedIps}/{TotalIps} IPs")]
-    private static partial void LogDiscoveryCancelled(ILogger logger, string network, int scannedIps, int totalIps);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to scan network {Network}, continuing with next network. Scanned {ScannedIps}/{TotalIps} IPs so far")]
-    private static partial void LogNetworkScanContinue(ILogger logger, string network, int scannedIps, int totalIps);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Multi-network scan complete: {ScannedIps}/{TotalIps} IPs, {FoundPrinters} printers")]
-    private static partial void LogMultiNetworkScanComplete(ILogger logger, int scannedIps, int totalIps, int foundPrinters);
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)
     {
-        LogDiscoveryStarting(logger);
+        _logger.LogInformation("Starting printer network discovery...");
 
         // Gather existing printers to exclude from results (fresh scope for safety)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
 
-        NetworkDiscoverySettingsDto settings = settingsService.GetSettings();
+        NetworkDiscoverySettingsDto settings = _settingsService.GetSettings();
         // Auto-detect network ranges if none configured
         if (settings.NetworkRanges.Count == 0)
         {
@@ -124,27 +50,27 @@ public partial class NetworkDiscoveryService(
             if (autoRanges.Count > 0)
             {
                 settings.NetworkRanges.AddRange(autoRanges);
-                logger.LogInformation("Auto-detected {Count} network range(s) for discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
+                _logger.LogInformation("Auto-detected {Count} network range(s) for discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
             }
             else
             {
-                logger.LogWarning("No network ranges configured and none could be auto-detected. Discovery will return empty result.");
+                _logger.LogWarning("No network ranges configured and none could be auto-detected. Discovery will return empty result.");
                 return [];
             }
         }
-        LogDiscoverySettings(logger, string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
+        _logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}", string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
 
         List<DiscoveredPrinterDto> discovered = new();
 
         foreach (string network in settings.NetworkRanges)
         {
-            LogScanningNetwork(logger, network);
+            _logger.LogInformation("Scanning network: {Network}", network);
             List<DiscoveredPrinterDto> networkPrinters = await ScanNetworkAsync(network, settings, existingServerUrls, cancellationToken);
-            LogNetworkScanCompleted(logger, network, networkPrinters.Count);
+            _logger.LogInformation("Network {Network} scan completed. Found {Count} printers", network, networkPrinters.Count);
             discovered.AddRange(networkPrinters);
         }
 
-        LogDiscoveryCompleted(logger, discovered.Count);
+        _logger.LogInformation("Network discovery completed. Found {Count} printers", discovered.Count);
         if (discovered.Count == 0)
         {
             return new List<DiscoveredPrinterDto>();
@@ -155,12 +81,12 @@ public partial class NetworkDiscoveryService(
 
     public async Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        LogDiscoveryStarting(logger);
+        _logger.LogInformation("Starting printer network discovery...");
 
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
 
-        NetworkDiscoverySettingsDto settings = settingsService.GetSettings();
+        NetworkDiscoverySettingsDto settings = _settingsService.GetSettings();
         bool autoDetectedNetworks = false;
         // Auto-detect network ranges if none configured
         if (settings.NetworkRanges.Count == 0)
@@ -170,14 +96,14 @@ public partial class NetworkDiscoveryService(
             {
                 settings.NetworkRanges.AddRange(autoRanges);
                 autoDetectedNetworks = true;
-                logger.LogInformation("Auto-detected {Count} network range(s) for streaming discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
+                _logger.LogInformation("Auto-detected {Count} network range(s) for streaming discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
             }
             else
             {
-                logger.LogWarning("No network ranges configured and none could be auto-detected. Streaming discovery will send immediate completion.");
+                _logger.LogWarning("No network ranges configured and none could be auto-detected. Streaming discovery will send immediate completion.");
             }
         }
-        LogDiscoverySettings(logger, string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
+        _logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}", string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
 
         int totalIps = 0;
         int scannedIps = 0;
@@ -213,8 +139,8 @@ public partial class NetworkDiscoveryService(
             settings.NetworkRanges,
             autoDetectedNetworks
         );
-        progressCache.Set(sessionId, initialProgress);
-        await hubContext.Clients
+        _progressCache.Set(sessionId, initialProgress);
+        await _hubContext.Clients
             .Group($"discovery-{sessionId}")
             .SendAsync(
                 "DiscoveryProgress",
@@ -223,11 +149,11 @@ public partial class NetworkDiscoveryService(
 
         int excludedPrinters = 0; // count of printers skipped because already present
 
-        LogMultiNetworkScanStarting(logger, settings.NetworkRanges.Count, string.Join(", ", settings.NetworkRanges));
+        _logger.LogInformation("Starting multi-network scan for {NetworkCount} networks: {Networks}", settings.NetworkRanges.Count, string.Join(", ", settings.NetworkRanges));
 
         foreach (string network in settings.NetworkRanges)
         {
-            LogScanningNetwork(logger, network);
+            _logger.LogInformation("Scanning network: {Network}", network);
 
             try
             {
@@ -242,24 +168,24 @@ public partial class NetworkDiscoveryService(
                 scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
                 foundPrinters += networkPrinters.Count;
 
-                LogNetworkScanCompleted(logger, network, networkPrinters.Count);
-                LogNetworkProgress(logger, network, scannedIps, totalIps, (double)scannedIps / totalIps * 100, foundPrinters);
+                _logger.LogInformation("Network {Network} scan completed. Found {Count} printers", network, networkPrinters.Count);
+                _logger.LogInformation("Progress after {Network}: {ScannedIps}/{TotalIps} IPs ({Progress:F1}%), {FoundPrinters} total", network, scannedIps, totalIps, (double)scannedIps / totalIps * 100, foundPrinters);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                logger.LogWarning("Discovery cancelled during {Network} scan after {ScannedIps}/{TotalIps} IPs", network, scannedIps, totalIps);
+                _logger.LogWarning("Discovery cancelled during {Network} scan after {ScannedIps}/{TotalIps} IPs", network, scannedIps, totalIps);
                 throw;
             }
             catch (Exception ex)
             {
-                LogNetworkScanError(logger, ex, network);
-                logger.LogWarning("Failed to scan network {Network}, continuing with next network. Scanned {ScannedIps}/{TotalIps} IPs so far", network, scannedIps, totalIps);
+                _logger.LogError(ex, "Failed to scan network: {Network}", network);
+                _logger.LogWarning("Failed to scan network {Network}, continuing with next network. Scanned {ScannedIps}/{TotalIps} IPs so far", network, scannedIps, totalIps);
                 // Continue with next network range instead of stopping entire discovery
                 continue;
             }
         }
 
-        logger.LogInformation("Multi-network scan complete: {ScannedIps}/{TotalIps} IPs, {FoundPrinters} printers", scannedIps, totalIps, foundPrinters);
+        _logger.LogInformation("Multi-network scan complete: {ScannedIps}/{TotalIps} IPs, {FoundPrinters} printers", scannedIps, totalIps, foundPrinters);
 
         // Emit a final progress snapshot with Completed status for clients that only listen to progress stream
         if (totalIps > 0)
@@ -278,14 +204,14 @@ public partial class NetworkDiscoveryService(
                 settings.NetworkRanges,
                 autoDetectedNetworks
             );
-            progressCache.Set(sessionId, finalProgress);
-            await hubContext.Clients
+            _progressCache.Set(sessionId, finalProgress);
+            await _hubContext.Clients
                 .Group($"discovery-{sessionId}")
                 .SendAsync("DiscoveryProgress", finalProgress, cancellationToken);
         }
 
         // Send completion signal
-        await hubContext.Clients
+        await _hubContext.Clients
             .Group($"discovery-{sessionId}")
             .SendAsync(
                 "DiscoveryCompleted",
@@ -303,8 +229,7 @@ public partial class NetworkDiscoveryService(
         // NOTE: Do not clear the cached progress immediately. Leaving the final Completed snapshot
         // allows late group joiners (e.g. tests or UI racing right after start) to still receive a
         // DiscoveryProgress event. A new discovery run will overwrite this entry anyway.
-
-        LogDiscoveryCompleted(logger, foundPrinters);
+        _logger.LogInformation("Network discovery completed. Found {Count} printers", foundPrinters);
     }
 
     private static HashSet<string> DetectLocalNetworks()
@@ -403,7 +328,7 @@ public partial class NetworkDiscoveryService(
         {
             (IPAddress? networkAddr, int cidr) = ParseCidr(network);
             List<string> hosts = GetHostsInRange(networkAddr, cidr);
-            LogNetworkHostCount(logger, network, hosts.Count);
+            _logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
 
             using SemaphoreSlim semaphore = new(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
             Task<DiscoveredPrinterDto?>[] tasks = hosts.Select(async host =>
@@ -411,11 +336,11 @@ public partial class NetworkDiscoveryService(
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    LogScanningHost(logger, host);
+                    _logger.LogDebug("Scanning host: {Host}", host);
                     DiscoveredPrinterDto? result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
                     if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
-                        LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
+                        _logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})", result.IpAddress, result.Port, result.Name, result.Backend);
                         // Exclude from future duplicates (within same run) in case multiple ports map
                         existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
                     }
@@ -432,11 +357,11 @@ public partial class NetworkDiscoveryService(
         }
         catch (FormatException ex)
         {
-            LogNetworkScanError(logger, ex, network);
+            _logger.LogError(ex, "Failed to scan network: {Network}", network);
         }
         catch (ArgumentException ex)
         {
-            LogNetworkScanError(logger, ex, network);
+            _logger.LogError(ex, "Failed to scan network: {Network}", network);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -445,7 +370,7 @@ public partial class NetworkDiscoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogNetworkScanError(logger, ex, network);
+            _logger.LogError(ex, "Failed to scan network: {Network}", network);
         }
 
         return discovered;
@@ -461,7 +386,7 @@ public partial class NetworkDiscoveryService(
         {
             (IPAddress? networkAddr, int cidr) = ParseCidr(network);
             List<string> hosts = GetHostsInRange(networkAddr, cidr);
-            LogNetworkHostCount(logger, network, hosts.Count);
+            _logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
 
             using SemaphoreSlim semaphore = new(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
             Task<DiscoveredPrinterDto?>[] tasks = hosts.Select(async host =>
@@ -469,7 +394,7 @@ public partial class NetworkDiscoveryService(
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    LogScanningHost(logger, host);
+                    _logger.LogDebug("Scanning host: {Host}", host);
 
                     // Send progress update for current IP
                     int currentScanned = Interlocked.Increment(ref scannedCount);
@@ -487,13 +412,13 @@ public partial class NetworkDiscoveryService(
                         settings.NetworkRanges,
                         autoDetectedNetworks
                     );
-                    progressCache.Set(sessionId, progressDto);
-                    await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", progressDto, cancellationToken);
+                    _progressCache.Set(sessionId, progressDto);
+                    await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", progressDto, cancellationToken);
 
                     DiscoveredPrinterDto? result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
                     if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
-                        LogFoundPrinter(logger, result.IpAddress, result.Port, result.Name, result.Backend);
+                        _logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})", result.IpAddress, result.Port, result.Name, result.Backend);
 
                         // Increment found printers count
                         Interlocked.Increment(ref foundCount);
@@ -502,7 +427,7 @@ public partial class NetworkDiscoveryService(
                         // Mark as seen to avoid duplicate notifications
                         existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
 
-                        await hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(sessionId, result), cancellationToken);
+                        await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(sessionId, result), cancellationToken);
                     }
                     else if (result != null)
                     {
@@ -522,11 +447,11 @@ public partial class NetworkDiscoveryService(
         }
         catch (FormatException ex)
         {
-            LogNetworkScanError(logger, ex, network);
+            _logger.LogError(ex, "Failed to scan network: {Network}", network);
         }
         catch (ArgumentException ex)
         {
-            LogNetworkScanError(logger, ex, network);
+            _logger.LogError(ex, "Failed to scan network: {Network}", network);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -535,7 +460,7 @@ public partial class NetworkDiscoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogNetworkScanError(logger, ex, network);
+            _logger.LogError(ex, "Failed to scan network: {Network}", network);
         }
 
         return discovered;
@@ -616,7 +541,7 @@ public partial class NetworkDiscoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogHostScanError(logger, ex, ipAddress);
+            _logger.LogDebug(ex, "Failed to scan host {Host}", ipAddress);
         }
 
         return null;
@@ -628,35 +553,35 @@ public partial class NetworkDiscoveryService(
 
         try
         {
-            LogAttemptingDiscovery(logger, baseUrl);
+            _logger.LogDebug("Attempting discovery at {BaseUrl}", baseUrl);
             // Only allow Moonraker discovery on port 7125
             if (port == 7125)
             {
-                LogTestingMoonraker(logger, baseUrl);
+                _logger.LogInformation("Testing Moonraker at {BaseUrl}", baseUrl);
                 PrinterInfo? moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (moonrakerInfo != null)
                 {
-                    LogDiscoveredMoonraker(logger, baseUrl);
+                    _logger.LogInformation("Successfully discovered Moonraker printer at {BaseUrl}", baseUrl);
                     return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
                 }
                 else
                 {
-                    LogNoMoonrakerResponse(logger, baseUrl);
+                    _logger.LogDebug("No Moonraker response from {BaseUrl}", baseUrl);
                 }
             }
             else if (port == 80)
             {
                 // Only allow PrusaLink on port 80. Ignore Moonraker on port 80.
-                LogTestingPrusaLink(logger, baseUrl);
+                _logger.LogInformation("Testing PrusaLink at {BaseUrl}", baseUrl);
                 PrinterInfo? prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
                 if (prusaInfo != null)
                 {
-                    LogDiscoveredPrusaLink(logger, baseUrl);
+                    _logger.LogInformation("Successfully discovered PrusaLink printer at {BaseUrl}", baseUrl);
                     return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.PrusaLink, prusaInfo);
                 }
                 else
                 {
-                    LogNoPrusaLinkResponse(logger, baseUrl);
+                    _logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
                     // Do NOT test for Moonraker on port 80 anymore. Intentionally skip.
                 }
             }
@@ -668,7 +593,7 @@ public partial class NetworkDiscoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "Failed to discover printer at {BaseUrl}", baseUrl);
         }
 
         return null;
@@ -682,7 +607,7 @@ public partial class NetworkDiscoveryService(
             cts.CancelAfter(timeoutMs);
 
             // Try to get printer info from Moonraker to get hostname and check if it's online
-            MoonrakerPrinterInfo? printerInfo = await moonrakerClient.GetPrinterInfoAsync(baseUrl, cts.Token);
+            MoonrakerPrinterInfo? printerInfo = await _moonrakerClient.GetPrinterInfoAsync(baseUrl, cts.Token);
             if (printerInfo != null && !string.IsNullOrEmpty(printerInfo.State))
             {
                 return new PrinterInfo
@@ -702,15 +627,15 @@ public partial class NetworkDiscoveryService(
         }
         catch (HttpRequestException ex)
         {
-            LogMoonrakerDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogMoonrakerDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogMoonrakerDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
         }
 
         return null;
@@ -724,7 +649,7 @@ public partial class NetworkDiscoveryService(
             cts.CancelAfter(timeoutMs);
 
             // Try to get info from PrusaLink API
-            Services.PrinterInfo info = await prusaLinkClient.ApiClient.GetInfoAsync(baseUrl, null, cts.Token);
+            Services.PrinterInfo info = await _prusaLinkClient.ApiClient.GetInfoAsync(baseUrl, null, cts.Token);
             if (info != null)
             {
                 return new PrinterInfo
@@ -744,15 +669,15 @@ public partial class NetworkDiscoveryService(
         }
         catch (HttpRequestException ex)
         {
-            LogPrusaLinkDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogPrusaLinkDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogPrusaLinkDiscoveryError(logger, ex, baseUrl);
+            _logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
         }
 
         return null;
@@ -845,7 +770,7 @@ public partial class NetworkDiscoveryService(
         try
         {
             // Prefer a fresh scope so we don't depend on the lifetime of the injected scoped context (especially for background discovery)
-            using IServiceScope scope = scopeFactory.CreateScope();
+            using IServiceScope scope = _scopeFactory.CreateScope();
             AppDbContext ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             List<string> urls = ctx.Printers.Select(p => p.ServerUrl).ToList();
             foreach (string? p in urls)
@@ -858,7 +783,7 @@ public partial class NetworkDiscoveryService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed loading existing printers for exclusion; proceeding without filter");
+            _logger.LogWarning(ex, "Failed loading existing printers for exclusion; proceeding without filter");
         }
         return existingServerUrls;
     }

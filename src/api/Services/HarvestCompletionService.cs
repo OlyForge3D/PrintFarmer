@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -10,10 +11,10 @@ namespace Farm.Web.Api.Services;
 /// </summary>
 public class HarvestCompletionService(
     IServiceProvider serviceProvider,
-    ILogger<HarvestCompletionService> logger) : BackgroundService
+    IUnifiedLoggingService logger) : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
-    private readonly ILogger<HarvestCompletionService> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

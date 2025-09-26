@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 
@@ -6,13 +7,13 @@ namespace Farm.Web.Api.Services;
 
 public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
 {
-    private readonly ILogger<NetworkDiscoverySettingsService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private NetworkDiscoverySettingsDto? _settings;
     private readonly string _path = Path.Combine(AppContext.BaseDirectory, "network.discovery.settings.json");
     private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
     private static readonly char[] PortSeparators = [',', ';', ' '];
 
-    public NetworkDiscoverySettingsService(ILogger<NetworkDiscoverySettingsService> logger)
+    public NetworkDiscoverySettingsService(IUnifiedLoggingService logger)
     {
         _logger = logger;
         try
@@ -77,6 +78,7 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
 
         // Validate settings before saving
         NetworkValidationResult validation = NetworkValidationService.ValidateSettings(settings);
+
 
         if (!validation.IsValid)
         {

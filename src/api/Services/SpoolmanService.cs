@@ -5,14 +5,15 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
-public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanService> logger, INetworkDiscoverySettingsService networkSettings) : ISpoolmanService
+public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingService logger, INetworkDiscoverySettingsService networkSettings) : ISpoolmanService
 {
     private readonly HttpClient http = http;
     private readonly AppDbContext db = db;
-    private readonly ILogger<SpoolmanService> logger = logger;
+    private readonly IUnifiedLoggingService logger = logger;
     private readonly INetworkDiscoverySettingsService networkSettings = networkSettings;
 
     public SpoolmanConfigDto? GetConfig()
@@ -89,7 +90,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug("Spoolman not configured – returning empty spool list");
+            logger.LogDebug($"Spoolman not configured – returning empty spool list");
             return [];
         }
 
@@ -114,11 +115,11 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
                 {
                     if (result.AttemptedPages > 1)
                     {
-                        logger.LogInformation("Retrieved {Count} spools across {Pages} pages via endpoint {Endpoint}", result.Items.Count, result.AttemptedPages, ep);
+                        logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages via endpoint {ep}");
                     }
                     else
                     {
-                        logger.LogDebug("Retrieved {Count} spools via endpoint {Endpoint}", result.Items.Count, ep);
+                        logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}");
                     }
                     return result.Items;
                 }
@@ -126,20 +127,20 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
                 // If zero AND status success we still try next candidate, but log once
                 if (result.Success && result.Items.Count == 0)
                 {
-                    logger.LogWarning("Spoolman endpoint {Endpoint} returned 0 spools (status {Status}). Trying next candidate…", ep, result.LastStatusCode);
+                    logger.LogWarning($"Spoolman endpoint {ep} returned 0 spools (status {result.LastStatusCode}). Trying next candidate…");
                 }
                 else if (!result.Success)
                 {
-                    logger.LogDebug("Spoolman endpoint {Endpoint} non-success status {Status}; trying next candidate", ep, result.LastStatusCode);
+                    logger.LogDebug($"Spoolman endpoint {ep} non-success status {result.LastStatusCode}; trying next candidate");
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Exception when querying Spoolman endpoint {Endpoint}; trying next candidate", ep);
+                logger.LogDebug(ex, $"Exception when querying Spoolman endpoint {ep}; trying next candidate");
             }
         }
 
-        logger.LogWarning("All candidate Spoolman endpoints returned 0 spools or failed – returning empty list");
+        logger.LogWarning($"All candidate Spoolman endpoints returned 0 spools or failed – returning empty list");
         return [];
     }
 
@@ -152,7 +153,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug("Spoolman not configured – returning empty material list");
+            logger.LogDebug($"Spoolman not configured – returning empty material list");
             return [];
         }
 
@@ -177,27 +178,27 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
                 {
                     if (result.AttemptedPages > 1)
                     {
-                        logger.LogInformation("Retrieved {Count} materials across {Pages} pages via endpoint {Endpoint}", result.Items.Count, result.AttemptedPages, ep);
+                        logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages via endpoint {ep}");
                     }
                     else
                     {
-                        logger.LogDebug("Retrieved {Count} materials via endpoint {Endpoint}", result.Items.Count, ep);
+                        logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}");
                     }
                     return result.Items;
                 }
                 else if (result.Success)
                 {
-                    logger.LogInformation("Successfully queried Spoolman material endpoint {Endpoint} but got 0 results", ep);
+                    logger.LogInformation($"Successfully queried Spoolman material endpoint {ep} but got 0 results");
                     return [];
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Exception when querying Spoolman material endpoint {Endpoint}; trying next candidate", ep);
+                logger.LogDebug(ex, $"Exception when querying Spoolman material endpoint {ep}; trying next candidate");
             }
         }
 
-        logger.LogWarning("All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list");
+        logger.LogWarning($"All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list");
         return [];
     }
 
@@ -231,14 +232,14 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug("Spoolman page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
+                logger.LogDebug($"Spoolman page {page} content-type {mediaType} not JSON; aborting");
                 break;
             }
 
             using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
             if (doc is null)
             {
-                logger.LogDebug("Spoolman page {Page} invalid JSON; aborting", page);
+                logger.LogDebug($"Spoolman page {page} invalid JSON; aborting");
                 break;
             }
 
@@ -250,7 +251,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
             }
 
             int added = collected.Count - before;
-            logger.LogDebug("Spoolman page {Page} added {Added} spools (total {Total})", page, added, collected.Count);
+            logger.LogDebug($"Spoolman page {page} added {added} spools (total {collected.Count})");
 
             // Pagination detection: common DRF style { "next": "url or null" }
             string? next = null;
@@ -316,14 +317,14 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug("Spoolman material page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
+                logger.LogDebug($"Spoolman material page {page} content-type {mediaType} not JSON; aborting");
                 break;
             }
 
             string json = await resp.Content.ReadAsStringAsync(ct);
             if (string.IsNullOrWhiteSpace(json))
             {
-                logger.LogDebug("Spoolman material page {Page} returned empty response; aborting", page);
+                logger.LogDebug($"Spoolman material page {page} returned empty response; aborting");
                 break;
             }
 
@@ -1000,7 +1001,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
         }
         catch (Exception ex)
         {
-            logger.LogWarning("Failed to expand network range '{Range}': {Error}", range, ex.Message);
+            logger.LogWarning($"Failed to expand network range '{range}': {ex.Message}");
         }
 
         return Enumerable.Empty<string>();
@@ -1014,7 +1015,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
         // Limit to /16 or smaller subnets to avoid excessive scanning
         if (prefixLength < 16)
         {
-            logger.LogWarning("CIDR range too large (/{PrefixLength}), limiting to /16", prefixLength);
+            logger.LogWarning($"CIDR range too large (/{prefixLength}), limiting to /16");
             prefixLength = 16;
         }
 
@@ -1051,7 +1052,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanS
         // Limit range size to prevent excessive scanning
         if (end - start > 1024)
         {
-            logger.LogWarning("IP range too large ({Start}-{End}), limiting to 1024 addresses", startIp, endIp);
+            logger.LogWarning($"IP range too large ({startIp}-{endIp}), limiting to 1024 addresses");
             end = start + 1024;
         }
 
