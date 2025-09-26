@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.FileProviders;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Services.SlicerServices;
 public partial class DbSlicerSettingsService : ISlicerSettingsService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<DbSlicerSettingsService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly JsonSerializerOptions _serializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -21,7 +22,7 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
     private static int _loggedMissingTableFlag; // 0 = not logged, 1 = logged (Interlocked for thread-safety)
     private readonly IHostEnvironment _env;
 
-    public DbSlicerSettingsService(IServiceScopeFactory scopeFactory, ILogger<DbSlicerSettingsService> logger, IServiceProvider rootProvider)
+    public DbSlicerSettingsService(IServiceScopeFactory scopeFactory, IUnifiedLoggingService logger, IServiceProvider rootProvider)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -57,11 +58,11 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
                 // Non-missing-table errors still logged (demoted to debug in test env to reduce noise)
                 if (_env.IsEnvironment("Testing"))
                 {
-                    _logger.LogDebug(ex, "[SlicerSettings] Query failed (elapsed {Elapsed} ms) - env=Testing", sw.ElapsedMilliseconds);
+                    _logger.LogDebug(ex, $"[SlicerSettings] Query failed (elapsed {sw.ElapsedMilliseconds} ms) - env=Testing");
                 }
                 else
                 {
-                    _logger.LogWarning(ex, "[SlicerSettings] Query failed (elapsed {Elapsed} ms)", sw.ElapsedMilliseconds);
+                    _logger.LogWarning(ex, $"[SlicerSettings] Query failed (elapsed {sw.ElapsedMilliseconds} ms)");
                 }
             }
         }
@@ -85,7 +86,7 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
             };
             db.SlicerSettings.Add(entity);
             db.SaveChanges();
-            _logger.LogInformation("[SlicerSettings] Created default settings row (elapsed {Elapsed} ms)", sw.ElapsedMilliseconds);
+            _logger.LogInformation($"[SlicerSettings] Created default settings row (elapsed {sw.ElapsedMilliseconds} ms)");
         }
 
         Dictionary<SlicerEngineType, PerEngineSlicerSetting>? perEngine = null;
@@ -102,7 +103,7 @@ public partial class DbSlicerSettingsService : ISlicerSettingsService
         }
 
         sw.Stop();
-        _logger.LogDebug("[SlicerSettings] Settings retrieval complete in {Elapsed} ms (Enabled={Enabled})", sw.ElapsedMilliseconds, entity.Enabled);
+        _logger.LogDebug($"[SlicerSettings] Settings retrieval complete in {sw.ElapsedMilliseconds} ms (Enabled={entity.Enabled})");
         return new SlicerSettingsDto(entity.Enabled, perEngine ?? new(), entity.JitterPercent);
     }
 

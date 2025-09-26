@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
@@ -28,31 +29,8 @@ internal sealed class PrinterState
     public string? HomedAxes { get; set; }
 }
 
-public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, ILogger<MoonrakerSubscriptionService> logger) : IHostedService, IDisposable
+public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IServiceScopeFactory scopeFactory, IUnifiedLoggingService logger) : IHostedService, IDisposable
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "MoonrakerSubscriptionService starting")]
-    private static partial void LogServiceStarting(ILogger logger);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "MoonrakerSubscriptionService stopping")]
-    private static partial void LogServiceStopping(ILogger logger);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Starting WebSocket connection for printer {PrinterName}")]
-    private static partial void LogConnectionStarting(ILogger logger, string printerName);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Connection failed for printer {PrinterName}: {ErrorMessage}")]
-    private static partial void LogConnectionFailed(ILogger logger, string printerName, string errorMessage);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Connected to printer {PrinterName}")]
-    private static partial void LogConnectionSuccess(ILogger logger, string printerName);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "WebSocket disconnected for printer {PrinterName}")]
-    private static partial void LogWebSocketDisconnected(ILogger logger, string printerName);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Connection error for printer {PrinterName}")]
-    private static partial void LogConnectionError(ILogger logger, Exception exception, string printerName);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to send connection identification for printer {PrinterName}")]
-    private static partial void LogIdentificationFailed(ILogger logger, Exception exception, string printerName);
 
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
@@ -88,7 +66,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        LogServiceStarting(logger);
+        logger.LogInformation($"MoonrakerSubscriptionService starting");
         _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
         return Task.CompletedTask;
     }
@@ -480,7 +458,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                     {
                         byte[] pingData = Encoding.UTF8.GetBytes($"ping-{DateTime.UtcNow:O}");
                         await ws.SendAsync(pingData, WebSocketMessageType.Text, endOfMessage: true, ct);
-                        logger.LogTrace("Sent heartbeat ping to printer {PrinterName}", printer.Name);
+                        logger.LogDebug($"Sent heartbeat ping to printer {printer.Name}");
                     }
                     catch (Exception ex)
                     {
@@ -618,7 +596,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             else if (root.TryGetProperty("method", out JsonElement methodProp))
             {
                 string? method = methodProp.GetString();
-                logger.LogTrace("Received notification {Method} from printer {PrinterName}", method, printer.Name);
+                logger.LogDebug($"Received notification {method} from printer {printer.Name}");
 
                 switch (method)
                 {
@@ -649,7 +627,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                         break;
 
                     default:
-                        logger.LogTrace("Unhandled notification method {Method} from printer {PrinterName}", method, printer.Name);
+                        logger.LogDebug($"Unhandled notification method {method} from printer {printer.Name}");
                         break;
                 }
             }
@@ -678,8 +656,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         string? stateValue = null, jobName = null;
         double? hotend = null, bed = null, hotendTarget = null, bedTarget = null;
 
-        logger.LogTrace("Processing status update for printer {PrinterId}. Raw status: {StatusData}",
-            printerId, statusObj.GetRawText());
+        logger.LogDebug($"Processing status update for printer {printerId}. Raw status: {statusObj.GetRawText()}");
 
         // Toolhead position and homed axes
         string? homedAxes = null;
@@ -705,11 +682,11 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 { z = pos[2].GetDouble(); }
                 catch { }
 
-                logger.LogTrace("Extracted position for printer {PrinterId}: x={X}, y={Y}, z={Z}", printerId, x, y, z);
+                logger.LogDebug($"Extracted position for printer {printerId}: x={x}, y={y}, z={z}");
             }
             else
             {
-                logger.LogTrace("No toolhead.position found in status update for printer {PrinterId}", printerId);
+                logger.LogDebug($"No toolhead.position found in status update for printer {printerId}");
             }
 
             // Extract homed axes
@@ -784,7 +761,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
         {
             webhooksState = ws.GetString();
-            logger.LogTrace("Extracted webhooks state for printer {PrinterId}: {WebhooksState}", printerId, webhooksState);
+            logger.LogDebug($"Extracted webhooks state for printer {printerId}: {webhooksState}");
         }
 
         // Determine final state: webhooks state takes precedence over print_stats state
@@ -794,13 +771,13 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         {
             // Webhooks states: startup, ready, shutdown, error
             stateValue = webhooksState;
-            logger.LogTrace("Using webhooks state '{WebhooksState}' for printer {PrinterId}", stateValue, printerId);
+            logger.LogDebug($"Using webhooks state '{stateValue}' for printer {printerId}");
         }
         else if (!string.IsNullOrEmpty(printStatsState))
         {
             // Print stats states: standby, printing, paused, complete, error, cancelled
             stateValue = printStatsState;
-            logger.LogTrace("Using print_stats state '{PrintStatsState}' for printer {PrinterId}", stateValue, printerId);
+            logger.LogDebug($"Using print_stats state '{stateValue}' for printer {printerId}");
         }
 
         // Extruder temperatures
@@ -819,12 +796,11 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 catch { }
             }
 
-            logger.LogTrace("Extracted hotend temps for printer {PrinterId}: current={Hotend}, target={HotendTarget}",
-                printerId, hotend, hotendTarget);
+            logger.LogDebug($"Extracted hotend temps for printer {printerId}: current={hotend}, target={hotendTarget}");
         }
         else
         {
-            logger.LogTrace("No extruder data found in status update for printer {PrinterId}", printerId);
+            logger.LogDebug($"No extruder data found in status update for printer {printerId}");
         }
 
         // Bed temperatures
@@ -843,12 +819,11 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
                 catch { }
             }
 
-            logger.LogTrace("Extracted bed temps for printer {PrinterId}: current={Bed}, target={BedTarget}",
-                printerId, bed, bedTarget);
+            logger.LogDebug($"Extracted bed temps for printer {printerId}: current={bed}, target={bedTarget}");
         }
         else
         {
-            logger.LogTrace("No heater_bed data found in status update for printer {PrinterId}", printerId);
+            logger.LogDebug($"No heater_bed data found in status update for printer {printerId}");
         }
 
         // Get spool information
@@ -926,13 +901,13 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
         );
 
         logger.LogDebug("Sending status update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HotendTemp={HotendTemp}, HotendTarget={HotendTarget}, BedTemp={BedTemp}, BedTarget={BedTarget}, HomedAxes={HomedAxes}",
-            printerId, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
+            $"Sending status update for printer {printerId}: X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
 
         // Track successful status update time
         _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
 
         await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
-        logger.LogTrace("Sent status update for printer {PrinterId}", printerId);
+        logger.LogDebug($"Sent status update for printer {printerId}");
     }
 
     private async Task SendOfflineStatusAsync(Guid printerId, CancellationToken ct)
@@ -1092,8 +1067,7 @@ public sealed partial class MoonrakerSubscriptionService(IHubContext<PrinterHub>
             if (compositeStatus != null && compositeStatus.IsOnline)
             {
                 // Convert CompositeStatus to StatusUpdate format and send via existing logic
-                logger.LogDebug("HTTP polling fallback retrieved status for printer {PrinterName}: State={State}, IsOnline={IsOnline}",
-                    printer.Name, compositeStatus.State, compositeStatus.IsOnline);
+                logger.LogDebug($"HTTP polling fallback retrieved status for printer {printer.Name}: State={compositeStatus.State}, IsOnline={compositeStatus.IsOnline}");
 
                 // Create a status update using the composite status data
                 PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);

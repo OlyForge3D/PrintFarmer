@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 
@@ -6,14 +7,14 @@ namespace Farm.Web.Api.Services;
 
 public class SignalRSettingsService : ISignalRSettingsService
 {
-    private readonly ILogger<SignalRSettingsService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private SignalRSettingsDto? _settings;
     private readonly string _path = Path.Combine(AppContext.BaseDirectory, "signalr.settings.json");
     private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
 
-    public SignalRSettingsService(ILogger<SignalRSettingsService> logger)
+    public SignalRSettingsService(IUnifiedLoggingService logger)
     {
-        _logger = logger;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         try
         {
             if (File.Exists(_path))
@@ -28,7 +29,7 @@ public class SignalRSettingsService : ISignalRSettingsService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load SignalR settings from {Path}", _path);
+            _logger.LogWarning(ex, $"Failed to load SignalR settings from {_path}");
         }
     }
 
@@ -70,11 +71,11 @@ public class SignalRSettingsService : ISignalRSettingsService
         {
             string json = JsonSerializer.Serialize(_settings, s_writeOptions);
             File.WriteAllText(_path, json);
-            _logger.LogInformation("Saved SignalR settings to {Path}", _path);
+            _logger.LogInformation($"Saved SignalR settings to {_path}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to save SignalR settings to {Path}", _path);
+            _logger.LogError(ex, $"Failed to save SignalR settings to {_path}");
         }
     }
 }

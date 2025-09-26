@@ -16,7 +16,7 @@ public class SlicerWorkerHostedService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ISlicerExecutableManager _exeManager;
     private readonly ITempPathProvider _tempProvider;
-    private readonly ILogger<SlicerWorkerHostedService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly SlicerWorkerConfiguration _config;
     private readonly ISlicerSettingsService _settingsService;
     private readonly Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner _processRunner;
@@ -26,7 +26,7 @@ public class SlicerWorkerHostedService : BackgroundService
         IServiceScopeFactory scopeFactory,
         ISlicerExecutableManager exeManager,
         ITempPathProvider tempProvider,
-        ILogger<SlicerWorkerHostedService> logger,
+    IUnifiedLoggingService logger,
         IConfiguration cfg,
         ISlicerSettingsService settingsService,
         Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner processRunner,
@@ -50,7 +50,7 @@ public class SlicerWorkerHostedService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using Activity? activity = _telemetry.StartActivity("SlicerWorkerHostedService.ExecuteAsync");
-        _logger.LogInformation("Slicer worker started (worker id {WorkerId})", _config.WorkerId);
+        _logger.LogInformation($"Slicer worker started (worker id {_config.WorkerId})");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -58,18 +58,18 @@ public class SlicerWorkerHostedService : BackgroundService
             {
                 using Activity? loopActivity = _telemetry.StartActivity("SlicerWorkerHostedService.WorkLoop");
 
-                _logger.LogDebug("Getting runtime settings from SlicerSettingsService");
+                _logger.LogDebug($"Getting runtime settings from SlicerSettingsService");
                 SlicerSettingsDto runtimeSettings = _settingsService.GetSettings();
-                _logger.LogDebug("Got runtime settings: Enabled={Enabled}", runtimeSettings.Enabled);
+                _logger.LogDebug($"Got runtime settings: Enabled={runtimeSettings.Enabled}");
 
                 if (!runtimeSettings.Enabled)
                 {
-                    _logger.LogDebug("Slicer worker is disabled via runtime settings; sleeping");
+                    _logger.LogDebug($"Slicer worker is disabled via runtime settings; sleeping");
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                     continue;
                 }
 
-                _logger.LogDebug("Attempting to dequeue slicer job");
+                _logger.LogDebug($"Attempting to dequeue slicer job");
                 // Attempt to dequeue a job (non-blocking)
                 DistributedSlicingJob? dequeuedJob = null;
                 // Create scope (AsyncServiceScope implements IAsyncDisposable but synchronous disposal acceptable here)
@@ -81,12 +81,12 @@ public class SlicerWorkerHostedService : BackgroundService
 
                 if (dequeuedJob == null)
                 {
-                    _logger.LogDebug("No jobs available, sleeping for 2 seconds");
+                    _logger.LogDebug($"No jobs available, sleeping for 2 seconds");
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                     continue;
                 }
 
-                _logger.LogDebug("Dequeued job {JobId}, starting background processing", dequeuedJob.JobId);
+                _logger.LogDebug($"Dequeued job {dequeuedJob.JobId}, starting background processing");
                 // Start background processing after scope is disposed (ProcessJobAsync creates its own scope)
                 _ = Task.Run(() => ProcessJobAsync(dequeuedJob!, stoppingToken), stoppingToken);
             }
@@ -96,12 +96,12 @@ public class SlicerWorkerHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error while dequeuing slicing job");
+                _logger.LogError($"Error while dequeuing slicing job: {ex.Message}");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
 
-        _logger.LogInformation("Slicer worker stopping (worker id {WorkerId})", _config.WorkerId);
+        _logger.LogInformation($"Slicer worker stopping (worker id {_config.WorkerId})");
     }
 
     private async Task ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken)
@@ -116,7 +116,7 @@ public class SlicerWorkerHostedService : BackgroundService
         job.WorkerId = _config.WorkerId;
         try
         {
-            _logger.LogInformation("Processing slicing job {JobId} (engine {Engine})", job.Id, job.EngineType);
+            _logger.LogInformation($"Processing slicing job {job.Id} (engine {job.EngineType})");
             await notifier.NotifyProgressAsync(new SlicingProgressUpdate { JobId = job.Id, Progress = 5, Status = SlicingJobStatus.Slicing, CurrentStep = "Queued to worker" }, cancellationToken);
 
             // Download model to temp
@@ -153,7 +153,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to generate PrusaSlicer config for job {JobId}; continuing with default args", job.Id);
+                        _logger.LogWarning($"Failed to generate PrusaSlicer config for job {job.Id}; continuing with default args: {ex.Message}");
                     }
                 }
 
@@ -173,7 +173,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to generate OrcaSlicer config for job {JobId}; falling back to default args", job.Id);
+                        _logger.LogWarning($"Failed to generate OrcaSlicer config for job {job.Id}; falling back to default args: {ex.Message}");
                         if (string.IsNullOrWhiteSpace(argsTemplate))
                         {
                             argsTemplate = "--export-gcode -o {output} {input}";
@@ -212,7 +212,8 @@ public class SlicerWorkerHostedService : BackgroundService
                     PrusaProgressParser parser = new();
                     _ = Task.Run(async () =>
                     {
-                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken,
+                        var loggerAdapter = new Progress.UnifiedLoggerAdapter(_logger);
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, loggerAdapter, cancellationToken,
                             // onParserCompleted
                             async (jid, ct) =>
                             {
@@ -269,7 +270,8 @@ public class SlicerWorkerHostedService : BackgroundService
                     OrcaProgressParser parser = new();
                     _ = Task.Run(async () =>
                     {
-                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken,
+                        var loggerAdapter = new Progress.UnifiedLoggerAdapter(_logger);
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, loggerAdapter, cancellationToken,
                             async (jid, ct) =>
                             {
                                 try
@@ -447,7 +449,7 @@ public class SlicerWorkerHostedService : BackgroundService
 
                     string message = $"Transient error occurred: {ex.Message}. Scheduled retry #{job.RetryCount} in {delaySeconds} seconds.";
                     await notifier.NotifyFailureAsync(job, message, cancellationToken);
-                    _logger.LogInformation("Job {JobId} scheduled for retry #{RetryCount} in {Delay}s", job.Id, job.RetryCount, delaySeconds);
+                    _logger.LogInformation($"Job {job.Id} scheduled for retry #{job.RetryCount} in {delaySeconds}s");
                 }
                 else
                 {
@@ -458,7 +460,7 @@ public class SlicerWorkerHostedService : BackgroundService
             }
             catch (Exception notifyEx)
             {
-                _logger.LogError(notifyEx, "Failed to requeue/fail job {JobId} after exception", job.Id);
+                _logger.LogError($"Failed to requeue/fail job {job.Id} after exception: {notifyEx.Message}");
             }
         }
         finally
@@ -475,7 +477,7 @@ public class SlicerWorkerHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to cleanup job temp dir for {JobId}", job.Id);
+                _logger.LogDebug($"Failed to cleanup job temp dir for {job.Id}: {ex.Message}");
             }
         }
     }

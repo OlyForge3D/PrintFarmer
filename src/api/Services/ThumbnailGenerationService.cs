@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
@@ -10,14 +11,14 @@ namespace Farm.Web.Api.Services;
 /// </summary>
 public class ThumbnailGenerationService : IThumbnailGenerationService
 {
-    private readonly ILogger<ThumbnailGenerationService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly string _pythonPath;
     private readonly string _scriptPath;
     private readonly string _thumbnailsBasePath;
 
     public string ThumbnailFileExtension => ".png";
 
-    public ThumbnailGenerationService(ILogger<ThumbnailGenerationService> logger, IConfiguration configuration)
+    public ThumbnailGenerationService(IUnifiedLoggingService logger, IConfiguration configuration)
     {
         _logger = logger;
 
@@ -59,13 +60,13 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
     {
         if (!IsFormatSupported(fileFormat))
         {
-            _logger.LogWarning("Thumbnail generation not supported for format: {FileFormat}", fileFormat);
+            _logger.LogWarning($"Thumbnail generation not supported for format: {fileFormat}");
             return false;
         }
 
         if (!File.Exists(modelFilePath))
         {
-            _logger.LogWarning("Model file not found: {ModelFilePath}", modelFilePath);
+            _logger.LogWarning($"Model file not found: {modelFilePath}");
             return false;
         }
 
@@ -100,8 +101,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 }
             };
 
-            _logger.LogDebug("Starting thumbnail generation: {FileName} {Arguments}",
-                _pythonPath, arguments.ToString());
+            _logger.LogDebug($"Starting thumbnail generation: {_pythonPath} {arguments}");
 
             process.Start();
 
@@ -132,19 +132,18 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
 
             if (process.ExitCode == 0 && File.Exists(outputPath))
             {
-                _logger.LogDebug("Thumbnail generated successfully: {OutputPath}", outputPath);
+                _logger.LogDebug($"Thumbnail generated successfully: {outputPath}");
                 return true;
             }
             else
             {
-                _logger.LogWarning("Thumbnail generation failed. Exit code: {ExitCode}, Error: {Error}, Output: {Output}",
-                    process.ExitCode, error, output);
+                _logger.LogWarning($"Thumbnail generation failed. Exit code: {process.ExitCode}, Error: {error}, Output: {output}");
                 return false;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Exception during thumbnail generation for {ModelFilePath}", modelFilePath);
+            _logger.LogError(ex, $"Exception during thumbnail generation for {modelFilePath}");
             return false;
         }
     }
@@ -276,7 +275,7 @@ if __name__ == ""__main__"":
         try
         {
             File.WriteAllText(_scriptPath, scriptContent, Encoding.UTF8);
-            _logger.LogInformation("Created thumbnail generation Python script at: {ScriptPath}", _scriptPath);
+            _logger.LogInformation($"Created thumbnail generation Python script at: {_scriptPath}");
 
             // Make script executable on Unix systems
             if (!OperatingSystem.IsWindows())

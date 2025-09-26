@@ -1,4 +1,5 @@
-﻿namespace Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Telemetry;
+namespace Farm.Web.Api.Services;
 
 /// <summary>
 /// Helper for implementing retry policies with exponential backoff
@@ -12,7 +13,7 @@ public static class RetryPolicyHelper
     /// <param name="operation">Function to execute with retry</param>
     /// <param name="maxRetries">Maximum number of retry attempts (default: 3)</param>
     /// <param name="initialDelayMs">Initial delay in milliseconds (default: 500)</param>
-    /// <param name="logger">Optional logger to log retry attempts</param>
+    /// <param name="logger">Optional logger to log retry attempts (IUnifiedLoggingService)</param>
     /// <param name="operationName">Name of the operation for logging</param>
     /// <returns>Result of the operation</returns>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts fail</exception>
@@ -20,7 +21,7 @@ public static class RetryPolicyHelper
         Func<Task<T>> operation,
         int maxRetries = 3,
         int initialDelayMs = 500,
-        ILogger? logger = null,
+        IUnifiedLoggingService? logger = null,
         string operationName = "operation")
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -36,8 +37,7 @@ public static class RetryPolicyHelper
                 {
                     // Calculate exponential backoff delay
                     int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                    logger?.LogInformation("Retry {RetryCount}/{MaxRetries} for {OperationName} after {DelayMs}ms",
-                        retryCount, maxRetries, operationName, delay);
+                    logger?.LogInformation($"Retry {retryCount}/{maxRetries} for {operationName} after {delay}ms");
                     await Task.Delay(delay);
                 }
 
@@ -51,13 +51,11 @@ public static class RetryPolicyHelper
 
                 if (retryCount <= maxRetries)
                 {
-                    logger?.LogWarning(ex, "{OperationName} failed (attempt {RetryCount}/{MaxRetries}): {ErrorMessage}",
-                        operationName, retryCount, maxRetries, ex.Message);
+                    logger?.LogWarning(ex, $"{operationName} failed (attempt {retryCount}/{maxRetries}): {ex.Message}");
                 }
                 else
                 {
-                    logger?.LogError(ex, "{OperationName} failed after {MaxRetries} attempts: {ErrorMessage}",
-                        operationName, maxRetries, ex.Message);
+                    logger?.LogError(ex, $"{operationName} failed after {maxRetries} attempts: {ex.Message}");
                 }
             }
         }
@@ -71,14 +69,14 @@ public static class RetryPolicyHelper
     /// <param name="operation">Action to execute with retry</param>
     /// <param name="maxRetries">Maximum number of retry attempts (default: 3)</param>
     /// <param name="initialDelayMs">Initial delay in milliseconds (default: 500)</param>
-    /// <param name="logger">Optional logger to log retry attempts</param>
+    /// <param name="logger">Optional logger to log retry attempts (IUnifiedLoggingService)</param>
     /// <param name="operationName">Name of the operation for logging</param>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts fail</exception>
     public static async Task ExecuteWithRetryAsync(
         Func<Task> operation,
         int maxRetries = 3,
         int initialDelayMs = 500,
-        ILogger? logger = null,
+        IUnifiedLoggingService? logger = null,
         string operationName = "operation")
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -94,8 +92,7 @@ public static class RetryPolicyHelper
                 {
                     // Calculate exponential backoff delay
                     int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                    logger?.LogInformation("Retry {RetryCount}/{MaxRetries} for {OperationName} after {DelayMs}ms",
-                        retryCount, maxRetries, operationName, delay);
+                    logger?.LogInformation($"Retry {retryCount}/{maxRetries} for {operationName} after {delay}ms");
                     await Task.Delay(delay);
                 }
 
@@ -110,13 +107,11 @@ public static class RetryPolicyHelper
 
                 if (retryCount <= maxRetries)
                 {
-                    logger?.LogWarning(ex, "{OperationName} failed (attempt {RetryCount}/{MaxRetries}): {ErrorMessage}",
-                        operationName, retryCount, maxRetries, ex.Message);
+                    logger?.LogWarning(ex, $"{operationName} failed (attempt {retryCount}/{maxRetries}): {ex.Message}");
                 }
                 else
                 {
-                    logger?.LogError(ex, "{OperationName} failed after {MaxRetries} attempts: {ErrorMessage}",
-                        operationName, maxRetries, ex.Message);
+                    logger?.LogError(ex, $"{operationName} failed after {maxRetries} attempts: {ex.Message}");
                 }
             }
         }

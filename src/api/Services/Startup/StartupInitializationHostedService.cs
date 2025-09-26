@@ -2,6 +2,7 @@
 using Farm.Web.Api.Configuration;
 using Farm.Infrastructure.Data;
 using Microsoft.Extensions.Options;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.Startup;
 
@@ -36,7 +37,7 @@ namespace Farm.Web.Api.Services.Startup;
 public class StartupInitializationHostedService : IHostedService
 {
     private readonly IServiceProvider _root;
-    private readonly ILogger<StartupInitializationHostedService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly StartupStatus _status;
     private readonly TimeSpan _overallTimeout = TimeSpan.FromSeconds(90);
     private readonly Histogram<double> _initDurationHistogram;
@@ -54,11 +55,11 @@ public class StartupInitializationHostedService : IHostedService
     /// <param name="meterFactory">Factory used to create OpenTelemetry metrics instruments.</param>
     /// <param name="env">Host environment (reserved for future conditional behavior).</param>
     public StartupInitializationHostedService(
-        IServiceProvider root,
-        ILogger<StartupInitializationHostedService> logger,
-        StartupStatus status,
-        IMeterFactory meterFactory,
-        IHostEnvironment env)
+    IServiceProvider root,
+    IUnifiedLoggingService logger,
+    StartupStatus status,
+    IMeterFactory meterFactory,
+    IHostEnvironment env)
     {
         _root = root;
         _logger = logger;
@@ -85,7 +86,7 @@ public class StartupInitializationHostedService : IHostedService
         CancellationToken token = _cts.Token;
         _status.MarkInitializationStarted();
         _ = Task.Run(() => RunInitializationAsync(token), CancellationToken.None);
-        _logger.LogInformation("[StartupInit] Background initialization scheduled (timeout {Timeout}s)", _overallTimeout.TotalSeconds);
+        _logger.LogInformation($"[StartupInit] Background initialization scheduled (timeout {_overallTimeout.TotalSeconds}s)");
         return Task.CompletedTask; // DO NOT await heavy work here
     }
 
@@ -121,7 +122,7 @@ public class StartupInitializationHostedService : IHostedService
             double elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;
             _initDurationHistogram.Record(elapsedMs, KeyValuePair.Create<string, object?>("outcome", "success"));
             _initSuccessCounter.Add(1);
-            _logger.LogInformation("[StartupInit] Initialization succeeded in {Elapsed} ms", (DateTime.UtcNow - start).TotalMilliseconds);
+            _logger.LogInformation($"[StartupInit] Initialization succeeded in {(DateTime.UtcNow - start).TotalMilliseconds} ms");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -133,7 +134,7 @@ public class StartupInitializationHostedService : IHostedService
                 {
                     _initDurationHistogram.Record(d1.TotalMilliseconds, KeyValuePair.Create<string, object?>("outcome", "canceled"));
                 }
-                _logger.LogCritical("[StartupInit] Initialization canceled or timed out after {Timeout}s", _overallTimeout.TotalSeconds);
+                _logger.LogCritical($"[StartupInit] Initialization canceled or timed out after {_overallTimeout.TotalSeconds}s");
             }
         }
         catch (Exception ex)
@@ -144,7 +145,7 @@ public class StartupInitializationHostedService : IHostedService
             {
                 _initDurationHistogram.Record(d2.TotalMilliseconds, KeyValuePair.Create<string, object?>("outcome", "failed"));
             }
-            _logger.LogCritical(ex, "[StartupInit] Initialization failed: {Message}", ex.Message);
+            _logger.LogCritical(ex, $"[StartupInit] Initialization failed: {ex.Message}");
         }
     }
 

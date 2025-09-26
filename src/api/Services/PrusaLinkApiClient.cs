@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
@@ -7,19 +8,13 @@ namespace Farm.Web.Api.Services;
 /// Comprehensive PrusaLink API client based on the official OpenAPI specification
 /// https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
 /// </summary>
-public partial class PrusaLinkApiClient
+public class PrusaLinkApiClient
 {
-    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink API call failed for {Url}")]
-    private static partial void LogApiError(ILogger logger, Exception exception, string url);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink API deserialization failed for {Url}")]
-    private static partial void LogDeserializationError(ILogger logger, Exception exception, string url);
-
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
-    private readonly ILogger<PrusaLinkApiClient> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
-    public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
+    public PrusaLinkApiClient(HttpClient httpClient, IUnifiedLoggingService logger)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -72,17 +67,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -108,17 +103,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url.ToString());
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url.ToString());
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url.ToString());
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -142,17 +137,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -176,17 +171,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -521,6 +516,4 @@ public partial class PrusaLinkApiClient
 
         return request;
     }
-
-
 }

@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -9,10 +10,10 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// SlicerExecutables:{EngineName}:Path
 /// SlicerExecutables:{EngineName}:ArgsTemplate  (optional, {input} and {output} placeholders recommended)
 /// </summary>
-public class SlicerExecutableManager(IConfiguration config, ILogger<SlicerExecutableManager> logger, ISlicerSettingsService? settingsService = null) : ISlicerExecutableManager
+public class SlicerExecutableManager(IConfiguration config, IUnifiedLoggingService logger, ISlicerSettingsService? settingsService = null) : ISlicerExecutableManager
 {
     private readonly IConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
-    private readonly ILogger<SlicerExecutableManager> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ISlicerSettingsService? _settingsService = settingsService;
 
     public bool TryGetExecutable(SlicerEngineType engine, out string? executablePath, out string? argsTemplate)
@@ -53,7 +54,7 @@ public class SlicerExecutableManager(IConfiguration config, ILogger<SlicerExecut
     {
         if (!TryGetExecutable(engine, out string? exe, out string? _))
         {
-            _logger.LogWarning("No configured executable found for slicer engine {Engine}", engine);
+            _logger.LogWarning($"No configured executable found for slicer engine {engine}");
             return false;
         }
 
@@ -79,7 +80,7 @@ public class SlicerExecutableManager(IConfiguration config, ILogger<SlicerExecut
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to validate slicer executable at {Exe}", exe);
+            _logger.LogWarning($"Failed to validate slicer executable at {exe}: {ex.Message}");
             return false;
         }
     }

@@ -1,4 +1,5 @@
 ﻿using System.Threading.Channels;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 
@@ -10,12 +11,12 @@ namespace Farm.Web.Api.Services;
 public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 {
     private readonly Channel<HarvestFileJob> _channel;
-    private readonly ILogger<InMemoryHarvestQueue> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private bool _disposed;
 
-    public InMemoryHarvestQueue(ILogger<InMemoryHarvestQueue> logger)
+    public InMemoryHarvestQueue(IUnifiedLoggingService logger)
     {
-        _logger = logger;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Create unbounded channel for maximum throughput
         // In production, you might want bounded channels with backpressure
@@ -39,12 +40,12 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
         try
         {
             await _channel.Writer.WriteAsync(job, ct);
-            _logger.LogDebug("Enqueued job for file {FileName} from operation {OperationId}", job.FileName, job.OperationId);
+            _logger.LogDebug($"Enqueued job for file {job.FileName} from operation {job.OperationId}");
         }
         catch (InvalidOperationException)
         {
             // Channel was completed
-            _logger.LogWarning("Attempted to enqueue job {JobFileName} but queue is completed", job.FileName);
+            _logger.LogWarning($"Attempted to enqueue job {job.FileName} but queue is completed");
             throw;
         }
     }
@@ -58,8 +59,7 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 
         await foreach (HarvestFileJob job in _channel.Reader.ReadAllAsync(ct))
         {
-            _logger.LogDebug("Dequeued job for file {FileName} from operation {OperationId}",
-                job.FileName, job.OperationId);
+            _logger.LogDebug($"Dequeued job for file {job.FileName} from operation {job.OperationId}");
             yield return job;
         }
 

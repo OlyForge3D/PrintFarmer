@@ -3,6 +3,7 @@
 
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
@@ -10,10 +11,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
-public class DatabaseSeeder(AppDbContext context, ILogger<DatabaseSeeder> logger) : IDatabaseSeeder
+public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger) : IDatabaseSeeder
 {
     private readonly AppDbContext _context = context;
-    private readonly ILogger<DatabaseSeeder> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task SeedCatalogDataAsync()
     {

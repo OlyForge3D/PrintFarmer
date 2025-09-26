@@ -1,23 +1,13 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
-// Simple adapter to convert ILogger<T> to ILogger<U>
-internal sealed class LoggerAdapter<T>(ILogger logger) : ILogger<T>
+public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = null) : PrinterClientBase, IPrusaLinkClient
 {
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => logger.BeginScope(state);
-    public bool IsEnabled(LogLevel logLevel) => logger.IsEnabled(logLevel);
-    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        => logger.Log(logLevel, eventId, state, exception, formatter);
-}
-
-public class PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null) : PrinterClientBase, IPrusaLinkClient
-{
-    private readonly PrusaLinkApiClient _apiClient = new(http, logger != null
-        ? new LoggerAdapter<PrusaLinkApiClient>(logger)
-        : Microsoft.Extensions.Logging.Abstractions.NullLogger<PrusaLinkApiClient>.Instance);
-    private readonly ILogger? _logger = logger;
+    private readonly PrusaLinkApiClient _apiClient = new(http, logger ?? new NullLoggingService());
+    private readonly IUnifiedLoggingService? _logger = logger;
 
     public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
     {

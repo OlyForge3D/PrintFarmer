@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Runtime.InteropServices;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
@@ -7,10 +8,10 @@ namespace Farm.Web.Api.Services;
 /// Handles URL rewriting for external services based on the runtime environment.
 /// This allows the same configuration to work across Docker, native execution, and different platforms.
 /// </summary>
-public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, IConfiguration configuration)
+public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration)
 {
-    private readonly ILogger<NetworkUrlRewriteService> _logger = logger;
-    private readonly IConfiguration _configuration = configuration;
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
 
     /// <summary>
     /// Rewrites a URL to make it accessible from the current runtime environment.
@@ -32,16 +33,14 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
 
             if (rewrittenUrl != originalUrl)
             {
-                _logger.LogDebug("URL rewritten for {ServiceName}: {OriginalUrl} -> {RewrittenUrl}",
-                    serviceName ?? "unknown service", originalUrl, rewrittenUrl);
+                _logger.LogDebug($"URL rewritten for {serviceName ?? "unknown service"}: {originalUrl} -> {rewrittenUrl}");
             }
 
             return rewrittenUrl;
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning("Invalid URL format, returning unchanged: {Url}. Error: {Error}",
-                originalUrl, ex.Message);
+            _logger.LogWarning(ex, $"Invalid URL format, returning unchanged: {originalUrl}. Error: {ex.Message}");
             return originalUrl;
         }
     }
@@ -54,8 +53,7 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
         string? envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
         if (!string.IsNullOrEmpty(envOverride))
         {
-            _logger.LogDebug("Using environment override for {Host}:{Port} -> {Override}",
-                uri.Host, uri.Port, envOverride);
+            _logger.LogDebug($"Using environment override for {uri.Host}:{uri.Port} -> {envOverride}");
             return ReplaceHostPort(uri, envOverride).ToString();
         }
 
@@ -79,8 +77,7 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
             if (IsDockerDesktop())
             {
                 Uri hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
-                _logger.LogDebug("Docker Desktop detected, rewriting to host.docker.internal: {Url}",
-                    hostDockerInternalUrl);
+                _logger.LogDebug($"Docker Desktop detected, rewriting to host.docker.internal: {hostDockerInternalUrl}");
                 return hostDockerInternalUrl.ToString();
             }
 
@@ -89,7 +86,7 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
             if (!string.IsNullOrEmpty(gatewayOverride))
             {
                 Uri gatewayUrl = ReplaceHostPort(uri, $"{gatewayOverride}:{uri.Port}");
-                _logger.LogDebug("Using Docker host gateway: {Url}", gatewayUrl);
+                _logger.LogDebug($"Using Docker host gateway: {gatewayUrl}");
                 return gatewayUrl.ToString();
             }
         }
