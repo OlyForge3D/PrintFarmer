@@ -28,19 +28,19 @@ public class AuthenticationService(
             User? user = await GetUserByUsernameAsync(username);
             if (user == null)
             {
-                _logger.LogWarning("Authentication failed for username: {Username} - user not found", username);
+                _logger.LogWarning($"Authentication failed for username: {username} - user not found", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
             if (!user.IsActive)
             {
-                _logger.LogWarning("Authentication failed for username: {Username} - user is inactive", username);
+                _logger.LogWarning($"Authentication failed for username: {username} - user is inactive", null, null);
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
 
             if (!_passwordHashing.VerifyPassword(password, user.PasswordHash))
             {
-                _logger.LogWarning("Authentication failed for username: {Username} - invalid password", username);
+                _logger.LogWarning($"Authentication failed for username: {username} - invalid password", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
@@ -52,7 +52,7 @@ public class AuthenticationService(
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
 
-            _logger.LogInformation("User {Username} authenticated successfully", username);
+            _logger.LogInformation($"User {username} authenticated successfully", null, null);
 
             return new AuthenticationResult(
                 true,
@@ -63,7 +63,7 @@ public class AuthenticationService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during authentication for username: {Username}", username);
+            _logger.LogError(ex, $"Error during authentication for username: {username}", null, null);
             return new AuthenticationResult(false, Error: "Authentication service error");
         }
     }
@@ -134,7 +134,7 @@ public class AuthenticationService(
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
 
-            _logger.LogInformation("User {Username} registered successfully", request.Username);
+            _logger.LogInformation($"User {request.Username} registered successfully", null, null);
 
             return new AuthenticationResult(
                 true,
@@ -145,7 +145,7 @@ public class AuthenticationService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during registration for username: {Username}", (object)(request?.Username ?? "NULL"));
+            _logger.LogError(ex, $"Error during registration for username: {(request?.Username ?? "NULL")}", null, null);
             return new AuthenticationResult(false, Error: "Registration service error");
         }
     }
@@ -157,7 +157,7 @@ public class AuthenticationService(
         if (string.IsNullOrWhiteSpace(rawKey) || rawKey.Length < 32)
         {
             // S6781: Do not log secret key values
-            _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
+            _logger.LogError($"JWT key is missing or too short. Minimum 32 characters recommended.", null, null);
             throw new InvalidOperationException("Secure JWT key not configured");
         }
         // S6781: Secure usage, not disclosed or logged

@@ -33,8 +33,9 @@ public class GlobalExceptionMiddleware(RequestDelegate next, IUnifiedLoggingServ
         // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
         {
-            string correlationId = context.TraceIdentifier;
-            _logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}");
+            // Use correlationId from HttpContext.Items if available (set by TelemetryMiddleware)
+            string correlationId = context.Items["CorrelationId"] as string ?? context.TraceIdentifier;
+            _logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}", correlationId);
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }

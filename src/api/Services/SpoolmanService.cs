@@ -90,7 +90,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug($"Spoolman not configured – returning empty spool list");
+            logger.LogDebug($"Spoolman not configured – returning empty spool list", null, null);
             return [];
         }
 
@@ -115,11 +115,11 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
                 {
                     if (result.AttemptedPages > 1)
                     {
-                        logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages via endpoint {ep}");
+                        logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages via endpoint {ep}", null, null);
                     }
                     else
                     {
-                        logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}");
+                        logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}", null, null);
                     }
                     return result.Items;
                 }
@@ -127,20 +127,20 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
                 // If zero AND status success we still try next candidate, but log once
                 if (result.Success && result.Items.Count == 0)
                 {
-                    logger.LogWarning($"Spoolman endpoint {ep} returned 0 spools (status {result.LastStatusCode}). Trying next candidate…");
+                    logger.LogWarning($"Spoolman endpoint {ep} returned 0 spools (status {result.LastStatusCode}). Trying next candidate…", null, null);
                 }
                 else if (!result.Success)
                 {
-                    logger.LogDebug($"Spoolman endpoint {ep} non-success status {result.LastStatusCode}; trying next candidate");
+                    logger.LogDebug($"Spoolman endpoint {ep} non-success status {result.LastStatusCode}; trying next candidate", null, null);
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, $"Exception when querying Spoolman endpoint {ep}; trying next candidate");
+                logger.LogDebug(ex, $"Exception when querying Spoolman endpoint {ep}; trying next candidate", null, null);
             }
         }
 
-        logger.LogWarning($"All candidate Spoolman endpoints returned 0 spools or failed – returning empty list");
+        logger.LogWarning($"All candidate Spoolman endpoints returned 0 spools or failed – returning empty list", null, null);
         return [];
     }
 
@@ -153,7 +153,7 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug($"Spoolman not configured – returning empty material list");
+            logger.LogDebug($"Spoolman not configured – returning empty material list", null, null);
             return [];
         }
 
@@ -178,27 +178,27 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
                 {
                     if (result.AttemptedPages > 1)
                     {
-                        logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages via endpoint {ep}");
+                        logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages via endpoint {ep}", null, null);
                     }
                     else
                     {
-                        logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}");
+                        logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}", null, null);
                     }
                     return result.Items;
                 }
                 else if (result.Success)
                 {
-                    logger.LogInformation($"Successfully queried Spoolman material endpoint {ep} but got 0 results");
+                    logger.LogInformation($"Successfully queried Spoolman material endpoint {ep} but got 0 results", null, null);
                     return [];
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, $"Exception when querying Spoolman material endpoint {ep}; trying next candidate");
+                logger.LogDebug(ex, $"Exception when querying Spoolman material endpoint {ep}; trying next candidate", null, null);
             }
         }
 
-        logger.LogWarning($"All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list");
+        logger.LogWarning($"All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list", null, null);
         return [];
     }
 

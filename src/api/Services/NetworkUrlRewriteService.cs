@@ -33,14 +33,14 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
 
             if (rewrittenUrl != originalUrl)
             {
-                _logger.LogDebug($"URL rewritten for {serviceName ?? "unknown service"}: {originalUrl} -> {rewrittenUrl}");
+                _logger.LogDebug($"URL rewritten for {serviceName ?? "unknown service"}: {originalUrl} -> {rewrittenUrl}", null, null);
             }
 
             return rewrittenUrl;
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning(ex, $"Invalid URL format, returning unchanged: {originalUrl}. Error: {ex.Message}");
+            _logger.LogWarning(ex, $"Invalid URL format, returning unchanged: {originalUrl}. Error: {ex.Message}", null, null);
             return originalUrl;
         }
     }
@@ -53,7 +53,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
         string? envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
         if (!string.IsNullOrEmpty(envOverride))
         {
-            _logger.LogDebug($"Using environment override for {uri.Host}:{uri.Port} -> {envOverride}");
+            _logger.LogDebug($"Using environment override for {uri.Host}:{uri.Port} -> {envOverride}", null, null);
             return ReplaceHostPort(uri, envOverride).ToString();
         }
 
@@ -77,7 +77,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
             if (IsDockerDesktop())
             {
                 Uri hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
-                _logger.LogDebug($"Docker Desktop detected, rewriting to host.docker.internal: {hostDockerInternalUrl}");
+                _logger.LogDebug($"Docker Desktop detected, rewriting to host.docker.internal: {hostDockerInternalUrl}", null, null);
                 return hostDockerInternalUrl.ToString();
             }
 
@@ -86,7 +86,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
             if (!string.IsNullOrEmpty(gatewayOverride))
             {
                 Uri gatewayUrl = ReplaceHostPort(uri, $"{gatewayOverride}:{uri.Port}");
-                _logger.LogDebug($"Using Docker host gateway: {gatewayUrl}");
+                _logger.LogDebug($"Using Docker host gateway: {gatewayUrl}", null, null);
                 return gatewayUrl.ToString();
             }
         }

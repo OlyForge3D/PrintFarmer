@@ -43,6 +43,18 @@ import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';
 
 export class ApiClient {
+  // Utility to generate a correlation ID (UUID v4)
+  private static generateCorrelationId(): string {
+    // Use crypto API if available, fallback to random
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // Fallback: simple random string
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
   // SystemLogSettings API
   async getSystemLogSettings() {
     const res = await this.client.get('/systemlogsettings');
@@ -74,12 +86,14 @@ export class ApiClient {
       },
     });
 
-    // Request interceptor for authentication
+    // Request interceptor for authentication and correlationId
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem('auth-token');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      // Add correlationId header to every request
+      config.headers['X-Correlation-Id'] = ApiClient.generateCorrelationId();
       return config;
     });
 

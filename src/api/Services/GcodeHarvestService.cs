@@ -109,10 +109,10 @@ public partial class GcodeHarvestService(
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
     {
-    _logger.LogInformation("🔥 StartHarvestAsync CALLED for printer ID: {PrinterId}", (object)(request?.PrinterId ?? Guid.Empty));
+        _logger.LogInformation($"🔥 StartHarvestAsync CALLED for printer ID: {(request?.PrinterId ?? Guid.Empty)}");
         ArgumentNullException.ThrowIfNull(request);
         Printer? printer = await _db.Printers.FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
-    _logger.LogInformation("🔍 Found printer: {PrinterName} (ID: {PrinterId})", (object)(printer?.Name ?? "NULL"), (object)(printer?.Id ?? Guid.Empty));
+        _logger.LogInformation($"🔍 Found printer: {(printer?.Name ?? "NULL")} (ID: {(printer?.Id ?? Guid.Empty)})");
         if (printer == null)
         {
             return new GcodeHarvestResultDto(Guid.Empty, false, "Printer not found");
@@ -150,8 +150,7 @@ public partial class GcodeHarvestService(
         _db.GcodeHarvestOperations.Add(operation);
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Starting file discovery for operation {OperationId} on printer {PrinterName}",
-            operation.Id, printer.Name);
+        _logger.LogInformation($"Starting file discovery for operation {operation.Id} on printer {printer.Name}");
 
         // Start file discovery and queueing in background
         // Using a properly tracked task with error handling and using CancellationToken.None
@@ -160,13 +159,13 @@ public partial class GcodeHarvestService(
         {
             try
             {
-                _logger.LogInformation("🚀 Background harvest task STARTED for operation {OperationId} on printer {PrinterName}", operation.Id, printer.Name);
+                _logger.LogInformation($"🚀 Background harvest task STARTED for operation {operation.Id} on printer {printer.Name}");
                 await DiscoverAndQueueFilesAsync(operation, printer);
-                _logger.LogInformation("✅ Background harvest task COMPLETED successfully for operation {OperationId}", operation.Id);
+                _logger.LogInformation($"✅ Background harvest task COMPLETED successfully for operation {operation.Id}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Background harvest task FAILED for operation {OperationId}: {ErrorMessage}", operation.Id, ex.Message);
+                _logger.LogError(ex, $"❌ Background harvest task FAILED for operation {operation.Id}: {ex.Message}");
 
                 // Update the operation status to failed
                 using IServiceScope scope = _serviceScopeFactory.CreateScope();
@@ -179,24 +178,24 @@ public partial class GcodeHarvestService(
                     dbOperation.ErrorMessage = $"File discovery failed: {ex.Message}";
                     dbOperation.CompletedAt = DateTime.UtcNow;
                     await scopedDb.SaveChangesAsync();
-                    _logger.LogError("💾 Updated operation {OperationId} status to Failed in database", operation.Id);
+                    _logger.LogError($"💾 Updated operation {operation.Id} status to Failed in database");
                 }
                 else
                 {
-                    _logger.LogError("⚠️ Could not find operation {OperationId} in database to mark as failed", operation.Id);
+                    _logger.LogError($"⚠️ Could not find operation {operation.Id} in database to mark as failed");
                 }
             }
             finally
             {
                 // Remove from active tasks when done
                 _activeTasks.TryRemove(operation.Id, out _);
-                _logger.LogDebug("Removed operation {OperationId} from active tasks tracking", operation.Id);
+                _logger.LogDebug($"Removed operation {operation.Id} from active tasks tracking");
             }
         }, CancellationToken.None);
 
         // Add to active tasks collection for tracking
         _activeTasks[operation.Id] = backgroundTask;
-        _logger.LogDebug("Added operation {OperationId} to active tasks tracking", operation.Id);
+        _logger.LogDebug($"Added operation {operation.Id} to active tasks tracking");
 
         return new GcodeHarvestResultDto(
             operation.Id,
@@ -220,13 +219,11 @@ public partial class GcodeHarvestService(
 
         try
         {
-            scopedLogger.LogInformation("Starting file discovery in scoped context for operation {OperationId} on printer {PrinterName}",
-                operation.Id, printer.Name);
+            scopedLogger.LogInformation($"Starting file discovery in scoped context for operation {operation.Id} on printer {printer.Name}");
 
             // Get file list from printer based on backend type
             PrinterBackend backend = (PrinterBackend)printer.Backend;
-            scopedLogger.LogInformation("Calling file discovery for backend {Backend} on printer {PrinterName} at {ServerUrl}",
-                backend, printer.Name, printer.ServerUrl);
+            scopedLogger.LogInformation($"Calling file discovery for backend {backend} on printer {printer.Name} at {printer.ServerUrl}");
 
             List<PrinterFileInfo> fileList;
 
@@ -234,31 +231,30 @@ public partial class GcodeHarvestService(
             switch (backend)
             {
                 case PrinterBackend.Moonraker:
-                    scopedLogger.LogInformation("Getting files from Moonraker backend at {ServerUrl}", printer.ServerUrl);
+                    scopedLogger.LogInformation($"Getting files from Moonraker backend at {printer.ServerUrl}");
                     fileList = await GetMoonrakerFilesAsync(printer.ServerUrl, scopedMoonraker, scopedLogger);
                     break;
                 case PrinterBackend.PrusaLink:
-                    scopedLogger.LogInformation("Getting files from PrusaLink backend at {ServerUrl}", printer.ServerUrl);
+                    scopedLogger.LogInformation($"Getting files from PrusaLink backend at {printer.ServerUrl}");
                     fileList = await GetPrusaLinkFilesAsync(printer.ServerUrl, printer.ApiKey, scopedPrusa, scopedLogger);
                     break;
                 case PrinterBackend.SDCP:
-                    scopedLogger.LogInformation("Getting files from SDCP backend at {ServerUrl}", printer.ServerUrl);
+                    scopedLogger.LogInformation($"Getting files from SDCP backend at {printer.ServerUrl}");
                     fileList = await GetSdcpFilesAsync(printer.ServerUrl, scopedSdcp, scopedLogger);
                     break;
                 default:
-                    scopedLogger.LogWarning("Unsupported printer backend {Backend}", backend);
+                    scopedLogger.LogWarning($"Unsupported printer backend {backend}");
                     fileList = new List<PrinterFileInfo>();
                     break;
             }
 
-            scopedLogger.LogInformation("Discovered {FileCount} files for operation {OperationId}",
-                fileList.Count, operation.Id);
+            scopedLogger.LogInformation($"Discovered {fileList.Count} files for operation {operation.Id}");
 
             // Log sample filenames for debugging
             if (fileList.Count > 0)
             {
                 string[] sampleFiles = fileList.Take(10).Select(f => $"{f.Name} (size: {f.Size})").ToArray();
-                scopedLogger.LogInformation("📄 Sample files: {SampleFiles}", string.Join(", ", sampleFiles));
+                scopedLogger.LogInformation($"📄 Sample files: {string.Join(", ", sampleFiles)}");
             }
 
             // Determine allowed extensions (default to gcode if none specified)
@@ -271,7 +267,7 @@ public partial class GcodeHarvestService(
             // Apply filtering for extensions & size constraints for preliminary count
             bool PassesInitialFilters(PrinterFileInfo f)
             {
-                scopedLogger.LogDebug("🔍 Filtering file: '{FileName}' (Size: {Size})", f.Name, f.Size);
+                scopedLogger.LogDebug($"🔍 Filtering file: '{f.Name}' (Size: {f.Size})");
 
                 string nameLower = f.Name.ToLowerInvariant();
                 bool extOk = false;
@@ -280,38 +276,37 @@ public partial class GcodeHarvestService(
                     if (nameLower.EndsWith(ext))
                     {
                         extOk = true;
-                        scopedLogger.LogDebug("✅ File '{FileName}' matches extension '{Extension}'", f.Name, ext);
+                        scopedLogger.LogDebug($"✅ File '{f.Name}' matches extension '{ext}'");
                         break;
                     }
                 }
                 if (!extOk)
                 {
-                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: extension doesn't match any of [{AllowedExts}]", f.Name, string.Join(", ", allowedExts));
+                    scopedLogger.LogDebug($"❌ File '{f.Name}' rejected: extension doesn't match any of [{string.Join(", ", allowedExts)}]");
                     return false;
                 }
                 if (operation.MinFileSizeBytes.HasValue && f.Size < operation.MinFileSizeBytes.Value)
                 {
-                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: size {Size} < minimum {MinSize}", f.Name, f.Size, operation.MinFileSizeBytes.Value);
+                    scopedLogger.LogDebug($"❌ File '{f.Name}' rejected: size {f.Size} < minimum {operation.MinFileSizeBytes.Value}");
                     return false;
                 }
                 if (operation.MaxFileSizeBytes.HasValue && f.Size > operation.MaxFileSizeBytes.Value)
                 {
-                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: size {Size} > maximum {MaxSize}", f.Name, f.Size, operation.MaxFileSizeBytes.Value);
+                    scopedLogger.LogDebug($"❌ File '{f.Name}' rejected: size {f.Size} > maximum {operation.MaxFileSizeBytes.Value}");
                     return false;
                 }
                 if (operation.ModifiedAfter.HasValue && f.ModifiedAt.HasValue && f.ModifiedAt < operation.ModifiedAfter)
                 {
-                    scopedLogger.LogDebug("❌ File '{FileName}' rejected: modified {Modified} < required {ModifiedAfter}", f.Name, f.ModifiedAt, operation.ModifiedAfter);
+                    scopedLogger.LogDebug($"❌ File '{f.Name}' rejected: modified {f.ModifiedAt} < required {operation.ModifiedAfter}");
                     return false;
                 }
-                scopedLogger.LogDebug("✅ File '{FileName}' passed all filters", f.Name);
+                scopedLogger.LogDebug($"✅ File '{f.Name}' passed all filters");
                 return true;
             }
 
             List<PrinterFileInfo> filteredFiles = fileList.Where(PassesInitialFilters).ToList();
             int gcodeFileCount = filteredFiles.Count;
-            scopedLogger.LogInformation("Filtered to {FilteredCount} candidate files (from {TotalFileCount}). Extensions: {AllowedExts}",
-                gcodeFileCount, fileList.Count, string.Join(',', allowedExts));
+            scopedLogger.LogInformation($"Filtered to {gcodeFileCount} candidate files (from {fileList.Count}). Extensions: {string.Join(",", allowedExts)}");
 
             // Update files found count immediately
             GcodeHarvestOperation? dbOperation = await scopedDb.GcodeHarvestOperations
@@ -320,12 +315,11 @@ public partial class GcodeHarvestService(
             {
                 dbOperation.FilesFound = gcodeFileCount;
                 await scopedDb.SaveChangesAsync();
-                scopedLogger.LogInformation("Updated operation {OperationId} with {GcodeFileCount} G-code files found",
-                    operation.Id, dbOperation.FilesFound);
+                scopedLogger.LogInformation($"Updated operation {operation.Id} with {dbOperation.FilesFound} G-code files found");
             }
             else
             {
-                scopedLogger.LogWarning("Could not find operation {OperationId} in database to update files found count", operation.Id);
+                scopedLogger.LogWarning($"Could not find operation {operation.Id} in database to update files found count");
             }
 
             // Queue each G-code file for processing
@@ -343,27 +337,24 @@ public partial class GcodeHarvestService(
                     ModifiedAt = fileInfo.ModifiedAt
                 };
 
-                scopedLogger.LogDebug("Queueing file {FileName} with path {FilePath}", fileInfo.Name, fileInfo.Path);
+                scopedLogger.LogDebug($"Queueing file {fileInfo.Name} with path {fileInfo.Path}");
                 await _harvestQueue.EnqueueAsync(job);
                 queuedCount++;
 
                 if (queuedCount % 10 == 0)
                 {
-                    scopedLogger.LogInformation("Queued {QueuedCount} files so far for operation {OperationId}",
-                        queuedCount, operation.Id);
+                    scopedLogger.LogInformation($"Queued {queuedCount} files so far for operation {operation.Id}");
                 }
             }
 
-            scopedLogger.LogInformation("Queued {QueuedCount} files for processing in operation {OperationId}",
-                queuedCount, operation.Id);
+            scopedLogger.LogInformation($"Queued {queuedCount} files for processing in operation {operation.Id}");
 
             // Check how many discovered files already exist
             int existingFiles = await scopedDb.HarvestDiscoveredFiles
                 .Where(d => d.HarvestOperationId == operation.Id)
                 .CountAsync();
 
-            scopedLogger.LogInformation("Found {ExistingCount} existing discovered files for operation {OperationId}",
-                existingFiles, operation.Id);
+            scopedLogger.LogInformation($"Found {existingFiles} existing discovered files for operation {operation.Id}");
 
             // If no files were queued, mark operation as completed
             if (queuedCount == 0 && dbOperation != null)
@@ -371,12 +362,12 @@ public partial class GcodeHarvestService(
                 dbOperation.Status = GcodeHarvestStatus.Completed;
                 dbOperation.CompletedAt = DateTime.UtcNow;
                 await scopedDb.SaveChangesAsync();
-                scopedLogger.LogInformation("Operation {OperationId} completed with no files to process", operation.Id);
+                scopedLogger.LogInformation($"Operation {operation.Id} completed with no files to process");
             }
         }
         catch (Exception ex)
         {
-            scopedLogger.LogError(ex, "File discovery failed for operation {OperationId}", operation.Id);
+            scopedLogger.LogError(ex, $"File discovery failed for operation {operation.Id}");
 
             // Mark operation as failed
             GcodeHarvestOperation? dbOperation = await scopedDb.GcodeHarvestOperations
@@ -527,18 +518,17 @@ public partial class GcodeHarvestService(
 
     public async Task<DiscoveredGcodeFileDto[]> GetDiscoveredFilesAsync(Guid operationId, CancellationToken ct = default)
     {
-        _logger.LogInformation("Getting discovered files for operation {OperationId}", operationId);
+        _logger.LogInformation($"Getting discovered files for operation {operationId}");
 
         // Verify the operation exists
         GcodeHarvestOperation? operation = await _db.GcodeHarvestOperations.FirstOrDefaultAsync(o => o.Id == operationId, ct);
         if (operation == null)
         {
-            _logger.LogWarning("GetDiscoveredFilesAsync: Operation {OperationId} not found", operationId);
+            _logger.LogWarning($"GetDiscoveredFilesAsync: Operation {operationId} not found");
             return Array.Empty<DiscoveredGcodeFileDto>();
         }
 
-        _logger.LogInformation("Found operation {OperationId} with status {Status}, files found: {FilesFound}",
-            operationId, operation.Status, operation.FilesFound);
+        _logger.LogInformation($"Found operation {operationId} with status {operation.Status}, files found: {operation.FilesFound}");
 
         // Get files with explicit logging
         HarvestDiscoveredFile[] files = await _db.HarvestDiscoveredFiles
@@ -546,8 +536,7 @@ public partial class GcodeHarvestService(
                 .OrderBy(d => d.FileName)
                 .ToArrayAsync(ct);
 
-        _logger.LogInformation("Found {FileCount} discovered files for operation {OperationId}",
-            files.Length, operationId);
+        _logger.LogInformation($"Found {files.Length} discovered files for operation {operationId}");
 
         return files.Select(MapToDto).ToArray();
     }
@@ -765,7 +754,7 @@ public partial class GcodeHarvestService(
         await _db.SaveChangesAsync(ct);
 
         // Log the cancellation for tracking purposes
-        _logger.LogInformation("Harvest operation {OperationId} was cancelled", operationId);
+        _logger.LogInformation($"Harvest operation {operationId} was cancelled");
 
         // Note: We don't actually cancel the task because Task.Run doesn't support 
         // cancellation after it's started. The background task will check the 
@@ -934,14 +923,14 @@ public partial class GcodeHarvestService(
             {
                 int fileCount = directoryInfo.Files?.Length ?? 0;
                 int dirCount = directoryInfo.Dirs?.Length ?? 0;
-                log.LogInformation("🔍 Directory has {FileCount} files and {DirCount} subdirectories", fileCount, dirCount);
+                log.LogInformation($"🔍 Directory has {fileCount} files and {dirCount} subdirectories");
 
-                log.LogInformation("🚀 Starting CollectFilesRecursivelyWithRetryAsync with empty list (current count: {CurrentCount})", files.Count);
+                log.LogInformation($"🚀 Starting CollectFilesRecursivelyWithRetryAsync with empty list (current count: {files.Count})");
                 await CollectFilesRecursivelyWithRetryAsync(files, directoryInfo, "gcodes", serverUrl, client, log);
-                log.LogInformation("✅ Completed CollectFilesRecursivelyWithRetryAsync, list now has {FinalCount} files", files.Count);
+                log.LogInformation($"✅ Completed CollectFilesRecursivelyWithRetryAsync, list now has {files.Count} files");
             }
 
-            log.LogInformation("🏁 Found {FileCount} files in Moonraker at {ServerUrl}", files.Count, serverUrl);
+            log.LogInformation($"🏁 Found {files.Count} files in Moonraker at {serverUrl}");
             return files; // List<PrinterFileInfo>
         }
         catch (Exception ex)
@@ -958,7 +947,7 @@ public partial class GcodeHarvestService(
         // Add files from current directory
         if (directory.Files != null)
         {
-            log.LogInformation("📁 Processing {FileCount} files in directory {BasePath}", directory.Files.Length, basePath);
+            log.LogInformation($"📁 Processing {directory.Files.Length} files in directory {basePath}");
             foreach (MoonrakerFileInfo file in directory.Files)
             {
                 PrinterFileInfo printerFileInfo = new()
@@ -971,7 +960,7 @@ public partial class GcodeHarvestService(
                 files.Add(printerFileInfo);
                 log.LogDebug("➕ Added file: {FileName} (Size: {Size} bytes)", printerFileInfo.Name, printerFileInfo.Size);
             }
-            log.LogInformation("✅ Added {FileCount} files from {BasePath}, total now: {TotalCount}", directory.Files.Length, basePath, files.Count);
+            log.LogInformation($"✅ Added {directory.Files.Length} files from {basePath}, total now: {files.Count}");
         }
         else
         {
@@ -981,7 +970,7 @@ public partial class GcodeHarvestService(
         // Recursively process subdirectories
         if (directory.Dirs != null && directory.Dirs.Length > 0)
         {
-            log.LogInformation("📁 Processing {SubdirCount} subdirectories in {BasePath}", directory.Dirs.Length, basePath);
+            log.LogInformation($"📁 Processing {directory.Dirs.Length} subdirectories in {basePath}");
             foreach (DirectoryInfo subDir in directory.Dirs)
             {
                 try
@@ -1116,7 +1105,7 @@ public partial class GcodeHarvestService(
                 ModifiedAt = null // PrusaLink basic API doesn't provide modification date
             }).ToList();
 
-            log.LogInformation("Found {FileCount} files in PrusaLink at {ServerUrl}", files.Count, serverUrl);
+            log.LogInformation($"Found {files.Count} files in PrusaLink at {serverUrl}");
             return files;
         }
         catch (Exception ex)
@@ -1132,7 +1121,7 @@ public partial class GcodeHarvestService(
         try
         {
             // SDCP implementation would go here
-            log.LogInformation("SDCP file listing not yet implemented for {ServerUrl}", serverUrl);
+            log.LogInformation($"SDCP file listing not yet implemented for {serverUrl}");
             await Task.Delay(100); // Adding await to fix the warning
             return new List<PrinterFileInfo>();
         }
@@ -1243,7 +1232,7 @@ public partial class GcodeHarvestService(
             return;
         }
 
-        _logger.LogInformation("Waiting for {TaskCount} active harvest tasks to complete", tasks.Length);
+        _logger.LogInformation($"Waiting for {tasks.Length} active harvest tasks to complete");
 
         try
         {
@@ -1251,15 +1240,15 @@ public partial class GcodeHarvestService(
             using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, ct);
 
             await Task.WhenAll(tasks).WaitAsync(linkedCts.Token);
-            _logger.LogInformation("All harvest tasks completed successfully");
+            _logger.LogInformation($"All harvest tasks completed successfully");
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Timeout or cancellation occurred while waiting for harvest tasks");
+            _logger.LogWarning($"Timeout or cancellation occurred while waiting for harvest tasks");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error waiting for harvest tasks to complete");
+            _logger.LogError(ex, $"Error waiting for harvest tasks to complete");
         }
     }
 

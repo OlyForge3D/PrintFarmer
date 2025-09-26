@@ -37,7 +37,7 @@ public partial class NetworkDiscoveryService(
 
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting printer network discovery...");
+        _logger.LogInformation($"Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from results (fresh scope for safety)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
@@ -50,27 +50,27 @@ public partial class NetworkDiscoveryService(
             if (autoRanges.Count > 0)
             {
                 settings.NetworkRanges.AddRange(autoRanges);
-                _logger.LogInformation("Auto-detected {Count} network range(s) for discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
+                _logger.LogInformation($"Auto-detected {autoRanges.Count} network range(s) for discovery: {string.Join(",", autoRanges)}", null, null);
             }
             else
             {
-                _logger.LogWarning("No network ranges configured and none could be auto-detected. Discovery will return empty result.");
+                _logger.LogWarning($"No network ranges configured and none could be auto-detected. Discovery will return empty result.", null, null);
                 return [];
             }
         }
-        _logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}", string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
+        _logger.LogInformation($"Discovery settings: Networks={string.Join(",", settings.NetworkRanges)}, Timeout={settings.TimeoutMs}ms, MaxScans={settings.MaxConcurrentScans}, Ports={string.Join(",", settings.Ports)}", null, null);
 
         List<DiscoveredPrinterDto> discovered = new();
 
         foreach (string network in settings.NetworkRanges)
         {
-            _logger.LogInformation("Scanning network: {Network}", network);
+            _logger.LogInformation($"Scanning network: {network}", null, null);
             List<DiscoveredPrinterDto> networkPrinters = await ScanNetworkAsync(network, settings, existingServerUrls, cancellationToken);
-            _logger.LogInformation("Network {Network} scan completed. Found {Count} printers", network, networkPrinters.Count);
+            _logger.LogInformation($"Network {network} scan completed. Found {networkPrinters.Count} printers", null, null);
             discovered.AddRange(networkPrinters);
         }
 
-        _logger.LogInformation("Network discovery completed. Found {Count} printers", discovered.Count);
+        _logger.LogInformation($"Network discovery completed. Found {discovered.Count} printers", null, null);
         if (discovered.Count == 0)
         {
             return new List<DiscoveredPrinterDto>();
@@ -81,7 +81,7 @@ public partial class NetworkDiscoveryService(
 
     public async Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting printer network discovery...");
+        _logger.LogInformation($"Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
@@ -96,14 +96,14 @@ public partial class NetworkDiscoveryService(
             {
                 settings.NetworkRanges.AddRange(autoRanges);
                 autoDetectedNetworks = true;
-                _logger.LogInformation("Auto-detected {Count} network range(s) for streaming discovery: {Ranges}", autoRanges.Count, string.Join(",", autoRanges));
+                _logger.LogInformation($"Auto-detected {autoRanges.Count} network range(s) for streaming discovery: {string.Join(",", autoRanges)}", null, null);
             }
             else
             {
-                _logger.LogWarning("No network ranges configured and none could be auto-detected. Streaming discovery will send immediate completion.");
+                _logger.LogWarning($"No network ranges configured and none could be auto-detected. Streaming discovery will send immediate completion.", null, null);
             }
         }
-        _logger.LogInformation("Discovery settings: Networks={Networks}, Timeout={TimeoutMs}ms, MaxScans={MaxScans}, Ports={Ports}", string.Join(",", settings.NetworkRanges), settings.TimeoutMs, settings.MaxConcurrentScans, string.Join(",", settings.Ports));
+        _logger.LogInformation($"Discovery settings: Networks={string.Join(",", settings.NetworkRanges)}, Timeout={settings.TimeoutMs}ms, MaxScans={settings.MaxConcurrentScans}, Ports={string.Join(",", settings.Ports)}", null, null);
 
         int totalIps = 0;
         int scannedIps = 0;
@@ -149,11 +149,11 @@ public partial class NetworkDiscoveryService(
 
         int excludedPrinters = 0; // count of printers skipped because already present
 
-        _logger.LogInformation("Starting multi-network scan for {NetworkCount} networks: {Networks}", settings.NetworkRanges.Count, string.Join(", ", settings.NetworkRanges));
+        _logger.LogInformation($"Starting multi-network scan for {settings.NetworkRanges.Count} networks: {string.Join(", ", settings.NetworkRanges)}", null, null);
 
         foreach (string network in settings.NetworkRanges)
         {
-            _logger.LogInformation("Scanning network: {Network}", network);
+            _logger.LogInformation($"Scanning network: {network}", null, null);
 
             try
             {
@@ -168,12 +168,12 @@ public partial class NetworkDiscoveryService(
                 scannedIps += hosts.Count; // Track actual IPs scanned, not printers found
                 foundPrinters += networkPrinters.Count;
 
-                _logger.LogInformation("Network {Network} scan completed. Found {Count} printers", network, networkPrinters.Count);
-                _logger.LogInformation("Progress after {Network}: {ScannedIps}/{TotalIps} IPs ({Progress:F1}%), {FoundPrinters} total", network, scannedIps, totalIps, (double)scannedIps / totalIps * 100, foundPrinters);
+                _logger.LogInformation($"Network {network} scan completed. Found {networkPrinters.Count} printers", null, null);
+                _logger.LogInformation($"Progress after {network}: {scannedIps}/{totalIps} IPs ({((double)scannedIps / totalIps * 100):F1}%), {foundPrinters} total", null, null);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogWarning("Discovery cancelled during {Network} scan after {ScannedIps}/{TotalIps} IPs", network, scannedIps, totalIps);
+                _logger.LogWarning($"Discovery cancelled during {network} scan after {scannedIps}/{totalIps} IPs", null, null);
                 throw;
             }
             catch (Exception ex)
@@ -185,7 +185,7 @@ public partial class NetworkDiscoveryService(
             }
         }
 
-        _logger.LogInformation("Multi-network scan complete: {ScannedIps}/{TotalIps} IPs, {FoundPrinters} printers", scannedIps, totalIps, foundPrinters);
+        _logger.LogInformation($"Multi-network scan complete: {scannedIps}/{totalIps} IPs, {foundPrinters} printers", null, null);
 
         // Emit a final progress snapshot with Completed status for clients that only listen to progress stream
         if (totalIps > 0)
@@ -229,7 +229,7 @@ public partial class NetworkDiscoveryService(
         // NOTE: Do not clear the cached progress immediately. Leaving the final Completed snapshot
         // allows late group joiners (e.g. tests or UI racing right after start) to still receive a
         // DiscoveryProgress event. A new discovery run will overwrite this entry anyway.
-        _logger.LogInformation("Network discovery completed. Found {Count} printers", foundPrinters);
+        _logger.LogInformation($"Network discovery completed. Found {foundPrinters} printers", null, null);
     }
 
     private static HashSet<string> DetectLocalNetworks()
@@ -328,7 +328,7 @@ public partial class NetworkDiscoveryService(
         {
             (IPAddress? networkAddr, int cidr) = ParseCidr(network);
             List<string> hosts = GetHostsInRange(networkAddr, cidr);
-            _logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
+            _logger.LogInformation($"Network {network} contains {hosts.Count} hosts to scan", null, null);
 
             using SemaphoreSlim semaphore = new(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
             Task<DiscoveredPrinterDto?>[] tasks = hosts.Select(async host =>
@@ -336,11 +336,11 @@ public partial class NetworkDiscoveryService(
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    _logger.LogDebug("Scanning host: {Host}", host);
+                    _logger.LogDebug($"Scanning host: {host}", null, null);
                     DiscoveredPrinterDto? result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
                     if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
-                        _logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})", result.IpAddress, result.Port, result.Name, result.Backend);
+                        _logger.LogInformation($"Found printer at {result.IpAddress}:{result.Port} - {result.Name} ({result.Backend})", null, null);
                         // Exclude from future duplicates (within same run) in case multiple ports map
                         existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
                     }
@@ -386,7 +386,7 @@ public partial class NetworkDiscoveryService(
         {
             (IPAddress? networkAddr, int cidr) = ParseCidr(network);
             List<string> hosts = GetHostsInRange(networkAddr, cidr);
-            _logger.LogInformation("Network {Network} contains {HostCount} hosts to scan", network, hosts.Count);
+            _logger.LogInformation($"Network {network} contains {hosts.Count} hosts to scan", null, null);
 
             using SemaphoreSlim semaphore = new(settings.MaxConcurrentScans, settings.MaxConcurrentScans);
             Task<DiscoveredPrinterDto?>[] tasks = hosts.Select(async host =>
@@ -394,7 +394,7 @@ public partial class NetworkDiscoveryService(
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    _logger.LogDebug("Scanning host: {Host}", host);
+                    _logger.LogDebug($"Scanning host: {host}", null, null);
 
                     // Send progress update for current IP
                     int currentScanned = Interlocked.Increment(ref scannedCount);
@@ -418,7 +418,7 @@ public partial class NetworkDiscoveryService(
                     DiscoveredPrinterDto? result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
                     if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
                     {
-                        _logger.LogInformation("Found printer at {Host}:{Port} - {Name} ({Backend})", result.IpAddress, result.Port, result.Name, result.Backend);
+                        _logger.LogInformation($"Found printer at {result.IpAddress}:{result.Port} - {result.Name} ({result.Backend})", null, null);
 
                         // Increment found printers count
                         Interlocked.Increment(ref foundCount);

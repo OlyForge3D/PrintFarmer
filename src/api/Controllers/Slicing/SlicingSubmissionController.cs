@@ -204,7 +204,7 @@ public class SlicingSubmissionController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to enqueue slicing job: {ex.Message}", ex);
+            _logger.LogError(ex, $"Failed to enqueue slicing job: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }
@@ -354,7 +354,7 @@ public class SlicingSubmissionController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to enqueue slicing job for uploaded model {modelId}: {ex.Message}", ex);
+            _logger.LogError(ex, $"Failed to enqueue slicing job for uploaded model {modelId}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }

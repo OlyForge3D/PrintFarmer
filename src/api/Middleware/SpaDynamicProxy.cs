@@ -44,17 +44,17 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
                 if (resp.IsSuccessStatusCode)
                 {
                     _state.Activate();
-                    _logger.LogInformation("[SPA] Dev server detected at {Url}; proxy activation enabled", _state.DevServerUrl);
+                    _logger.LogInformation($"[SPA] Dev server detected at {_state.DevServerUrl}; proxy activation enabled", null, null);
                     break;
                 }
                 else
                 {
-                    _logger.LogDebug("[SPA] Probe status {Status} for {Url}", (int)resp.StatusCode, _state.DevServerUrl);
+                    _logger.LogDebug($"[SPA] Probe status {(int)resp.StatusCode} for {_state.DevServerUrl}", null, null);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "[SPA] Probe failed for {Url}", _state.DevServerUrl);
+                _logger.LogDebug(ex, $"[SPA] Probe failed for {_state.DevServerUrl}", null, null);
             }
             await Task.Delay(_intervalMs, stoppingToken);
         }
@@ -82,6 +82,12 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             {
                 using HttpRequestMessage req = new(HttpMethod.Get, target);
                 CopyHeaders(context, req);
+                // Propagate correlationId header if present
+                string? correlationId = context.Items["CorrelationId"] as string ?? context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(correlationId))
+                {
+                    req.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+                }
                 HttpResponseMessage resp = await s_client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
                 if (IsHtml(resp))
                 {
@@ -102,7 +108,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[SPA] Proxy failure to {Target}", target);
+                _logger.LogWarning(ex, $"[SPA] Proxy failure to {target}", null, null);
             }
         }
         await _next(context);

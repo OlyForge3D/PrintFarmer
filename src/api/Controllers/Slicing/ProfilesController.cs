@@ -80,7 +80,7 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to create profile: {ex.Message}", ex);
+            _logger.LogError(ex, $"Failed to create profile: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create profile");
         }
     }
@@ -220,7 +220,7 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get profiles: {ex.Message}", ex);
+            _logger.LogError(ex, $"Failed to get profiles: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get available profiles");
         }
     }

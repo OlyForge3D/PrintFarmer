@@ -16,6 +16,7 @@ import { PrintersPage } from '@/pages/PrintersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
+import LogsPage from './pages/logs/LogsPage';
 import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { UserManagementPage } from '@/pages/UserManagementPage';
@@ -160,6 +161,14 @@ function App() {
                     element={
                       <ProtectedRoute requiredRole="farm_admin">
                         <ObservabilityDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/logs"
+                    element={
+                      <ProtectedRoute requiredRole="farm_admin">
+                        <LogsPage />
                       </ProtectedRoute>
                     }
                   />

@@ -451,6 +451,8 @@ public class SystemLog
     public string Message { get; set; } = string.Empty;
     public string? Exception { get; set; }
     public string? Source { get; set; }
+    public string? CorrelationId { get; set; } // For end-to-end tracing
+    public string? Metadata { get; set; } // JSON metadata for arbitrary context
 }
 
 

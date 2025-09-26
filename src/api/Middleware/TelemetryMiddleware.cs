@@ -10,6 +10,15 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
 
     public async Task InvokeAsync(HttpContext context)
     {
+        // Extract correlationId from header (frontend sends X-Correlation-Id)
+        string? correlationId = context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            correlationId = context.TraceIdentifier;
+        }
+        // Store in HttpContext.Items for downstream access
+        context.Items["CorrelationId"] = correlationId;
+
         // Skip telemetry for health checks and static files to reduce noise
         string? path = context.Request.Path.Value?.ToLower();
         if (path != null && (path.StartsWith("/health") || path.StartsWith("/swagger") || path.StartsWith("/openapi") || path.Contains(".")))
@@ -26,6 +35,7 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
         activity?.SetTag("http.method", method);
         activity?.SetTag("http.route", endpoint);
         activity?.SetTag("http.scheme", context.Request.Scheme);
+        activity?.SetTag("correlation.id", correlationId);
 
         try
         {

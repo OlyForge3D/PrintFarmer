@@ -68,7 +68,7 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
 {
     public void ValidateConfiguration()
     {
-        logger.LogInformation("Validating application configuration...");
+        logger.LogInformation($"Validating application configuration...", null, null);
 
         List<string> validationErrors = new();
 
@@ -102,29 +102,29 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
         {
             if (appConfig.EnableDetailedErrors)
             {
-                logger.LogWarning("Detailed errors are enabled in production environment");
+                logger.LogWarning($"Detailed errors are enabled in production environment", null, null);
             }
 
             if (dbConfig.EnableSensitiveDataLogging)
             {
-                logger.LogWarning("Sensitive data logging is enabled in production environment");
+                logger.LogWarning($"Sensitive data logging is enabled in production environment", null, null);
             }
 
             if (appConfig.AllowedOrigins == "*")
             {
-                logger.LogWarning("CORS is configured to allow all origins in production environment");
+                logger.LogWarning($"CORS is configured to allow all origins in production environment", null, null);
             }
         }
 
         if (validationErrors.Count > 0)
         {
             string errorMessage = $"Configuration validation failed:\n{string.Join("\n", validationErrors)}";
-            logger.LogCritical("Configuration validation failed: {Errors}", errorMessage);
+            logger.LogCritical($"Configuration validation failed: {errorMessage}", null, null);
             throw new InvalidOperationException(errorMessage);
         }
 
-        logger.LogInformation("Configuration validation completed successfully");
-        logger.LogInformation("App Settings: Port={Port}, BaseUrl={BaseUrl}, HttpTimeout={Timeout}s", appConfig.Port, appConfig.BaseUrl, appConfig.HttpTimeoutSeconds);
-        logger.LogInformation("Database Settings: Provider={Provider}, InitMode={InitMode}", dbConfig.Provider, dbConfig.InitMode);
+        logger.LogInformation($"Configuration validation completed successfully", null, null);
+        logger.LogInformation($"App Settings: Port={appConfig.Port}, BaseUrl={appConfig.BaseUrl}, HttpTimeout={appConfig.HttpTimeoutSeconds}s", null, null);
+        logger.LogInformation($"Database Settings: Provider={dbConfig.Provider}, InitMode={dbConfig.InitMode}", null, null);
     }
 }

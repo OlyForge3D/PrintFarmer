@@ -47,7 +47,7 @@ IGcodeHarvestService harvestService) : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to analyze G-code file {file.FileName}: {ex.Message}", ex);
+            _logger.LogError(ex, $"Failed to analyze G-code file {file.FileName}: {ex.Message}");
             return StatusCode(500, "Failed to analyze G-code file");
         }
     }
@@ -70,7 +70,7 @@ IGcodeHarvestService harvestService) : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error enabling debug logs: {ex.Message}", ex);
+            _logger.LogError(ex, $"Error enabling debug logs: {ex.Message}");
             return StatusCode(500, new { success = false, error = ex.Message });
         }
     }

@@ -29,7 +29,7 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 
         _channel = Channel.CreateUnbounded<HarvestFileJob>(options);
 
-        _logger.LogInformation("InMemoryHarvestQueue initialized");
+        _logger.LogInformation($"InMemoryHarvestQueue initialized", null, null);
     }
 
     public async Task EnqueueAsync(HarvestFileJob job, CancellationToken ct = default)
@@ -40,12 +40,12 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
         try
         {
             await _channel.Writer.WriteAsync(job, ct);
-            _logger.LogDebug($"Enqueued job for file {job.FileName} from operation {job.OperationId}");
+            _logger.LogDebug($"Enqueued job for file {job.FileName} from operation {job.OperationId}", null, null);
         }
         catch (InvalidOperationException)
         {
             // Channel was completed
-            _logger.LogWarning($"Attempted to enqueue job {job.FileName} but queue is completed");
+            _logger.LogWarning($"Attempted to enqueue job {job.FileName} but queue is completed", null, null);
             throw;
         }
     }
@@ -59,11 +59,11 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
 
         await foreach (HarvestFileJob job in _channel.Reader.ReadAllAsync(ct))
         {
-            _logger.LogDebug($"Dequeued job for file {job.FileName} from operation {job.OperationId}");
+            _logger.LogDebug($"Dequeued job for file {job.FileName} from operation {job.OperationId}", null, null);
             yield return job;
         }
 
-        _logger.LogInformation("Queue reading completed - no more jobs available");
+        _logger.LogInformation($"Queue reading completed - no more jobs available", null, null);
     }
 
     public int QueueDepth
@@ -89,7 +89,7 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
         }
 
         _channel.Writer.Complete();
-        _logger.LogInformation("Harvest queue marked as complete - no more jobs will be accepted");
+        _logger.LogInformation($"Harvest queue marked as complete - no more jobs will be accepted", null, null);
     }
 
     public void Dispose()
@@ -104,6 +104,6 @@ public sealed class InMemoryHarvestQueue : IHarvestQueue, IDisposable
         // Complete the channel if not already done
         _channel.Writer.Complete();
 
-        _logger.LogInformation("InMemoryHarvestQueue disposed");
+        _logger.LogInformation($"InMemoryHarvestQueue disposed", null, null);
     }
 }

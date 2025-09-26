@@ -420,7 +420,7 @@ public class SlicerWorkerHostedService : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Slicing job {JobId} failed", job.Id);
+            _logger.LogError($"Slicing job {job.Id} failed: {ex.Message}");
 
             try
             {
