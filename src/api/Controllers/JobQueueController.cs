@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Print Job Queue")]
-public class JobQueueController(AppDbContext db, ILogger<JobQueueController> logger) : ControllerBase
+public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all jobs in the queue
@@ -149,7 +150,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error queueing print job for file {GcodeFileId}", request.GcodeFileId);
+            logger.LogError(ex, $"Error queueing print job for file {request.GcodeFileId}");
             return Problem("An error occurred while queueing the job", statusCode: 500);
         }
     }
@@ -200,7 +201,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error retrieving print job {JobId}", id);
+            logger.LogError(ex, $"Error retrieving print job {id}");
             return Problem("An error occurred while retrieving the job", statusCode: 500);
         }
     }
@@ -300,7 +301,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error updating print job {JobId}", id);
+            logger.LogError(ex, $"Error updating print job {id}");
             return Problem("An error occurred while updating the job", statusCode: 500);
         }
     }
@@ -336,7 +337,7 @@ public class JobQueueController(AppDbContext db, ILogger<JobQueueController> log
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error deleting print job {JobId}", id);
+            logger.LogError(ex, $"Error deleting print job {id}");
             return Problem("An error occurred while deleting the job", statusCode: 500);
         }
     }

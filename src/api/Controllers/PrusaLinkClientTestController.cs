@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,10 +11,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/client-test/prusalink")]
 public class PrusaLinkClientTestController(
-    ILogger<PrusaLinkClientTestController> logger,
+    IUnifiedLoggingService logger,
     IPrusaLinkClient prusaLinkClient) : ControllerBase
 {
-    private readonly ILogger<PrusaLinkClientTestController> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly IPrusaLinkClient _prusaLinkClient = prusaLinkClient;
 
     /// <summary>

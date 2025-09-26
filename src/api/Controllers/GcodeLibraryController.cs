@@ -2,6 +2,7 @@
 using Farm.Web.Api.Data;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("G-code Library")]
-public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, ILogger<GcodeLibraryController> logger) : ControllerBase
+public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all G-code files in the library
@@ -157,7 +158,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error retrieving G-code file {FileId}", id);
+            logger.LogError(ex, $"Error retrieving G-code file {id}");
             return Problem("An error occurred while retrieving the file", statusCode: 500);
         }
     }
@@ -296,7 +297,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error uploading G-code file {FileName}", file?.FileName);
+            logger.LogError(ex, $"Error uploading G-code file {file?.FileName}");
             return Problem("An error occurred while uploading the file", statusCode: 500);
         }
     }
@@ -414,7 +415,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error updating G-code file {FileId}", id);
+            logger.LogError(ex, $"Error updating G-code file {id}");
             return Problem("An error occurred while updating the file", statusCode: 500);
         }
     }
@@ -479,7 +480,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error deleting G-code file {FileId}", id);
+            logger.LogError(ex, $"Error deleting G-code file {id}");
             return Problem("An error occurred while deleting the file", statusCode: 500);
         }
     }
@@ -516,7 +517,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error downloading G-code file {FileId}", id);
+            logger.LogError(ex, $"Error downloading G-code file {id}");
             return Problem("An error occurred while downloading the file", statusCode: 500);
         }
     }

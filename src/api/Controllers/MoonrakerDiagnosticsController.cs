@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,10 +13,10 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Moonraker Diagnostics")]
 public class MoonrakerDiagnosticsController(
     IMoonrakerClient moonrakerClient,
-    ILogger<MoonrakerDiagnosticsController> logger) : ControllerBase
+    IUnifiedLoggingService logger) : ControllerBase
 {
     private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
-    private readonly ILogger<MoonrakerDiagnosticsController> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Test endpoint to invoke GetFileRootsAsync directly
@@ -80,7 +81,7 @@ public class MoonrakerDiagnosticsController(
             }
 
             // failure path
-            _logger.LogError(lastException, "GetFileRootsAsync failed after retries");
+            _logger.LogError(lastException!, "GetFileRootsAsync failed after retries");
             return Problem($"GetFileRootsAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
@@ -153,7 +154,7 @@ public class MoonrakerDiagnosticsController(
             }
 
             // failure path
-            _logger.LogError(lastException, "GetDirectoryAsync failed after retries");
+            _logger.LogError(lastException!, "GetDirectoryAsync failed after retries");
             return Problem($"GetDirectoryAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
@@ -176,7 +177,8 @@ public class MoonrakerDiagnosticsController(
         {
             return BadRequest("url is required");
         }
-        _logger.LogInformation("MoonrakerDiagnostics: GetDetailedFileList called for {Url}, root {Root}, path {Path}", url, root, path);
+
+        _logger.LogInformation("MoonrakerDiagnostics: GetDetailedFileList called for {Url}, root {Root}, path {Path}", url, root, path ?? string.Empty);
 
         try
         {
@@ -226,7 +228,7 @@ public class MoonrakerDiagnosticsController(
             }
 
             // failure path
-            _logger.LogError(lastException, "GetDetailedFileListAsync failed after retries");
+            _logger.LogError(lastException!, "GetDetailedFileListAsync failed after retries");
             return Problem($"GetDetailedFileListAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)

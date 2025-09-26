@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Headers;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
@@ -23,11 +24,11 @@ public sealed class SpaProxyActivationState
 /// <summary>
 /// Background watcher that periodically probes the SPA dev server and activates proxying when reachable.
 /// </summary>
-public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, ILogger<SpaDevServerWatcher> logger, IConfiguration config) : BackgroundService
+public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger, IConfiguration config) : BackgroundService
 {
     private readonly SpaProxyActivationState _state = state;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly ILogger<SpaDevServerWatcher> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly int _intervalMs = config.GetValue<int?>("SPA_PROXY_POLL_INTERVAL_MS") ?? 1500;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -53,7 +54,7 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
             }
             catch (Exception ex)
             {
-                _logger.LogTrace(ex, "[SPA] Probe failed for {Url}", _state.DevServerUrl);
+                _logger.LogDebug(ex, "[SPA] Probe failed for {Url}", _state.DevServerUrl);
             }
             await Task.Delay(_intervalMs, stoppingToken);
         }
@@ -63,12 +64,12 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
 /// <summary>
 /// Middleware that proxies unknown GET/HEAD requests to the dev server after activation.
 /// </summary>
-public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state, ILogger<SpaDynamicProxyMiddleware> logger)
+public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state, IUnifiedLoggingService logger)
 {
     private static readonly HttpClient s_client = new();
     private readonly RequestDelegate _next = next;
     private readonly SpaProxyActivationState _state = state;
-    private readonly ILogger<SpaDynamicProxyMiddleware> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task InvokeAsync(HttpContext context)
     {

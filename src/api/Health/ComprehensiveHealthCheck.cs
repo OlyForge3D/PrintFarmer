@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -9,7 +10,7 @@ namespace Farm.Web.Api.Health;
 /// Comprehensive health check that validates database connectivity,
 /// external service availability, and system resources
 /// </summary>
-public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory httpClientFactory, ILogger<ComprehensiveHealthCheck> logger) : IHealthCheck
+public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {

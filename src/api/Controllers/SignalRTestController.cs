@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Hubs;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
@@ -11,7 +12,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/[controller]")]
 public class SignalRTestController(
     IHubContext<PrinterHub> hubContext,
-    ILogger<SignalRTestController> logger) : ControllerBase
+    IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Test endpoint to verify SignalR hub can send messages

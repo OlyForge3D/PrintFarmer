@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Configuration;
@@ -63,7 +64,7 @@ public class DatabaseSettings
 /// <summary>
 /// Configuration validation service that runs at startup
 /// </summary>
-public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<DatabaseSettings> dbSettings, ILogger<ConfigurationValidator> logger)
+public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<DatabaseSettings> dbSettings, IUnifiedLoggingService logger)
 {
     public void ValidateConfiguration()
     {
@@ -123,9 +124,7 @@ public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<
         }
 
         logger.LogInformation("Configuration validation completed successfully");
-        logger.LogInformation("App Settings: Port={Port}, BaseUrl={BaseUrl}, HttpTimeout={Timeout}s",
-            appConfig.Port, appConfig.BaseUrl, appConfig.HttpTimeoutSeconds);
-        logger.LogInformation("Database Settings: Provider={Provider}, InitMode={InitMode}",
-            dbConfig.Provider, dbConfig.InitMode);
+        logger.LogInformation("App Settings: Port={Port}, BaseUrl={BaseUrl}, HttpTimeout={Timeout}s", appConfig.Port, appConfig.BaseUrl, appConfig.HttpTimeoutSeconds);
+        logger.LogInformation("Database Settings: Provider={Provider}, InitMode={InitMode}", dbConfig.Provider, dbConfig.InitMode);
     }
 }

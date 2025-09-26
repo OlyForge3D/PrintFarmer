@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 
 namespace Farm.Web.Api.Infrastructure.Authorization;
@@ -10,9 +11,9 @@ public sealed class RequirePermissionAttribute(string resource, string action) :
     public string Action { get; } = action;
 }
 
-public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandler> logger) : AuthorizationHandler<RequirePermissionAttribute>
+public class PermissionAuthorizationHandler(IUnifiedLoggingService logger) : AuthorizationHandler<RequirePermissionAttribute>
 {
-    private readonly ILogger<PermissionAuthorizationHandler> _logger = logger;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
