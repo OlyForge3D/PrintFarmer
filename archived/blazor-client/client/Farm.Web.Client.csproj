@@ -10,6 +10,6 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
-  <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
   </ItemGroup>
 </Project>
