@@ -212,8 +212,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     PrusaProgressParser parser = new();
                     _ = Task.Run(async () =>
                     {
-                        var loggerAdapter = new Progress.UnifiedLoggerAdapter(_logger);
-                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, loggerAdapter, cancellationToken,
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken,
                             // onParserCompleted
                             async (jid, ct) =>
                             {
@@ -270,8 +269,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     OrcaProgressParser parser = new();
                     _ = Task.Run(async () =>
                     {
-                        var loggerAdapter = new Progress.UnifiedLoggerAdapter(_logger);
-                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, loggerAdapter, cancellationToken,
+                        await SlicerProgressMonitor.MonitorAsync(job.Id, procHandle, notifier, parser, _logger, cancellationToken,
                             async (jid, ct) =>
                             {
                                 try
