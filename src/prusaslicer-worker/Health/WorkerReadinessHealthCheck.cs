@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Worker.Core;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.PrusaSlicer.Worker.Health;
@@ -9,7 +10,7 @@ namespace Farm.PrusaSlicer.Worker.Health;
 /// </summary>
 public class WorkerReadinessHealthCheck(
     IWorkerStateService workerStateService,
-    ILogger<WorkerReadinessHealthCheck> logger) : IHealthCheck
+    IUnifiedLoggingService logger) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
@@ -22,8 +23,7 @@ public class WorkerReadinessHealthCheck(
                          !state.IsShuttingDown &&
                          state.ActiveJobs < state.MaxConcurrentJobs;
 
-            logger.LogDebug("Readiness check - Worker ready: {IsReady}, ActiveJobs: {ActiveJobs}/{MaxJobs}",
-                isReady, state.ActiveJobs, state.MaxConcurrentJobs);
+            logger.LogDebug($"Readiness check - Worker ready: {isReady}, ActiveJobs: {state.ActiveJobs}/{state.MaxConcurrentJobs}");
 
             var data = new Dictionary<string, object>
             {
@@ -40,7 +40,7 @@ public class WorkerReadinessHealthCheck(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Readiness check failed");
+            logger.LogError(ex, $"Readiness check failed");
             return Task.FromResult(HealthCheckResult.Unhealthy("Readiness check failed", ex));
         }
     }

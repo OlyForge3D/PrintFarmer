@@ -5,7 +5,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Tests.TestUtils;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
@@ -115,7 +115,7 @@ public class SlicerWorkerHostedServiceTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var logger = sp.GetRequiredService<ILogger<SlicerWorkerHostedService>>();
+        var logger = new TestLoggingService();
         var settingsSvc = sp.GetRequiredService<ISlicerSettingsService>();
         services.AddSingleton<IPrintFarmerTelemetryService, NoopTelemetry>();
         var sp2 = services.BuildServiceProvider();
@@ -227,7 +227,7 @@ public class SlicerWorkerHostedServiceTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var logger = sp.GetRequiredService<ILogger<SlicerWorkerHostedService>>();
+        var logger = new TestLoggingService();
         var settingsSvc = sp.GetRequiredService<ISlicerSettingsService>();
         services.AddSingleton<IPrintFarmerTelemetryService, NoopTelemetry>();
         var sp2 = services.BuildServiceProvider();

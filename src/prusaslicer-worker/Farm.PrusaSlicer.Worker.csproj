@@ -12,12 +12,13 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Diagnostics.HealthChecks" Version="2.2.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
-    <PackageReference Include="System.Text.Json" Version="9.0.0" />
+    <PackageReference Include="System.Text.Json" Version="9.0.9" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../shared/Farm.Web.Shared.csproj" />
     <ProjectReference Include="../worker-shared/Farm.Slicer.Worker.Core.csproj" />
+    <ProjectReference Include="../Farm.Infrastructure/Farm.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

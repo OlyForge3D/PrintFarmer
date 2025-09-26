@@ -1,5 +1,5 @@
 ﻿using Farm.Web.Api.Services.SlicerServices;
-using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Tests.TestUtils;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -10,14 +10,14 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// </summary>
 public class LocalSlicerFileStorageTests : IDisposable
 {
-    private readonly Mock<ILogger<LocalSlicerFileStorage>> _mockLogger;
+    private readonly TestLoggingService _testLogger;
     private readonly LocalSlicerFileStorage _storage;
     private readonly string _tempBasePath;
     private readonly LocalFileStorageOptions _options;
 
     public LocalSlicerFileStorageTests()
     {
-        _mockLogger = new Mock<ILogger<LocalSlicerFileStorage>>();
+        _testLogger = new TestLoggingService();
         _tempBasePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
 
         _options = new LocalFileStorageOptions
@@ -26,7 +26,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         };
 
         var optionsWrapper = Options.Create(_options);
-        _storage = new LocalSlicerFileStorage(optionsWrapper, _mockLogger.Object);
+        _storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger);
     }
 
     public void Dispose()
@@ -421,7 +421,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
     {
         // Arrange & Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _mockLogger.Object));
+        Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger));
     }
 
     [Fact]
@@ -435,7 +435,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         try
         {
             // Act
-            var storage = new LocalSlicerFileStorage(optionsWrapper, _mockLogger.Object);
+            var storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger);
 
             // Assert
             Directory.Exists(newTempPath).Should().BeTrue();

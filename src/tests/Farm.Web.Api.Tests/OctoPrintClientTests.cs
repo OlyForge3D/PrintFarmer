@@ -97,7 +97,10 @@ public class OctoPrintClientTests
         request.Headers.Add("X-Api-Key", "key");
         // Use reflection to access internal HttpClient property
         var httpClientProp = typeof(OctoPrintClient).GetProperty("HttpClient", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var httpClient = (HttpClient)httpClientProp.GetValue(client);
+        Assert.NotNull(httpClientProp);
+        var httpClientObj = httpClientProp.GetValue(client);
+        Assert.NotNull(httpClientObj);
+        var httpClient = (HttpClient)httpClientObj!;
         var response = await httpClient.SendAsync(request);
         var pluginsJson = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(pluginsJson);

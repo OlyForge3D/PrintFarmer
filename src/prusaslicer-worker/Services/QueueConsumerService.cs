@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Worker.Core; // base consumer + abstractions
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Worker.Core; // base consumer + abstractions
 using Farm.Web.Shared;
 using StackExchange.Redis;
 
@@ -11,7 +12,7 @@ public class QueueConsumerService : BaseQueueConsumerService
         IConnectionMultiplexer redis,
         IProgressReporter progress,
         IServiceProvider services,
-        ILogger<QueueConsumerService> logger,
+        IUnifiedLoggingService logger,
         IWorkerStateService state,
         IConfiguration config,
         ISlicingPipelineService pipeline)

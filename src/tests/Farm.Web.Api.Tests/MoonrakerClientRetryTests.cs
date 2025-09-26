@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Microsoft.Extensions.Logging.Abstractions;
+using Farm.Web.Api.Tests.TestUtils;
 using Moq;
 using Moq.Protected;
 
@@ -25,7 +25,7 @@ public class MoonrakerClientRetryTests
                 return responder(attempt);
             });
         var http = new HttpClient(handler.Object);
-        return (new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance), handler, attempt);
+        return (new MoonrakerClient(http, new TestLoggingService()), handler, attempt);
     }
 
     [Fact]

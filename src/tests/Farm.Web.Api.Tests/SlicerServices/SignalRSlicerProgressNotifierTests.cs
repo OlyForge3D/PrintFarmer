@@ -1,7 +1,7 @@
 ﻿using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Tests.TestUtils;
 using Moq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -15,7 +15,7 @@ public class SignalRSlicerProgressNotifierTests
     private readonly Mock<IHubClients> _mockClients;
     private readonly Mock<IClientProxy> _mockClientProxy;
     private readonly Mock<IGroupManager> _mockGroupManager;
-    private readonly Mock<ILogger<SignalRSlicerProgressNotifier>> _mockLogger;
+    private readonly TestLoggingService _testLogger;
     private readonly SignalRSlicerProgressNotifier _notifier;
 
     public SignalRSlicerProgressNotifierTests()
@@ -24,7 +24,7 @@ public class SignalRSlicerProgressNotifierTests
         _mockClients = new Mock<IHubClients>();
         _mockClientProxy = new Mock<IClientProxy>();
         _mockGroupManager = new Mock<IGroupManager>();
-        _mockLogger = new Mock<ILogger<SignalRSlicerProgressNotifier>>();
+        _testLogger = new TestLoggingService();
 
         // Setup hub context
         _mockHubContext.Setup(h => h.Clients).Returns(_mockClients.Object);
@@ -34,7 +34,7 @@ public class SignalRSlicerProgressNotifierTests
         _mockClients.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(_mockClientProxy.Object);
         _mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(_mockClientProxy.Object);
 
-        _notifier = new SignalRSlicerProgressNotifier(_mockHubContext.Object, _mockLogger.Object);
+        _notifier = new SignalRSlicerProgressNotifier(_mockHubContext.Object, _testLogger);
     }
 
     [Fact]
@@ -405,7 +405,7 @@ public class SignalRSlicerProgressNotifierTests
     {
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
-            new SignalRSlicerProgressNotifier(null!, _mockLogger.Object));
+            new SignalRSlicerProgressNotifier(null!, _testLogger));
     }
 
     [Fact]
