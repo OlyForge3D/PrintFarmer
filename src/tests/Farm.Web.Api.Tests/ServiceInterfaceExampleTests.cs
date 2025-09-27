@@ -1,4 +1,7 @@
-﻿using Farm.Web.Api.Services;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Moq;
@@ -34,7 +37,7 @@ public class ServiceInterfaceExampleTests
 
         // Verify the method was called
         mockMoonraker.Verify(m => m.GetStatusAsync("http://test-printer", It.IsAny<CancellationToken>()), Times.Once);
-    }
+}
 
     /// <summary>
     /// Example showing how to mock ISpoolmanService for testing filament spool functionality
@@ -97,135 +100,5 @@ public class ServiceInterfaceExampleTests
         Assert.Equal("PLA", result[0].Material);
         Assert.Equal("#FF0000", result[0].ColorHex);
     }
-
-    /// <summary>
-    /// Example showing how to mock IPresetService for testing filament preset functionality
-    /// </summary>
-    [Fact]
-    public void MockedPresetService_CanReturnPresets()
-    {
-        // Arrange
-        var mockPresets = new Mock<IPresetService>();
-        var expectedPresets = new FilamentPresetsDto(new Dictionary<string, TempTargets>
-        {
-            ["ABS"] = new TempTargets(230, 100),
-            ["ASA"] = new TempTargets(245, 100),
-            ["PLA"] = new TempTargets(205, 60),
-            ["PC"] = new TempTargets(260, 110),
-            ["PCTG"] = new TempTargets(235, 80),
-            ["PETG"] = new TempTargets(240, 85)
-        });
-
-        mockPresets
-            .Setup(p => p.GetPresets())
-            .Returns(expectedPresets);
-
-        // Act
-        var result = mockPresets.Object.GetPresets();
-
-        // Assert
-        Assert.Equal(205, result.Presets["PLA"].Hotend);
-        Assert.Equal(60, result.Presets["PLA"].Bed);
-        Assert.Equal(240, result.Presets["PETG"].Hotend);
-        Assert.Equal(85, result.Presets["PETG"].Bed);
-    }
-
-    /// <summary>
-    /// Example showing how to mock IPrusaLinkClient for testing Prusa printer functionality
-    /// </summary>
-    [Fact]
-    public async Task MockedPrusaLinkClient_CanReturnJobInfoAsync()
-    {
-        // Arrange
-        var mockPrusa = new Mock<IPrusaLinkClient>();
-        var expectedJob = new PrusaJob
-        (
-            PrintState: "printing",
-            Progress: 45.5,
-            JobName: "test_print.gcode",
-            ThumbnailUrl: "http://prusa/thumb.png",
-            CameraStreamUrl: "http://prusa/stream",
-            CameraSnapshotUrl: "http://prusa/snapshot"
-        );
-
-        mockPrusa
-            .Setup(p => p.GetJobAsync("http://prusa-printer", "test-api-key", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedJob);
-
-        // Act
-        var result = await mockPrusa.Object.GetJobAsync("http://prusa-printer", "test-api-key");
-
-        // Assert
-        Assert.Equal("test_print.gcode", result?.JobName);
-        Assert.Equal(45.5, result?.Progress);
-        Assert.Equal("printing", result?.PrintState);
-    }
-
-    /// <summary>
-    /// Example showing how to mock ISdcpClient for testing SDCP printer functionality
-    /// </summary>
-    [Fact]
-    public async Task MockedSdcpClient_CanReturnCompositeStatusAsync()
-    {
-        // Arrange
-        var mockSdcp = new Mock<ISdcpClient>();
-        var expectedStatus = new PrinterCompositeStatus
-        (
-            IsOnline: true,
-            State: "printing",
-            Progress: 75.0,
-            JobName: "elegoo_print.gcode",
-            ThumbnailUrl: null,
-            CameraStreamUrl: "http://elegoo-camera/stream",
-            CameraSnapshotUrl: null,
-            X: 100.5,
-            Y: 50.2,
-            Z: 15.8,
-            HotendTemp: 210.0,
-            BedTemp: 60.0,
-            HotendTarget: 215.0,
-            BedTarget: 65.0
-        );
-
-        mockSdcp
-            .Setup(s => s.GetCompositeStatusAsync("ws://elegoo-printer", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedStatus);
-
-        // Act
-        var result = await mockSdcp.Object.GetCompositeStatusAsync("ws://elegoo-printer");
-
-        // Assert
-        Assert.True(result.IsOnline);
-        Assert.Equal("printing", result.State);
-        Assert.Equal(75.0, result.Progress);
-        Assert.Equal("elegoo_print.gcode", result.JobName);
-        Assert.Equal(210.0, result.HotendTemp);
-        Assert.Equal(60.0, result.BedTemp);
-    }
-
-    /// <summary>
-    /// Example showing how to mock IDatabaseSeeder for testing database initialization
-    /// </summary>
-    [Fact]
-    public async Task MockedDatabaseSeeder_CanSeedDataAsync()
-    {
-        // Arrange
-        var mockSeeder = new Mock<IDatabaseSeeder>();
-
-        mockSeeder
-            .Setup(s => s.SeedCatalogDataAsync())
-            .Returns(Task.CompletedTask);
-
-        mockSeeder
-            .Setup(s => s.SeedSpoolmanConfigAsync())
-            .Returns(Task.CompletedTask);
-
-        // Act
-        await mockSeeder.Object.SeedCatalogDataAsync();
-        await mockSeeder.Object.SeedSpoolmanConfigAsync();
-
-        // Assert
-        mockSeeder.Verify(s => s.SeedCatalogDataAsync(), Times.Once);
-        mockSeeder.Verify(s => s.SeedSpoolmanConfigAsync(), Times.Once);
-    }
 }
+

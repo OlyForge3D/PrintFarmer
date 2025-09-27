@@ -1,4 +1,13 @@
-import React, { useState } from 'react';
+
+export interface SettingsPageletProps {
+  metadata: SettingMetadata;
+  values: Record<string, string | number | boolean | undefined>;
+  onChange: (field: string, value: string | number | boolean) => void;
+  onSave: () => void;
+  isSaving?: boolean;
+  error?: string;
+}
+import React from 'react';
 
 export interface SettingPropertyMetadata {
   name: string;
@@ -14,14 +23,7 @@ export interface SettingMetadata {
   properties: SettingPropertyMetadata[];
 }
 
-export interface SettingsPageletProps {
-  metadata: SettingMetadata;
-  values: Record<string, any>;
-  onChange: (field: string, value: any) => void;
-  onSave: () => void;
-  isSaving?: boolean;
-  error?: string;
-}
+
 
 export const SettingsPagelet: React.FC<SettingsPageletProps> = ({
   metadata,
@@ -40,7 +42,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({
           onSave();
         }}
       >
-        {metadata.properties.map((prop) => (
+        {metadata.properties.map((prop: SettingPropertyMetadata) => (
           <div className="mb-4" key={prop.name}>
             <label className="block font-medium mb-1" htmlFor={prop.name}>
               {prop.displayName || prop.name}
@@ -53,9 +55,9 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({
               value={
                 prop.type === 'Boolean' || prop.type === 'bool'
                   ? undefined
-                  : prop.type === 'number'
-                    ? values[prop.name] ?? ''
-                    : values[prop.name] ?? ''
+                  : typeof values[prop.name] === 'string' || typeof values[prop.name] === 'number'
+                    ? values[prop.name]
+                    : ''
               }
               checked={prop.type === 'Boolean' || prop.type === 'bool' ? !!values[prop.name] : undefined}
               onChange={e =>

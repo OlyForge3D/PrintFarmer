@@ -12,6 +12,7 @@ namespace Farm.Infrastructure.Settings
     public class DatabaseSettings : IAppSetting, IValidatableSetting
     {
         public const string SectionName = "Db";
+        public static string SectionKey => SectionName;
 
         [Required]
         [RegularExpression("SqlServer|Postgres|MySql|Sqlite")]

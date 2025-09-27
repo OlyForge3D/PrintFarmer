@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Telemetry;
 
@@ -86,7 +87,7 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         using Activity? activity = _activitySource.StartActivity($"Log.{category}");
 
         // Resolve telemetry service as needed
-        var telemetry = _serviceProvider.GetService(typeof(IPrintFarmerTelemetryService)) as IPrintFarmerTelemetryService;
+        IPrintFarmerTelemetryService? telemetry = _serviceProvider.GetService(typeof(IPrintFarmerTelemetryService)) as IPrintFarmerTelemetryService;
 
         // Add context to telemetry
         if (activity != null)
@@ -157,9 +158,9 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         try
         {
             // Use a new scope to avoid tracking conflicts
-            using var scope = _serviceProvider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var systemLog = new Farm.Infrastructure.Domain.SystemLog
+            using IServiceScope scope = _serviceProvider.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            SystemLog systemLog = new Farm.Infrastructure.Domain.SystemLog
             {
                 // Do NOT set Id, let the DB generate it
                 Timestamp = DateTime.UtcNow,

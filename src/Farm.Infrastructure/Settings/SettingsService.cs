@@ -25,15 +25,15 @@ namespace Farm.Infrastructure.Settings
 
         private void LoadSettings(IConfiguration config)
         {
-            var newSettings = new Dictionary<string, object>();
-            foreach (var type in _settingTypes)
+            Dictionary<string, object> newSettings = new Dictionary<string, object>();
+            foreach (Type type in _settingTypes)
             {
-                var attr = type.GetCustomAttribute<AppSettingAttribute>();
+                AppSettingAttribute? attr = type.GetCustomAttribute<AppSettingAttribute>();
                 if (attr == null)
                 {
                     continue;
                 }
-                var instance = config.GetSection(attr.Key).Get(type) ?? Activator.CreateInstance(type);
+                object? instance = config.GetSection(attr.Key).Get(type) ?? Activator.CreateInstance(type);
                 if (instance == null)
                 {
                     throw new InvalidOperationException($"Could not create instance of settings type {type.FullName}");
@@ -74,39 +74,30 @@ namespace Farm.Infrastructure.Settings
         /// </summary>
         public IEnumerable<SettingMetadata> GetAllMetadata()
         {
-            foreach (var type in _settingTypes)
+            foreach (Type type in _settingTypes)
             {
-                var attr = type.GetCustomAttribute<AppSettingAttribute>();
-                if (attr == null) continue;
-                var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                AppSettingAttribute? attr = type.GetCustomAttribute<AppSettingAttribute>();
+                if (attr == null)
+                {
+                    continue;
+                }
+
+                List<SettingPropertyMetadata> props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Select(p => new SettingPropertyMetadata
                     {
                         Name = p.Name,
                         Type = p.PropertyType.Name,
-                        // Optionally: extract validation attributes, description, etc.
-                        Attributes = p.GetCustomAttributes().Select(a => a.GetType().Name).ToList()
+                        Attributes = new System.Collections.ObjectModel.ReadOnlyCollection<string>(p.GetCustomAttributes().Select(a => a.GetType().Name).ToList())
                     }).ToList();
                 yield return new SettingMetadata
                 {
                     Key = attr.Key,
                     ClassName = type.Name,
-                    Properties = props
+                    Properties = new System.Collections.ObjectModel.ReadOnlyCollection<SettingPropertyMetadata>(props)
                 };
             }
         }
 
-        public class SettingMetadata
-        {
-            public string Key { get; set; } = string.Empty;
-            public string ClassName { get; set; } = string.Empty;
-            public List<SettingPropertyMetadata> Properties { get; set; } = new();
-        }
 
-        public class SettingPropertyMetadata
-        {
-            public string Name { get; set; } = string.Empty;
-            public string Type { get; set; } = string.Empty;
-            public List<string> Attributes { get; set; } = new();
-        }
     }
 }

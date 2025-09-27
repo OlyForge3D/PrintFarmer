@@ -196,12 +196,13 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         }
         // Save presets to AppSettings and persist
         var settings = settingsService.Current;
+        // Convert to InfraSettings.TempTargets for storage
         settings.FilamentPresets = new InfraSettings.FilamentPresetsDto(
             presets.Presets.ToDictionary(
                 kvp => kvp.Key,
-                kvp => new Shared.TempTargets(
-                    (int?)kvp.Value.Hotend ?? 0,
-                    (int?)kvp.Value.Bed ?? 0
+                kvp => new InfraSettings.TempTargets(
+                    (int)(kvp.Value.Hotend ?? 0),
+                    (int)(kvp.Value.Bed ?? 0)
                 )
             )
         );

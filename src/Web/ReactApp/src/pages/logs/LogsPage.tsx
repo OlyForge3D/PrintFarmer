@@ -26,7 +26,7 @@ export default function LogsPage() {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const params: any = {};
+      const params: Record<string, string> = {};
       if (filters.correlationId) params.correlationId = filters.correlationId;
       if (filters.level) params.level = filters.level;
       if (filters.from) params.from = filters.from;
@@ -34,7 +34,7 @@ export default function LogsPage() {
       if (filters.metadata) params.metadata = filters.metadata;
       const res = await axios.get("/api/systemlogs", { params });
       setLogs(res.data);
-    } catch (err) {
+    } catch {
       alert("Failed to fetch logs");
     }
     setLoading(false);
@@ -42,7 +42,7 @@ export default function LogsPage() {
 
   const exportLogs = async () => {
     try {
-      const params: any = {};
+      const params: Record<string, string> = {};
       if (filters.correlationId) params.correlationId = filters.correlationId;
       if (filters.level) params.level = filters.level;
       if (filters.from) params.from = filters.from;
@@ -56,7 +56,7 @@ export default function LogsPage() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-    } catch (err) {
+    } catch {
       alert("Failed to export logs");
     }
   };
