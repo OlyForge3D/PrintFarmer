@@ -29,7 +29,7 @@ public class UnifiedSettingsController : ControllerBase
     /// Returns metadata for all discovered settings classes for dynamic UI generation.
     /// </summary>
     [HttpGet("metadata")]
-    public ActionResult<IEnumerable<SettingsService.SettingMetadata>> GetMetadata()
+    public ActionResult<IEnumerable<SettingMetadata>> GetMetadata()
     {
         var metadata = _modularSettingsService.GetAllMetadata();
         return Ok(metadata);

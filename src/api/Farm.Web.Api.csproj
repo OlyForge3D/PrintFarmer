@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Farm.Infrastructure/Farm.Infrastructure.csproj" />
+  <ProjectReference Include="../infrastructure/Farm.Infrastructure.csproj" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />
@@ -47,7 +47,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
-    <ProjectReference Include="..\Farm.Infrastructure\Farm.Infrastructure.csproj" />
+  <!-- Removed old Farm.Infrastructure reference after folder rename -->
   </ItemGroup>
 
   <ItemGroup>
