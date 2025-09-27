@@ -69,5 +69,44 @@ namespace Farm.Infrastructure.Settings
         {
             get { return _settings.Values; }
         }
+        /// <summary>
+        /// Returns metadata for all discovered settings classes for dynamic UI generation.
+        /// </summary>
+        public IEnumerable<SettingMetadata> GetAllMetadata()
+        {
+            foreach (var type in _settingTypes)
+            {
+                var attr = type.GetCustomAttribute<AppSettingAttribute>();
+                if (attr == null) continue;
+                var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Select(p => new SettingPropertyMetadata
+                    {
+                        Name = p.Name,
+                        Type = p.PropertyType.Name,
+                        // Optionally: extract validation attributes, description, etc.
+                        Attributes = p.GetCustomAttributes().Select(a => a.GetType().Name).ToList()
+                    }).ToList();
+                yield return new SettingMetadata
+                {
+                    Key = attr.Key,
+                    ClassName = type.Name,
+                    Properties = props
+                };
+            }
+        }
+
+        public class SettingMetadata
+        {
+            public string Key { get; set; } = string.Empty;
+            public string ClassName { get; set; } = string.Empty;
+            public List<SettingPropertyMetadata> Properties { get; set; } = new();
+        }
+
+        public class SettingPropertyMetadata
+        {
+            public string Name { get; set; } = string.Empty;
+            public string Type { get; set; } = string.Empty;
+            public List<string> Attributes { get; set; } = new();
+        }
     }
 }

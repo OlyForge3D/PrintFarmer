@@ -8,17 +8,31 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/settings")]
 public class UnifiedSettingsController : ControllerBase
 {
-    private readonly IAppSettingsService _settingsService;
 
-    public UnifiedSettingsController(IAppSettingsService settingsService)
+    private readonly IAppSettingsService _settingsService;
+    private readonly SettingsService _modularSettingsService;
+
+    public UnifiedSettingsController(IAppSettingsService settingsService, SettingsService modularSettingsService)
     {
         _settingsService = settingsService;
+        _modularSettingsService = modularSettingsService;
     }
+
 
     [HttpGet]
     public ActionResult<AppSettings> Get()
     {
         return Ok(_settingsService.Current);
+    }
+
+    /// <summary>
+    /// Returns metadata for all discovered settings classes for dynamic UI generation.
+    /// </summary>
+    [HttpGet("metadata")]
+    public ActionResult<IEnumerable<SettingsService.SettingMetadata>> GetMetadata()
+    {
+        var metadata = _modularSettingsService.GetAllMetadata();
+        return Ok(metadata);
     }
 
     [HttpPost]

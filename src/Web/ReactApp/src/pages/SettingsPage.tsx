@@ -1,4 +1,70 @@
 import { useState, useEffect, useCallback } from 'react';
+import { SettingsPagelet, SettingMetadata } from '../components/SettingsPagelet';
+// --- Dynamic Settings UI State ---
+const [settingsMetadata, setSettingsMetadata] = useState<SettingMetadata[]>([]);
+const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, any>>>({});
+const [settingsLoading, setSettingsLoading] = useState(true);
+const [settingsError, setSettingsError] = useState<string | null>(null);
+const [settingsSaving, setSettingsSaving] = useState<Record<string, boolean>>({});
+const [settingsDirty, setSettingsDirty] = useState<Record<string, boolean>>({});
+
+// Fetch settings metadata and values
+const loadDynamicSettings = useCallback(async () => {
+  setSettingsLoading(true);
+  setSettingsError(null);
+  try {
+    const metaResp = await fetch('/api/settings/metadata');
+    if (!metaResp.ok) throw new Error('Failed to load settings metadata');
+    const metadata: SettingMetadata[] = await metaResp.json();
+    setSettingsMetadata(metadata);
+
+    // Fetch current values for each settings class
+    const valuesObj: Record<string, Record<string, any>> = {};
+    for (const meta of metadata) {
+      const valResp = await fetch(`/api/settings/${meta.key}`);
+      if (!valResp.ok) throw new Error(`Failed to load settings for ${meta.key}`);
+      valuesObj[meta.key] = await valResp.json();
+    }
+    setSettingsValues(valuesObj);
+    setSettingsDirty({});
+  } catch (err: any) {
+    setSettingsError(err.message || 'Failed to load settings');
+  } finally {
+    setSettingsLoading(false);
+  }
+}, []);
+
+useEffect(() => {
+  loadDynamicSettings();
+}, [loadDynamicSettings]);
+
+const handlePageletChange = (key: string, field: string, value: any) => {
+  setSettingsValues(prev => ({
+    ...prev,
+    [key]: { ...prev[key], [field]: value }
+  }));
+  setSettingsDirty(prev => ({ ...prev, [key]: true }));
+};
+
+const handlePageletSave = async (key: string) => {
+  setSettingsSaving(prev => ({ ...prev, [key]: true }));
+  setSettingsError(null);
+  try {
+    const resp = await fetch(`/api/settings/${key}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settingsValues[key])
+    });
+    if (!resp.ok) throw new Error(`Failed to save settings for ${key}`);
+    setSettingsDirty(prev => ({ ...prev, [key]: false }));
+    // Optionally reload values
+    await loadDynamicSettings();
+  } catch (err: any) {
+    setSettingsError(err.message || `Failed to save settings for ${key}`);
+  } finally {
+    setSettingsSaving(prev => ({ ...prev, [key]: false }));
+  }
+};
 import { useDiagnosticsSummary } from '@/hooks/useHealth';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
@@ -550,7 +616,8 @@ export function SettingsPage() {
 
   // autoDetectNetworks removed
 
-  if (loading) {
+
+  if (settingsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-pf-text-secondary">Loading settings...</div>
@@ -564,840 +631,25 @@ export function SettingsPage() {
         <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Settings</h1>
       </div>
 
-      {error && (
+      {settingsError && (
         <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded">
-          {error}
+          {settingsError}
         </div>
       )}
 
-      {/* Spoolman Configuration */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
-        <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Spoolman Integration</h2>
-        {diagnostics && (
-          <div className="text-sm text-pf-text-secondary mb-2 flex gap-4 flex-wrap">
-            <span>Configured: {diagnostics.spoolman.configured ? 'Yes' : 'No'}</span>
-            {diagnostics.spoolman.baseUrl && <span>Base URL: {diagnostics.spoolman.baseUrl}</span>}
-            <span>Discovery Ranges: {diagnostics.discovery.ranges.length}</span>
-            <span>Scan Ports: {diagnostics.discovery.ports.join(', ')}</span>
-          </div>
-        )}
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-2">
-              Spoolman Base URL
-            </label>
-            <input
-              type="url"
-              value={spoolmanBase}
-              onChange={(e) => setSpoolmanBase(e.target.value)}
-              placeholder="http://spoolman:7912"
-              className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary"
-            />
-            <p className="text-sm text-pf-text-secondary mt-1">
-              Base URL to your Spoolman instance. No API key required. Example: http://spoolman:7912
-            </p>
-            {normalizedUrl && (
-              <p className="text-sm text-pf-text-secondary mt-1">
-                Will save as: <code className="bg-pf-bg-0 px-2 py-1 rounded">{normalizedUrl}</code>
-              </p>
-            )}
-          </div>
+      {/* Render a SettingsPagelet for each settings class */}
+      {settingsMetadata.map(meta => (
+        <SettingsPagelet
+          key={meta.key}
+          metadata={meta}
+          values={settingsValues[meta.key] || {}}
+          onChange={(field, value) => handlePageletChange(meta.key, field, value)}
+          onSave={() => handlePageletSave(meta.key)}
+          isSaving={!!settingsSaving[meta.key]}
+          error={settingsError ?? undefined}
+        />
+      ))}
 
-          {normalizedUrl && (
-            <div className="flex gap-2 items-center">
-              <a
-                href={normalizedUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 flex items-center gap-2"
-              >
-                <ExternalLink className="h-4 w-4" />
-                Open Spoolman
-              </a>
-              <button
-                onClick={testSpoolman}
-                disabled={testing}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-              >
-                <TestTube className="h-4 w-4" />
-                {testing ? 'Testing...' : 'Test connection'}
-              </button>
-              {testOk !== null && (
-                <span className={`text-sm ${testOk ? 'text-green-400' : 'text-red-400'}`}>
-                  {testMessage}
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={saveSpoolman}
-              disabled={!normalizedUrl}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <Save className="h-4 w-4" />
-              Save
-            </button>
-            <button
-              onClick={clearSpoolman}
-              type="button"
-              className="px-4 py-2 bg-red-700 text-white rounded hover:bg-red-800 flex items-center gap-2"
-            >
-              <Trash2 className="h-4 w-4" />
-              Clear
-            </button>
-            <a
-              href="/spools"
-              className="px-4 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 flex items-center gap-2"
-            >
-              View Spools
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* Filament Types Management */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h2 className="text-xl font-semibold text-pf-text-primary">Filament Types & Temperature Presets</h2>
-            <p className="text-sm text-pf-text-secondary">
-              Manage filament types and their default temperature settings. These are used as presets for printer controls.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <SpoolmanFilamentImportButton onImportSuccess={loadSettings} />
-            <button
-              onClick={() => setShowAddForm(true)}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              Add Type
-            </button>
-          </div>
-        </div>
-        
-        {/* Add new filament type form */}
-        {showAddForm && (
-          <div className="mb-4 p-4 bg-pf-bg-0 border border-pf-border rounded">
-            <h3 className="text-lg font-medium text-pf-text-primary mb-3">Add New Filament Type</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-2">Name</label>
-                <input
-                  type="text"
-                  value={newFilamentType.name}
-                  onChange={(e) => setNewFilamentType(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="e.g., PLA, ABS, PETG"
-                  className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-2">Hotend Temp (°C)</label>
-                <input
-                  type="number"
-                  value={newFilamentType.hotend}
-                  onChange={(e) => setNewFilamentType(prev => ({ ...prev, hotend: Number(e.target.value) }))}
-                  aria-label="New filament hotend temperature"
-                  className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-2">Bed Temp (°C)</label>
-                <input
-                  type="number"
-                  value={newFilamentType.bed}
-                  onChange={(e) => setNewFilamentType(prev => ({ ...prev, bed: Number(e.target.value) }))}
-                  aria-label="New filament bed temperature"
-                  className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
-                />
-              </div>
-              <div className="flex items-end gap-2">
-                <button
-                  onClick={addFilamentType}
-                  disabled={!newFilamentType.name.trim()}
-                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-                >
-                  <Save className="h-4 w-4" />
-                  Add
-                </button>
-                <button
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setNewFilamentType({ name: '', hotend: 210, bed: 60 });
-                  }}
-                  className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Filament types list */}
-        <div className="space-y-2">
-          {filamentTypes.map((filamentType) => (
-            <div key={filamentType.id} className="flex items-center justify-between p-3 bg-pf-bg-0 border border-pf-border rounded">
-              {editingFilamentType?.id === filamentType.id ? (
-                <div className="flex items-center gap-4 flex-1">
-                    <input
-                    type="text"
-                    value={editingFilamentType.name}
-                    onChange={(e) => setEditingFilamentType(prev => prev ? { ...prev, name: e.target.value } : null)}
-                      aria-label="Filament type name"
-                    className="w-32 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
-                  />
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-pf-text-secondary">Hotend:</span>
-                    <input
-                      type="number"
-                      value={editingFilamentType.defaultTemperatures.hotend}
-                      onChange={(e) => setEditingFilamentType(prev => prev ? {
-                        ...prev,
-                        defaultTemperatures: { ...prev.defaultTemperatures, hotend: Number(e.target.value) }
-                      } : null)}
-                      aria-label="Hotend temperature"
-                      className="w-16 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
-                    />
-                    <span className="text-sm text-pf-text-secondary">°C</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-pf-text-secondary">Bed:</span>
-                    <input
-                      type="number"
-                      value={editingFilamentType.defaultTemperatures.bed}
-                      onChange={(e) => setEditingFilamentType(prev => prev ? {
-                        ...prev,
-                        defaultTemperatures: { ...prev.defaultTemperatures, bed: Number(e.target.value) }
-                      } : null)}
-                      aria-label="Bed temperature"
-                      className="w-16 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
-                    />
-                    <span className="text-sm text-pf-text-secondary">°C</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => updateFilamentType(
-                        editingFilamentType.id,
-                        editingFilamentType.name,
-                        editingFilamentType.defaultTemperatures.hotend,
-                        editingFilamentType.defaultTemperatures.bed
-                      )}
-                      className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => setEditingFilamentType(null)}
-                      className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-4">
-                    <span className="font-medium text-pf-text-primary">{filamentType.name}</span>
-                    <span className="text-sm text-pf-text-secondary">
-                      Hotend: {filamentType.defaultTemperatures.hotend}°C, Bed: {filamentType.defaultTemperatures.bed}°C
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setEditingFilamentType(filamentType)}
-                      className="p-2 text-blue-400 hover:text-blue-300"
-                      title="Edit filament type"
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => deleteFilamentType(filamentType.id)}
-                      className="p-2 text-red-400 hover:text-red-300"
-                      title="Delete filament type"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-          
-          {filamentTypes.length === 0 && (
-            <div className="text-center py-8 text-pf-text-secondary">
-              No filament types defined. Add some to get started!
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Network Discovery Settings */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
-        <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Network Discovery Settings</h2>
-        <p className="text-sm text-pf-text-secondary mb-4">
-          Configure network ranges and parameters for printer discovery. Use proper CIDR notation (e.g., 192.168.1.0/24). Leave ranges empty to disable discovery.
-        </p>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-2">
-              Network Ranges (CIDR notation)
-            </label>
-            <div className="space-y-2">
-              {networkRanges.map((range, index) => {
-                const validation = networkValidation.ranges[index];
-                const isOverlapping = networkValidation.overlapping.includes(range.cidr.trim());
-                const hasError = validation && range.cidr.trim() && (!validation.isValid || isOverlapping);
-                
-                return (
-                  <div key={index} className="space-y-1">
-                    <div className="flex gap-2">
-                      <div className="flex-1 relative">
-                        <input
-                          type="text"
-                          value={range.cidr}
-                          onChange={(e) => updateNetworkRange(index, e.target.value)}
-                          placeholder="192.168.1.0/24"
-                          className={`w-full px-3 py-2 bg-pf-bg-0 border rounded text-pf-text-primary placeholder-pf-text-secondary ${
-                            hasError 
-                              ? 'border-red-500 focus:ring-red-500' 
-                              : validation && range.cidr.trim() && validation.isValid && !isOverlapping
-                              ? 'border-green-500 focus:ring-green-500'
-                              : 'border-pf-border focus:ring-pf-accent'
-                          }`}
-                        />
-                        {validation && range.cidr.trim() && (
-                          <div className="absolute right-8 top-2.5">
-                            {validation.isValid && !isOverlapping ? (
-                              <CheckCircle className="h-5 w-5 text-green-500" />
-                            ) : (
-                              <AlertCircle className="h-5 w-5 text-red-500" />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => removeNetworkRange(index)}
-                        className="px-3 py-2 text-red-400 hover:text-red-300"
-                        title="Remove this range"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    
-                    {/* Validation messages */}
-                    {validation && range.cidr.trim() && (
-                      <div className="ml-3 text-xs">
-                        {!validation.isValid && (
-                          <div className="text-red-400 flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3" />
-                            Invalid CIDR format
-                            {validation.suggestion && (
-                              <span className="ml-1">
-                                - try: <button 
-                                  onClick={() => updateNetworkRange(index, validation.suggestion!)} 
-                                  className="underline hover:no-underline text-blue-400"
-                                >
-                                  {validation.suggestion}
-                                </button>
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {validation.isValid && isOverlapping && (
-                          <div className="text-orange-400 flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3" />
-                            Overlaps with other network ranges
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <button
-                onClick={addNetworkRange}
-                className="px-4 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 flex items-center gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add Range
-              </button>
-            </div>
-            
-            {/* Network validation summary */}
-            {networkValidation.overlapping.length > 0 && (
-              <div className="mt-3 p-3 bg-orange-900/20 border border-orange-700 rounded">
-                <div className="text-orange-200 text-sm flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  Overlapping network ranges detected:
-                </div>
-                <div className="mt-1 ml-6 text-xs text-orange-300">
-                  {networkValidation.overlapping.join(', ')}
-                </div>
-                <div className="mt-1 ml-6 text-xs text-orange-400">
-                  Overlapping ranges may cause duplicate scanning and inefficient discovery.
-                </div>
-              </div>
-            )}
-            
-            {networkValidation.ranges.some(r => r.cidr.trim() && !r.isValid) && (
-              <div className="mt-3 p-3 bg-red-900/20 border border-red-700 rounded">
-                <div className="text-red-200 text-sm flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  Invalid CIDR formats detected. Please fix before saving.
-                </div>
-              </div>
-            )}
-            
-            {/* Auto-detect removed due to Docker / container network constraints */}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-2">
-                Discovery Timeout (ms)
-              </label>
-              <input
-                type="number"
-                value={discoveryTimeout}
-                onChange={(e) => setDiscoveryTimeout(Number(e.target.value))}
-                min={1000}
-                max={10000}
-                    aria-label="Discovery timeout"
-                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-2">
-                Max Concurrent Scans
-              </label>
-              <input
-                type="number"
-                value={maxConcurrentScans}
-                onChange={(e) => setMaxConcurrentScans(Number(e.target.value))}
-                min={1}
-                max={100}
-                    aria-label="Max concurrent scans"
-                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-2">
-              Ports to Scan
-            </label>
-            <div className="space-y-2">
-              {scanPorts.map((port, index) => (
-                <div key={index} className="flex gap-2">
-                  <input
-                    type="number"
-                    value={port}
-                    onChange={(e) => updateScanPort(index, Number(e.target.value))}
-                    min={1}
-                    max={65535}
-                    aria-label="Scan port"
-                    className="w-24 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
-                  />
-                  <button
-                    onClick={() => removeScanPort(index)}
-                    className="px-3 py-2 text-red-400 hover:text-red-300"
-                    title="Remove this port"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={addScanPort}
-                className="px-4 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 flex items-center gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add Port
-              </button>
-            </div>
-          </div>
-
-          <button
-            onClick={saveNetworkSettings}
-            disabled={networkValidation.hasErrors || isSaving}
-            className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
-              networkValidation.hasErrors || isSaving
-                ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                : saveSuccess
-                ? 'bg-green-600 text-white hover:bg-green-700'
-                : 'bg-green-600 text-white hover:bg-green-700'
-            }`}
-          >
-            {isSaving ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : saveSuccess ? (
-              <>
-                <CheckCircle className="h-4 w-4" />
-                Saved!
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" />
-                Save Network Settings
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {hasRole('farm_admin') && passwordPolicy && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
-          <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Password Policy</h2>
-          <p className="text-sm text-pf-text-secondary mb-4">Configure global password requirements for new accounts and admin creation.</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-2">Minimum Length</label>
-              <input
-                id="pp-minlength"
-                type="number"
-                min={6}
-                max={256}
-                aria-label="Minimum password length"
-                value={draftPolicy.minLength}
-                onChange={(e) => updatePolicyField('minLength', Number(e.target.value))}
-                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
-              />
-              <p className="text-xs text-pf-text-secondary mt-1">Applies to all new passwords. Existing passwords unaffected.</p>
-            </div>
-            <div className="space-y-2 col-span-2">
-              <div className="flex items-center gap-2">
-                <input
-                  id="pp-upper"
-                  type="checkbox"
-                  checked={draftPolicy.requireUppercase}
-                  onChange={(e) => updatePolicyField('requireUppercase', e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="pp-upper" className="text-sm text-pf-text-primary">Require Uppercase Letter</label>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="pp-lower"
-                  type="checkbox"
-                  checked={draftPolicy.requireLowercase}
-                  onChange={(e) => updatePolicyField('requireLowercase', e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="pp-lower" className="text-sm text-pf-text-primary">Require Lowercase Letter</label>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="pp-digit"
-                  type="checkbox"
-                  checked={draftPolicy.requireDigit}
-                  onChange={(e) => updatePolicyField('requireDigit', e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="pp-digit" className="text-sm text-pf-text-primary">Require Digit</label>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="pp-symbol"
-                  type="checkbox"
-                  checked={draftPolicy.requireSymbol}
-                  onChange={(e) => updatePolicyField('requireSymbol', e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="pp-symbol" className="text-sm text-pf-text-primary">Require Symbol</label>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={savePasswordPolicy}
-              disabled={!policyDirty || saving || draftPolicy.minLength < 6 || draftPolicy.minLength > 256}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-            >
-              <Save className="h-4 w-4" />
-              {saving ? 'Saving...' : 'Save Policy'}
-            </button>
-            {policyDirty && !saving && (
-              <button
-                type="button"
-                onClick={() => { setPolicyDirty(false); resetPolicy(); }}
-                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {hasRole('farm_admin') && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
-          <h2 className="text-xl font-semibold text-pf-text-primary mb-4">SignalR Settings</h2>
-          <p className="text-sm text-pf-text-secondary mb-4">Configure SignalR console logging and verbosity level for real-time communication debugging.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-2">Log Level</label>
-              <select
-                id="signalr-loglevel"
-                value={signalrSettings.logLevel}
-                onChange={(e) => updateSignalRField('logLevel', e.target.value)}
-                className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary"
-                aria-label="SignalR log level"
-              >
-                <option value="None">None</option>
-                <option value="Critical">Critical</option>
-                <option value="Error">Error</option>
-                <option value="Warning">Warning</option>
-                <option value="Information">Information</option>
-                <option value="Debug">Debug</option>
-                <option value="Trace">Trace</option>
-              </select>
-              <p className="text-xs text-pf-text-secondary mt-1">Controls verbosity of SignalR client logging. Changes take effect after page refresh.</p>
-            </div>
-            <div className="flex flex-col justify-start">
-              <label className="block text-sm font-medium text-pf-text-primary mb-2">Console Logging</label>
-              <div className="flex items-center gap-2 mt-2">
-                <input
-                  id="signalr-console"
-                  type="checkbox"
-                  checked={signalrSettings.consoleLoggingEnabled}
-                  onChange={(e) => updateSignalRField('consoleLoggingEnabled', e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="signalr-console" className="text-sm text-pf-text-primary">Enable Console Logging</label>
-              </div>
-              <p className="text-xs text-pf-text-secondary mt-1">When disabled, SignalR logging is completely suppressed regardless of level.</p>
-            </div>
-          </div>
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={saveSignalRSettings}
-              disabled={!signalrDirty || signalrSaving}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-            >
-              <Save className="h-4 w-4" />
-              {signalrSaving ? 'Saving...' : 'Save Settings'}
-            </button>
-            {signalrDirty && !signalrSaving && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSignalrSettings({ logLevel: 'Information', consoleLoggingEnabled: true });
-                  setSignalrDirty(false);
-                }}
-                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* OpenTelemetry Settings */}
-      {hasRole('farm_admin') && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-xl font-semibold text-pf-text-primary">OpenTelemetry Settings</h2>
-              <p className="text-sm text-pf-text-secondary">Configure system observability and tracing options</p>
-            </div>
-            <div className={`flex items-center space-x-2 ${isTelemetryInitialized() ? 'text-green-500' : 'text-red-500'}`}>
-              {isTelemetryInitialized() ? (
-                <CheckCircle className="h-5 w-5" />
-              ) : (
-                <AlertCircle className="h-5 w-5" />
-              )}
-              <span className="text-sm font-medium">
-                {isTelemetryInitialized() ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <p className="text-sm text-pf-text-secondary">Service Name</p>
-              <p className="font-mono text-sm text-pf-text-primary">PrintFarmer.Frontend</p>
-            </div>
-            <div>
-              <p className="text-sm text-pf-text-secondary">Environment</p>
-              <p className="font-mono text-sm text-pf-text-primary">{import.meta.env.MODE}</p>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            {/* Enable Telemetry */}
-            <div className="flex items-center justify-between">
-              <div>
-                <label htmlFor="enable-telemetry" className="text-sm font-medium text-pf-text-primary">Enable Telemetry</label>
-                <p className="text-sm text-pf-text-secondary">Master switch for all telemetry collection</p>
-              </div>
-              <input
-                id="enable-telemetry"
-                type="checkbox"
-                checked={telemetrySettings.enabled}
-                onChange={(e) => handleTelemetrySettingChange('enabled', e.target.checked)}
-                className="h-4 w-4"
-              />
-            </div>
-
-            {/* Console Logging */}
-            <div className="flex items-center justify-between">
-              <div>
-                <label htmlFor="telemetry-console-logging" className="text-sm font-medium text-pf-text-primary">Console Logging</label>
-                <p className="text-sm text-pf-text-secondary">Output traces to browser console</p>
-              </div>
-              <input
-                id="telemetry-console-logging"
-                type="checkbox"
-                checked={telemetrySettings.consoleLogging}
-                onChange={(e) => handleTelemetrySettingChange('consoleLogging', e.target.checked)}
-                className="h-4 w-4"
-              />
-            </div>
-
-            {/* OTLP Endpoint */}
-            <div>
-              <label htmlFor="otlp-endpoint" className="block text-sm font-medium text-pf-text-primary mb-2">
-                OTLP Endpoint
-              </label>
-              <div className="flex space-x-2">
-                <input
-                  id="otlp-endpoint"
-                  type={showOtlpEndpoint ? 'text' : 'password'}
-                  value={telemetrySettings.otlpEndpoint}
-                  onChange={(e) => handleTelemetrySettingChange('otlpEndpoint', e.target.value)}
-                  placeholder="https://otel-collector.example.com/v1/traces"
-                  className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-secondary"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowOtlpEndpoint(!showOtlpEndpoint)}
-                  className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2"
-                  aria-label={showOtlpEndpoint ? 'Hide endpoint' : 'Show endpoint'}
-                >
-                  {showOtlpEndpoint ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-              <p className="text-sm text-pf-text-secondary mt-1">
-                External collector endpoint for trace export
-              </p>
-            </div>
-
-            {/* Sampling Rate */}
-            <div>
-              <label htmlFor="sampling-rate" className="block text-sm font-medium text-pf-text-primary mb-2">
-                Sampling Rate
-              </label>
-              <input
-                id="sampling-rate"
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={telemetrySettings.samplingRate}
-                onChange={(e) => handleTelemetrySettingChange('samplingRate', parseFloat(e.target.value))}
-                className="w-full h-2 bg-pf-bg-0 rounded-lg appearance-none cursor-pointer"
-              />
-              <div className="flex justify-between text-xs text-pf-text-secondary mt-1">
-                <span>0% (Disabled)</span>
-                <span className="font-medium">{(telemetrySettings.samplingRate * 100).toFixed(0)}%</span>
-                <span>100% (All traces)</span>
-              </div>
-            </div>
-
-            {/* Instrumentation Options */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-pf-text-primary">Instrumentation</h3>
-              
-              <div className="flex items-center justify-between">
-                <div>
-                  <label htmlFor="track-interactions" className="text-sm font-medium text-pf-text-primary">Track User Interactions</label>
-                  <p className="text-sm text-pf-text-secondary">Monitor clicks, form submissions, etc.</p>
-                </div>
-                <input
-                  id="track-interactions"
-                  type="checkbox"
-                  checked={telemetrySettings.trackUserInteractions}
-                  onChange={(e) => handleTelemetrySettingChange('trackUserInteractions', e.target.checked)}
-                  className="h-4 w-4"
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <label htmlFor="track-api-calls" className="text-sm font-medium text-pf-text-primary">Track API Calls</label>
-                  <p className="text-sm text-pf-text-secondary">Monitor HTTP requests and responses</p>
-                </div>
-                <input
-                  id="track-api-calls"
-                  type="checkbox"
-                  checked={telemetrySettings.trackApiCalls}
-                  onChange={(e) => handleTelemetrySettingChange('trackApiCalls', e.target.checked)}
-                  className="h-4 w-4"
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <label htmlFor="track-components" className="text-sm font-medium text-pf-text-primary">Track Component Lifecycle</label>
-                  <p className="text-sm text-pf-text-secondary">Monitor React component mount/unmount</p>
-                </div>
-                <input
-                  id="track-components"
-                  type="checkbox"
-                  checked={telemetrySettings.trackComponentLifecycle}
-                  onChange={(e) => handleTelemetrySettingChange('trackComponentLifecycle', e.target.checked)}
-                  className="h-4 w-4"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={saveTelemetrySettings}
-              disabled={!telemetryDirty}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-            >
-              <Save className="h-4 w-4" />
-              Save Telemetry Settings
-            </button>
-            {telemetryDirty && (
-              <button
-                type="button"
-                onClick={() => {
-                  setTelemetrySettings({
-                    enabled: true,
-                    consoleLogging: import.meta.env.DEV === true,
-                    otlpEndpoint: import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT || '',
-                    samplingRate: 1.0,
-                    trackUserInteractions: true,
-                    trackApiCalls: true,
-                    trackComponentLifecycle: true
-                  });
-                  setTelemetryDirty(false);
-                }}
-                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        </div>
-      )}
       <DebugLoggingControls />
     </div>
   );
@@ -1473,44 +725,7 @@ function DebugLoggingControls() {
         <p className="text-xs text-pf-text-secondary mt-4">These toggles control live debug logging for development and troubleshooting. Settings are persisted in your browser and will remain after reload.</p>
       </div>
 
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6 mt-8">
-        <h2 className="text-xl font-semibold text-pf-text-primary mb-4">System Log Persistence</h2>
-        <p className="text-sm text-pf-text-secondary mb-4">Configure which types of logs to persist and how long to retain them in the backend database.</p>
-        <div className="mb-4">
-          <label htmlFor="logRetentionDays" className="block text-sm font-medium text-pf-text-primary mb-2">Retention Period (days)</label>
-          <input
-            id="logRetentionDays"
-            type="number"
-            min={1}
-            max={365}
-            value={logRetentionDays}
-            onChange={e => setLogRetentionDays(Number(e.target.value))}
-            className="w-24 px-2 py-1 border rounded"
-          />
-        </div>
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">Log Types to Persist</label>
-          {['Info', 'Warning', 'Error', 'Telemetry'].map(type => (
-            <div key={type} className="flex items-center gap-2 mb-1">
-              <input
-                id={`persist-type-${type}`}
-                type="checkbox"
-                checked={persistedLogTypes.includes(type)}
-                onChange={e => {
-                  setPersistedLogTypes((prev: string[]) =>
-                    e.target.checked
-                      ? [...prev, type]
-                      : prev.filter((t: string) => t !== type)
-                  );
-                }}
-                className="h-4 w-4"
-              />
-              <label htmlFor={`persist-type-${type}`} className="text-sm text-pf-text-primary">{type}</label>
-            </div>
-          ))}
-        </div>
-        <p className="text-xs text-pf-text-secondary mt-4">Only selected log types will be persisted. Retention period controls automatic cleanup of old logs.</p>
-      </div>
+      {/* System Log Persistence settings are now managed via dynamic settings UI above. */}
     </>
   );
 }
