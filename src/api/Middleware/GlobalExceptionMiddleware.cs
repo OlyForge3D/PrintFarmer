@@ -2,6 +2,7 @@
 using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -9,7 +10,7 @@ namespace Farm.Web.Api.Middleware;
 /// Global exception handling middleware that provides consistent error responses
 /// and structured logging for all unhandled exceptions
 /// </summary>
-public class GlobalExceptionMiddleware(RequestDelegate next, IUnifiedLoggingService logger)
+public class GlobalExceptionMiddleware(RequestDelegate next)
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -19,9 +20,8 @@ public class GlobalExceptionMiddleware(RequestDelegate next, IUnifiedLoggingServ
     };
 
     private readonly RequestDelegate _next = next ?? throw new ArgumentNullException(nameof(next));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -35,7 +35,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next, IUnifiedLoggingServ
         {
             // Use correlationId from HttpContext.Items if available (set by TelemetryMiddleware)
             string correlationId = context.Items["CorrelationId"] as string ?? context.TraceIdentifier;
-            _logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}", correlationId);
+            logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}", correlationId);
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }

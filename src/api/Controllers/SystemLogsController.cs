@@ -20,7 +20,7 @@ public class SystemLogsController : ControllerBase
 
     // GET: api/systemlogs?correlationId=...&level=...&from=...&to=...&metadata=...
     [HttpGet]
-    public async Task<IActionResult> GetLogs(
+    public async Task<IActionResult> GetLogsAsync(
         [FromQuery] string? correlationId,
         [FromQuery] string? level,
         [FromQuery] DateTime? from,
@@ -59,7 +59,7 @@ public class SystemLogsController : ControllerBase
 
     // GET: api/systemlogs/export?correlationId=...&level=...&from=...&to=...&metadata=...
     [HttpGet("export")]
-    public async Task<IActionResult> ExportLogs(
+    public async Task<IActionResult> ExportLogsAsync(
         [FromQuery] string? correlationId,
         [FromQuery] string? level,
         [FromQuery] DateTime? from,

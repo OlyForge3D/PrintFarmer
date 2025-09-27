@@ -31,7 +31,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Printers")]
-public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog) : ControllerBase
+public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, IHttpClientFactory httpClientFactory) : ControllerBase
 {
     private readonly AppDbContext db = db;
     private readonly IMoonrakerClient moon = moon;
@@ -44,6 +44,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     private readonly ICircuitBreakerService circuitBreaker = circuitBreaker;
     private readonly IPrinterCapabilityDiscoveryService capabilityDiscovery = capabilityDiscovery;
     private readonly IDefaultCatalogService defaultCatalog = defaultCatalog;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
 
     // Feature flag: when enabled we swallow transient startup DB errors for /fast endpoint and return empty list.
     private static readonly bool FastEndpointDefensive =
@@ -655,7 +656,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 return false;
             }
 
-            using var httpClient = new HttpClient();
+            var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(2); // Short timeout to avoid blocking
 
             using var request = new HttpRequestMessage(HttpMethod.Head, snapshotUrl);

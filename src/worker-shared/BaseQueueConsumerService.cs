@@ -16,7 +16,9 @@ public abstract class BaseQueueConsumerService(
     string queueKey,
     string processingKey) : BackgroundService
 {
+#pragma warning disable CA2213 // _redis is injected and should not be disposed here
     private readonly IConnectionMultiplexer _redis = redis;
+#pragma warning restore CA2213
     private readonly IProgressReporter _progress = progress;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IUnifiedLoggingService _logger = logger;

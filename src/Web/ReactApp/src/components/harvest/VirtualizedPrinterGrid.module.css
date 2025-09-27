@@ -4,7 +4,10 @@
   position: absolute;
   left: 0;
   will-change: transform;
-  transform: var(--row-translate, none);
+}
+
+.printerGridRow[data-row-translate] {
+  transform: translateY(var(--row-translate-px, 0px));
 }
 
 .printerGridCellFixed {

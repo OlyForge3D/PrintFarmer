@@ -3,10 +3,14 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Middleware;
 
-public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryService telemetryService)
+public class TelemetryMiddleware
 {
-    private readonly RequestDelegate _next = next;
-    private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
+    private readonly RequestDelegate _next;
+
+    public TelemetryMiddleware(RequestDelegate next)
+    {
+        _next = next ?? throw new ArgumentNullException(nameof(next));
+    }
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -31,7 +35,10 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
         string endpoint = context.Request.Path.Value ?? "unknown";
         string method = context.Request.Method;
 
-        using Activity? activity = _telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
+        // Resolve telemetry service from request services
+        var telemetryService = context.RequestServices.GetRequiredService<IPrintFarmerTelemetryService>();
+
+        using Activity? activity = telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
         activity?.SetTag("http.method", method);
         activity?.SetTag("http.route", endpoint);
         activity?.SetTag("http.scheme", context.Request.Scheme);
@@ -45,7 +52,7 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
             int statusCode = context.Response.StatusCode;
             activity?.SetTag("http.status_code", statusCode);
 
-            _telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);
+            telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);
         }
         catch (Exception ex)
         {
@@ -55,7 +62,7 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
             activity?.SetTag("exception.type", ex.GetType().Name);
             activity?.SetTag("exception.message", ex.Message);
 
-            _telemetryService.RecordApiCall(endpoint, method, 500, stopwatch.Elapsed);
+            telemetryService.RecordApiCall(endpoint, method, 500, stopwatch.Elapsed);
             throw;
         }
     }

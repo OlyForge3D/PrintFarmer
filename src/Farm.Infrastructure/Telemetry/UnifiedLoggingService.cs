@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Farm.Infrastructure.Data;
 
@@ -24,15 +25,15 @@ public interface IUnifiedLoggingService
 public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 {
     private readonly ILogger<UnifiedLoggingService> _logger;
-    private readonly IPrintFarmerTelemetryService _telemetryService;
     private readonly AppDbContext _dbContext;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ActivitySource _activitySource = new ActivitySource("PrintFarmer.Logging");
 
-    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, IPrintFarmerTelemetryService telemetryService, AppDbContext dbContext)
+    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, AppDbContext dbContext, IServiceProvider serviceProvider)
     {
         _logger = logger;
-        _telemetryService = telemetryService;
         _dbContext = dbContext;
+        _serviceProvider = serviceProvider;
     }
 
     public void LogDebug(string message, string? correlationId = null, object? metadata = null, params object[] args)
@@ -84,6 +85,9 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
     {
         using Activity? activity = _activitySource.StartActivity($"Log.{category}");
 
+        // Resolve telemetry service as needed
+        var telemetry = _serviceProvider.GetService(typeof(IPrintFarmerTelemetryService)) as IPrintFarmerTelemetryService;
+
         // Add context to telemetry
         if (activity != null)
         {
@@ -112,6 +116,8 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
                 activity.SetStatus(ActivityStatusCode.Error, exception.Message);
             }
         }
+        // Optionally use telemetry for additional reporting if needed
+        // (telemetry?.SomeMethod(...))
 
         // Log to structured logger
         if (exception != null)
@@ -147,21 +153,25 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
             }
         }
 
-        // Persist to SystemLog table
-        var systemLog = new Farm.Infrastructure.Domain.SystemLog
-        {
-            Timestamp = DateTime.UtcNow,
-            Level = level.ToString(),
-            Message = formattedMessage,
-            Exception = exception?.ToString(),
-            Source = category,
-            CorrelationId = correlationId,
-            Metadata = metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : null
-        };
+        // Persist to SystemLog table using a new entity and a new DbContext instance per log entry
         try
         {
-            _dbContext.SystemLogs.Add(systemLog);
-            _dbContext.SaveChanges();
+            // Use a new scope to avoid tracking conflicts
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var systemLog = new Farm.Infrastructure.Domain.SystemLog
+            {
+                // Do NOT set Id, let the DB generate it
+                Timestamp = DateTime.UtcNow,
+                Level = level.ToString(),
+                Message = formattedMessage,
+                Exception = exception?.ToString(),
+                Source = category,
+                CorrelationId = correlationId,
+                Metadata = metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : null
+            };
+            db.SystemLogs.Add(systemLog);
+            db.SaveChanges();
         }
         catch (Exception dbEx)
         {

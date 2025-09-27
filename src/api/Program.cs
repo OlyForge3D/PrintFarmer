@@ -37,17 +37,15 @@ using StackExchange.Redis;
 using Swashbuckle.AspNetCore.Swagger;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
+
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-// Register SystemLogCleanupService for periodic log cleanup
-builder.Services.AddHostedService<SystemLogCleanupService>();
+
+// Register AppSettingsService as singleton
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
 try
 {
-    // CA3003: Path is constructed from known root, not user input
-#pragma warning disable CA3003
     string potentialShared = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "wwwroot"));
-#pragma warning restore CA3003
     if (Directory.Exists(potentialShared))
     {
         builder.Environment.WebRootPath = potentialShared;
@@ -55,18 +53,13 @@ try
 }
 catch { /* non-fatal */ }
 
+// Register SystemLogCleanupService for periodic log cleanup
+builder.Services.AddScoped<SystemLogCleanupService>();
+
 // Add API services
 builder.Services.AddControllers(options =>
     {
         options.Filters.Add<Farm.Web.Api.Infrastructure.Filters.DuplicateConflictExceptionFilter>();
-    })
-    .AddJsonOptions(o =>
-    {
-        // Register custom converters first so they take precedence
-        o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrinterBackendJsonConverter());
-        o.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrintJobStatusJsonConverter());
-        // Default string enum converter for all other enums
-        o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     })
     .AddJsonOptions(options =>
     {
@@ -74,7 +67,18 @@ builder.Services.AddControllers(options =>
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.WriteIndented = false;
         options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        options.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrinterBackendJsonConverter());
+        options.JsonSerializerOptions.Converters.Add(new Farm.Web.Shared.Json.PrintJobStatusJsonConverter());
+        // Default string enum converter for all other enums
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
+
+// Register SystemLogCleanupService for periodic log cleanup
+builder.Services.AddScoped<SystemLogCleanupService>();
+
+// Register AppSettingsService as singleton
+var settingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+builder.Services.AddSingleton<IAppSettingsService>(sp => new AppSettingsService(settingsPath));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -99,162 +103,24 @@ builder.Services.AddCors(options =>
     options.AddPolicy("Default", policy =>
     {
         // Get allowed origins from environment variable or use defaults.
-        // Support both legacy CORS__AllowedOrigins and current ALLOWED_ORIGINS for backward compatibility.
         string allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
             ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
-            ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001"; // include React dev server defaults
-
-        // Check if wildcard network access is enabled
+            ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
         bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
-        string networkRanges = Environment.GetEnvironmentVariable("ALLOWED_NETWORK_RANGES")
-                           ?? "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12";
-
-        // IMPORTANT: We previously used AllowAnyOrigin() when ALLOW_LOCAL_NETWORK=true, which resulted in
-        // Access-Control-Allow-Origin: * and broke requests with credentials (e.g., SignalR negotiation using
-        // cookies or Authorization headers) because browsers forbid wildcard with credentials. We now always
-        // emit the requesting origin explicitly when allowed so credentials are supported.
-
         policy.SetIsOriginAllowed(origin =>
         {
-            // Always allow when local network flag is on (broad dev convenience) – but return true so the
-            // middleware echoes the concrete origin (not '*') enabling credentialed requests.
             if (allowLocalNetwork)
             {
                 return true;
             }
-
-            string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                                   .Select(o => o.Trim())
-                                                   .ToArray();
-
-            if (configuredOrigins.Contains(origin))
-            {
-                return true;
-            }
-
-            // Check if origin matches allowed network ranges (ip-based origin like http://192.168.x.x:port)
-            return Uri.TryCreate(origin, UriKind.Absolute, out var uri)
-                ? IsIpInAllowedRanges(uri.Host, networkRanges)
-                : false;
-        })
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials();
+            var configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(o => o.Trim()).ToArray();
+            return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+        });
+        policy.AllowCredentials();
+        policy.WithHeaders("Content-Type", "Authorization");
+        policy.WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
     });
-});
-
-// Helper method to check if IP is in allowed network ranges
-static bool IsIpInAllowedRanges(string host, string networkRanges)
-{
-    try
-    {
-        if (!System.Net.IPAddress.TryParse(host, out IPAddress? ipAddress))
-        {
-            return false;
-        }
-
-        string[] ranges = networkRanges.Split(',', StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (string range in ranges)
-        {
-            string[] parts = range.Trim().Split('/');
-            if (parts.Length != 2)
-            {
-                continue;
-            }
-
-            if (System.Net.IPAddress.TryParse(parts[0], out IPAddress? networkAddress) &&
-                int.TryParse(parts[1], out int prefixLength) &&
-                IsIpInNetwork(ipAddress, networkAddress, prefixLength))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-    catch
-    {
-        return false;
-    }
-}
-
-// Helper method to check if IP is in network range
-static bool IsIpInNetwork(System.Net.IPAddress ipAddress, System.Net.IPAddress networkAddress, int prefixLength)
-{
-    byte[] ipBytes = ipAddress.GetAddressBytes();
-    byte[] networkBytes = networkAddress.GetAddressBytes();
-
-    if (ipBytes.Length != networkBytes.Length)
-    {
-        return false;
-    }
-
-    int bytesToCheck = prefixLength / 8;
-    int bitsToCheck = prefixLength % 8;
-
-    for (int i = 0; i < bytesToCheck; i++)
-    {
-        if (ipBytes[i] != networkBytes[i])
-        {
-            return false;
-        }
-    }
-
-    if (bitsToCheck > 0 && bytesToCheck < ipBytes.Length)
-    {
-        byte mask = (byte)(0xFF << (8 - bitsToCheck));
-        if ((ipBytes[bytesToCheck] & mask) != (networkBytes[bytesToCheck] & mask))
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// Database provider selection: Sqlite (default), SqlServer, Postgres, MySql
-string dbProvider = builder.Configuration["Db:Provider"]
-               ?? Environment.GetEnvironmentVariable("DB_PROVIDER")
-               ?? "Sqlite";
-
-builder.Services.AddDbContext<AppDbContext>(options =>
-{
-    switch (dbProvider)
-    {
-        case "SqlServer":
-            options.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer")
-                                 ?? builder.Configuration.GetConnectionString("Default")
-                                 ?? "Server=localhost,1433;Database=printfarmer;User Id=sa;Password=PrintFarm123!;TrustServerCertificate=True;",
-                                 o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
-            break;
-        case "Postgres":
-            options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")
-                               ?? builder.Configuration.GetConnectionString("Default")
-                               ?? "Host=localhost;Database=printfarmer;Username=printfarmer;Password=PrintFarm123!",
-                               o => o.MigrationsHistoryTable("__EFMigrationsHistory", "public"));
-            break;
-        case "MySql":
-        {
-            string cs = builder.Configuration.GetConnectionString("MySql")
-                     ?? builder.Configuration.GetConnectionString("Default")
-                     ?? "Server=localhost;Database=printfarmer;User=printfarmer;Password=PrintFarm123!;";
-            ServerVersion serverVersion = ServerVersion.AutoDetect(cs);
-            options.UseMySql(cs, serverVersion);
-            break;
-        }
-        default:
-            options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite")
-                              ?? builder.Configuration.GetConnectionString("Default")
-                              ?? "Data Source=farm.db");
-            break;
-    }
-
-    if (builder.Environment.IsDevelopment())
-    {
-        options.EnableSensitiveDataLogging();
-        options.EnableDetailedErrors();
-    }
 });
 
 // Configure OpenTelemetry
@@ -265,7 +131,7 @@ builder.Services.AddOpenTelemetry()
                 .AddAttributes(new[]
                 {
                     new KeyValuePair<string, object>("farm.environment", builder.Environment.EnvironmentName),
-                    new KeyValuePair<string, object>("farm.database.provider", dbProvider)
+                    new KeyValuePair<string, object>("farm.database.provider", builder.Configuration.GetValue<string>("DB_PROVIDER") ?? "sqlite")
                 });
     })
     .WithTracing(tracing =>
@@ -351,16 +217,16 @@ builder.Services.AddOpenTelemetry()
 
 // Create ActivitySource for custom instrumentation
 ActivitySource activitySource = new("PrintFarmer.API");
-builder.Services.AddSingleton(activitySource);
+builder.Services.AddSingleton(_ => activitySource);
 
 // Register custom telemetry service
-builder.Services.AddSingleton<Farm.Infrastructure.Telemetry.IPrintFarmerTelemetryService, Farm.Infrastructure.Telemetry.PrintFarmerTelemetryService>();
+builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IPrintFarmerTelemetryService, Farm.Infrastructure.Telemetry.PrintFarmerTelemetryService>();
 
 // Register unified logging services
 
 
 // Register unified logging service from Farm.Infrastructure
-builder.Services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
+builder.Services.AddScoped<IUnifiedLoggingService, UnifiedLoggingService>();
 
 // HTTP clients for external APIs
 builder.Services.AddHttpClient<MoonrakerClient>(client =>
@@ -383,106 +249,6 @@ builder.Services.AddHttpClient<SpoolmanService>("SpoolmanService", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-// Register services with interfaces
-builder.Services.AddScoped<IPresetService, PresetService>();
-builder.Services.AddScoped<ISpoolmanService, SpoolmanService>();
-builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
-builder.Services.AddScoped<INetworkDiscoverySettingsService, NetworkDiscoverySettingsService>();
-builder.Services.AddScoped<ISignalRSettingsService, SignalRSettingsService>();
-builder.Services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
-builder.Services.AddScoped<IPrinterCapabilityDiscoveryService, PrinterCapabilityDiscoveryService>();
-builder.Services.AddHostedService<PrinterCapabilityUpdateService>();
-builder.Services.AddScoped<DatabaseSeeder>();
-builder.Services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
-builder.Services.AddScoped<DatabaseInitializer>();
-builder.Services.AddScoped<ConfigurationValidator>();
-builder.Services.AddScoped<IMoonrakerClient, MoonrakerClient>();
-builder.Services.AddScoped<IPrusaLinkClient, PrusaLinkClient>();
-builder.Services.AddScoped<IOctoPrintClient, OctoPrintClient>();
-// Model analysis and virus scanning services for ModelController
-builder.Services.AddScoped<IModelAnalysisService, ModelAnalysisService>();
-builder.Services.AddScoped<IVirusScanner, ClamAVVirusScanner>();
-builder.Services.AddScoped<IThumbnailGenerationService, ThumbnailGenerationService>();
-// Migration status provider (lightweight introspection without forcing migrations strategy changes)
-// NOTE: Was singleton; changed to Scoped because it directly depends on AppDbContext (scoped) to avoid scoped->singleton injection violation in tests.
-builder.Services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
-builder.Services.AddHttpClient<SdcpClient>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(10);
-});
-
-builder.Services.AddScoped<ISdcpClient, SdcpClient>();
-builder.Services.AddSingleton<Farm.Infrastructure.Normalization.INormalizationEventLogger, Farm.Infrastructure.Normalization.NormalizationEventLogger>();
-builder.Services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
-builder.Services.AddSingleton<INormalizationEventLogger, NormalizationEventLogger>();
-builder.Services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
-builder.Services.AddScoped<GcodeHarvestService>();
-// G-code upload runtime settings & quota services
-builder.Services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
-builder.Services.AddSingleton<IGcodeUploadQuotaService>(sp =>
-{
-    string? limitEnv = Environment.GetEnvironmentVariable("GCODE_DAILY_UPLOAD_LIMIT_BYTES");
-    return long.TryParse(limitEnv, out long limit) && limit > 0
-        ? new InMemoryGcodeUploadQuotaService(limit)
-        : new InMemoryGcodeUploadQuotaService();
-});
-
-// Catalog caching (manufacturers/models lists + ETags)
-builder.Services.AddMemoryCache();
-// CatalogCache uses AppDbContext; make it scoped to avoid consuming scoped context from singleton. Internal IMemoryCache still handles cross-request caching.
-builder.Services.AddScoped<ICatalogCache, CatalogCache>();
-// Bind CatalogCacheOptions from configuration section CatalogCache (optional)
-builder.Services.Configure<CatalogCacheOptions>(builder.Configuration.GetSection("CatalogCache"));
-
-// Harvest queue services
-builder.Services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
-
-// Slicer services (MockSlicerOptions removed with in-process engine deprecation)
-builder.Services.Configure<LocalFileStorageOptions>(builder.Configuration.GetSection("LocalFileStorage"));
-
-// Add Redis connection for slicer job queue
-builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
-{
-    IConfiguration? configuration = provider.GetService<IConfiguration>();
-    string connectionString = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
-    return ConnectionMultiplexer.Connect(connectionString);
-});
-
-// In-process slicer engines removed (external workers handle slicing). DI registrations deleted.
-builder.Services.AddScoped<ISlicerJobQueue, RedisSlicerJobQueue>();
-builder.Services.AddScoped<ISlicerFileStorage, LocalSlicerFileStorage>();
-builder.Services.AddScoped<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
-builder.Services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
-builder.Services.AddSingleton<ITempPathProvider, DefaultTempPathProvider>();
-
-// Register slicer runtime settings store (DB-backed)
-builder.Services.AddSingleton<ISlicerSettingsService, DbSlicerSettingsService>();
-builder.Services.AddSingleton<Farm.Web.Api.Services.Startup.StartupStatus>();
-builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.StartupInitializationHostedService>();
-
-// Ensure SlicerExecutableManager can consult runtime admin settings
-builder.Services.AddSingleton<ISlicerExecutableManager, SlicerExecutableManager>();
-// Process runner used by SlicerWorkerHostedService; abstraction allows test injection of fake processes.
-builder.Services.AddTransient<Farm.Web.Api.Services.SlicerServices.Process.IProcessRunner, Farm.Web.Api.Services.SlicerServices.Process.SystemProcessRunner>();
-
-// Register local worker hosted service (it will respect runtime admin settings and stay idle when disabled)
-builder.Services.AddHostedService<SlicerWorkerHostedService>();
-
-// Network URL rewriting for cross-environment compatibility
-builder.Services.AddSingleton<NetworkUrlRewriteService>();
-
-// Background services
-builder.Services.AddHostedService<MoonrakerSubscriptionService>();
-builder.Services.AddHostedService<HarvestWorkerService>();
-builder.Services.AddHostedService<HarvestCompletionService>();
-builder.Services.AddHostedService<GracefulShutdownService>();
-// Register ChunkUploadCleanupService with required dependencies
-builder.Services.AddHostedService(provider =>
-    new Farm.Infrastructure.ChunkUploadCleanupService(
-    provider.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(),
-        builder.Environment.WebRootPath
-    )
-);
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
@@ -539,9 +305,9 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
     {
         devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
     }
-    builder.Services.AddSingleton(new SpaProxyActivationState(devUrl));
+    builder.Services.AddSingleton(_ => new SpaProxyActivationState(devUrl));
     builder.Services.AddHttpClient("SpaProxy");
-    builder.Services.AddHostedService<SpaDevServerWatcher>();
+    builder.Services.AddScoped<SpaDevServerWatcher>();
 }
 
 // Authentication and Authorization services
@@ -1240,6 +1006,12 @@ if (isMonolithicDeployment)
 }
 
 // Enter host run loop
+// Ensure database schema is created before running the host
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.EnsureCreatedAsync();
+}
 await app.RunAsync();
 
 // Expose Program for WebApplicationFactory in tests

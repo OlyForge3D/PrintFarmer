@@ -111,10 +111,17 @@ public class SdcpAckResult
 }
 
 
-public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient
+public sealed class SdcpClient : PrinterClientBase, ISdcpClient
 {
-    private readonly HttpClient httpClient = httpClient;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly HttpClient httpClient;
+    private readonly IUnifiedLoggingService _logger;
+    public SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger)
+        : base()
+    {
+        this.httpClient = httpClient;
+        this._logger = logger;
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP

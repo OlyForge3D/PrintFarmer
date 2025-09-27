@@ -8,7 +8,8 @@ public class SystemLogSettingsDto
 {
     [Range(1, 365)]
     public int RetentionDays { get; set; } = 30;
-    public List<string> PersistedLogTypes { get; set; } = new() { "Info", "Warning", "Error" };
+    private static readonly string[] DefaultLogTypes = new[] { "Info", "Warning", "Error" };
+    public System.Collections.ObjectModel.Collection<string> PersistedLogTypes { get; set; } = new(DefaultLogTypes);
 }
 
 [ApiController]

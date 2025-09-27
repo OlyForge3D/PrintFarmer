@@ -39,6 +39,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // SystemLog Entity Configuration
+        modelBuilder.Entity<SystemLog>(b =>
+        {
+            b.HasKey(l => l.Id);
+            b.Property(l => l.CorrelationId).HasMaxLength(64);
+            b.Property(l => l.Exception).HasColumnType("TEXT");
+            b.Property(l => l.Level).IsRequired().HasMaxLength(32);
+            b.Property(l => l.Message).IsRequired().HasMaxLength(1024);
+            b.Property(l => l.Metadata).HasColumnType("TEXT");
+            b.Property(l => l.Source).HasMaxLength(128);
+            b.Property(l => l.Timestamp).IsRequired();
+            b.HasIndex(l => l.Timestamp);
+            b.HasIndex(l => l.Level);
+        });
         ArgumentNullException.ThrowIfNull(modelBuilder);
         modelBuilder.Entity<Printer>(b =>
         {
@@ -522,6 +536,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
         {
+            // Use a static value for UpdatedAt to avoid model instability in migrations
             modelBuilder.Entity<PasswordPolicy>().HasData(new PasswordPolicy
             {
                 Id = 1,
@@ -530,7 +545,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 RequireLowercase = false,
                 RequireDigit = false,
                 RequireSymbol = false,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         }
     }

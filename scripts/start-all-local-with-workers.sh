@@ -126,18 +126,27 @@ check_port() {
 fresh_cleanup() {
   info "Starting fresh cleanup - terminating all existing containers and processes..."
   
-  # Stop and remove PrintFarmer Docker containers by name pattern
+  # Stop and remove PrintFarmer Docker containers by name pattern (running or stopped)
   local containers=(
     "printfarmer-redis-distributed"
     "printfarmer-orca-worker" 
     "printfarmer-prusa-worker"
   )
+  # Only remove stopped containers if --fresh is present
+  if [[ ${FRESH:-0} -eq 1 ]]; then
+    for cname in "${containers[@]}"; do
+      if docker ps -a --filter "name=$cname" | grep -q .; then
+        warn "Removing container: $cname (fresh start)"
+        docker rm -f "$cname" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
   
   for container_name in "${containers[@]}"; do
     if docker ps -q --filter "name=$container_name" | grep -q .; then
       warn "Stopping container: $container_name"
-      docker stop "$container_name" >/dev/null 2>&1 || true
-      docker rm "$container_name" >/dev/null 2>&1 || true
+      #docker stop "$container_name" >/dev/null 2>&1 || true
+      docker rm -f "$container_name" >/dev/null 2>&1 || true
     fi
   done
   
@@ -238,7 +247,50 @@ info "Checking prerequisites..."
 require_cmd dotnet
 require_cmd npm
 require_cmd node
+
 require_cmd docker
+
+# --- Docker health check and restart logic ---
+if command -v docker &> /dev/null; then
+  info "Checking Docker daemon status..."
+  if ! docker info > /dev/null 2>&1; then
+    warn "Docker is installed but not responding. Attempting to restart Docker..."
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      open --background -a Docker
+      info "Waiting for Docker Desktop to start..."
+      for i in {1..30}; do
+        if docker info > /dev/null 2>&1; then
+          success "Docker is now responsive."
+          break
+        fi
+        sleep 2
+      done
+    else
+      sudo systemctl restart docker
+      info "Waiting for Docker daemon to restart..."
+      for i in {1..30}; do
+        if docker info > /dev/null 2>&1; then
+          success "Docker is now responsive."
+          break
+        fi
+        sleep 2
+      done
+    fi
+    if ! docker info > /dev/null 2>&1; then
+      error "Docker could not be started. Please start Docker manually."
+    fi
+  else
+    success "Docker is running."
+  fi
+
+  # Remove stopped containers for PrintFarmer images if they exist but are not running
+  for cname in printfarmer-redis-distributed printfarmer-orca-worker printfarmer-prusa-worker; do
+    if docker ps -a --filter "name=$cname" --format '{{.Status}}' | grep -v Up | grep -q .; then
+      warn "Removing stopped container: $cname"
+      docker rm -f "$cname" >/dev/null 2>&1 || true
+    fi
+  done
+fi
 
 # Check for Docker images
 if [[ $NO_ORCA -eq 0 ]] && ! docker image inspect printfarmer/orcaslicer-worker >/dev/null 2>&1; then
@@ -268,7 +320,7 @@ fi
 
 success "Prerequisites check passed"
 
-# Fresh cleanup if requested - terminate all existing containers and processes
+# Run fresh cleanup if --fresh is specified (only once, before any build or service startup)
 if [[ $FRESH -eq 1 ]]; then
   fresh_cleanup
 fi
@@ -290,10 +342,6 @@ if [[ $CLEAN -eq 1 ]]; then
   success "Build artifacts cleaned"
 fi
 
-# Fresh cleanup - terminate all existing containers and processes
-if [[ $FRESH -eq 1 ]]; then
-  fresh_cleanup
-fi
 
 # Check and free ports
 info "Checking ports..."
@@ -322,6 +370,9 @@ if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
   info "Installing React dependencies..."
   npm install --legacy-peer-deps
 fi
+
+# Ensure EF Core migrations are applied after cleaning and before starting API server
+
 
 # Create/update React .env for development with distributed workers
 

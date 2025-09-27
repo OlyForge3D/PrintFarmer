@@ -7,6 +7,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { PrinterCard, PrinterCardProps } from './PrinterCard';
 import { HarvestOptions, GcodeHarvestOperation } from '@/types/api';
 import styles from './VirtualizedPrinterGrid.module.css';
+import { getRowTransformClass } from './rowTransformUtil';
 
 interface VirtualizedPrinterGridProps {
   printers: PrinterCardProps['printer'][];
@@ -56,20 +57,18 @@ export const VirtualizedPrinterGrid: React.FC<VirtualizedPrinterGridProps> = (pr
     <div
       ref={parentRef}
       className={styles.printerGridOuter}
-      style={{ height: gridHeight, width: gridWidth }}
+      data-height={gridHeight}
+      data-width={gridWidth}
     >
       <div
         className={styles.printerGridInner}
-        style={{ height: rowVirtualizer.getTotalSize() }}
+        data-height={rowVirtualizer.getTotalSize()}
+        data-width="100%"
       >
         {rowVirtualizer.getVirtualItems().map(row => (
           <div
             key={row.key}
-            className={styles.printerGridRow}
-            style={{
-              // Use CSS custom property for transform
-              ['--row-translate' as string]: `translateY(${row.start}px)`
-            }}
+            className={styles.printerGridRow + ' ' + getRowTransformClass(row.start)}
           >
             {Array.from({ length: columnCount }).map((_, columnIndex) => {
               const idx = row.index * columnCount + columnIndex;
@@ -80,10 +79,8 @@ export const VirtualizedPrinterGrid: React.FC<VirtualizedPrinterGridProps> = (pr
                 <div
                   className={styles.printerGridCell + ' ' + styles.printerGridCellFixed}
                   key={printer.id}
-                  style={{
-                    ['--cell-width' as string]: cardWidth + 'px',
-                    ['--cell-height' as string]: cardHeight + 'px',
-                  }}
+                   data-width={cardWidth}
+                   data-height={cardHeight}
                 >
                   <PrinterCard
                     printer={printer}

@@ -2,6 +2,8 @@ using System;
 using Microsoft.Extensions.Logging;
 using Farm.Infrastructure.Telemetry;
 
+namespace Farm.Infrastructure.Telemetry;
+
 // Extension methods for easy integration
 public static class UnifiedLoggingExtensions
 {

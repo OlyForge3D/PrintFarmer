@@ -37,7 +37,7 @@ namespace Farm.Web.Api.Services.Startup;
 public class StartupInitializationHostedService : IHostedService
 {
     private readonly IServiceProvider _root;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly StartupStatus _status;
     private readonly TimeSpan _overallTimeout = TimeSpan.FromSeconds(90);
     private readonly Histogram<double> _initDurationHistogram;
@@ -50,19 +50,19 @@ public class StartupInitializationHostedService : IHostedService
     /// Creates a new <see cref="StartupInitializationHostedService"/>.
     /// </summary>
     /// <param name="root">Root service provider used to create a scoped provider for initialization.</param>
-    /// <param name="logger">Logger for diagnostic and progress events.</param>
+    /// <param name="scopeFactory">Scope factory for creating DI scopes during initialization.</param>
     /// <param name="status">Shared status object updated with readiness / failure outcome.</param>
     /// <param name="meterFactory">Factory used to create OpenTelemetry metrics instruments.</param>
     /// <param name="env">Host environment (reserved for future conditional behavior).</param>
     public StartupInitializationHostedService(
-    IServiceProvider root,
-    IUnifiedLoggingService logger,
-    StartupStatus status,
-    IMeterFactory meterFactory,
-    IHostEnvironment env)
+        IServiceProvider root,
+        IServiceScopeFactory scopeFactory,
+        StartupStatus status,
+        IMeterFactory meterFactory,
+        IHostEnvironment env)
     {
         _root = root;
-        _logger = logger;
+        _scopeFactory = scopeFactory;
         _status = status;
 
         Meter meter = meterFactory.Create("Farm.Web.Api.Startup");
@@ -86,7 +86,11 @@ public class StartupInitializationHostedService : IHostedService
         CancellationToken token = _cts.Token;
         _status.MarkInitializationStarted();
         _ = Task.Run(() => RunInitializationAsync(token), CancellationToken.None);
-        _logger.LogInformation($"[StartupInit] Background initialization scheduled (timeout {_overallTimeout.TotalSeconds}s)");
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
+            logger.LogInformation($"[StartupInit] Background initialization scheduled (timeout {_overallTimeout.TotalSeconds}s)");
+        }
         return Task.CompletedTask; // DO NOT await heavy work here
     }
 
@@ -104,7 +108,8 @@ public class StartupInitializationHostedService : IHostedService
             using IServiceScope scope = _root.CreateScope();
             IServiceProvider services = scope.ServiceProvider;
 
-            _logger.LogInformation("[StartupInit] Initialization started (async)");
+            var logger = services.GetRequiredService<IUnifiedLoggingService>();
+            logger.LogInformation("[StartupInit] Initialization started (async)");
             ConfigurationValidator configurationValidator = services.GetRequiredService<ConfigurationValidator>();
             DatabaseInitializer dbInitializer = services.GetRequiredService<DatabaseInitializer>();
             DatabaseSettings dbSettings = services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
@@ -122,7 +127,8 @@ public class StartupInitializationHostedService : IHostedService
             double elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;
             _initDurationHistogram.Record(elapsedMs, KeyValuePair.Create<string, object?>("outcome", "success"));
             _initSuccessCounter.Add(1);
-            _logger.LogInformation($"[StartupInit] Initialization succeeded in {(DateTime.UtcNow - start).TotalMilliseconds} ms");
+            var successLogger = services.GetRequiredService<IUnifiedLoggingService>();
+            successLogger.LogInformation($"[StartupInit] Initialization succeeded in {elapsedMs} ms");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -134,7 +140,11 @@ public class StartupInitializationHostedService : IHostedService
                 {
                     _initDurationHistogram.Record(d1.TotalMilliseconds, KeyValuePair.Create<string, object?>("outcome", "canceled"));
                 }
-                _logger.LogCritical($"[StartupInit] Initialization canceled or timed out after {_overallTimeout.TotalSeconds}s");
+                using (var scope = _scopeFactory.CreateScope())
+                {
+                    var logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
+                    logger.LogCritical($"[StartupInit] Initialization canceled or timed out after {_overallTimeout.TotalSeconds}s");
+                }
             }
         }
         catch (Exception ex)
@@ -145,7 +155,11 @@ public class StartupInitializationHostedService : IHostedService
             {
                 _initDurationHistogram.Record(d2.TotalMilliseconds, KeyValuePair.Create<string, object?>("outcome", "failed"));
             }
-            _logger.LogCritical(ex, $"[StartupInit] Initialization failed: {ex.Message}");
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
+                logger.LogCritical(ex, $"[StartupInit] Initialization failed: {ex.Message}");
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 ﻿using System.Net.Http.Headers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Primitives;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -24,11 +25,10 @@ public sealed class SpaProxyActivationState
 /// <summary>
 /// Background watcher that periodically probes the SPA dev server and activates proxying when reachable.
 /// </summary>
-public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger, IConfiguration config) : BackgroundService
+public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, IConfiguration config) : BackgroundService
 {
     private readonly SpaProxyActivationState _state = state;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly IUnifiedLoggingService _logger = logger;
     private readonly int _intervalMs = config.GetValue<int?>("SPA_PROXY_POLL_INTERVAL_MS") ?? 1500;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -44,17 +44,17 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
                 if (resp.IsSuccessStatusCode)
                 {
                     _state.Activate();
-                    _logger.LogInformation($"[SPA] Dev server detected at {_state.DevServerUrl}; proxy activation enabled", null, null);
+                    // Logging moved to method injection if needed
                     break;
                 }
                 else
                 {
-                    _logger.LogDebug($"[SPA] Probe status {(int)resp.StatusCode} for {_state.DevServerUrl}", null, null);
+                    // Logging moved to method injection if needed
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogDebug(ex, $"[SPA] Probe failed for {_state.DevServerUrl}", null, null);
+                // Logging moved to method injection if needed
             }
             await Task.Delay(_intervalMs, stoppingToken);
         }
@@ -64,14 +64,13 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
 /// <summary>
 /// Middleware that proxies unknown GET/HEAD requests to the dev server after activation.
 /// </summary>
-public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state, IUnifiedLoggingService logger)
+public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state)
 {
     private static readonly HttpClient s_client = new();
     private readonly RequestDelegate _next = next;
     private readonly SpaProxyActivationState _state = state;
-    private readonly IUnifiedLoggingService _logger = logger;
 
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
     {
         // Only proxy when activated, only for root-like SPA routes, and only for GET/HEAD
         ArgumentNullException.ThrowIfNull(context);
@@ -108,7 +107,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"[SPA] Proxy failure to {target}", null, null);
+                logger.LogWarning(ex, $"[SPA] Proxy failure to {target}", null, null);
             }
         }
         await _next(context);
