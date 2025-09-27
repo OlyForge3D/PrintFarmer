@@ -44,6 +44,7 @@ public class StartupInitializationHostedService : IHostedService
     private readonly Counter<long> _initSuccessCounter;
     private readonly Counter<long> _initFailureCounter;
     private readonly ObservableGauge<int> _phaseGauge; // referenced via observable delegate
+    private readonly Farm.Infrastructure.Settings.SettingsService _settingsService;
     private CancellationTokenSource? _cts;
 
     /// <summary>
@@ -54,16 +55,19 @@ public class StartupInitializationHostedService : IHostedService
     /// <param name="status">Shared status object updated with readiness / failure outcome.</param>
     /// <param name="meterFactory">Factory used to create OpenTelemetry metrics instruments.</param>
     /// <param name="env">Host environment (reserved for future conditional behavior).</param>
+    /// <param name="settingsService">SettingsService for accessing modular settings.</param>
     public StartupInitializationHostedService(
         IServiceProvider root,
         IServiceScopeFactory scopeFactory,
         StartupStatus status,
         IMeterFactory meterFactory,
-        IHostEnvironment env)
+        IHostEnvironment env,
+        Farm.Infrastructure.Settings.SettingsService settingsService)
     {
         _root = root;
         _scopeFactory = scopeFactory;
         _status = status;
+        _settingsService = settingsService;
 
         Meter meter = meterFactory.Create("Farm.Web.Api.Startup");
         _initDurationHistogram = meter.CreateHistogram<double>("startup.initialization.duration.ms", unit: "ms", description: "Duration of startup initialization");
@@ -110,9 +114,11 @@ public class StartupInitializationHostedService : IHostedService
 
             var logger = services.GetRequiredService<IUnifiedLoggingService>();
             logger.LogInformation("[StartupInit] Initialization started (async)");
+
+
             ConfigurationValidator configurationValidator = services.GetRequiredService<ConfigurationValidator>();
-            DatabaseInitializer dbInitializer = services.GetRequiredService<DatabaseInitializer>();
-            DatabaseSettings dbSettings = services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
+            var dbInitializer = services.GetRequiredService<DatabaseInitializer>();
+            var dbSettings = _settingsService.Get<Farm.Infrastructure.Settings.DatabaseSettings>();
 
             int retryCount = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_COUNT"), out int rc) ? rc : 3;
             int retryDelay = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_DELAY"), out int rd) ? rd : 2;

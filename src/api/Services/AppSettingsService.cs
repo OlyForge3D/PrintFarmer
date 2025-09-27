@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Threading;
-using Farm.Web.Api.Settings;
+using Farm.Infrastructure.Settings;
 
 namespace Farm.Web.Api.Services
 {

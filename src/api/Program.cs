@@ -40,7 +40,9 @@ using Swashbuckle.AspNetCore.Swagger;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-// Register AppSettingsService as singleton
+// Register SettingsService as singleton
+builder.Services.AddSingleton<Farm.Infrastructure.Settings.SettingsService>(sp =>
+    new Farm.Infrastructure.Settings.SettingsService(sp.GetRequiredService<IConfiguration>()));
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
 try
@@ -52,6 +54,8 @@ try
     }
 }
 catch { /* non-fatal */ }
+
+
 
 // Register SystemLogCleanupService for periodic log cleanup
 builder.Services.AddScoped<SystemLogCleanupService>();
@@ -76,9 +80,7 @@ builder.Services.AddControllers(options =>
 // Register SystemLogCleanupService for periodic log cleanup
 builder.Services.AddScoped<SystemLogCleanupService>();
 
-// Register AppSettingsService as singleton
-var settingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
-builder.Services.AddSingleton<IAppSettingsService>(sp => new AppSettingsService(settingsPath));
+
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -716,13 +718,6 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
     }
 });
 
-// Minimal API for presets
-app.MapGet("/api/presets", ([FromServices] IPresetService svc) => Results.Ok(svc.GetPresets()));
-app.MapPost("/api/presets", ([FromServices] IPresetService svc, [FromBody] FilamentPresetsDto body) =>
-{
-    svc.SavePresets(body);
-    return Results.NoContent();
-});
 
 // Minimal API for network discovery settings
 app.MapGet("/api/network-discovery/settings", ([FromServices] INetworkDiscoverySettingsService svc) => Results.Ok(svc.GetSettings()));
@@ -1031,3 +1026,7 @@ public partial class Program
 
 // Cached JSON options to avoid per-call allocations (CA1869)
 // Removed per-file JsonDefaults class; using Program.HealthJsonOptions instead.
+
+
+
+

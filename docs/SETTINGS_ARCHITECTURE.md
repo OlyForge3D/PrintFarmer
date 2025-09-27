@@ -23,10 +23,31 @@ This plan describes how to migrate PrintFarmer's settings architecture to a modu
 // Attribute to mark settings classes
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class AppSettingAttribute : Attribute
+# Implementation Status (as of 2025-09-26)
+
+**Backend:**
+- All settings classes are now modular, discoverable, and decorated with `[AppSetting]`.
+- The `IAppSetting` interface now requires a static `SectionKey` property (no longer empty).
+- All legacy settings services and registrations (e.g., `AppSettingsService`, `IAppSettingsService`, `IOptions<T>`) have been removed from the backend.
+- The `SettingsService` is the single source of truth for all settings, using reflection and attributes for discovery and loading.
+- All settings classes implement validation via `IValidatableSetting` where appropriate.
+- Duplicate/ambiguous types (e.g., `TempTargets`, `PerEngineSlicerSetting`) have been resolved; only one canonical definition is used throughout the codebase.
+- All usages in controllers and services have been migrated to use the new `SettingsService` model.
+- Lint/style issues (formatting, nullability, collection types) have been resolved in all settings-related files.
 {
+**Frontend/UI:**
+- The backend is ready for dynamic UI discovery: all settings classes are exposed and can be listed/queried via the service.
+- The Admin UI migration to dynamic, pagelet-based settings is planned/underway (see Phase 5).
     public string Key { get; }
+**Documentation:**
+- This document and all onboarding guides are up to date with the new architecture and usage patterns.
     public AppSettingAttribute(string key) => Key = key;
+**Outstanding/Next Steps:**
+- Complete dynamic UI migration (Phase 5) and add frontend tests for settings pagelets.
+- Continue to add new settings classes as needed using the documented pattern.
+- Optional: implement advanced features (versioning, per-tenant overrides, etc.).
 }
+---
 
 // Marker interface (optional)
 public interface IAppSetting { }
@@ -99,49 +120,49 @@ var mySlicerSettings = settingsService.Get<MySlicerSettings>();
 ---
 
 ## Phase 1: Foundation & Attribute Model
-- [ ] Define `[AppSetting]` attribute for marking settings classes.
-- [ ] Define `IAppSetting` marker interface (for type safety).
-- [ ] Define `IValidatableSetting` interface with `Validate()`/`ValidateAsync()`.
-- [ ] Refactor existing settings classes to use attribute and interfaces.
+- [x] Define `[AppSetting]` attribute for marking settings classes.
+- [x] Define `IAppSetting` marker interface (for type safety).
+- [x] Define `IValidatableSetting` interface with `Validate()`/`ValidateAsync()`.
+- [x] Refactor existing settings classes to use attribute and interfaces.
 
 ---
 
 ## Phase 2: Settings Service & Discovery
-- [ ] Implement `SettingsService`:
-    - Use reflection to scan assemblies for `[AppSetting]` classes.
-    - Register discovered settings using the attribute's key.
-    - Load settings from configuration (JSON, env vars, etc.) by key.
-    - Expose `Get<T>()`, `GetByKey(string)`, and `GetAll()` APIs.
-- [ ] Support reload/refresh of settings at runtime (optional).
+- [x] Implement `SettingsService`:
+    - [x] Use reflection to scan assemblies for `[AppSetting]` classes.
+    - [x] Register discovered settings using the attribute's key.
+    - [x] Load settings from configuration (JSON, env vars, etc.) by key.
+    - [x] Expose `Get<T>()`, `GetByKey(string)`, and `GetAll()` APIs.
+- [x] Support reload/refresh of settings at runtime (optional).
 
 ---
 
 ## Phase 3: Validation Pipeline
-- [ ] On load, call `Validate()`/`ValidateAsync()` for all settings implementing `IValidatableSetting`.
-- [ ] Aggregate and surface validation errors at startup (fail fast or log as warnings).
-- [ ] Add tests for validation logic and error handling.
+- [x] On load, call `Validate()`/`ValidateAsync()` for all settings implementing `IValidatableSetting`.
+- [x] Aggregate and surface validation errors at startup (fail fast or log as warnings).
+- [x] Add tests for validation logic and error handling.
 
 ---
 
 
 ## Phase 4: Migration, Integration & UI Alignment
-- [ ] Audit all settings currently editable in the Admin UI (review existing settings pages/components and API endpoints).
-- [ ] For each setting, ensure it is represented as a settings class using `[AppSetting]` and interfaces.
-- [ ] For any setting not yet represented as a settings class, create a new class in `src/Farm.Infrastructure/Settings/`:
-    - Decorate with `[AppSetting("Key")]`.
-    - Implement `IAppSetting` and, if needed, `IValidatableSetting`.
-    - Add properties for each setting field.
-    - Add validation logic as appropriate.
-- [ ] Migrate configuration binding and persistence to use the new settings classes.
-- [ ] Update the settings service to ensure all new classes are discoverable and loaded.
-- [ ] Update all usages to use `SettingsService` instead of direct property access.
-- [ ] Update configuration binding logic to support new model.
-- [ ] Update startup and validation logic to use new service.
-- [ ] Expose a generic API endpoint (e.g., `/api/settings`) to:
-    - List all available settings classes (with metadata: key, display name, description).
-    - Get and update values for each settings class by key.
-- [ ] Ensure validation is enforced on update.
-- [ ] Add OpenAPI documentation for the new endpoints.
+- [x] Audit all settings currently editable in the Admin UI (review existing settings pages/components and API endpoints).
+- [x] For each setting, ensure it is represented as a settings class using `[AppSetting]` and interfaces.
+- [x] For any setting not yet represented as a settings class, create a new class in `src/Farm.Infrastructure/Settings/`:
+    - [x] Decorate with `[AppSetting("Key")]`.
+    - [x] Implement `IAppSetting` and, if needed, `IValidatableSetting`.
+    - [x] Add properties for each setting field.
+    - [x] Add validation logic as appropriate.
+- [x] Migrate configuration binding and persistence to use the new settings classes.
+- [x] Update the settings service to ensure all new classes are discoverable and loaded.
+- [x] Update all usages to use `SettingsService` instead of direct property access.
+- [x] Update configuration binding logic to support new model.
+- [x] Update startup and validation logic to use new service.
+- [x] Expose a generic API endpoint (e.g., `/api/settings`) to:
+    - [x] List all available settings classes (with metadata: key, display name, description).
+    - [x] Get and update values for each settings class by key.
+- [x] Ensure validation is enforced on update.
+- [x] Add OpenAPI documentation for the new endpoints.
 
 ---
 

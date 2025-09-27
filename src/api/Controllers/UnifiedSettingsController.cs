@@ -1,4 +1,4 @@
-using Farm.Web.Api.Settings;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 

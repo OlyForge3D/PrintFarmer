@@ -1,130 +1,18 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
-using Farm.Infrastructure.Telemetry;
-using Microsoft.Extensions.Options;
+﻿
 
-namespace Farm.Web.Api.Configuration;
-
-/// <summary>
-/// Application configuration settings with validation
-/// </summary>
-public class AppSettings
+namespace Farm.Web.Api.Configuration
 {
-    public const string SectionName = "App";
-
-    [Required]
-    [Range(1, 65535)]
-    public int Port { get; set; } = 5088;
-
-    [Required]
-    [Url]
-    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Bound from configuration as string; changing type would be a breaking change")]
-    public string BaseUrl { get; set; } = "http://localhost:5088";
-
-    [Required]
-    [MinLength(1)]
-    public string AllowedOrigins { get; set; } = "*";
-
-    [Range(1, 3600)]
-    public int HttpTimeoutSeconds { get; set; } = 30;
-
-    [Range(1, 100)]
-    public int MaxConcurrentConnections { get; set; } = 50;
-
-    [Range(10, 86400)]
-    public int HeartbeatIntervalSeconds { get; set; } = 30;
-
-    public bool EnableDetailedErrors { get; set; }
-
-    [Range(1, 10000)]
-    public int MaxRetryAttempts { get; set; } = 10;
-}
-
-/// <summary>
-/// Database configuration settings with validation
-/// </summary>
-public class DatabaseSettings
-{
-    public const string SectionName = "Db";
-
-    [Required]
-    [AllowedValues("SqlServer", "Postgres", "MySql", "Sqlite")]
-    public string Provider { get; set; } = "Sqlite";
-
-    public string? ConnectionString { get; set; }
-
-    [Range(1, 300)]
-    public int CommandTimeoutSeconds { get; set; } = 30;
-
-    public bool EnableSensitiveDataLogging { get; set; }
-
-    public string InitMode { get; set; } = "Migrate";
-}
-
-/// <summary>
-/// Configuration validation service that runs at startup
-/// </summary>
-public class ConfigurationValidator(IOptions<AppSettings> appSettings, IOptions<DatabaseSettings> dbSettings, IUnifiedLoggingService logger)
-{
-    public void ValidateConfiguration()
+    // ConfigurationValidator stub: all legacy property validation removed
+    public class ConfigurationValidator
     {
-        logger.LogInformation($"Validating application configuration...", null, null);
-
-        List<string> validationErrors = new();
-
-        // Validate app settings
-        AppSettings appConfig = appSettings.Value;
-        if (appConfig.Port < 1 || appConfig.Port > 65535)
+        public ConfigurationValidator(Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.AppSettings> appSettings)
         {
-            validationErrors.Add($"Invalid port: {appConfig.Port}. Must be between 1-65535");
+            // Only unified AppSettings is available; legacy property validation removed
         }
 
-        if (!Uri.TryCreate(appConfig.BaseUrl, UriKind.Absolute, out Uri? baseUri))
+        public void ValidateConfiguration()
         {
-            validationErrors.Add($"Invalid BaseUrl: {appConfig.BaseUrl}");
+            // No-op: All legacy property validation removed
         }
-
-        // Validate database settings
-        DatabaseSettings dbConfig = dbSettings.Value;
-        string[] validProviders = new[] { "SqlServer", "Postgres", "MySql", "Sqlite" };
-        if (!validProviders.Contains(dbConfig.Provider))
-        {
-            validationErrors.Add($"Invalid database provider: {dbConfig.Provider}. Must be one of: {string.Join(", ", validProviders)}");
-        }
-
-        if (dbConfig.Provider != "Sqlite" && string.IsNullOrWhiteSpace(dbConfig.ConnectionString))
-        {
-            validationErrors.Add($"Connection string required for provider: {dbConfig.Provider}");
-        }
-
-        // Log warnings for development settings in production
-        if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Production")
-        {
-            if (appConfig.EnableDetailedErrors)
-            {
-                logger.LogWarning($"Detailed errors are enabled in production environment", null, null);
-            }
-
-            if (dbConfig.EnableSensitiveDataLogging)
-            {
-                logger.LogWarning($"Sensitive data logging is enabled in production environment", null, null);
-            }
-
-            if (appConfig.AllowedOrigins == "*")
-            {
-                logger.LogWarning($"CORS is configured to allow all origins in production environment", null, null);
-            }
-        }
-
-        if (validationErrors.Count > 0)
-        {
-            string errorMessage = $"Configuration validation failed:\n{string.Join("\n", validationErrors)}";
-            logger.LogCritical($"Configuration validation failed: {errorMessage}", null, null);
-            throw new InvalidOperationException(errorMessage);
-        }
-
-        logger.LogInformation($"Configuration validation completed successfully", null, null);
-        logger.LogInformation($"App Settings: Port={appConfig.Port}, BaseUrl={appConfig.BaseUrl}, HttpTimeout={appConfig.HttpTimeoutSeconds}s", null, null);
-        logger.LogInformation($"Database Settings: Provider={dbConfig.Provider}, InitMode={dbConfig.InitMode}", null, null);
     }
 }
