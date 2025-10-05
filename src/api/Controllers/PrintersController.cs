@@ -2907,17 +2907,42 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(typeof(IEnumerable<DiscoveredPrinterDto>), 200)]
     [ProducesResponseType(408)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<DiscoveredPrinterDto>>> DiscoverPrintersAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<DiscoveredPrinterDto>>> DiscoverPrintersAsync([FromQuery] string? backends, CancellationToken ct)
     {
         try
         {
-            _logger.LogInformation($"Starting network printer discovery...");
+            _logger.LogInformation($"Starting network printer discovery... Backends={backends}");
 
             // Set timeout for network discovery - with 100ms per IP, 254 IPs * 2 ports = ~51 seconds + overhead
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout for full network scan
 
+            // Parse optional backends query parameter (comma-separated names)
+            List<PrinterBackend>? backendList = null;
+            if (!string.IsNullOrWhiteSpace(backends))
+            {
+                var parts = backends.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var parsed = new List<PrinterBackend>();
+                foreach (var p in parts)
+                {
+                    if (Enum.TryParse<PrinterBackend>(p, true, out var b))
+                    {
+                        parsed.Add(b);
+                    }
+                }
+                if (parsed.Count > 0)
+                {
+                    backendList = parsed;
+                }
+            }
+
             List<DiscoveredPrinterDto> discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
+
+            // If backend filter provided, apply it at controller layer
+            if (backendList != null && backendList.Count > 0)
+            {
+                discovered = discovered.Where(d => backendList.Contains(d.Backend)).ToList();
+            }
 
             // Get existing printer ServerUrls to filter out duplicates
             List<string> existingUrls = await db.Printers
@@ -2955,7 +2980,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(408)]
     [ProducesResponseType(500)]
-    public ActionResult StartDiscoveryStream(CancellationToken ct)
+    public ActionResult StartDiscoveryStream([FromBody] StartDiscoveryRequest? request, CancellationToken ct)
     {
         try
         {
@@ -2973,7 +2998,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                     using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout to allow for multiple networks and slow responses
 
-                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, timeoutCts.Token);
+                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, request?.Backends, timeoutCts.Token);
                 }
                 catch (OperationCanceledException)
                 {

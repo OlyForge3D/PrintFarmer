@@ -29,6 +29,7 @@ import {
   PrinterModelDto,
   RegisterRequest,
   ResolveHostnameRequest,
+  StartDiscoveryRequest,
   ResolveHostnameResponse,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -222,8 +223,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async startDiscoveryStream(): Promise<{ sessionId: string; message: string }> {
-    const response = await this.client.post<{ sessionId: string; message: string }>('/printers/discover/stream');
+    async startDiscoveryStream(request?: StartDiscoveryRequest): Promise<{ sessionId: string; message: string }> {
+    const response = await this.client.post<{ sessionId: string; message: string }>('/printers/discover/stream', request || {});
     return response.data;
   }
 
