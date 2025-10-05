@@ -68,7 +68,8 @@ public class NetworkDiscoverySettingsService : INetworkDiscoverySettingsService
             [], // Empty - user must specify network ranges
             100, // Default timeout: 100ms per host
             15,  // Default max concurrent scans
-            defaultPorts // Default / environment-derived ports
+            defaultPorts, // Default / environment-derived ports
+            null // No backend filter - scan all backends by default
         );
     }
 

@@ -542,6 +542,13 @@ public record DiscoveryCompletedDto(
 );
 
 /// <summary>
+/// Request to start a network discovery session with optional backend filtering.
+/// </summary>
+public record StartDiscoveryRequest(
+    List<PrinterBackend>? Backends = null
+);
+
+/// <summary>
 /// States representing the lifecycle of a discovery session.
 /// </summary>
 public enum DiscoveryStatus
@@ -574,9 +581,10 @@ public record NetworkDiscoverySettingsDto(
     List<string> NetworkRanges,
     int TimeoutMs = 3000,
     int MaxConcurrentScans = 20,
-    List<int> Ports = null!)
+    List<int> Ports = null!,
+    List<PrinterBackend>? Backends = null)
 {
-    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [80])
+    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [80], null)
     {
     }
 }

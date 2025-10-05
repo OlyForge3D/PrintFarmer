@@ -18,6 +18,7 @@ import {
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  StartDiscoveryRequest,
   UpdatePrinterDto
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
@@ -291,7 +292,7 @@ export function useDiscoverPrinters() {
 
 export function useStartDiscoveryStream() {
   return useMutation({
-    mutationFn: () => apiClient.startDiscoveryStream(),
+    mutationFn: (request?: StartDiscoveryRequest) => apiClient.startDiscoveryStream(request),
   });
 }
 
