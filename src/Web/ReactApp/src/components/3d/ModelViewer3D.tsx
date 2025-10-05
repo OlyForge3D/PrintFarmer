@@ -1,4 +1,5 @@
 import React, { Suspense, useRef, useState } from 'react';
+// (renderUnknown not required here)
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { 
   OrbitControls, 
@@ -120,7 +121,11 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
                 if (typeof maybeMsg === 'string') return maybeMsg;
               }
               try {
-                return JSON.stringify(error);
+                // Prefer message/stack if available to avoid serializing unknown objects
+                if (error && typeof error === 'object') {
+                  const maybeMsg = (error as { message?: unknown }).message;
+                  if (typeof maybeMsg === 'string') return maybeMsg;
+                }
               } catch { /* ignore */ }
             }
             return 'Failed to load model';

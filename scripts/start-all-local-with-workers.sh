@@ -9,8 +9,11 @@
 #   --no-orca           Skip OrcaSlicer worker container
 #   --no-prusa          Skip PrusaSlicer worker container  
 #   --no-tests          Skip running initial tests
-#   --clean             Clean build artifacts before starting
-#   --fresh             Terminate all existing containers/apps before starting fresh
+#   --api-only          Only start the API server (skip React, Redis, and workers)
+#   --clean             Clean build artifacts and containers (preserves database data)
+#   --fresh             Complete fresh start (removes containers AND data volumes)
+#
+# Note: --clean and --fresh are mutually exclusive. Use one or the other.
 #
 # Services started:
 #   1. API Backend (ASP.NET Core) - localhost:5245
@@ -39,6 +42,10 @@ REDIS_URL=${REDIS_URL:-localhost:6379}
 ORCA_WORKER_URL=${ORCA_WORKER_URL:-http://localhost:8081}
 PRUSA_WORKER_URL=${PRUSA_WORKER_URL:-http://localhost:8082}
 
+# Central DB connection string for API and workers
+DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-"Host=localhost;Port=5432;Database=printfarmer;Username=postgres;Password=postgres"}
+# NOTE: DB_CONNECTION_STRING is a shell variable for convenience. Always pass it to .NET apps as ConnectionStrings__DefaultConnection.
+
 # Logging and PID management
 LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
 PID_DIR=${PID_DIR:-"$ROOT_DIR/.pids"}
@@ -56,60 +63,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Parse command line options
-FOREGROUND=0
-NO_ORCA=0
-NO_PRUSA=0
-NO_TESTS=0
-CLEAN=0
-FRESH=0
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --foreground|-f)
-      FOREGROUND=1
-      shift
-      ;;
-    --no-orca)
-      NO_ORCA=1
-      shift
-      ;;
-    --no-prusa)
-      NO_PRUSA=1
-      shift
-      ;;
-    --no-tests)
-      NO_TESTS=1
-      shift
-      ;;
-    --clean)
-      CLEAN=1
-      shift
-      ;;
-    --fresh)
-      FRESH=1
-      shift
-      ;;
-    *)
-      echo "Unknown option: $1"
-      echo "Usage: $0 [--foreground] [--no-orca] [--no-prusa] [--no-tests] [--clean] [--fresh]"
-      exit 1
-      ;;
-  esac
-done
-
-# Utility functions
+# Utility functions (must be defined before first use)
 info() { echo -e "${BLUE}ℹ️  $*${NC}"; }
 success() { echo -e "${GREEN}✅ $*${NC}"; }
 warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
 error() { echo -e "${RED}❌ $*${NC}"; exit 1; }
 
-require_cmd() {
-  if ! command -v "$1" &> /dev/null; then
-    error "Required command '$1' not found. Please install it first."
-  fi
-}
-
+# Utility to free a TCP port if in use
 check_port() {
   local port=$1
   if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -122,7 +82,105 @@ check_port() {
   fi
 }
 
-# Fresh cleanup function - terminates all existing containers and processes
+# Utility to ensure a command is available
+require_cmd() {
+  if ! command -v "$1" &> /dev/null; then
+    error "Required command '$1' not found. Please install it first."
+  fi
+}
+
+# --- PostgreSQL dev environment ---
+if [[ -f "$ROOT_DIR/scripts/env.postgres-dev.sh" ]]; then
+  source "$ROOT_DIR/scripts/env.postgres-dev.sh"
+  info "Loaded PostgreSQL dev environment variables."
+else
+  warn "env.postgres-dev.sh not found. Using default environment."
+fi
+
+
+# Ensure PostgreSQL container is running before proceeding
+POSTGRES_CONTAINER_NAME="printfarmer-postgres"
+POSTGRES_IMAGE="postgres:15"
+
+ensure_postgres_container() {
+  info "Ensuring PostgreSQL container is running..."
+  local cid
+  POSTGRES_VOLUME="printfarmer-postgres-data"
+  
+  # Check if container exists and is running
+  cid=$(docker ps -q --filter "name=^/${POSTGRES_CONTAINER_NAME}$")
+  if [[ -n "$cid" ]]; then
+    info "PostgreSQL container already running."
+    return
+  fi
+  
+  # Only remove volume and container if --fresh flag is set
+  # (--clean preserves data volumes)
+  if [[ $FRESH -eq 1 ]]; then
+    # Remove existing container if it exists
+    cid=$(docker ps -aq --filter "name=^/${POSTGRES_CONTAINER_NAME}$")
+    if [[ -n "$cid" ]]; then
+      warn "Removing container: $POSTGRES_CONTAINER_NAME (--fresh specified)"
+      docker rm -f "$POSTGRES_CONTAINER_NAME" >/dev/null 2>&1 || true
+    fi
+    
+    # Loop until the volume is deleted
+    for i in {1..30}; do
+      if docker volume ls -q | grep -q "^${POSTGRES_VOLUME}$"; then
+        warn "Attempting to remove Postgres data volume: ${POSTGRES_VOLUME} (attempt $i)"
+        docker volume rm "${POSTGRES_VOLUME}" >/dev/null 2>&1 || true
+        sleep 1
+      else
+        success "Postgres data volume ${POSTGRES_VOLUME} deleted."
+        break
+      fi
+      if [[ $i -eq 30 ]]; then
+        error "Failed to delete Postgres data volume ${POSTGRES_VOLUME} after 30 seconds. Please remove it manually."
+      fi
+    done
+  elif [[ $CLEAN -eq 1 ]]; then
+    # For --clean, just remove the container but keep the volume
+    cid=$(docker ps -aq --filter "name=^/${POSTGRES_CONTAINER_NAME}$")
+    if [[ -n "$cid" ]]; then
+      info "Removing PostgreSQL container for clean build (keeping data volume)..."
+      docker rm -f "$POSTGRES_CONTAINER_NAME" >/dev/null 2>&1 || true
+    fi
+  else
+    # Normal mode: just remove stopped container if exists, keep the volume
+    cid=$(docker ps -aq --filter "name=^/${POSTGRES_CONTAINER_NAME}$")
+    if [[ -n "$cid" ]]; then
+      info "Removing stopped PostgreSQL container (keeping data volume)..."
+      docker rm -f "$POSTGRES_CONTAINER_NAME" >/dev/null 2>&1 || true
+    fi
+  fi
+  
+  # Create new container
+  info "Creating new PostgreSQL container..."
+  POSTGRES_CONTAINER_ID=$(docker run -d --name "$POSTGRES_CONTAINER_NAME" -p 5432:5432 \
+    -v ${POSTGRES_VOLUME}:/var/lib/postgresql/data \
+    -e POSTGRES_DB=printfarmer \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=postgres \
+    "$POSTGRES_IMAGE")
+  
+  if [[ -z "$POSTGRES_CONTAINER_ID" ]] || [[ ! "$POSTGRES_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]; then
+    error "Failed to create PostgreSQL container. Docker output: $POSTGRES_CONTAINER_ID"
+  fi
+  
+  # Wait for readiness
+  for i in {1..30}; do
+    if docker exec "$POSTGRES_CONTAINER_NAME" pg_isready -U postgres >/dev/null 2>&1; then
+      success "PostgreSQL container ready (ID: ${POSTGRES_CONTAINER_ID:0:12})"
+      return
+    fi
+    if [[ $i -eq 30 ]]; then
+      error "PostgreSQL container failed to become ready within 30 seconds"
+    fi
+    sleep 1
+  done
+}
+
+# Fresh cleanup function - terminates all existing containers and processes (adapted for workers)
 fresh_cleanup() {
   info "Starting fresh cleanup - terminating all existing containers and processes..."
   
@@ -203,7 +261,6 @@ fresh_cleanup() {
   
   success "Fresh cleanup completed - ready for clean startup"
 }
-
 # Cleanup function for graceful shutdown
 cleanup() {
   info "Shutting down services..."
@@ -248,11 +305,118 @@ require_cmd dotnet
 require_cmd npm
 require_cmd node
 
+# Parse command line options
+FOREGROUND=0
+NO_ORCA=0
+NO_PRUSA=0
+NO_TESTS=0
+CLEAN=0
+FRESH=0
+API_ONLY=0
+BUILD_ORCA=0
+BUILD_PRUSA=0
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --foreground|-f)
+      FOREGROUND=1
+      shift
+      ;;
+    --no-orca)
+      NO_ORCA=1
+      shift
+      ;;
+    --no-prusa)
+      NO_PRUSA=1
+      shift
+      ;;
+    --no-tests)
+      NO_TESTS=1
+      shift
+      ;;
+    --api-only)
+      API_ONLY=1
+      shift
+      ;;
+    --clean)
+      if [[ $FRESH -eq 1 ]]; then
+        error "--clean and --fresh are mutually exclusive. Use one or the other."
+      fi
+        CLEAN=1
+        # Force worker image rebuild after cleaning
+        BUILD_ORCA=1
+        BUILD_PRUSA=1
+        shift
+        ;;
+
+    --fresh)
+      if [[ $CLEAN -eq 1 ]]; then
+        error "--clean and --fresh are mutually exclusive. Use one or the other."
+      fi
+      FRESH=1
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0 [--foreground] [--no-orca] [--no-prusa] [--no-tests] [--api-only] [--clean] [--fresh]"
+      echo ""
+      echo "Options:"
+      echo "  --api-only  Only start the API server (skip React, Redis, and workers)"
+      echo "  --clean     Clean build artifacts and containers (keeps data volumes)"
+      echo "  --fresh     Fresh start - removes everything including data volumes"
+      echo "              (--clean and --fresh are mutually exclusive)"
+      exit 1
+      ;;
+  esac
+done
+
+# Early exit for API-only mode: stop existing API, ensure Docker and Postgres, rebuild and start API only
+if [[ $API_ONLY -eq 1 ]]; then
+  # Stop any process on API port
+  PORT=${API_URL##*:}
+  info "API-only mode: freeing port $PORT"
+  check_port $PORT
+
+  # Ensure Docker daemon
+  require_cmd docker
+  info "Checking Docker daemon..."
+  if ! docker info > /dev/null 2>&1; then
+    warn "Docker not responsive; attempt to start..."
+    if [[ "$OSTYPE" == darwin* ]]; then
+      open --background -a Docker
+    else
+      sudo systemctl restart docker
+    fi
+    # wait for Docker
+    for i in {1..30}; do
+      if docker info > /dev/null 2>&1; then
+        success "Docker is now responsive"
+        break
+      fi
+      sleep 2
+    done
+    if ! docker info > /dev/null 2>&1; then
+      error "Docker could not be started"
+    fi
+  fi
+
+  # Ensure Postgres container for migrations
+  ensure_postgres_container
+
+  # Build and run API only
+  info "Restoring and building API only..."
+  cd "$SRC_DIR"
+  dotnet restore api/Farm.Web.Api.csproj
+  dotnet build api/Farm.Web.Api.csproj -c Debug
+fi
+
+# Require Docker for full mode below
 require_cmd docker
 
 # --- Docker health check and restart logic ---
 if command -v docker &> /dev/null; then
   info "Checking Docker daemon status..."
+  docker_restarted=0
   if ! docker info > /dev/null 2>&1; then
     warn "Docker is installed but not responding. Attempting to restart Docker..."
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -261,6 +425,7 @@ if command -v docker &> /dev/null; then
       for i in {1..30}; do
         if docker info > /dev/null 2>&1; then
           success "Docker is now responsive."
+          docker_restarted=1
           break
         fi
         sleep 2
@@ -271,6 +436,7 @@ if command -v docker &> /dev/null; then
       for i in {1..30}; do
         if docker info > /dev/null 2>&1; then
           success "Docker is now responsive."
+          docker_restarted=1
           break
         fi
         sleep 2
@@ -282,6 +448,15 @@ if command -v docker &> /dev/null; then
   else
     success "Docker is running."
   fi
+  # Always check and start Postgres container after Docker is responsive
+  POSTGRES_CONTAINER_NAME="printfarmer-postgres"
+  POSTGRES_CID=$(docker ps -a -q --filter "name=^/${POSTGRES_CONTAINER_NAME}$")
+  POSTGRES_RUNNING=$(docker ps -q --filter "name=^/${POSTGRES_CONTAINER_NAME}$")
+  if [[ -n "$POSTGRES_CID" ]] && [[ -z "$POSTGRES_RUNNING" ]]; then
+    info "Starting existing stopped/exited PostgreSQL container after Docker restart..."
+    docker start "$POSTGRES_CONTAINER_NAME" >/dev/null
+    success "PostgreSQL container started (ID: ${POSTGRES_CID:0:12})"
+  fi
 
   # Remove stopped containers for PrintFarmer images if they exist but are not running
   for cname in printfarmer-redis-distributed printfarmer-orca-worker printfarmer-prusa-worker; do
@@ -290,21 +465,6 @@ if command -v docker &> /dev/null; then
       docker rm -f "$cname" >/dev/null 2>&1 || true
     fi
   done
-fi
-
-# Check for Docker images
-if [[ $NO_ORCA -eq 0 ]] && ! docker image inspect printfarmer/orcaslicer-worker >/dev/null 2>&1; then
-  warn "OrcaSlicer worker image not found. Building it..."
-  cd "$ROOT_DIR"
-  docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base .
-  docker build -f Dockerfile.orcaslicer -t printfarmer/orcaslicer-worker .
-fi
-
-if [[ $NO_PRUSA -eq 0 ]] && ! docker image inspect printfarmer/prusaslicer-worker >/dev/null 2>&1; then
-  warn "PrusaSlicer worker image not found. Building it..."
-  cd "$ROOT_DIR"
-  docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base .
-  docker build -f Dockerfile.prusaslicer -t printfarmer/prusaslicer-worker .
 fi
 
 # Verify .NET version
@@ -320,9 +480,63 @@ fi
 
 success "Prerequisites check passed"
 
-# Run fresh cleanup if --fresh is specified (only once, before any build or service startup)
+
+# --- Ensure containers/images are stopped/removed BEFORE any build if --clean or --fresh ---
 if [[ $FRESH -eq 1 ]]; then
   fresh_cleanup
+elif [[ $CLEAN -eq 1 ]]; then
+  info "Cleaning up containers and images before build (--clean specified)"
+  # Stop and remove PrintFarmer Docker containers by name pattern (running or stopped)
+  containers=(
+    "printfarmer-redis-distributed"
+    "printfarmer-orca-worker"
+    "printfarmer-prusa-worker"
+    "printfarmer-postgres"
+  )
+  for cname in "${containers[@]}"; do
+    if docker ps -a --filter "name=$cname" | grep -q .; then
+      warn "Removing container: $cname (--clean)"
+      docker rm -f "$cname" >/dev/null 2>&1 || true
+    fi
+  done
+  # Remove worker images if --clean is present
+  for img in printfarmer/orcaslicer-worker printfarmer/prusaslicer-worker; do
+    if docker image inspect "$img" >/dev/null 2>&1; then
+      warn "Removing worker image: $img (--clean)"
+      docker rmi -f "$img" >/dev/null 2>&1 || true
+    fi
+  done
+  # Remove PrintFarmer Postgres data volume for a truly clean DB
+  # Ensure container is removed before volume
+  if docker ps -a --filter "name=printfarmer-postgres" | grep -q .; then
+    warn "Removing container: printfarmer-postgres before volume removal (--clean)"
+    docker rm -f printfarmer-postgres >/dev/null 2>&1 || true
+  fi
+  if docker volume ls -q | grep -q '^printfarmer-postgres-data$'; then
+    warn "Removing Postgres data volume: printfarmer-postgres-data (--clean)"
+    docker volume rm printfarmer-postgres-data >/dev/null 2>&1 || true
+  fi
+fi
+
+## Ensure Postgres container is started only once, after all other containers are built
+# ...existing code...
+
+# Check for Docker images
+if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect printfarmer/orcaslicer-worker >/dev/null 2>&1 ); then
+  warn "OrcaSlicer worker image not found. Building it..."
+  cd "$ROOT_DIR"
+  docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base . 
+  docker tag printfarmer/slicer-base:latest slicer-base:latest
+  
+  docker build -f Dockerfile.orcaslicer -t printfarmer/orcaslicer-worker .
+fi
+
+if [[ $NO_PRUSA -eq 0 ]] && ( [[ $BUILD_PRUSA -eq 1 ]] || ! docker image inspect printfarmer/prusaslicer-worker >/dev/null 2>&1 ); then
+  warn "PrusaSlicer worker image not found. Building it..."
+  cd "$ROOT_DIR"
+  docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base . 
+  docker tag printfarmer/slicer-base:latest slicer-base:latest
+  docker build -f Dockerfile.prusaslicer -t printfarmer/prusaslicer-worker .
 fi
 
 # Create directories
@@ -360,8 +574,9 @@ info "Bootstrapping dependencies..."
 cd "$SRC_DIR"
 
 if [[ ! -f "$API_DIR/bin/Debug/net9.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]]; then
-  info "Restoring and building .NET solution..."
+  info "Restoring .NET dependencies..."
   dotnet restore ./farm-web.sln
+  info "Building .NET solution..."
   dotnet build ./farm-web.sln -c Debug
 fi
 
@@ -395,18 +610,82 @@ cd "$SRC_DIR"
 
 success "Dependencies ready"
 
-# Start Redis (required for distributed workers)
-info "Starting Redis container..."
-REDIS_CONTAINER_ID=$(docker run -d --name printfarmer-redis-distributed -p 6379:6379 \
-  redis:7-alpine redis-server --appendonly yes)
-if [[ -z "$REDIS_CONTAINER_ID" ]]; then
-  error "Failed to start Redis container"
+
+# Check Docker again before starting Redis
+if [[ $API_ONLY -eq 0 ]]; then
+  require_cmd docker
+  if command -v docker &> /dev/null; then
+    info "Checking Docker daemon status before starting Redis..."
+  if ! docker info > /dev/null 2>&1; then
+    warn "Docker is installed but not responding. Attempting to restart Docker..."
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      open --background -a Docker
+      info "Waiting for Docker Desktop to start..."
+      for i in {1..30}; do
+        if docker info > /dev/null 2>&1; then
+          success "Docker is now responsive."
+          break
+        fi
+        sleep 2
+      done
+    else
+      sudo systemctl restart docker
+      info "Waiting for Docker daemon to restart..."
+      for i in {1..30}; do
+        if docker info > /dev/null 2>&1; then
+          success "Docker is now responsive."
+          break
+        fi
+        sleep 2
+      done
+    fi
+    if ! docker info > /dev/null 2>&1; then
+      error "Docker could not be started. Please start Docker manually."
+    fi
+  else
+    success "Docker is running."
+  fi
+fi
+
+REDIS_CONTAINER_NAME="printfarmer-redis-distributed"
+info "Ensuring Redis container is running..."
+if cid=$(docker ps -q --filter "name=^/${REDIS_CONTAINER_NAME}$"); then
+  if [[ -n "$cid" ]]; then
+    success "Redis container already running (ID: ${cid:0:12})"
+    REDIS_CONTAINER_ID="$cid"
+  else
+    # If container exists but is stopped, start it
+    cid=$(docker ps -a -q --filter "name=^/${REDIS_CONTAINER_NAME}$")
+    if [[ -n "$cid" ]]; then
+      info "Starting existing stopped Redis container..."
+      docker start "$REDIS_CONTAINER_NAME" >/dev/null
+      REDIS_CONTAINER_ID="$cid"
+    else
+      # Create new container
+      info "Creating new Redis container..."
+      REDIS_CONTAINER_ID=$(docker run -d --name "$REDIS_CONTAINER_NAME" -p 6379:6379 \
+        -v redis-data:/data \
+        redis:7-alpine redis-server --appendonly yes)
+      if [[ -z "$REDIS_CONTAINER_ID" ]]; then
+        error "Failed to start Redis container"
+      fi
+    fi
+  fi
+else
+  # Create new container
+  info "Creating new Redis container..."
+  REDIS_CONTAINER_ID=$(docker run -d --name "$REDIS_CONTAINER_NAME" -p 6379:6379 \
+    -v redis-data:/data \
+    redis:7-alpine redis-server --appendonly yes)
+  if [[ -z "$REDIS_CONTAINER_ID" ]]; then
+    error "Failed to start Redis container"
+  fi
 fi
 
 # Wait for Redis to be ready
 for i in {1..30}; do
-  if docker exec "$REDIS_CONTAINER_ID" redis-cli ping >/dev/null 2>&1; then
-    success "Redis container started (ID: ${REDIS_CONTAINER_ID:0:12})"
+  if docker exec "$REDIS_CONTAINER_NAME" redis-cli ping >/dev/null 2>&1; then
+    success "Redis container ready (ID: ${REDIS_CONTAINER_ID:0:12})"
     break
   fi
   if [[ $i -eq 30 ]]; then
@@ -417,43 +696,117 @@ done
 
 # Start OrcaSlicer worker
 if [[ $NO_ORCA -eq 0 ]]; then
-  info "Starting OrcaSlicer worker container..."
-  ORCA_CONTAINER_ID=$(docker run -d --name printfarmer-orca-worker \
-    -p ${ORCA_WORKER_URL##*:}:8080 \
-    -e ConnectionStrings__Redis="host.docker.internal:6379" \
-    -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
-    -e Worker__WorkingDirectory="/app/temp" \
-    -e ASPNETCORE_URLS="http://+:8080" \
-    printfarmer/orcaslicer-worker)
-  
-  if [[ -z "$ORCA_CONTAINER_ID" ]]; then
-    error "Failed to start OrcaSlicer worker container"
+  ORCA_CONTAINER_NAME="printfarmer-orca-worker"
+  info "Ensuring OrcaSlicer worker container is running..."
+  if cid=$(docker ps -q --filter "name=^/${ORCA_CONTAINER_NAME}$"); then
+    if [[ -n "$cid" ]]; then
+      success "OrcaSlicer worker container already running (ID: ${cid:0:12})"
+      ORCA_CONTAINER_ID="$cid"
+    else
+      # If container exists but is stopped, start it
+      cid=$(docker ps -a -q --filter "name=^/${ORCA_CONTAINER_NAME}$")
+      if [[ -n "$cid" ]]; then
+        info "Starting existing stopped OrcaSlicer worker container..."
+        docker start "$ORCA_CONTAINER_NAME" >/dev/null
+        ORCA_CONTAINER_ID="$cid"
+      else
+        # Create new container
+        info "Creating new OrcaSlicer worker container..."
+        ORCA_CONTAINER_ID=$(docker run -d --name "$ORCA_CONTAINER_NAME" \
+          -p ${ORCA_WORKER_URL##*:}:8080 \
+          -e ConnectionStrings__Redis="host.docker.internal:6379" \
+          -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
+          -e Worker__WorkingDirectory="/app/temp" \
+          -e ASPNETCORE_URLS="http://+:8080" \
+          printfarmer/orcaslicer-worker)
+        if [[ -z "$ORCA_CONTAINER_ID" ]]; then
+          error "Failed to start OrcaSlicer worker container"
+        fi
+      fi
+    fi
+  else
+    # Create new container
+    info "Creating new OrcaSlicer worker container..."
+    ORCA_CONTAINER_ID=$(docker run -d --name "$ORCA_CONTAINER_NAME" \
+      -p ${ORCA_WORKER_URL##*:}:8080 \
+      -e ConnectionStrings__Redis="host.docker.internal:6379" \
+      -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
+      -e Worker__WorkingDirectory="/app/temp" \
+      -e ASPNETCORE_URLS="http://+:8080" \
+      printfarmer/orcaslicer-worker)
+    if [[ -z "$ORCA_CONTAINER_ID" ]]; then
+      error "Failed to start OrcaSlicer worker container"
+    fi
   fi
-  success "OrcaSlicer worker started (ID: ${ORCA_CONTAINER_ID:0:12})"
+  success "OrcaSlicer worker container ready (ID: ${ORCA_CONTAINER_ID:0:12})"
 else
   ORCA_CONTAINER_ID=""
   info "Skipping OrcaSlicer worker (--no-orca specified)"
 fi
 
+
 # Start PrusaSlicer worker
 if [[ $NO_PRUSA -eq 0 ]]; then
-  info "Starting PrusaSlicer worker container..."
-  PRUSA_CONTAINER_ID=$(docker run -d --name printfarmer-prusa-worker \
-    -p ${PRUSA_WORKER_URL##*:}:8080 \
-    -e ConnectionStrings__Redis="host.docker.internal:6379" \
-    -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
-    -e Worker__WorkingDirectory="/app/temp" \
-    -e ASPNETCORE_URLS="http://+:8080" \
-    printfarmer/prusaslicer-worker)
-  
-  if [[ -z "$PRUSA_CONTAINER_ID" ]]; then
-    error "Failed to start PrusaSlicer worker container"
+  PRUSA_CONTAINER_NAME="printfarmer-prusa-worker"
+  info "Ensuring PrusaSlicer worker container is running..."
+  if cid=$(docker ps -q --filter "name=^/${PRUSA_CONTAINER_NAME}$"); then
+    if [[ -n "$cid" ]]; then
+      success "PrusaSlicer worker container already running (ID: ${cid:0:12})"
+      PRUSA_CONTAINER_ID="$cid"
+    else
+      # If container exists but is stopped, start it
+      cid=$(docker ps -a -q --filter "name=^/${PRUSA_CONTAINER_NAME}$")
+      if [[ -n "$cid" ]]; then
+        info "Starting existing stopped PrusaSlicer worker container..."
+        docker start "$PRUSA_CONTAINER_NAME" >/dev/null
+        PRUSA_CONTAINER_ID="$cid"
+      else
+        # Create new container
+        info "Creating new PrusaSlicer worker container..."
+        PRUSA_CONTAINER_ID=$(docker run -d --name "$PRUSA_CONTAINER_NAME" \
+          -p ${PRUSA_WORKER_URL##*:}:8080 \
+          -e ConnectionStrings__Redis="host.docker.internal:6379" \
+          -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
+          -e Worker__WorkingDirectory="/app/temp" \
+          -e ASPNETCORE_URLS="http://+:8080" \
+          printfarmer/prusaslicer-worker)
+        if [[ -z "$PRUSA_CONTAINER_ID" ]]; then
+          error "Failed to start PrusaSlicer worker container"
+        fi
+      fi
+    fi
+  else
+    # Create new container
+    info "Creating new PrusaSlicer worker container..."
+    PRUSA_CONTAINER_ID=$(docker run -d --name "$PRUSA_CONTAINER_NAME" \
+      -p ${PRUSA_WORKER_URL##*:}:8080 \
+      -e ConnectionStrings__Redis="host.docker.internal:6379" \
+      -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
+      -e Worker__WorkingDirectory="/app/temp" \
+      -e ASPNETCORE_URLS="http://+:8080" \
+      printfarmer/prusaslicer-worker)
+    if [[ -z "$PRUSA_CONTAINER_ID" ]]; then
+      error "Failed to start PrusaSlicer worker container"
+    fi
   fi
-  success "PrusaSlicer worker started (ID: ${PRUSA_CONTAINER_ID:0:12})"
+  success "PrusaSlicer worker container ready (ID: ${PRUSA_CONTAINER_ID:0:12})"
 else
   PRUSA_CONTAINER_ID=""
   info "Skipping PrusaSlicer worker (--no-prusa specified)"
 fi
+
+fi  # End of API_ONLY check for Docker/Redis/Workers
+
+# Set empty container IDs if API_ONLY mode
+if [[ $API_ONLY -eq 1 ]]; then
+  REDIS_CONTAINER_ID=""
+  ORCA_CONTAINER_ID=""
+  PRUSA_CONTAINER_ID=""
+  info "API-only mode: skipping Redis and worker containers"
+fi
+
+# Final check: Ensure Postgres is running before starting API/React
+ensure_postgres_container
 
 # Environment setup for API with distributed slicing enabled
 export ASPNETCORE_ENVIRONMENT=Development
@@ -461,6 +814,7 @@ export DEPLOYMENT_MODE=monolithic
 export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"
 export ConnectionStrings__Redis="$REDIS_URL"
+export ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING"
 export ENABLE_DISTRIBUTED_SLICING=true
 
 # Start API server
@@ -475,15 +829,20 @@ else
   API_PID=$!
 fi
 
-# Start React dev server
-info "Starting React dev server..."
-cd "$REACT_DIR"
-if [[ $FOREGROUND -eq 1 ]]; then
-  npm run dev > "$REACT_LOG" 2>&1 &
-  REACT_PID=$!
+# Start React dev server (unless --api-only)
+if [[ $API_ONLY -eq 0 ]]; then
+  info "Starting React dev server..."
+  cd "$REACT_DIR"
+  if [[ $FOREGROUND -eq 1 ]]; then
+    npm run dev > "$REACT_LOG" 2>&1 &
+    REACT_PID=$!
+  else
+    npm run dev > "$REACT_LOG" 2>&1 &
+    REACT_PID=$!
+  fi
 else
-  npm run dev > "$REACT_LOG" 2>&1 &
-  REACT_PID=$!
+  REACT_PID=""
+  info "API-only mode: skipping React dev server"
 fi
 
 # Save service metadata
@@ -518,27 +877,31 @@ for i in {1..60}; do
   sleep 1
 done
 
-# Wait for React dev server
-for i in {1..60}; do
-  if curl -s "$REACT_URL" > /dev/null 2>&1; then
-    success "React dev server ready at $REACT_URL"
-    break
-  fi
-  if [[ $i -eq 60 ]]; then
-    error "React dev server failed to start within 60 seconds. Check logs: $REACT_LOG"
-  fi
-  sleep 1
-done
-
-# Test Redis connection
-if docker exec "$REDIS_CONTAINER_ID" redis-cli ping >/dev/null 2>&1; then
-  success "Redis ready at $REDIS_URL"
-else
-  warn "Redis container running but not responding to ping"
+# Wait for React dev server (unless --api-only)
+if [[ $API_ONLY -eq 0 ]]; then
+  for i in {1..60}; do
+    if curl -s "$REACT_URL" > /dev/null 2>&1; then
+      success "React dev server ready at $REACT_URL"
+      break
+    fi
+    if [[ $i -eq 60 ]]; then
+      error "React dev server failed to start within 60 seconds. Check logs: $REACT_LOG"
+    fi
+    sleep 1
+  done
 fi
 
-# Wait for worker containers
-if [[ $NO_ORCA -eq 0 ]]; then
+# Test Redis connection (unless --api-only)
+if [[ $API_ONLY -eq 0 ]]; then
+  if docker exec "$REDIS_CONTAINER_ID" redis-cli ping >/dev/null 2>&1; then
+    success "Redis ready at $REDIS_URL"
+  else
+    warn "Redis container running but not responding to ping"
+  fi
+fi
+
+# Wait for worker containers (unless --api-only)
+if [[ $API_ONLY -eq 0 && $NO_ORCA -eq 0 ]]; then
   for i in {1..60}; do
     if curl -s "$ORCA_WORKER_URL/healthz" > /dev/null 2>&1; then
       success "OrcaSlicer worker ready at $ORCA_WORKER_URL"
@@ -551,7 +914,7 @@ if [[ $NO_ORCA -eq 0 ]]; then
   done
 fi
 
-if [[ $NO_PRUSA -eq 0 ]]; then
+if [[ $API_ONLY -eq 0 && $NO_PRUSA -eq 0 ]]; then
   for i in {1..60}; do
     if curl -s "$PRUSA_WORKER_URL/healthz" > /dev/null 2>&1; then
       success "PrusaSlicer worker ready at $PRUSA_WORKER_URL"
@@ -567,12 +930,21 @@ fi
 # Run initial tests unless disabled
 if [[ $NO_TESTS -eq 0 ]]; then
   info "Running initial health checks..."
-  
-  # Test API endpoints
-  if curl -s "$API_URL/healthz" | grep -q '"status":"ok"'; then
-    success "API health check passed"
+
+  # Test API endpoints (comprehensive health)
+  health_json=$(curl -s "$API_URL/health")
+  health_status=$(echo "$health_json" | grep -o '"status":"[^"]*"' | head -1 | cut -d '"' -f4)
+  if [[ "$health_status" == "Healthy" ]]; then
+    success "API health check passed (comprehensive)"
   else
-    warn "API health check failed"
+    warn "API health check failed (comprehensive): status=$health_status"
+    echo "Full health check result (pretty-printed):"
+    if command -v jq >/dev/null 2>&1; then
+      echo "$health_json" | jq
+    else
+      echo "$health_json"
+    fi
+    exit 1
   fi
   
   # Test React
@@ -610,6 +982,11 @@ echo "📊 Service URLs:"
 echo "  • API Backend:      $API_URL"
 echo "  • React Frontend:   $REACT_URL"
 echo "  • Redis Queue:      $REDIS_URL"
+if [[ -n "${DB_PROVIDER:-}" ]]; then
+  echo "  • Data Backend:      $DB_PROVIDER"
+else
+  echo "  • Data Backend:      (not set)"
+fi
 if [[ $NO_ORCA -eq 0 ]]; then
 echo "  • OrcaSlicer Worker: $ORCA_WORKER_URL"
 fi

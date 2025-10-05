@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './styles/icons.css'
 import App from './App.tsx'
 import { SpoolmanProvider } from './contexts/SpoolmanContext'
 import { initializeTelemetry } from './telemetry/config'

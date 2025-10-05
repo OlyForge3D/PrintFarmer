@@ -29,8 +29,11 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy shared + worker project files first (restore layer caching)
+
+# Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
+COPY src/Infrastructure/*.csproj ./infrastructure/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
 
@@ -38,6 +41,7 @@ RUN dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj
 
 # Copy sources
 COPY src/shared/ ./shared/
+COPY src/Infrastructure/ ./infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/orcaslicer-worker/ ./orcaslicer-worker/
 

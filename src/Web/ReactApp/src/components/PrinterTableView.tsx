@@ -9,6 +9,7 @@ import { Printer, PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Trash2, Edit, CheckCircle2, Circle, AlertTriangle, Wrench, Check, X } from 'lucide-react';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterTableViewProps {
   printers: Printer[];
@@ -110,6 +111,12 @@ export function PrinterTableView({
 
   return (
     <div className="bg-pf-bg-1 border border-pf-border rounded-xl overflow-hidden">
+      {/* Optional debug panel for table-level realtime data */}
+      {window.PrintFarmerDebug?.printerTableDisplay && (
+        <div className="p-2 border-b border-pf-border bg-pf-bg-0 text-xs text-pf-text-tertiary">
+          {renderUnknown({ printers, selectedCount: selectedPrinters.size })}
+        </div>
+      )}
       {/* Bulk Actions Header */}
       {selectedPrinters.size > 0 && (
         <div className="bg-pf-accent-2 px-4 py-3 border-b border-pf-border flex items-center justify-between">
@@ -207,14 +214,17 @@ export function PrinterTableView({
                 bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
               };
 
-              // Conditional debug logging for realtime updates
-              if (window.PrintFarmerDebug?.printerRealtime) {
-                console.log('[PrintFarmer] PrinterTableView realtime:', {
-                  printerId: printer.id,
-                  printerName: printer.name,
-                  currentStatus,
-                  realtimeStatus
-                });
+              // Conditional debug logging for realtime updates (guarded)
+              if (typeof window !== 'undefined') {
+                const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+                if (win.PrintFarmerDebug?.printerRealtime) {
+                  console.log('[PrintFarmer] PrinterTableView realtime:', {
+                    printerId: printer.id,
+                    printerName: printer.name,
+                    currentStatus,
+                    realtimeStatus
+                  });
+                }
               }
 
               return (

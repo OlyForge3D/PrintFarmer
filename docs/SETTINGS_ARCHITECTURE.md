@@ -37,12 +37,12 @@ This plan describes how to migrate PrintFarmer's settings architecture to a modu
 ```csharp
 // Attribute to mark settings classes
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class AppSettingAttribute : Attribute
+public sealed class SystemSettingAttribute : Attribute
 # Implementation Status (as of 2025-09-26)
 
 **Backend:**
 - All settings classes are now modular, discoverable, and decorated with `[AppSetting]`.
-- The `IAppSetting` interface now requires a static `SectionKey` property (no longer empty).
+- The `ISystemSetting` interface now requires a static `SectionKey` property (no longer empty).
 - All legacy settings services and registrations (e.g., `AppSettingsService`, `IAppSettingsService`, `IOptions<T>`) have been removed from the backend.
 - The `SettingsService` is the single source of truth for all settings, using reflection and attributes for discovery and loading.
 - All settings classes implement validation via `IValidatableSetting` where appropriate.
@@ -56,7 +56,7 @@ public sealed class AppSettingAttribute : Attribute
     public string Key { get; }
 **Documentation:**
 - This document and all onboarding guides are up to date with the new architecture and usage patterns.
-    public AppSettingAttribute(string key) => Key = key;
+    public SystemSettingAttribute(string key) => Key = key;
 **Outstanding/Next Steps:**
 - Complete dynamic UI migration (Phase 5) and add frontend tests for settings pagelets.
 - Continue to add new settings classes as needed using the documented pattern.
@@ -65,7 +65,7 @@ public sealed class AppSettingAttribute : Attribute
 ---
 
 // Marker interface (optional)
-public interface IAppSetting { }
+public interface ISystemSetting { }
 
 // Validation interface
 public interface IValidatableSetting
@@ -78,8 +78,8 @@ public interface IValidatableSetting
 ### 2. Example Settings Class
 
 ```csharp
-[AppSetting("Slicer.MySlicer")]
-public class MySlicerSettings : IAppSetting, IValidatableSetting
+[SystemSetting("Slicer.MySlicer")]
+public class MySlicerSettings : ISystemSetting, IValidatableSetting
 {
     public string Path { get; set; }
     public int Threads { get; set; }
@@ -105,10 +105,10 @@ public class SettingsService
     {
         var settingTypes = AppDomain.CurrentDomain.GetAssemblies()
             .SelectMany(a => a.GetTypes())
-            .Where(t => t.GetCustomAttribute<AppSettingAttribute>() != null);
+            .Where(t => t.GetCustomAttribute<SystemSettingAttribute>() != null);
         foreach (var type in settingTypes)
         {
-            var attr = type.GetCustomAttribute<AppSettingAttribute>();
+            var attr = type.GetCustomAttribute<SystemSettingAttribute>();
             var instance = config.GetSection(attr.Key).Get(type) ?? Activator.CreateInstance(type);
             if (instance is IValidatableSetting validatable)
                 validatable.Validate();
@@ -116,7 +116,7 @@ public class SettingsService
         }
     }
 
-    public T Get<T>() where T : class, IAppSetting => _settings.Values.OfType<T>().First();
+    public T Get<T>() where T : class, ISystemSetting => _settings.Values.OfType<T>().First();
     public object GetByKey(string key) => _settings[key];
     public IEnumerable<object> GetAll() => _settings.Values;
 }
@@ -136,7 +136,7 @@ var mySlicerSettings = settingsService.Get<MySlicerSettings>();
 
 ## Phase 1: Foundation & Attribute Model
 - [x] Define `[AppSetting]` attribute for marking settings classes.
-- [x] Define `IAppSetting` marker interface (for type safety).
+- [x] Define `ISystemSetting` marker interface (for type safety).
 - [x] Define `IValidatableSetting` interface with `Validate()`/`ValidateAsync()`.
 - [x] Refactor existing settings classes to use attribute and interfaces.
 
@@ -164,8 +164,8 @@ var mySlicerSettings = settingsService.Get<MySlicerSettings>();
 - [x] Audit all settings currently editable in the Admin UI (review existing settings pages/components and API endpoints).
 - [x] For each setting, ensure it is represented as a settings class using `[AppSetting]` and interfaces.
 - [x] For any setting not yet represented as a settings class, create a new class in `src/Farm.Infrastructure/Settings/`:
-    - [x] Decorate with `[AppSetting("Key")]`.
-    - [x] Implement `IAppSetting` and, if needed, `IValidatableSetting`.
+    - [x] Decorate with `[SystemSetting("Key")]`.
+    - [x] Implement `ISystemSetting` and, if needed, `IValidatableSetting`.
     - [x] Add properties for each setting field.
     - [x] Add validation logic as appropriate.
 - [x] Migrate configuration binding and persistence to use the new settings classes.

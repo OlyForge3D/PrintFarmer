@@ -63,7 +63,7 @@ export function TelemetrySettingsPage() {
     });
     
     // In a real application, these settings would be persisted
-    if (window.PrintFarmerDebug?.telemetrySettingsPage) {
+    if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.telemetrySettingsPage) {
       console.log('[PrintFarmer] TelemetrySettingsPage: Telemetry settings saved:', settings);
     }
   };

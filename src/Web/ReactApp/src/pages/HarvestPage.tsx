@@ -7,7 +7,7 @@ import {
   GcodeHarvestStatus,
   GcodeHarvestOperation
 } from '@/types/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { usePrinters, useCancelHarvestOperation } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/harvest-signalr';

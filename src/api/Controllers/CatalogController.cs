@@ -34,14 +34,25 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
     [ProducesResponseType(304)]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync([FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
     {
-        (IReadOnlyList<ManufacturerDto>? list, string? etag) = await _catalogCache.GetManufacturersAsync(ct);
-        if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Split(',').Select(s => s.Trim()).Contains(etag, StringComparer.Ordinal))
+        try
         {
+            (IReadOnlyList<ManufacturerDto>? list, string? etag) = await _catalogCache.GetManufacturersAsync(ct);
+            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Split(',').Select(s => s.Trim()).Contains(etag, StringComparer.Ordinal))
+            {
+                Response.Headers["ETag"] = etag;
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
             Response.Headers["ETag"] = etag;
-            return StatusCode(StatusCodes.Status304NotModified);
+            return Ok(list);
         }
-        Response.Headers["ETag"] = etag;
-        return Ok(list);
+        catch (Exception ex)
+        {
+            // Log the error with as much context as possible
+            var logger = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Telemetry.IUnifiedLoggingService)) as Farm.Infrastructure.Telemetry.IUnifiedLoggingService;
+            logger?.LogError(ex, $"[CatalogController] GetManufacturersAsync failed: {ex.Message}");
+            // Optionally, include more context in the error response
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers", details = ex.ToString() });
+        }
     }
 
     [HttpGet("manufacturers/{id:guid}", Name = "GetManufacturerById")]

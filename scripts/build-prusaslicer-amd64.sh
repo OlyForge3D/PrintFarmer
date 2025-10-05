@@ -19,5 +19,8 @@ DOCKER_BUILDKIT=1 docker buildx build \
   -f Dockerfile.prusaslicer \
   --load .
 
+# Tag for local development stack compatibility
+docker tag "${TAG}" printfarmer-prusa-worker:latest
+
 echo "[buildx] Build complete. To verify with strict mode using the amd64 image run:"
 echo "  PRUSA_IMAGE=${TAG} scripts/verify-prusaslicer-worker.sh require-real"

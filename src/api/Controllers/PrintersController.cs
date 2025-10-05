@@ -137,7 +137,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (Exception ex)
         {
             _logger.LogWarning($"Error getting print job status for printer {p.Id}: {ex.Message}");
-            return StatusCode(500, new Farm.Web.Shared.PrintJobStatusDto { State = "error", Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new Farm.Web.Shared.PrintJobStatusDto { State = "error", Error = ex.Message });
         }
     }
 
@@ -558,7 +558,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         try
         {
+            _logger.LogInformation($"[FAST] /api/printers/fast called. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}");
             List<Printer> items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
+            _logger.LogDebug($"[FAST] Retrieved {items.Count} printers from DB.");
 
             // Return all printers as offline initially - let the client load statuses progressively
             List<PrinterFastDto> dtos = items.Select(p => new PrinterFastDto(
@@ -577,15 +579,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 OriginalServerUrl: p.OriginalServerUrl,
                 IpAddress: p.IpAddress
             )).ToList();
+            _logger.LogDebug($"[FAST] Returning {dtos.Count} PrinterFastDto objects to client.");
 
             return Ok(dtos);
         }
         catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
         {
-            // During early startup the DB might not yet be fully initialised (e.g. migrations running).
-            // Instead of surfacing a 500 to the UI, return an empty list so the UI can retry shortly.
-            _logger.LogDebug($"Printers fast endpoint accessed before startup completed; returning empty list. Exception: {ex.Message}");
+            _logger.LogWarning($"[FAST] Startup DB exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
             return Ok(Array.Empty<PrinterFastDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
 
@@ -602,7 +608,9 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         try
         {
+            _logger.LogInformation($"[CAMERA-URLS] /api/printers/camera-urls called. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}");
             List<Printer> items = await db.Printers.AsNoTracking().ToListAsync(ct);
+            _logger.LogDebug($"[CAMERA-URLS] Retrieved {items.Count} printers from DB.");
 
             PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
             {
@@ -616,6 +624,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                     snapshotUrl = GenerateStaticCameraSnapshotUrl(p.ServerUrl, p.Backend);
                 }
 
+                _logger.LogDebug($"[CAMERA-URLS] Printer {p.Name} ({p.Id}): streamUrl={{streamUrl}}, snapshotUrl={{snapshotUrl}}");
                 return new PrinterCameraUrlsDto(
                     Id: p.Id,
                     Name: p.Name,
@@ -624,12 +633,18 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 );
             }));
 
+            _logger.LogDebug($"[CAMERA-URLS] Returning {dtos.Length} PrinterCameraUrlsDto objects to client.");
             return Ok(dtos.ToList());
         }
         catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
         {
-            _logger.LogDebug($"Printers camera-urls endpoint accessed before startup completed; returning empty list. Exception: {ex.Message}");
+            _logger.LogWarning($"[CAMERA-URLS] Startup DB exception in /api/printers/camera-urls. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
             return Ok(Array.Empty<PrinterCameraUrlsDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/camera-urls. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
 
@@ -1008,6 +1023,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 p.Capabilities.HasHeatedBed,
                 p.Capabilities.HasEnclosure,
                 p.Capabilities.MultiMaterial,
+                p.Capabilities.SupportsAutoLeveling,
                 p.Capabilities.NumberOfExtruders,
                 p.Capabilities.MinHotendTemp,
                 p.Capabilities.MaxHotendTemp,
@@ -1436,6 +1452,39 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             p.ApiKey = dto.ApiKey;
         }
 
+        // Update or create printer capabilities
+        PrinterCapabilities? capabilities = await db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == id, ct);
+        if (capabilities == null)
+        {
+            capabilities = new PrinterCapabilities
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = id,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.PrinterCapabilities.Add(capabilities);
+        }
+
+        // Update capability fields from DTO
+        capabilities.NozzleDiameter = dto.NozzleDiameter;
+        capabilities.SupportedMaterials = dto.SupportedMaterials;
+        capabilities.MaxBuildVolumeX = dto.MaxBuildVolumeX;
+        capabilities.MaxBuildVolumeY = dto.MaxBuildVolumeY;
+        capabilities.MaxBuildVolumeZ = dto.MaxBuildVolumeZ;
+        capabilities.HasHeatedBed = dto.HasHeatedBed ?? true;
+        capabilities.HasEnclosure = dto.HasEnclosure ?? false;
+        capabilities.MultiMaterial = dto.MultiMaterial ?? false;
+        capabilities.NumberOfExtruders = dto.NumberOfExtruders ?? 1;
+        capabilities.MinHotendTemp = dto.MinHotendTemp;
+        capabilities.MaxHotendTemp = dto.MaxHotendTemp;
+        capabilities.MinBedTemp = dto.MinBedTemp;
+        capabilities.MaxBedTemp = dto.MaxBedTemp;
+        capabilities.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? false;
+        capabilities.MaxPrintSpeed = dto.MaxPrintSpeed;
+        capabilities.LastUpdated = DateTime.UtcNow;
+        capabilities.UpdatedAt = DateTime.UtcNow;
+
         await db.SaveChangesAsync(ct);
 
         // Build updated manufacturer/model names
@@ -1535,6 +1584,88 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch
         {
             return BadRequest("Invalid URL");
+        }
+    }
+
+    /// <summary>
+    /// Gets the default capabilities for a printer model.
+    /// </summary>
+    /// <param name="modelId">The unique identifier of the printer model</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Default printer capabilities based on the model</returns>
+    /// <response code="200">Returns the default capabilities for the model</response>
+    /// <response code="404">If the model with the specified ID was not found</response>
+    /// <response code="204">If no default capabilities are available for the model</response>
+    /// <response code="500">If there was an error retrieving the capabilities</response>
+    [HttpGet("model/{modelId:guid}/default-capabilities")]
+    [ProducesResponseType(typeof(PrinterCapabilitiesDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterCapabilitiesDto>> GetModelDefaultCapabilitiesAsync(Guid modelId, CancellationToken ct)
+    {
+        // Load model to verify it exists and get capability data
+        PrinterModel? model = await db.Models
+            .Include(m => m.Manufacturer)
+            .Include(m => m.SupportedFilamentTypes)
+                .ThenInclude(sft => sft.FilamentType)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == modelId, ct);
+
+        if (model is null)
+        {
+            return NotFound($"Printer model with ID {modelId} not found");
+        }
+
+        try
+        {
+            // Build capabilities directly from model data
+            // Check if model has any meaningful capability data
+            bool hasCapabilityData = model.MaxX.HasValue || model.MaxY.HasValue || model.MaxZ.HasValue ||
+                                      model.DefaultNozzleDiameter.HasValue || model.MaxHotendTemp.HasValue ||
+                                      model.MaxBedTemp.HasValue || model.SupportedFilamentTypes?.Any() == true;
+
+            if (!hasCapabilityData)
+            {
+                return NoContent(); // Model exists but has no capability data
+            }
+
+            // Get supported materials from filament types
+            string[] supportedMaterials = model.SupportedFilamentTypes?
+                .Where(sft => sft.FilamentType != null)
+                .Select(sft => sft.FilamentType!.Name)
+                .ToArray() ?? Array.Empty<string>();
+
+            // Map model data to DTO
+            PrinterCapabilitiesDto dto = new(
+                Id: Guid.Empty, // Not persisted yet
+                PrinterId: Guid.Empty,
+                PrinterName: model.Name,
+                NozzleDiameter: model.DefaultNozzleDiameter,
+                SupportedMaterials: supportedMaterials,
+                MaxBuildVolumeX: model.MaxX,
+                MaxBuildVolumeY: model.MaxY,
+                MaxBuildVolumeZ: model.MaxZ,
+                HasHeatedBed: model.HasHeatedBed,
+                HasEnclosure: model.HasEnclosure,
+                MultiMaterial: model.MultiMaterial,
+                NumberOfExtruders: model.NumberOfExtruders,
+                MinHotendTemp: model.MinHotendTemp,
+                MaxHotendTemp: model.MaxHotendTemp,
+                MinBedTemp: model.MinBedTemp,
+                MaxBedTemp: model.MaxBedTemp,
+                CurrentMaterial: null,
+                CurrentSpoolId: null,
+                IsAvailable: true,
+                LastUpdated: DateTime.UtcNow
+            );
+
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error retrieving default capabilities for model {modelId}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve model capabilities");
         }
     }
 
@@ -1936,11 +2067,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
             return success
                 ? Ok(new Farm.Web.Shared.UploadGcodeResultDto("File uploaded successfully", file.FileName))
-                : StatusCode(500, "Failed to upload file to printer");
+                : StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload file to printer");
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Upload failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Upload failed: {ex.Message}");
         }
     }
 
@@ -1970,7 +2101,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Failed to get file list: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get file list: {ex.Message}");
         }
     }
 
@@ -1998,11 +2129,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
             return success
                 ? Ok(new Farm.Web.Shared.StartPrintResultDto("Print started successfully", fileName))
-                : StatusCode(500, "Failed to start print");
+                : StatusCode(StatusCodes.Status500InternalServerError, "Failed to start print");
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Failed to start print: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to start print: {ex.Message}");
         }
     }
 
@@ -2143,7 +2274,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to get history for printer {id}: {ex.Message}");
+            _logger.LogError(ex, $"Failed to get history for printer {id}: {ex.Message}");
             return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
         }
     }
@@ -2218,12 +2349,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (HttpRequestException ex)
         {
             _logger.LogError($"Network error retrieving history job {jobId} for printer {id} from {printer.ServerUrl}: {ex.Message}");
-            return StatusCode(502, "Unable to connect to printer");
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
             _logger.LogWarning($"Timeout retrieving history job {jobId} for printer {id}: {ex.Message}");
-            return StatusCode(408, "Request timeout");
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
         // Let global exception handler catch other exceptions for consistent error responses
     }
@@ -2316,12 +2447,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         try
         {
             bool success = await moon.DeleteHistoryJobAsync(printer.ServerUrl, jobId, ct);
-            return success ? Ok() : StatusCode(500, "Failed to delete history job");
+            return success ? Ok() : StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Failed to delete history job {jobId} for printer {id}: {ex.Message}");
-            return StatusCode(500, "Failed to delete history job");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
         }
     }
 
@@ -2811,12 +2942,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (OperationCanceledException)
         {
             _logger.LogWarning($"Printer discovery was cancelled");
-            return StatusCode(408, "Discovery operation timed out");
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Discovery operation timed out");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Failed to discover printers on network: {ex.Message}");
-            return StatusCode(500, "Failed to discover printers. Please try again.");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to discover printers. Please try again.");
         }
     }
 
@@ -2861,7 +2992,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (Exception ex)
         {
             _logger.LogError($"Failed to start streaming printer discovery: {ex.Message}");
-            return StatusCode(500, "Failed to start discovery stream. Please try again.");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start discovery stream. Please try again.");
         }
     }
 

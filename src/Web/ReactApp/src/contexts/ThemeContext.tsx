@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useEffect, useState, ReactNode, useContext, useCallback, useMemo } from 'react';
+import React, { createContext, useEffect, useState, ReactNode, useCallback, useMemo } from 'react';
 
 export type ThemeName = 'dark' | 'light' | 'system';
 
@@ -155,36 +155,5 @@ export function ThemeProvider({
  * @throws Error if used outside of ThemeProvider
  */
 // Hooks moved to ThemeHooks.ts
-export function useThemeInternal(): ThemeContextType {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useTheme must be used within a ThemeProvider');
-  return ctx;
-}
-
-// Public hook exports (to support direct imports from ThemeContext as guided by lint rules)
-export function useTheme() { return useThemeInternal(); }
-export function useComputedTheme(): 'dark' | 'light' { return useThemeInternal().computedTheme; }
-export function useAccessibilityPreferences() {
-  const { prefersReducedMotion, prefersHighContrast } = useThemeInternal();
-  return { prefersReducedMotion, prefersHighContrast };
-}
-export function useThemeToggle() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useThemeToggle must be used within a ThemeProvider');
-
-  const isLight = ctx.theme === 'light';
-  const isDark = ctx.theme === 'dark';
-  const isSystem = ctx.theme === 'system';
-
-  return {
-    theme: ctx.theme,
-    computedTheme: ctx.computedTheme,
-    isLight,
-    isDark,
-    isSystem,
-    toggleTheme: ctx.toggleTheme,
-    setTheme: ctx.setTheme,
-    prefersReducedMotion: ctx.prefersReducedMotion,
-    prefersHighContrast: ctx.prefersHighContrast,
-  };
-}
+// Keep this file focused on React components (ThemeProvider and ThemeContext) to satisfy
+// the `react-refresh/only-export-components` rule. Hooks are exported from `ThemeHooks.ts`.

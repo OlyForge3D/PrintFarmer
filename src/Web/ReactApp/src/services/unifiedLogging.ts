@@ -1,6 +1,5 @@
 // This file contains unified logging code that needs to handle various data types
-// TypeScript 'any' is acceptable here for logging flexible data structures
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// Prefer `unknown` for external inputs and narrow before reading properties.
 /* eslint-disable @typescript-eslint/no-unsafe-function-type */
 
 import { trace } from '@opentelemetry/api';
@@ -8,7 +7,7 @@ import { trace } from '@opentelemetry/api';
 export interface LogEntry {
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
-  context?: any;
+  context?: unknown;
   timestamp: Date;
   component?: string;
   userId?: string;
@@ -16,16 +15,16 @@ export interface LogEntry {
 }
 
 export interface IUnifiedLoggingService {
-  debug(message: string, context?: any, component?: string): void;
-  info(message: string, context?: any, component?: string): void;
-  warn(message: string, context?: any, component?: string): void;
-  error(message: string, context?: any, component?: string): void;
+  debug(message: string, context?: unknown, component?: string): void;
+  info(message: string, context?: unknown, component?: string): void;
+  warn(message: string, context?: unknown, component?: string): void;
+  error(message: string, context?: unknown, component?: string): void;
   
   // Context-aware logging for specific scenarios
-  logApiRequest(method: string, url: string, statusCode: number, duration: number, details?: any): void;
-  logUserAction(action: string, component: string, details?: any): void;
-  logSignalREvent(event: string, connectionState: string, details?: any): void;
-  logComponentLifecycle(component: string, phase: 'mount' | 'unmount' | 'update', details?: any): void;
+  logApiRequest(method: string, url: string, statusCode: number, duration: number, details?: unknown): void;
+  logUserAction(action: string, component: string, details?: unknown): void;
+  logSignalREvent(event: string, connectionState: string, details?: unknown): void;
+  logComponentLifecycle(component: string, phase: 'mount' | 'unmount' | 'update', details?: unknown): void;
 }
 
 class UnifiedLoggingService implements IUnifiedLoggingService {
@@ -64,7 +63,7 @@ class UnifiedLoggingService implements IUnifiedLoggingService {
   }
 
   private createConsoleRedirect(level: LogEntry['level'], originalMethod: Function) {
-    return (...args: any[]) => {
+    return (...args: unknown[]) => {
       // Call original console method for development debugging
       originalMethod(...args);
       
@@ -80,23 +79,23 @@ class UnifiedLoggingService implements IUnifiedLoggingService {
     };
   }
 
-  debug(message: string, context?: any, component?: string): void {
+  debug(message: string, context?: unknown, component?: string): void {
     this.logWithTelemetry('debug', message, context, component);
   }
 
-  info(message: string, context?: any, component?: string): void {
+  info(message: string, context?: unknown, component?: string): void {
     this.logWithTelemetry('info', message, context, component);
   }
 
-  warn(message: string, context?: any, component?: string): void {
+  warn(message: string, context?: unknown, component?: string): void {
     this.logWithTelemetry('warn', message, context, component);
   }
 
-  error(message: string, context?: any, component?: string): void {
+  error(message: string, context?: unknown, component?: string): void {
     this.logWithTelemetry('error', message, context, component);
   }
 
-  logApiRequest(method: string, url: string, statusCode: number, duration: number, details?: any): void {
+  logApiRequest(method: string, url: string, statusCode: number, duration: number, details?: unknown): void {
     const level = statusCode >= 400 ? 'error' : statusCode >= 300 ? 'warn' : 'info';
     const message = `API ${method} ${url} -> ${statusCode} (${duration}ms)`;
     
@@ -105,22 +104,22 @@ class UnifiedLoggingService implements IUnifiedLoggingService {
       url,
       statusCode,
       duration,
-      ...details
+      ...(details as Record<string, unknown>),
     }, 'ApiClient');
   }
 
-  logUserAction(action: string, component: string, details?: any): void {
+  logUserAction(action: string, component: string, details?: unknown): void {
     const message = `User action: ${action}`;
     
     this.logWithTelemetry('info', message, {
       action,
       component,
       userId: this.userId,
-      ...details
+      ...(details as Record<string, unknown>),
     }, 'UserAction');
   }
 
-  logSignalREvent(event: string, connectionState: string, details?: any): void {
+  logSignalREvent(event: string, connectionState: string, details?: unknown): void {
     const level = connectionState === 'Connected' ? 'info' : 
                  connectionState === 'Reconnecting' ? 'warn' : 
                  connectionState === 'Disconnected' ? 'error' : 'info';
@@ -130,21 +129,21 @@ class UnifiedLoggingService implements IUnifiedLoggingService {
     this.logWithTelemetry(level, message, {
       event,
       connectionState,
-      ...details
+      ...(details as Record<string, unknown>),
     }, 'SignalR');
   }
 
-  logComponentLifecycle(component: string, phase: 'mount' | 'unmount' | 'update', details?: any): void {
+  logComponentLifecycle(component: string, phase: 'mount' | 'unmount' | 'update', details?: unknown): void {
     const message = `Component ${component} ${phase}`;
     
     this.logWithTelemetry('debug', message, {
       component,
       phase,
-      ...details
+      ...(details as Record<string, unknown>),
     }, 'ComponentLifecycle');
   }
 
-  private logWithTelemetry(level: LogEntry['level'], message: string, context?: any, component?: string): void {
+  private logWithTelemetry(level: LogEntry['level'], message: string, context?: unknown, component?: string): void {
     const span = this.tracer.startSpan(`log.${level}`);
     
     try {
@@ -160,7 +159,7 @@ class UnifiedLoggingService implements IUnifiedLoggingService {
 
       if (context) {
         span.setAttributes({
-          'log.context': JSON.stringify(context),
+          'log.context': JSON.stringify(context as Record<string, unknown>),
         });
       }
 
@@ -257,29 +256,31 @@ export const unifiedLogger = new UnifiedLoggingService();
 // Extension methods for specific use cases
 export const loggerExtensions = {
   // Printer-specific logging
-  logPrinterOperation: (operation: string, printerId: string, success: boolean, details?: any) => {
+  logPrinterOperation: (operation: string, printerId: string, success: boolean, details?: unknown) => {
     const level = success ? 'info' : 'warn';
     const message = `Printer ${operation}: ${success ? 'success' : 'failed'}`;
-    unifiedLogger[level](message, { operation, printerId, success, ...details }, 'PrinterOperation');
+    const detailsObj = details as Record<string, unknown> | undefined;
+    unifiedLogger[level](message, { operation, printerId, success, ...(detailsObj ?? {}) }, 'PrinterOperation');
   },
 
   // File operation logging
-  logFileOperation: (operation: string, fileName: string, success: boolean, fileSize?: number, details?: any) => {
+  logFileOperation: (operation: string, fileName: string, success: boolean, fileSize?: number, details?: unknown) => {
     const level = success ? 'info' : 'warn';
     const message = `File ${operation}: ${fileName}`;
-    unifiedLogger[level](message, { operation, fileName, success, fileSize, ...details }, 'FileOperation');
+    const detailsObj = details as Record<string, unknown> | undefined;
+    unifiedLogger[level](message, { operation, fileName, success, fileSize, ...(detailsObj ?? {}) }, 'FileOperation');
   },
 
   // Navigation logging
-  logNavigation: (from: string, to: string, details?: any) => {
-    unifiedLogger.info(`Navigation: ${from} -> ${to}`, { from, to, ...details }, 'Navigation');
+  logNavigation: (from: string, to: string, details?: unknown) => {
+    unifiedLogger.info(`Navigation: ${from} -> ${to}`, { from, to, ...(details as Record<string, unknown>) }, 'Navigation');
   },
 
   // Form submission logging
-  logFormSubmission: (formName: string, success: boolean, validationErrors?: any, details?: any) => {
+  logFormSubmission: (formName: string, success: boolean, validationErrors?: unknown, details?: unknown) => {
     const level = success ? 'info' : 'warn';
     const message = `Form ${formName}: ${success ? 'submitted' : 'validation failed'}`;
-    unifiedLogger[level](message, { formName, success, validationErrors, ...details }, 'FormSubmission');
+    unifiedLogger[level](message, { formName, success, validationErrors, ...(details as Record<string, unknown>) }, 'FormSubmission');
   },
 };
 

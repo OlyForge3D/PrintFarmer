@@ -2,7 +2,7 @@ import { LoginModal } from '@/components/auth/LoginModal';
 import { RegisterModal } from '@/components/auth/RegisterModal';
 import { BuildInfo } from '@/components/BuildInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { useSignalRConnection } from '@/hooks/useSignalR';
 import {
   Box,
@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import DebugPrinterSignalRPanel from '@/components/DebugPrinterSignalRPanel';
+import { printerSignalRService } from '@/services/printer-signalr';
 // Layout now uses <Outlet /> for nested routes
 
 interface NavigationItem {
@@ -82,13 +84,32 @@ const navigation: NavigationItem[] = [
 ];
 
 export function Layout() {
-  const { isConnected } = useSignalRConnection();
+  const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const location = useLocation();
   // Debug: log current pathname to ensure re-render on navigation
   useEffect(() => {
     // location change effect (debug removed)
   }, [location.pathname]);
+
+  // Global debug subscription to printer SignalR events (for dev verification)
+  useEffect(() => {
+    if (!import.meta.env.VITE_PRINTFARMER_DEBUG) return;
+    let unsub: (() => void) | null = null;
+    try {
+      printerSignalRService.connect();
+      unsub = printerSignalRService.onPrinterStatusUpdate((status) => {
+        // Gate debug logging behind per-area flag so it can be enabled in-browser
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (win.PrintFarmerDebug?.layout) {
+          console.debug('[Layout] Received PrinterUpdated', status.id, status.state, status.isOnline);
+        }
+      });
+    } catch (err) {
+      console.warn('[Layout] Could not subscribe to printerSignalRService', err);
+    }
+    return () => { if (unsub) unsub(); };
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -393,8 +414,17 @@ export function Layout() {
                   return (
                     <div key={item.name} className="flex flex-col">
                       {hasChildren ? (
-                        <details open={isExpanded} onToggle={() => toggleExpand(item.name)} className="group">
-                          <summary className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}>
+                        <details open={isExpanded} className="group">
+                          <summary
+                            className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                            onClick={e => {
+                              e.preventDefault(); // Prevent native toggle
+                              toggleExpand(item.name);
+                            }}
+                            aria-expanded={isExpanded}
+                            tabIndex={0}
+                            role="button"
+                          >
                             <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
                             <span className="flex-1 text-left">{item.name}</span>
                             <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
@@ -451,15 +481,25 @@ export function Layout() {
             <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
               {filteredNavigation.map(item => {
                 const Icon = item.icon;
+                const isExpanded = !!expanded[item.name];
                 const hasChildren = !!item.children?.length;
                 return (
                   <div key={item.name} className="flex flex-col">
                     {hasChildren ? (
-                      <details open={!!expanded[item.name]} onToggle={() => toggleExpand(item.name)} className="group">
-                        <summary className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}>
+                      <details open={isExpanded} className="group">
+                        <summary
+                          className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                          onClick={e => {
+                            e.preventDefault(); // Prevent native toggle
+                            toggleExpand(item.name);
+                          }}
+                          aria-expanded={isExpanded}
+                          tabIndex={0}
+                          role="button"
+                        >
                           <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
                           <span className="flex-1 text-left">{item.name}</span>
-                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${expanded[item.name] ? 'rotate-90' : ''}`} aria-hidden="true" />
+                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
                         </summary>
                         <div className="ml-8 space-y-1 mt-1">
                           {item.children!.map(child => {
@@ -541,6 +581,7 @@ export function Layout() {
         onClose={() => setShowRegisterModal(false)}
         onSwitchToLogin={switchToLogin}
       />
+      {import.meta.env.VITE_PRINTFARMER_DEBUG && <DebugPrinterSignalRPanel />}
     </div>
   );
 }

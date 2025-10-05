@@ -53,6 +53,19 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 
         AuthenticationResult result = await _authService.RegisterAsync(request);
 
+        // If registration succeeded but user is not active, inform user that admin approval is required
+        if (result.Success && result.User is { IsActive: false })
+        {
+            // Never return a JWT for unapproved users
+            return Ok(new AuthenticationResult(
+                Success: true,
+                Token: null,
+                ExpiresAt: null,
+                User: result.User,
+                Error: "Registration successful. Your account requires admin approval before you can log in."
+            ));
+        }
+
         if (result.Success)
         {
             return Ok(result);

@@ -89,8 +89,10 @@ export function initializeTelemetry(): void {
       ]
     });
 
-    console.log('[Telemetry] OpenTelemetry initialized successfully');
-    console.log('[UnifiedLogging] Console redirection enabled - all console statements are now captured in OpenTelemetry');
+    if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.telemetryLogs) {
+      console.log('[Telemetry] OpenTelemetry initialized successfully');
+      console.log('[UnifiedLogging] Console redirection enabled - all console statements are now captured in OpenTelemetry');
+    }
   } catch (error) {
     console.error('[Telemetry] Failed to initialize OpenTelemetry:', error);
   }
@@ -101,12 +103,14 @@ export function shutdownTelemetry(): Promise<void> {
     return Promise.resolve();
   }
 
-  return provider.shutdown().then(() => {
-    console.log('[Telemetry] OpenTelemetry shut down successfully');
-    provider = null;
-  }).catch((error: unknown) => {
-    console.error('[Telemetry] Error shutting down OpenTelemetry:', error);
-  });
+    return provider.shutdown().then(() => {
+      if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.telemetryLogs) {
+        console.log('[Telemetry] OpenTelemetry shut down successfully');
+      }
+      provider = null;
+    }).catch((error: unknown) => {
+      console.error('[Telemetry] Error shutting down OpenTelemetry:', error);
+    });
 }
 
 // Utility function to check if telemetry is initialized

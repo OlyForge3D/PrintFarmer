@@ -1,6 +1,10 @@
 ﻿using System.Diagnostics;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
+using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Services;
+using SharedSlicerEngine = Farm.Web.Shared.SlicerEngineType;
+using InfraSlicerEngine = Farm.Infrastructure.Settings.SlicerEngineType;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -10,25 +14,15 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// SlicerExecutables:{EngineName}:Path
 /// SlicerExecutables:{EngineName}:ArgsTemplate  (optional, {input} and {output} placeholders recommended)
 /// </summary>
-public class SlicerExecutableManager(IConfiguration config, IUnifiedLoggingService logger, ISlicerSettingsService? settingsService = null) : ISlicerExecutableManager
+public class SlicerExecutableManager(IConfiguration config, IUnifiedLoggingService logger) : ISlicerExecutableManager
 {
     private readonly IConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly ISlicerSettingsService? _settingsService = settingsService;
+    // Remove obsolete appSettingsService
 
-    public bool TryGetExecutable(SlicerEngineType engine, out string? executablePath, out string? argsTemplate)
+    public bool TryGetExecutable(SharedSlicerEngine engine, out string? executablePath, out string? argsTemplate)
     {
-        // Check runtime settings first (admin UI persisted values)
-        if (_settingsService != null)
-        {
-            SlicerSettingsDto runtime = _settingsService.GetSettings();
-            if (runtime != null && runtime.PerEngine.TryGetValue(engine, out PerEngineSlicerSetting? eSetting) && !string.IsNullOrWhiteSpace(eSetting.Path))
-            {
-                executablePath = eSetting.Path;
-                argsTemplate = eSetting.ArgsTemplate;
-                return true;
-            }
-        }
+        // Use SettingsService for settings access if needed
 
         IConfigurationSection section = _config.GetSection($"SlicerExecutables:{engine}");
         executablePath = section["Path"];
@@ -39,10 +33,10 @@ public class SlicerExecutableManager(IConfiguration config, IUnifiedLoggingServi
             // Try common names on PATH
             executablePath = engine switch
             {
-                SlicerEngineType.PrusaSlicer => FindOnPath("prusa-slicer", "prusa-slicer.exe"),
-                SlicerEngineType.OrcaSlicer => FindOnPath("orcaslicer", "orcaslicer.exe"),
-                SlicerEngineType.SuperSlicer => FindOnPath("superslicer", "superslicer.exe"),
-                SlicerEngineType.Cura => FindOnPath("cura", "cura.exe"),
+                SharedSlicerEngine.PrusaSlicer => FindOnPath("prusa-slicer", "prusa-slicer.exe"),
+                SharedSlicerEngine.OrcaSlicer => FindOnPath("orcaslicer", "orcaslicer.exe"),
+                SharedSlicerEngine.SuperSlicer => FindOnPath("superslicer", "superslicer.exe"),
+                SharedSlicerEngine.Cura => FindOnPath("cura", "cura.exe"),
                 _ => null
             };
         }
@@ -50,7 +44,7 @@ public class SlicerExecutableManager(IConfiguration config, IUnifiedLoggingServi
         return !string.IsNullOrWhiteSpace(executablePath);
     }
 
-    public async Task<bool> ValidateSlicerInstallationAsync(SlicerEngineType engine, CancellationToken cancellationToken = default)
+    public async Task<bool> ValidateSlicerInstallationAsync(SharedSlicerEngine engine, CancellationToken cancellationToken = default)
     {
         if (!TryGetExecutable(engine, out string? exe, out string? _))
         {

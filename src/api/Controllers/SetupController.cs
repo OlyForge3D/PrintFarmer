@@ -153,7 +153,7 @@ public class SetupController(
         Role? adminRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin", ct);
         if (adminRole == null)
         {
-            return StatusCode(500, new AuthenticationResult(false, Error: "Admin role not found in database. Database may not be properly initialized."));
+            return StatusCode(StatusCodes.Status500InternalServerError, new AuthenticationResult(false, Error: "Admin role not found in database. Database may not be properly initialized."));
         }
 
         // Create the admin user

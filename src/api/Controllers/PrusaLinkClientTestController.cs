@@ -43,7 +43,7 @@ public class PrusaLinkClientTestController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error testing PrusaLinkClient.GetStatusAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 
@@ -73,7 +73,7 @@ public class PrusaLinkClientTestController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error testing PrusaLinkClient.GetFileListAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 }

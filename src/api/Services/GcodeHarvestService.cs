@@ -819,7 +819,7 @@ public partial class GcodeHarvestService(
             .Take(limit)
             .ToArrayAsync(ct);
 
-        return [.. operations.Select(MapToDto)];
+        return operations.Select(MapToDto).ToArray();
     }
 
     // (moved below to be adjacent to the other overload)

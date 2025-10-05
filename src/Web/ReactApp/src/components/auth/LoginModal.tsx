@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, LogIn } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
+import { useAuth } from '@/contexts/AuthHooks';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -47,10 +48,13 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
-          <h2 className="text-xl font-semibold text-pf-text-primary flex items-center">
-            <LogIn className="h-5 w-5 mr-2" />
-            Sign In
-          </h2>
+          <div className="flex items-center gap-2">
+            <PrintFarmerLogo size={32} className="mr-2" />
+            <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
+            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
+              <LogIn className="h-5 w-5 mr-2" />Sign In
+            </span>
+          </div>
           <button
             onClick={handleClose}
             disabled={isLoading}

@@ -2,22 +2,20 @@ using System;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Telemetry;
 
 public interface IUnifiedLoggingService
 {
-    void LogDebug(string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogInformation(string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogWarning(string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogError(string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogCritical(string message, string? correlationId = null, object? metadata = null, params object[] args);
-    void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args);
+    void LogDebug(string message, string? correlationId = null, object? metadata = null);
+    void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null);
+    void LogInformation(string message, string? correlationId = null, object? metadata = null);
+    void LogWarning(string message, string? correlationId = null, object? metadata = null);
+    void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null);
+    void LogError(string message, string? correlationId = null, object? metadata = null);
+    void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null);
+    void LogCritical(string message, string? correlationId = null, object? metadata = null);
+    void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null);
 
     // Context-aware logging
     void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null);
@@ -26,60 +24,58 @@ public interface IUnifiedLoggingService
 public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 {
     private readonly ILogger<UnifiedLoggingService> _logger;
-    private readonly AppDbContext _dbContext;
     private readonly IServiceProvider _serviceProvider;
     private readonly ActivitySource _activitySource = new ActivitySource("PrintFarmer.Logging");
 
-    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, AppDbContext dbContext, IServiceProvider serviceProvider)
+    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, IServiceProvider serviceProvider)
     {
         _logger = logger;
-        _dbContext = dbContext;
         _serviceProvider = serviceProvider;
     }
 
-    public void LogDebug(string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogDebug(string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Debug, "Debug", message, correlationId, metadata, args);
+        LogWithTelemetry(LogLevel.Debug, "Debug", message, correlationId, metadata);
     }
 
-    public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Debug, "Debug", message, correlationId, metadata, args, exception);
+        LogWithTelemetry(LogLevel.Debug, "Debug", message, correlationId, metadata, exception);
     }
 
-    public void LogInformation(string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogInformation(string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Information, "Information", message, correlationId, metadata, args);
+        LogWithTelemetry(LogLevel.Information, "Information", message, correlationId, metadata);
     }
 
-    public void LogWarning(string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogWarning(string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Warning, "Warning", message, correlationId, metadata, args);
+        LogWithTelemetry(LogLevel.Warning, "Warning", message, correlationId, metadata);
     }
 
-    public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Warning, "Warning", message, correlationId, metadata, args, exception);
+        LogWithTelemetry(LogLevel.Warning, "Warning", message, correlationId, metadata, exception);
     }
 
-    public void LogError(string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogError(string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Error, "Error", message, correlationId, metadata, args);
+        LogWithTelemetry(LogLevel.Error, "Error", message, correlationId, metadata);
     }
 
-    public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Error, "Error", message, correlationId, metadata, args, exception);
+        LogWithTelemetry(LogLevel.Error, "Error", message, correlationId, metadata, exception);
     }
 
-    public void LogCritical(string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogCritical(string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Critical, "Critical", message, correlationId, metadata, args);
+        LogWithTelemetry(LogLevel.Critical, "Critical", message, correlationId, metadata);
     }
 
-    public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null, params object[] args)
+    public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null)
     {
-        LogWithTelemetry(LogLevel.Critical, "Critical", message, correlationId, metadata, args, exception);
+        LogWithTelemetry(LogLevel.Critical, "Critical", message, correlationId, metadata, exception);
     }
 
     public void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null)
@@ -133,17 +129,15 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         }
     }
 
-    private void LogWithTelemetry(LogLevel level, string category, string message, string? correlationId, object? metadata, object[] args, Exception? exception = null)
+    private void LogWithTelemetry(LogLevel level, string category, string message, string? correlationId, object? metadata, Exception? exception = null)
     {
         using Activity? activity = _activitySource.StartActivity($"Log.{category}");
-
-        string formattedMessage = args.Length > 0 ? string.Format(message, args) : message;
 
         if (activity != null)
         {
             activity.SetTag("log.level", level.ToString());
             activity.SetTag("log.category", category);
-            activity.SetTag("log.message", formattedMessage);
+            activity.SetTag("log.message", message);
             if (!string.IsNullOrEmpty(correlationId))
             {
                 activity.SetTag("log.correlationId", correlationId);
@@ -154,40 +148,25 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
             }
         }
 
-        // Persist to SystemLog table using a new entity and a new DbContext instance per log entry
-        try
+        // Log to structured logger with telemetry context (file/console)
+        var loggerArgs = new object?[]
         {
-            // Use a new scope to avoid tracking conflicts
-            using IServiceScope scope = _serviceProvider.CreateScope();
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            SystemLog systemLog = new Farm.Infrastructure.Domain.SystemLog
-            {
-                // Do NOT set Id, let the DB generate it
-                Timestamp = DateTime.UtcNow,
-                Level = level.ToString(),
-                Message = formattedMessage,
-                Exception = exception?.ToString(),
-                Source = category,
-                CorrelationId = correlationId,
-                Metadata = metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : null
-            };
-            db.SystemLogs.Add(systemLog);
-            db.SaveChanges();
-        }
-        catch (Exception dbEx)
-        {
-            // Fallback: log DB error to standard logger
-            _logger.LogError(dbEx, "Failed to persist log entry to SystemLog table");
-        }
-
-        // Log to structured logger with telemetry context
+            category,
+            message,
+            correlationId ?? "None",
+            metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : "None"
+        };
         if (exception != null)
         {
-            _logger.Log(level, exception, "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata}", category, formattedMessage, correlationId ?? "None", metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : "None");
+            _logger.Log(level, exception,
+                "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata}",
+                loggerArgs);
         }
         else
         {
-            _logger.Log(level, "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata}", category, formattedMessage, correlationId ?? "None", metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : "None");
+            _logger.Log(level,
+                "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata}",
+                loggerArgs);
         }
     }
 

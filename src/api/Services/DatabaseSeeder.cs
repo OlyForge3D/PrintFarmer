@@ -16,7 +16,14 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
     private readonly AppDbContext _context = context;
     private readonly IUnifiedLoggingService _logger = logger;
 
-    public async Task SeedCatalogDataAsync()
+    public async Task SeedAllAsync()
+    {
+        await SeedAuthenticationDataAsync();
+        await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
+        await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
+    }
+
+    private async Task SeedCatalogDataAsync()
     {
         try
         {
@@ -253,29 +260,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         }
     }
 
-    public async Task SeedSpoolmanConfigAsync()
-    {
-        try
-        {
-            // Check if SpoolmanConfig already exists
-            SpoolmanConfig? existingConfig = await _context.SpoolmanConfigs.FirstOrDefaultAsync();
-            if (existingConfig == null)
-            {
-                _context.SpoolmanConfigs.Add(new SpoolmanConfig
-                {
-                    // Remove explicit Id assignment - let SQL Server auto-generate it
-                    BaseUrl = "http://spoolman.local:7912"
-                });
-                await _context.SaveChangesAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Spoolman config seeding error");
-        }
-    }
-
-    public async Task SeedFilamentTypesAsync()
+    private async Task SeedFilamentTypesAsync()
     {
         // Default filament types to ensure exist
         (string Name, int HotendTemp, int BedTemp)[] filamentTypes = new (string Name, int HotendTemp, int BedTemp)[]
@@ -309,12 +294,6 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         await _context.SaveChangesAsync();
     }
 
-    public async Task SeedAllAsync()
-    {
-        await SeedSpoolmanConfigAsync();
-        await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
-        await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
-    }
 
     /// <summary>
     /// Gets the "Unknown" manufacturer, which should always exist after seeding
@@ -334,5 +313,200 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
         return unknownModel ?? throw new InvalidOperationException("Unknown model not found. Ensure SeedCatalogDataAsync() has been called.");
+    }
+
+    private async Task SeedAuthenticationDataAsync()
+    {
+        ArgumentNullException.ThrowIfNull(_context);
+
+        try
+        {
+            // Try to query the Actions table to see if it exists
+            await _context.Actions.AnyAsync();
+        }
+        catch (Exception)
+        {
+            // If authentication tables don't exist yet, skip seeding
+            // This can happen during initial database setup or testing
+            return;
+        }
+
+        // Seed Actions first
+        await SeedActionsAsync();
+
+        // Seed Resources
+        await SeedResourcesAsync();
+
+        // Seed Roles
+        await SeedRolesAsync();
+
+        // Seed Role Permissions
+        await SeedRolePermissionsAsync();
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task SeedActionsAsync()
+    {
+        var actions = new[]
+        {
+            new { Name = "create", DisplayName = "Create", Description = "Create new resources" },
+            new { Name = "read", DisplayName = "Read", Description = "View and read resources" },
+            new { Name = "update", DisplayName = "Update", Description = "Modify existing resources" },
+            new { Name = "delete", DisplayName = "Delete", Description = "Remove resources" },
+            new { Name = "execute", DisplayName = "Execute", Description = "Execute operations on resources" },
+            new { Name = "admin", DisplayName = "Administer", Description = "Full administrative control" }
+        };
+
+        foreach (var action in actions)
+        {
+            if (!await _context.Actions.AnyAsync(a => a.Name == action.Name))
+            {
+                _context.Actions.Add(new Farm.Infrastructure.Domain.Action
+                {
+                    Id = Guid.NewGuid(),
+                    Name = action.Name,
+                    DisplayName = action.DisplayName,
+                    Description = action.Description,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+    }
+
+    private async Task SeedResourcesAsync()
+    {
+        var resources = new[]
+        {
+            new { Name = "printers", DisplayName = "Printers", ResourceType = "printer", Description = "3D printer management" },
+            new { Name = "gcode_harvest", DisplayName = "G-code Harvest", ResourceType = "harvest", Description = "G-code file harvesting operations" },
+            new { Name = "gcode_library", DisplayName = "G-code Library", ResourceType = "library", Description = "G-code file library management" },
+            new { Name = "job_queue", DisplayName = "Print Job Queue", ResourceType = "queue", Description = "Print job queue management" },
+            new { Name = "slicer_engines", DisplayName = "Slicer Engines", ResourceType = "slicer", Description = "Slicer integration and management" },
+            new { Name = "users", DisplayName = "Users", ResourceType = "system", Description = "User account management" },
+            new { Name = "roles", DisplayName = "Roles", ResourceType = "system", Description = "Role and permission management" },
+            new { Name = "system_settings", DisplayName = "System Settings", ResourceType = "system", Description = "Application configuration and settings" },
+            new { Name = "spoolman", DisplayName = "Spoolman Integration", ResourceType = "integration", Description = "Spoolman filament management integration" },
+            new { Name = "network_discovery", DisplayName = "Network Discovery", ResourceType = "system", Description = "Printer network discovery and management" }
+        };
+
+        foreach (var resource in resources)
+        {
+            if (!await _context.Resources.AnyAsync(r => r.Name == resource.Name))
+            {
+                _context.Resources.Add(new Resource
+                {
+                    Id = Guid.NewGuid(),
+                    Name = resource.Name,
+                    DisplayName = resource.DisplayName,
+                    Description = resource.Description,
+                    ResourceType = resource.ResourceType,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+    }
+
+    private async Task SeedRolesAsync()
+    {
+        var roles = new[]
+        {
+            new { Name = "farm_admin", DisplayName = "Farm Administrator", Description = "Full access to all farm resources and user management", IsSystemRole = true },
+            new { Name = "farm_user", DisplayName = "Farm User", Description = "Standard user access to printers and print operations", IsSystemRole = true }
+        };
+
+        foreach (var role in roles)
+        {
+            if (!await _context.Roles.AnyAsync(r => r.Name == role.Name))
+            {
+                _context.Roles.Add(new Role
+                {
+                    Id = Guid.NewGuid(),
+                    Name = role.Name,
+                    DisplayName = role.DisplayName,
+                    Description = role.Description,
+                    IsSystemRole = role.IsSystemRole,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+    }
+
+    private async Task SeedRolePermissionsAsync()
+    {
+        // Ensure all roles, resources, and actions are saved first
+        await _context.SaveChangesAsync();
+
+        // Get the admin role - admins get all permissions
+        Role? adminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+        if (adminRole != null)
+        {
+            List<Resource> allResources = await _context.Resources.ToListAsync();
+            Farm.Infrastructure.Domain.Action? adminAction = await _context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
+
+            if (adminAction != null)
+            {
+                foreach (Resource resource in allResources)
+                {
+                    if (!await _context.RolePermissions.AnyAsync(rp =>
+                        rp.RoleId == adminRole.Id && rp.ResourceId == resource.Id && rp.ActionId == adminAction.Id))
+                    {
+                        _context.RolePermissions.Add(new RolePermission
+                        {
+                            Id = Guid.NewGuid(),
+                            RoleId = adminRole.Id,
+                            ResourceId = resource.Id,
+                            ActionId = adminAction.Id,
+                            Granted = true,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
+                }
+            }
+        }
+
+        // Get the user role - users get read access to most resources
+        Role? userRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_user");
+        if (userRole != null)
+        {
+            (string, string)[] userPermissions = new[]
+            {
+                ("printers", "read"),
+                ("printers", "execute"), // Can control printers
+                ("gcode_library", "read"),
+                ("gcode_library", "create"), // Can upload files
+                ("job_queue", "read"),
+                ("job_queue", "create"), // Can create print jobs
+                ("spoolman", "read")
+            };
+
+            foreach ((string? resourceName, string? actionName) in userPermissions)
+            {
+                Resource? resource = await _context.Resources.FirstOrDefaultAsync(r => r.Name == resourceName);
+                Farm.Infrastructure.Domain.Action? action = await _context.Actions.FirstOrDefaultAsync(a => a.Name == actionName);
+
+                if (resource != null && action != null)
+                {
+                    if (!await _context.RolePermissions.AnyAsync(rp =>
+                        rp.RoleId == userRole.Id && rp.ResourceId == resource.Id && rp.ActionId == action.Id))
+                    {
+                        _context.RolePermissions.Add(new RolePermission
+                        {
+                            Id = Guid.NewGuid(),
+                            RoleId = userRole.Id,
+                            ResourceId = resource.Id,
+                            ActionId = action.Id,
+                            Granted = true,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
+                }
+            }
+        }
     }
 }

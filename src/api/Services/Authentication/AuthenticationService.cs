@@ -103,7 +103,7 @@ public class AuthenticationService(
                 PasswordHash = _passwordHashing.HashPassword(request.Password),
                 FirstName = request.FirstName,
                 LastName = request.LastName,
-                IsActive = true,
+                IsActive = false, // Require admin approval before login
                 EmailConfirmed = false, // TODO: Implement email confirmation
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow

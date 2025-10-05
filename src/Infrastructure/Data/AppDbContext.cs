@@ -1,5 +1,6 @@
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
+using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -7,6 +8,7 @@ namespace Farm.Infrastructure.Data;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
+    public DbSet<AppSettingsEntity> AppSettingsEntities => Set<AppSettingsEntity>();
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<Printer> Printers => Set<Printer>();
     public DbSet<Spool> Spools => Set<Spool>();
@@ -39,6 +41,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // AppSettingsEntity Entity Configuration
+        modelBuilder.Entity<AppSettingsEntity>(b =>
+        {
+            b.HasKey(a => a.Id);
+            b.Property(a => a.Key).IsRequired().HasMaxLength(128);
+            b.Property(a => a.SettingsJson).IsRequired().HasColumnType("TEXT");
+            b.Property(a => a.UpdatedAt).IsRequired();
+            b.HasIndex(a => a.Key).IsUnique();
+        });
+
         // SystemLog Entity Configuration
         modelBuilder.Entity<SystemLog>(b =>
         {

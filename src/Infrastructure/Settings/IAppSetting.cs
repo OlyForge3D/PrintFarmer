@@ -1,13 +1,10 @@
 namespace Farm.Infrastructure.Settings
 {
     /// <summary>
-    /// Marker interface for settings classes.
+    /// Marker interface for AppSettings (runtime/configurable, persisted in DB).
     /// </summary>
     public interface IAppSetting
     {
-        /// <summary>
-        /// The unique key or section name for this settings class.
-        /// </summary>
         static abstract string SectionKey { get; }
     }
 }

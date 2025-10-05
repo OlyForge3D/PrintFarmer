@@ -1,5 +1,4 @@
 ﻿using System.Security.Cryptography;
-using Farm.Web.Api.Data;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;

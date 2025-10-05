@@ -40,6 +40,7 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
+import { renderUnknown } from '@/utils/renderUnknown';
 import { 
   ChevronDown, 
   ExternalLink,
@@ -210,7 +211,8 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   // Function to check if an axis is homed based on the homedAxes string from Moonraker
   const isAxisHomed = (axis: string): boolean => {
     const homedAxes = status?.homedAxes || '';
-    if (window.PrintFarmerDebug?.expandablePrinterCard) {
+    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+    if (win.PrintFarmerDebug?.expandablePrinterCard) {
       console.log(`[PrintFarmer] ExpandablePrinterCard: Checking axis ${axis}, homedAxes from status:`, homedAxes);
     }
     return homedAxes.includes(axis.toLowerCase());
@@ -483,26 +485,33 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </button>
         </div>
 
-        {showCamera && (
-          <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-            {cameraStreamUrl ? (
-              <img 
-                src={cameraStreamUrl} 
-                alt="webcam snapshot"
-                className="max-w-full max-h-full object-contain"
-                onError={(e) => e.currentTarget.style.display = 'none'}
-                onLoad={(e) => e.currentTarget.style.display = 'block'}
-              />
-            ) : (
-              <div className="text-center text-pf-text-secondary p-4">
-                <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No camera configured</p>
-              </div>
-            )}
-          </div>
-        )}
+              {showCamera && (
+                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                  {cameraStreamUrl ? (
+                    <img 
+                      src={cameraStreamUrl} 
+                      alt="webcam snapshot"
+                      className="max-w-full max-h-full object-contain"
+                      onError={(e) => e.currentTarget.style.display = 'none'}
+                      onLoad={(e) => e.currentTarget.style.display = 'block'}
+                    />
+                  ) : (
+                    <div className="text-center text-pf-text-secondary p-4">
+                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No camera configured</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
-        {/* History Modal */}
+              {/* Optional debug panel controlled by window.PrintFarmerDebug.expandablePrinterCardDisplay */}
+              {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
+                <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                  {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
+                </div>
+              )}
+        
+  {/* History Modal */}
         <PrinterHistoryModal
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
@@ -907,17 +916,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             </div>
             
             <div className="flex items-start mt-0">
-              <button 
-                className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
-                disabled={isPrinting}
-                onClick={() => {
-                  if (window.PrintFarmerDebug?.expandablePrinterCard) {
-                    console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
-                  }
-                }}
-              >
-                GO
-              </button>
+                <button
+                  className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
+                  disabled={isPrinting}
+                  onClick={() => {
+                    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+                    if (win.PrintFarmerDebug?.expandablePrinterCard) {
+                      console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
+                    }
+                  }}
+                >
+                  GO
+                </button>
             </div>
           </div>
         </div>

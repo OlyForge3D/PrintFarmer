@@ -17,14 +17,17 @@ ARG DEBUG_PRUSA_ASSETS=false
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
+# Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
+COPY src/Infrastructure/*.csproj ./infrastructure/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/prusaslicer-worker/*.csproj ./prusaslicer-worker/
 
 RUN dotnet restore ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj
 
 COPY src/shared/ ./shared/
+COPY src/Infrastructure/ ./infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/prusaslicer-worker/ ./prusaslicer-worker/
 

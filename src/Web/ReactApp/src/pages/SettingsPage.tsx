@@ -1,65 +1,194 @@
-import { useState } from 'react';
-
+import { useEffect, useState, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
+import { SettingsPagelet, SettingMetadata, SettingValue } from '../components/SettingsPagelet';
+import { SettingInputType } from '../types/SettingInputType';
+import {
+  fetchSettingsMetadata,
+  saveAllSettings,
+  fetchSettingsUnified,
+} from '../services/settingsApi';
 
 export function SettingsPage() {
-  // --- Dynamic Settings UI State ---
+  const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
+  const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [fieldErrorsBySection, setFieldErrorsBySection] = useState<Record<string, Record<string, string>>>({});
 
+  const location = useLocation();
 
-  // ...existing code for diagnostics, password policy, telemetry, etc...
+  const refetchSettingsValues = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const meta = await fetchSettingsMetadata();
+      setMetadata(meta);
+      const unified = await fetchSettingsUnified();
+      const valueMap: Record<string, Record<string, unknown>> = {};
+      for (const m of meta) {
+        const sectionKey = m.key;
+        valueMap[sectionKey] = (unified && typeof unified === 'object' && sectionKey in unified) ? (unified as Record<string, unknown>)[sectionKey] as Record<string, unknown> : {};
+      }
+      setSettingsValues(valueMap);
+      setLoading(false);
+    } catch (err) {
+      setError('Failed to reload settings after save.');
+      setLoading(false);
+      console.error('Error in refetchSettingsValues:', err);
+    }
+  }, []);
 
-  // --- Debug Logging Controls Example ---
-  const debugKeys = {
-    dashboard: 'Dashboard',
-    printer: 'Printer',
-    settings: 'Settings',
-    // ...add more debug keys as needed
-  };
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError(null);
+    fetchSettingsMetadata()
+      .then(async (meta) => {
+        if (!mounted) return;
+        setMetadata(meta);
+        await refetchSettingsValues();
+        setLoading(false);
+      })
+      .catch(() => {
+        setError('Failed to load settings metadata.');
+        setLoading(false);
+      });
+    return () => { mounted = false; };
+  }, [location, refetchSettingsValues]);
 
-  const [debugState, setDebugState] = useState<Record<string, boolean>>({});
-
-  const handleToggle = (key: string, checked: boolean) => {
-    setDebugState(prev => ({
+  const handleFieldChange = (className: string, field: string, value: SettingValue) => {
+    setSettingsValues(prev => ({
       ...prev,
-      [key]: checked,
+      [className]: {
+        ...(prev[className] || {}),
+        [field]: value,
+      }
     }));
+
+    const metaForSection = metadata.find(m => m.key === className);
+    if (metaForSection) {
+      const sectionValues = {
+        ...(settingsValues[className] || {}),
+        [field]: value,
+      };
+      const errs = validateSection(metaForSection, sectionValues);
+      setFieldErrorsBySection(prev => ({ ...prev, [className]: errs }));
+    }
   };
 
-  const handleReset = () => {
-    setDebugState({});
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const allErrors: Record<string, Record<string, string>> = {};
+      for (const metaItem of metadata) {
+        const sectionKey = metaItem.key;
+        const vals = settingsValues[sectionKey] || {};
+        const errs = validateSection(metaItem, vals);
+        if (Object.keys(errs).length > 0) allErrors[sectionKey] = errs;
+      }
+      if (Object.keys(allErrors).length > 0) {
+        setFieldErrorsBySection(allErrors);
+        setSaveError('Fix validation errors before saving.');
+        setSaving(false);
+        return;
+      }
+
+      const payload: Record<string, unknown> = {};
+      for (const meta of metadata) {
+        const sectionKey = meta.key;
+        payload[sectionKey] = settingsValues[sectionKey];
+      }
+      await saveAllSettings(payload);
+      await refetchSettingsValues();
+    } catch (err) {
+      const maybe = err as unknown;
+      if (typeof maybe === 'object' && maybe !== null) {
+        const maybeObj = maybe as Record<string, unknown>;
+        const resp = maybeObj['response'];
+        if (resp && typeof resp === 'object') {
+          const data = (resp as Record<string, unknown>)['data'];
+          if (data && typeof data === 'object') {
+            const errorsObj = (data as Record<string, unknown>)['errors'] as Record<string, unknown> | undefined;
+            if (errorsObj && typeof errorsObj === 'object') {
+              const newFieldErrors: Record<string, Record<string, string>> = {};
+              for (const [key, msg] of Object.entries(errorsObj)) {
+                const parts = key.split('.');
+                let section = parts.length > 1 ? parts[0] : undefined;
+                const fieldName = parts.length > 1 ? parts.slice(1).join('.') : parts[0];
+                if (!section) {
+                  const found = metadata.find(m => m.properties.some(p => p.name === fieldName));
+                  section = found?.key;
+                }
+                if (section) {
+                  newFieldErrors[section] = newFieldErrors[section] || {};
+                  newFieldErrors[section][fieldName] = String(msg ?? 'Invalid value');
+                } else {
+                  setSaveError(String(msg ?? 'Failed to save settings.'));
+                }
+              }
+              setFieldErrorsBySection(prev => ({ ...prev, ...newFieldErrors }));
+            }
+            if ('message' in (data as Record<string, unknown>) && !saveError) {
+              setSaveError(String((data as Record<string, unknown>)['message'] ?? ''));
+            }
+          }
+        }
+      }
+      if (!saveError) {
+        setSaveError('Failed to save settings.');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const validateSection = (metaItem: SettingMetadata, valuesObj: Record<string, unknown>): Record<string, string> => {
+    const errs: Record<string, string> = {};
+    for (const prop of metaItem.properties) {
+      const val = valuesObj[prop.name];
+      if (prop.attributes.includes('RequiredAttribute')) {
+        const empty = val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0);
+        if (empty) { errs[prop.name] = 'This field is required.'; continue; }
+      }
+      const isNumberType = prop.display?.inputType === SettingInputType.Number || ['Number', 'int', 'double'].includes(prop.type);
+      if (isNumberType) {
+        const num = typeof val === 'number' ? val : (typeof val === 'string' && val !== '' ? Number(val) : NaN);
+        if (!isNaN(num)) {
+          if (typeof prop.display?.minValue === 'number' && num < prop.display!.minValue!) errs[prop.name] = `Minimum is ${prop.display!.minValue}`;
+          if (typeof prop.display?.maxValue === 'number' && num > prop.display!.maxValue!) errs[prop.name] = `Maximum is ${prop.display!.maxValue}`;
+        }
+      }
+    }
+    return errs;
   };
 
   return (
-    <>
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6 mt-8">
-        <h2 className="text-xl font-semibold text-pf-text-primary mb-4">Debug Logging Controls</h2>
-        <p className="text-sm text-pf-text-secondary mb-4">Enable or disable informational logging for specific UI components. Changes are saved and persist across reloads.</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {Object.entries(debugKeys).map(([key, label]) => (
-            <div key={key} className="flex items-center gap-2">
-              <input
-                id={`pfdebug-${key}`}
-                type="checkbox"
-                checked={!!debugState[key]}
-                onChange={e => handleToggle(key, e.target.checked)}
-                className="h-4 w-4"
-              />
-              <label htmlFor={`pfdebug-${key}`} className="text-sm text-pf-text-primary">{label}</label>
-            </div>
+    <div className="max-w-3xl mx-auto py-8">
+      <h1 className="text-2xl font-bold mb-6">Settings</h1>
+      {loading ? (
+        <div className="text-center text-gray-500">Loading settings...</div>
+      ) : error ? (
+        <div className="text-center text-red-600">{error}</div>
+      ) : (
+        <form onSubmit={e => { e.preventDefault(); handleSave(); }}>
+          {metadata.map((meta) => (
+            <SettingsPagelet
+              key={meta.key}
+              metadata={meta}
+              values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
+              onChange={(field, value) => handleFieldChange(meta.key, field, value)}
+              fieldErrors={fieldErrorsBySection[meta.key]}
+            />
           ))}
-        </div>
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-          >
-            Reset All
+          {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
+          <button type="submit" className="px-5 py-2 bg-pf-accent text-white rounded-lg font-semibold shadow hover:bg-pf-accent-dark disabled:opacity-50 transition mt-6" disabled={saving}>
+            {saving ? 'Saving...' : 'Save All'}
           </button>
-        </div>
-        <p className="text-xs text-pf-text-secondary mt-4">These toggles control live debug logging for development and troubleshooting. Settings are persisted in your browser and will remain after reload.</p>
-      </div>
-
-      {/* System Log Persistence settings are now managed via dynamic settings UI above. */}
-    </>
+        </form>
+      )}
+    </div>
   );
 }

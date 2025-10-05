@@ -1,6 +1,8 @@
 ﻿using System.Text.Json;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services;
+using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -10,8 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests;
-
-using Farm.Web.Api.Tests.Infrastructure;
 
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
@@ -24,7 +24,7 @@ public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
             builder.ConfigureServices(services =>
             {
                 // Replace network discovery settings with a tiny pretend network (/30 gives 2 usable hosts)
-                services.AddSingleton<INetworkDiscoverySettingsService>(sp => new TestDiscoverySettingsService());
+                // Use SettingsService or direct configuration for network discovery settings
                 // Suppress verbose EF Core SQL command logs during tests (set global minimum to Warning)
                 services.AddLogging(lb => lb.SetMinimumLevel(LogLevel.Warning));
             });
@@ -91,13 +91,7 @@ public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
         {
             builder.ConfigureServices(services =>
             {
-                // Remove prior explicit TestDiscoverySettingsService registration
-                var existing = services.FirstOrDefault(d => d.ServiceType == typeof(INetworkDiscoverySettingsService));
-                if (existing != null)
-                {
-                    services.Remove(existing);
-                }
-                services.AddSingleton<INetworkDiscoverySettingsService>(sp => new EmptyDiscoverySettingsService());
+                // Use SettingsService or direct configuration for network discovery settings
                 services.AddLogging(lb => lb.SetMinimumLevel(LogLevel.Warning));
             });
         });
@@ -144,16 +138,5 @@ public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
     }
 }
 
-file sealed class TestDiscoverySettingsService : INetworkDiscoverySettingsService
-{
-    public NetworkDiscoverySettingsDto GetSettings() => new([
-        "127.0.0.0/30" // Deterministic tiny network (2 usable hosts) so progress event(s) are fast & predictable
-    ], 50, 2, [65535]);
-    public void SaveSettings(NetworkDiscoverySettingsDto settings) { }
-}
 
-file sealed class EmptyDiscoverySettingsService : INetworkDiscoverySettingsService
-{
-    public NetworkDiscoverySettingsDto GetSettings() => new([], 50, 2, [65535]);
-    public void SaveSettings(NetworkDiscoverySettingsDto settings) { }
-}
+// Removed obsolete IAppSettingsService test mocks

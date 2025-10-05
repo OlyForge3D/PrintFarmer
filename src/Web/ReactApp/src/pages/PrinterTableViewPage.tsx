@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { usePrinters } from '@/hooks/useApi';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';

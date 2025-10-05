@@ -12,8 +12,8 @@ export function SystemHealth() {
   if (error || !basic) {
     return (
       <div className="flex items-center space-x-2">
-        <XCircle className="h-4 w-4 text-red-500" />
-        <span className="text-xs text-red-600">System Offline</span>
+        <XCircle className="h-4 w-4 text-pf-error" />
+        <span className="text-xs text-pf-error-text">System Offline</span>
       </div>
     );
   }
@@ -23,11 +23,11 @@ export function SystemHealth() {
   return (
     <div className="flex items-center space-x-2">
       {isHealthy ? (
-        <CheckCircle className="h-4 w-4 text-green-500" />
+        <CheckCircle className="h-4 w-4 text-pf-success" />
       ) : (
-        <AlertCircle className="h-4 w-4 text-yellow-500" />
+        <AlertCircle className="h-4 w-4 text-pf-warning" />
       )}
-      <span className={`text-xs ${isHealthy ? 'text-green-600' : 'text-yellow-600'}`}>
+      <span className={`text-xs ${isHealthy ? 'text-pf-success' : 'text-pf-warning-text'}`}>
         System {isHealthy ? 'Healthy' : 'Warning'}
       </span>
     </div>
@@ -46,13 +46,13 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
 
   if (error || !detailedHealth) {
     return (
-      <div className={`bg-white rounded-lg shadow p-4 ${className}`}>
-        <h3 className="text-lg font-medium mb-4">System Health</h3>
-        <div className="flex items-center space-x-3 p-4 bg-red-50 rounded-lg">
-          <XCircle className="h-6 w-6 text-red-500" />
+      <div className={`bg-pf-bg-1 rounded-lg shadow p-4 ${className}`}>
+        <h3 className="text-lg font-medium mb-4 text-pf-text-primary">System Health</h3>
+        <div className="flex items-center space-x-3 p-4 bg-pf-error-bg rounded-lg">
+          <XCircle className="h-6 w-6 text-pf-error" />
           <div>
-            <p className="text-sm font-medium text-red-800">Unable to check system health</p>
-            <p className="text-xs text-red-600">API server may be offline</p>
+            <p className="text-sm font-medium text-pf-error-text">Unable to check system health</p>
+            <p className="text-xs text-pf-error-text">API server may be offline</p>
           </div>
         </div>
       </div>
@@ -65,14 +65,14 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
 
     let icon, colorClass;
     if (isHealthy) {
-      icon = <CheckCircle className="h-5 w-5 text-green-500" />;
-      colorClass = 'text-green-800 bg-green-50';
+      icon = <CheckCircle className="h-5 w-5 text-pf-success" />;
+      colorClass = 'text-pf-success bg-pf-success-bg';
     } else if (isWarning) {
-      icon = <AlertCircle className="h-5 w-5 text-yellow-500" />;
-      colorClass = 'text-yellow-800 bg-yellow-50';
+      icon = <AlertCircle className="h-5 w-5 text-pf-warning" />;
+      colorClass = 'text-pf-warning-text bg-pf-warning';
     } else {
-      icon = <XCircle className="h-5 w-5 text-red-500" />;
-      colorClass = 'text-red-800 bg-red-50';
+      icon = <XCircle className="h-5 w-5 text-pf-error" />;
+      colorClass = 'text-pf-error-text bg-pf-error-bg';
     }
 
     return (
@@ -87,11 +87,11 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
   };
 
   return (
-    <div className={`bg-white rounded-lg shadow p-6 ${className}`}>
-      <h3 className="text-lg font-medium mb-4">System Health</h3>
+    <div className={`bg-pf-bg-1 rounded-lg shadow p-6 ${className}`}>
+      <h3 className="text-lg font-medium mb-4 text-pf-text-primary">System Health</h3>
 
       <div className="space-y-3">
-  {/* Overall Status */}
+        {/* Overall Status */}
         {renderHealthStatus(detailedHealth.status ?? 'Unknown', 'Overall System')}
 
         {/* Database Status */}
@@ -111,8 +111,8 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
       </div>
 
       {/* Last Updated */}
-      <div className="mt-4 pt-3 border-t border-gray-200">
-        <p className="text-xs text-gray-500">
+      <div className="mt-4 pt-3 border-t border-pf-border">
+        <p className="text-xs text-pf-text-secondary">
           Last updated: {new Date().toLocaleTimeString()}
         </p>
       </div>

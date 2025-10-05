@@ -1,11 +1,15 @@
-﻿using Farm.Infrastructure.Data;
+﻿
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Startup;
-using InfraSettings = Farm.Infrastructure.Settings;
 using Shared = Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -15,60 +19,87 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Filament Types")]
-public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus, SpoolmanService spoolmanService, IAppSettingsService settingsService) : ControllerBase
+public class FilamentTypeController : ControllerBase
 {
+    private readonly AppDbContext db;
+    private readonly StartupStatus startupStatus;
+    private readonly ISpoolmanService spoolmanService;
+    private readonly IUnifiedLoggingService logger;
+
+    public FilamentTypeController(AppDbContext db, StartupStatus startupStatus, ISpoolmanService spoolmanService, IUnifiedLoggingService logger)
+    {
+        this.db = db;
+        this.startupStatus = startupStatus;
+        this.spoolmanService = spoolmanService;
+        this.logger = logger;
+    }
+
     /// <summary>
     /// Gets all available filament types.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all filament types ordered by name</returns>
     /// <response code="200">Returns the list of filament types</response>
+    /// <response code="503">If the system is still initializing</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<Shared.FilamentTypeDto>), 200)]
     [ProducesResponseType(503)]
     public async Task<ActionResult<IEnumerable<Shared.FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
     {
         // Ensure initialization is complete to prevent race conditions during startup
-        if (!startupStatus.IsReady)
+        try
         {
-            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-        }
+            if (!startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
 
-        List<Shared.FilamentTypeDto> list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
-            .Select(f => new Shared.FilamentTypeDto(f.Id, f.Name, new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
-            .ToListAsync(ct);
-        return Ok(list);
+            // Uncomment the next line to force a test exception for log verification
+            //throw new InvalidOperationException("[FilamentTypeController] Forced test exception for error logging verification.");
+
+            var list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
+                .Select(f => new Shared.FilamentTypeDto(f.Id, f.Name, new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
+                .ToListAsync(ct);
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "[FilamentTypeController] TEST ERROR LOG: Exception captured in GetFilamentTypesAsync: {Message}", ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
     }
 
     /// <summary>
-    /// Gets filament types as a dictionary for presets.
+    /// Gets filament types as a dictionary for presets (from the database).
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>Dictionary of filament type names to temperature targets</returns>
     /// <response code="200">Returns the filament presets dictionary</response>
+    /// <response code="503">If the system is still initializing</response>
     [HttpGet("presets")]
     [ProducesResponseType(typeof(Shared.FilamentPresetsDto), 200)]
     [ProducesResponseType(503)]
-    public Task<ActionResult<Shared.FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
+    public async Task<ActionResult<Shared.FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
     {
-        // Ensure initialization is complete to prevent race conditions during startup
-        if (!startupStatus.IsReady)
+        try
         {
-            return Task.FromResult<ActionResult<Shared.FilamentPresetsDto>>(
-                StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." })
-            );
+            if (!startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+            var presets = await db.FilamentTypes
+                .AsNoTracking()
+                .OrderBy(f => f.Name)
+                .ToDictionaryAsync(
+                    f => f.Name,
+                    f => new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), ct);
+            return Ok(new Shared.FilamentPresetsDto(presets));
         }
-        // Return presets from AppSettings
-        var presets = settingsService.Current.FilamentPresets;
-        Shared.FilamentPresetsDto sharedPresets = presets == null
-            ? new Shared.FilamentPresetsDto(new Dictionary<string, Shared.TempTargets>())
-            : new Shared.FilamentPresetsDto(
-                presets.Presets.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => new Shared.TempTargets(kvp.Value.Hotend, kvp.Value.Bed)
-                )
-            );
-        return Task.FromResult<ActionResult<Shared.FilamentPresetsDto>>(Ok(sharedPresets));
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Error in GetFilamentPresetsAsync: {Message}", ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
     }
 
     /// <summary>
@@ -178,7 +209,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     }
 
     /// <summary>
-    /// Saves filament presets from a dictionary format (for backward compatibility).
+    /// Saves filament presets from a dictionary format (updates the database).
     /// </summary>
     /// <param name="presets">The filament presets to save</param>
     /// <param name="ct">Cancellation token for the operation</param>
@@ -194,19 +225,30 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         {
             return BadRequest("Presets are required");
         }
-        // Save presets to AppSettings and persist
-        var settings = settingsService.Current;
-        // Convert to InfraSettings.TempTargets for storage
-        settings.FilamentPresets = new InfraSettings.FilamentPresetsDto(
-            presets.Presets.ToDictionary(
-                kvp => kvp.Key,
-                kvp => new InfraSettings.TempTargets(
-                    (int)(kvp.Value.Hotend ?? 0),
-                    (int)(kvp.Value.Bed ?? 0)
-                )
-            )
-        );
-        await settingsService.SaveAsync(settings, ct);
+        foreach (var kvp in presets.Presets)
+        {
+            var name = kvp.Key.Trim();
+            var tempTargets = kvp.Value;
+            var filamentType = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
+            if (filamentType == null)
+            {
+                filamentType = new FilamentType
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    DefaultHotendTemp = tempTargets.Hotend,
+                    DefaultBedTemp = tempTargets.Bed,
+                    CreatedAt = DateTime.UtcNow
+                };
+                db.FilamentTypes.Add(filamentType);
+            }
+            else
+            {
+                filamentType.DefaultHotendTemp = tempTargets.Hotend;
+                filamentType.DefaultBedTemp = tempTargets.Bed;
+            }
+        }
+        await db.SaveChangesAsync(ct);
         return NoContent();
     }
 

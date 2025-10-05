@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, UserPlus } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
+import { useAuth } from '@/contexts/AuthHooks';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -53,15 +54,19 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
 
     setIsLoading(true);
     try {
-      const success = await register({
+      const result = await register({
         username: formData.username,
         email: formData.email,
         password: formData.password,
         firstName: formData.firstName || undefined,
         lastName: formData.lastName || undefined,
       });
-      
-      if (success) {
+      if (result === 'pending') {
+        // Redirect to registration pending page
+        window.location.href = '/registration-pending';
+        return;
+      }
+      if (result) {
         onClose();
         setFormData({
           username: '',
@@ -109,10 +114,13 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
-          <h2 className="text-xl font-semibold text-pf-text-primary flex items-center">
-            <UserPlus className="h-5 w-5 mr-2" />
-            Create Account
-          </h2>
+          <div className="flex items-center gap-2">
+            <PrintFarmerLogo size={32} className="mr-2" />
+            <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
+            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
+              <UserPlus className="h-5 w-5 mr-2" />Create Account
+            </span>
+          </div>
           <button
             onClick={handleClose}
             disabled={isLoading}

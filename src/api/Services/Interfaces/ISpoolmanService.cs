@@ -9,6 +9,12 @@ namespace Farm.Web.Api.Services.Interfaces;
 public interface ISpoolmanService
 {
     /// <summary>
+    /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
+    /// </summary>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing a read-only list of all material types</returns>
+    Task<IReadOnlyList<SpoolmanMaterialDto>> ListMaterialsAsync(CancellationToken ct);
+    /// <summary>
     /// Gets the current Spoolman configuration including the base URL.
     /// </summary>
     /// <returns>The current Spoolman configuration, or null if not configured</returns>

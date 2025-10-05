@@ -9,7 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { GcodeFile } from '@/types/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { toast } from 'sonner';
 import { useFileHash } from '@/hooks/useFileHash';
 

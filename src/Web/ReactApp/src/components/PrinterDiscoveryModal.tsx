@@ -1,15 +1,15 @@
 if (!window.PrintFarmerDebug) {
   window.PrintFarmerDebug = {};
 }
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-import { signalRService } from '@/services/harvest-signalr';
 import { X, Search } from 'lucide-react';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterDiscoveryModalProps {
   isOpen: boolean;
@@ -25,13 +25,19 @@ interface PrinterConfiguration {
 }
 
 export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDiscoveryModalProps) {
-  if (window.PrintFarmerDebug?.printerDiscoveryModal) {
-    console.log('[PrintFarmer] PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+  if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+    try {
+      const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+      if (pf?.printerDiscoveryModal === true) {
+        console.log('[PrintFarmer] PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+      }
+    } catch {
+      // ignore
+    }
   }
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [printerConfigs, setPrinterConfigs] = useState<Record<string, PrinterConfiguration>>({});
-
   const startDiscoveryMutation = useStartDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
   
@@ -41,13 +47,6 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   
   // Use the discovery stream hook to listen for real-time updates
   const { progress, foundPrinters, resetDiscovery, isActive } = useDiscoveryStream(sessionId || undefined);
-
-  // Ensure SignalR connection when modal opens so we can receive events immediately
-  useEffect(() => {
-    if (isOpen) {
-      signalRService.connect();
-    }
-  }, [isOpen]);
 
   // When modal is being closed, reset session so a new discovery can start fresh next open
   if (!isOpen) {
@@ -59,13 +58,17 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const handleStartDiscovery = async () => {
     try {
-      if (window.PrintFarmerDebug?.printerDiscoveryModal) {
-        console.log('[PrintFarmer] PrinterDiscoveryModal: handleStartDiscovery called - starting network scan');
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+        if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+          console.log('[PrintFarmer] PrinterDiscoveryModal: handleStartDiscovery called - starting network scan');
+        }
       }
       resetDiscovery(); // Clear previous results
       const result = await startDiscoveryMutation.mutateAsync();
-      if (window.PrintFarmerDebug?.printerDiscoveryModal) {
-        console.log('[PrintFarmer] PrinterDiscoveryModal: Discovery stream started with sessionId:', result.sessionId);
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+        if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+          console.log('[PrintFarmer] PrinterDiscoveryModal: Discovery stream started with sessionId:', result.sessionId);
+        }
       }
       setSessionId(result.sessionId);
       setSelectedPrinters(new Set());
@@ -243,6 +246,12 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
                 {foundPrinters.length > 0 && (
                   <div className="space-y-4">
+                    {/* Debug panel (gated) */}
+                    {window.PrintFarmerDebug?.printerDiscoveryDisplay && (
+                      <div className="mb-2 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                        {renderUnknown({ foundPrinters, progress })}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <h4 className="text-md font-medium text-pf-text-primary">
                         Found {foundPrinters.length} printer{foundPrinters.length !== 1 ? 's' : ''}

@@ -394,7 +394,7 @@ public class GcodeFilesController(
         // If server-side paused, block further chunk data until resumed to avoid inconsistent state.
         if (state.Paused)
         {
-            return StatusCode(423, new
+            return StatusCode(StatusCodes.Status423Locked, new
             {
                 error = "upload_paused",
                 status = new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, state.UploadedBytes == state.TotalSize, state.FinalHash, true)
@@ -424,7 +424,7 @@ public class GcodeFilesController(
             {
                 Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
                 Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
-                return StatusCode(429, "Daily upload quota exceeded");
+                return StatusCode(StatusCodes.Status429TooManyRequests, "Daily upload quota exceeded");
             }
             await System.IO.File.AppendAllTextAsync(state.TempFilePath, string.Empty); // ensure exists
             await using (FileStream fs = new(state.TempFilePath, FileMode.Append, FileAccess.Write, FileShare.None))
@@ -772,7 +772,7 @@ public class GcodeFilesController(
             {
                 Response.Headers["ETag"] = etag;
                 Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
-                return StatusCode(304);
+                return StatusCode(StatusCodes.Status304NotModified);
             }
             DateTimeOffset? ifModifiedSince = typedHeaders.IfModifiedSince;
             if (ifModifiedSince.HasValue)
@@ -785,7 +785,7 @@ public class GcodeFilesController(
                 {
                     Response.Headers["ETag"] = etag;
                     Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
-                    return StatusCode(304);
+                    return StatusCode(StatusCodes.Status304NotModified);
                 }
             }
 
@@ -885,7 +885,7 @@ public class GcodeFilesController(
             {
                 Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
                 Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
-                return StatusCode(429, $"Daily upload quota exceeded ({used}/{limit} bytes)");
+                return StatusCode(StatusCodes.Status429TooManyRequests, $"Daily upload quota exceeded ({used}/{limit} bytes)");
             }
             await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await file.CopyToAsync(fs);

@@ -163,7 +163,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             body: JSON.stringify({ fileName: item.file.name, size: item.file.size, path: currentPath })
           });
           if (!initResp.ok) {
-            throw new Error(await initResp.text() || 'Chunk init failed');
+            throw new Error((await initResp.text()) || 'Chunk init failed');
           }
           const initData = await initResp.json() as { uploadId: string; recommendedChunkSize: number; totalSize: number; uploadedBytes: number; };
           uploadId = initData.uploadId;
@@ -220,7 +220,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               await new Promise(r => setTimeout(r, 1000));
               continue;
             }
-            throw new Error(await putResp.text() || 'Chunk upload failed');
+            throw new Error((await putResp.text()) || 'Chunk upload failed');
           }
           const statusJson = await putResp.json().catch(() => null) as { isComplete?: boolean; finalHash?: string; paused?: boolean; completed?: boolean } | null;
           offset += slice.size;
@@ -462,7 +462,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         </div>
       </div>
-
       {/* Search and filters */}
       <div className="flex items-center space-x-4">
         <div className="flex-1 max-w-md">
@@ -498,7 +497,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           {sortOrder === 'asc' ? '↑' : '↓'}
         </button>
       </div>
-
       {/* Drag & drop + click upload area */}
       {hasPermission('gcode_harvest', 'create') && (
         <div className="space-y-2">
@@ -637,7 +635,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           )}
         </div>
       )}
-
       {/* File listing */}
       {isLoading ? (
         <div className="space-y-2">
@@ -703,7 +700,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           {searchTerm ? 'No files match your search' : 'No files found'}
         </div>
       )}
-
       {/* File count and size */}
       {files && (
   <div className="flex flex-col gap-2 text-sm text-pf-text-secondary">

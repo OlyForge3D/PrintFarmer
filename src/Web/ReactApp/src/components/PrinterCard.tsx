@@ -12,6 +12,7 @@ import { Cog, Play, Pause, Square as StopIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterCardProps {
   printer: Printer;
@@ -32,14 +33,68 @@ export function PrinterCard({
   const { getPrinterStatus } = usePrinterStatusUpdates();
   const realtimeStatus = getPrinterStatus(printer.id);
 
-  // Conditional debug logging for PrinterCard
-  if (window.PrintFarmerDebug?.printerCard) {
-    console.log('[PrintFarmer] PrinterCard:', {
-      printerId: printer.id,
-      printerName: printer.name,
-      printer,
-      realtimeStatus
-    });
+  // If debug info exists on window, we may log it — avoid runtime exceptions
+  useEffect(() => {
+    try {
+      const pfDebug = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+      const maybeSignalR = pfDebug && (pfDebug['printerSignalR'] as unknown);
+      if (maybeSignalR && typeof maybeSignalR === 'object') {
+        const lastStatuses = (maybeSignalR as Record<string, unknown>)['lastStatuses'];
+        if (lastStatuses && typeof lastStatuses === 'object') {
+          const debugEntry = (lastStatuses as Record<string, unknown>)[printer.id];
+          if (debugEntry && typeof debugEntry === 'object') {
+            const maybeTimestamp = (debugEntry as Record<string, unknown>)['timestamp'];
+            const t = typeof maybeTimestamp === 'number' ? maybeTimestamp : Date.now();
+            if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerCard) {
+              console.debug('[PrinterCard] debug timestamp for printer', printer.id, t);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // ignore debug inspection errors
+      void err;
+    }
+  }, [realtimeStatus, printer.id]);
+
+  const renderDebugBadge = (): React.ReactNode => {
+      const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+      if (pf?.printerCard) {
+        // Guarded debug - emit to console for developers
+        if (pf.printerCard === true) {
+          console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
+        }
+      }
+
+      // Render-time debug (enable by setting window.PrintFarmerDebug.printerCardRender = true)
+      if (pf?.printerCardRender) {
+        if (pf.printerCardRender === true) {
+          console.debug('[PrintFarmer] PrinterCard render', { printerId: printer.id });
+        }
+      }
+
+      // Optionally render a small debug badge in the UI
+      if (window.PrintFarmerDebug?.printerCardDisplay) {
+        // Render debug payload safely using renderUnknown
+        const payload = {
+          printer,
+          realtimeStatus
+        } as unknown;
+        return <div className="text-xs text-pf-text-tertiary">{renderUnknown(payload)}</div>;
+      }
+      return null;
+  };
+
+  // Keep a single guarded console log point to avoid spam; prefer the render badge for payloads
+  try {
+    const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+    if (pf?.printerCard) {
+      if (pf.printerCard === true) {
+        console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
+      }
+    }
+  } catch {
+    // ignore debug guard failures
   }
 
   // State for print job status (Moonraker only)
@@ -265,9 +320,10 @@ export function PrinterCard({
 
   // Grid view (default)
   return (
-    <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl hover:shadow-lg transition-all duration-200">
+    <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl hover:shadow-lg transition-all duration-200 relative">
       {/* Header */}
       <div className="px-4 py-5 sm:p-6">
+        {renderDebugBadge()}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center min-w-0 flex-1">
             <span className="text-2xl mr-3 flex-shrink-0">{getBackendIcon(printer.backend)}</span>

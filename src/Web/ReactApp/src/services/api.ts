@@ -23,6 +23,7 @@ import {
   MultiUploadResponse,
   Printer,
   PrinterCameraUrls,
+  PrinterCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
   PrinterModelDto,
@@ -55,15 +56,46 @@ export class ApiClient {
       return v.toString(16);
     });
   }
-  // SystemLogSettings API
-  async getSystemLogSettings() {
-    const res = await this.client.get('/systemlogsettings');
+  // ============ Generic Settings API methods ============
+  /**
+   * Get settings for any settings class by class name
+   */
+  async getSettings<T = Record<string, unknown>>(className: string): Promise<T> {
+    const res = await this.client.get(`/settings/${className}`);
     return res.data;
   }
 
-  async setSystemLogSettings(settings: { retentionDays: number; persistedLogTypes: string[] }) {
-    await this.client.post('/systemlogsettings', settings);
+  /**
+   * Save settings for any settings class by class name
+   */
+  async saveSettings<T = Record<string, unknown>>(className: string, settings: T): Promise<void> {
+    await this.client.post(`/settings/${className}`, settings);
   }
+
+  /**
+   * Get all settings metadata for dynamic UI generation
+   */
+  async getSettingsMetadata(): Promise<Array<Record<string, unknown>>> {
+    const res = await this.client.get('/settings/metadata');
+    return res.data;
+  }
+
+  /**
+   * Get all unified settings
+   */
+  async getAllSettings(): Promise<Record<string, unknown>> {
+    const res = await this.client.get('/settings');
+    return res.data;
+  }
+
+  /**
+   * Save all unified settings
+   */
+  async saveAllSettings(settings: Record<string, unknown>): Promise<void> {
+    await this.client.post('/settings', settings);
+  }
+
+
   private client: AxiosInstance;
 
   constructor() {
@@ -327,39 +359,22 @@ export class ApiClient {
     await this.client.delete(`/catalog/printer-models/${id}`);
   }
 
-  // ============ Settings API methods ============
-  // Network Discovery settings
-  async getNetworkDiscoverySettings(): Promise<{ networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] }> {
-    const resp = await this.client.get('/network-discovery/settings');
-    // Backend returns camelCase via JSON options; map to consistent shape
-    const data = resp.data as { networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] };
-    return data;
+  // Get default capabilities for a printer model
+  async getModelDefaultCapabilities(modelId: string): Promise<PrinterCapabilitiesDto | null> {
+    try {
+      const response = await this.client.get<PrinterCapabilitiesDto>(`/printers/model/${modelId}/default-capabilities`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 204) {
+        return null; // No default capabilities available
+      }
+      throw error;
+    }
   }
 
-  async saveNetworkDiscoverySettings(payload: { networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] }): Promise<void> {
-    await this.client.post('/network-discovery/settings', {
-      networkRanges: payload.networkRanges,
-      timeoutMs: payload.timeoutMs,
-      maxConcurrentScans: payload.maxConcurrentScans,
-      ports: payload.ports
-    });
-  }
+  // ============ File type API methods ============
 
-  // SignalR settings
-  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
-    const resp = await this.client.get('/signalr/settings');
-    const data = resp.data as { logLevel: string; consoleLoggingEnabled: boolean };
-    return data;
-  }
 
-  async saveSignalRSettings(payload: { logLevel: string; consoleLoggingEnabled: boolean }): Promise<void> {
-    await this.client.post('/signalr/settings', {
-      logLevel: payload.logLevel,
-      consoleLoggingEnabled: payload.consoleLoggingEnabled
-    });
-  }
-
-  // autoDetectNetworkRanges removed (unreliable in containerized environments)
 
   // ============ Filament Type API methods ============
 

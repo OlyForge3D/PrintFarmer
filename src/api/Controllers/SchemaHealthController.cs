@@ -27,11 +27,11 @@ public class SchemaHealthController(AppDbContext dbContext) : ControllerBase
                 return Ok(new { ready = true });
             }
 
-            return StatusCode(503, new { ready = false, reason = "Printers table missing" });
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { ready = false, reason = "Printers table missing" });
         }
         catch (Exception ex)
         {
-            return StatusCode(503, new { ready = false, error = ex.Message });
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { ready = false, error = ex.Message });
         }
     }
 }

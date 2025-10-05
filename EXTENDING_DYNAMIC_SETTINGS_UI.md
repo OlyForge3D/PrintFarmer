@@ -15,18 +15,18 @@ PrintFarmer uses a modular, attribute-driven settings architecture. All persiste
 
 ## 2. Adding a New Settings Class (Backend)
 
-1. **Create a C# class** in `Farm.Infrastructure/Settings/` implementing `IAppSetting` (and optionally `IValidatableSetting`).
+1. **Create a C# class** in `Farm.Infrastructure/Settings/` implementing `ISystemSetting` (and optionally `IValidatableSetting`).
 2. **Annotate properties** with `[AppSetting]` and validation attributes (e.g., `[Required]`, `[Range]`).
 3. **Register the class** in the DI container if not using automatic discovery.
 4. **SettingsService** will automatically pick up the new class and expose its metadata and values.
 
 Example:
 ```csharp
-public class MyFeatureSettings : IAppSetting, IValidatableSetting {
-    [AppSetting(DisplayName = "Enable Feature", Description = "Toggle the feature.")]
+public class MyFeatureSettings : ISystemSetting, IValidatableSetting {
+    [SystemSetting(DisplayName = "Enable Feature", Description = "Toggle the feature.")]
     public bool EnableFeature { get; set; }
 
-    [AppSetting(DisplayName = "Max Items", Description = "Maximum number of items.")]
+    [SystemSetting(DisplayName = "Max Items", Description = "Maximum number of items.")]
     [Range(1, 100)]
     public int MaxItems { get; set; }
 }
@@ -67,7 +67,7 @@ public class MyFeatureSettings : IAppSetting, IValidatableSetting {
 
 ## 6. Best Practices
 
-- Always use `[AppSetting(DisplayName = ...)]` for user-friendly labels.
+- Always use `[SystemSetting(DisplayName = ...)]` for user-friendly labels.
 - Use validation attributes to enforce constraints.
 - Keep settings classes focused and modular.
 - Document new settings classes and their purpose.

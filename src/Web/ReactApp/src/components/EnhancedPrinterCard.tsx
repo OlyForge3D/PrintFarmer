@@ -5,7 +5,7 @@ import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { 
   ChevronDown, ChevronUp, Cog, Play, Pause, Square as StopIcon, Home, Upload, RefreshCw,
   Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, Move, FileText

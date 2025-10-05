@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { 
@@ -14,7 +14,7 @@ import {
   GcodeHarvestOperation,
   GcodeHarvestStatus
 } from '@/types/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { useCancelHarvestOperation } from '@/hooks/useApi';
 import { toast } from 'sonner';
 import { parseApiDateTimeValue, formatDuration } from '@/utils/datetime';
@@ -52,6 +52,13 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
   const config = statusConfig[operation.status];
   const progress = operation.filesProcessed / Math.max(operation.filesFound, 1) * 100;
+  const progressRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (progressRef.current) {
+      progressRef.current.style.width = `${Math.min(progress, 100)}%`;
+    }
+  }, [progress]);
 
   const handleCancel = () => {
     if (!window.confirm('Are you sure you want to cancel this harvest operation? This action cannot be undone.')) {
@@ -101,9 +108,9 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                   <span>{Math.round(progress)}%</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-1.5">
-                  <div 
+                  <div
+                    ref={progressRef}
                     className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                    style={{ width: `${Math.min(progress, 100)}%` }}
                   />
                 </div>
               </div>

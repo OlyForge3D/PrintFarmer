@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, within } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -14,6 +14,7 @@ vi.mock('@/hooks/useApi', async () => ({
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreatePrinter: () => ({ mutateAsync: vi.fn() }),
   useBasicHealth: () => ({ data: { status: 'ok' }, isLoading: false, error: null }),
+  useHealthStatus: () => ({ data: undefined, isLoading: false, error: null }),
   usePrinterDetails: vi.fn(() => ({ data: undefined })),
   useManufacturers: vi.fn(() => ({ data: [] })),
   useModels: vi.fn(() => ({ data: [] })),
@@ -166,9 +167,46 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Test Printer 1')).toBeTruthy();
-    expect(screen.getByText('Test Printer 2')).toBeTruthy();
-    expect(screen.getByText('Prusa MK3S+')).toBeTruthy();
-    expect(screen.getByText('Creality Ender 3')).toBeTruthy();
+    // The printers list should be present and contain two listitems
+    const list = screen.getByRole('list', { name: /printers list/i });
+    expect(list).toBeInTheDocument();
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+
+    // Prefer accessible queries: check text inside each listitem
+    expect(within(items[0]).getByText('Test Printer 1')).toBeInTheDocument();
+    expect(within(items[1]).getByText('Test Printer 2')).toBeInTheDocument();
+    expect(within(items[0]).getByText('Prusa MK3S+')).toBeInTheDocument();
+    expect(within(items[1]).getByText('Creality Ender 3')).toBeInTheDocument();
+  });
+
+  it('exposes data-testid attributes for printers list and items', () => {
+    // Reuse a small mock response
+    vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
+      data: [
+        { id: '42', name: 'X', manufacturerName: 'M', modelName: 'Model' }
+      ] as unknown as Printer[],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
+
+    render(
+      <TestWrapper>
+        <PrinterDashboard />
+      </TestWrapper>
+    );
+
+    // Locate the list via accessible role and assert the elements expose the test ids
+    const list = screen.getByRole('list', { name: /printers list/i });
+    expect(list).toBeInTheDocument();
+    const item = within(list).getByRole('listitem', { name: /Printer X/i });
+    expect(item).toBeInTheDocument();
+    // ensure data-testid attributes are present to prevent regressions
+    expect(list).toHaveAttribute('data-testid', 'printers-list');
+    expect(item).toHaveAttribute('data-testid', 'printer-item-42');
+    // validate visible text using accessible queries
+    expect(within(item).getByText('X')).toBeInTheDocument();
+    expect(within(item).getByText('M Model')).toBeInTheDocument();
   });
 });

@@ -164,7 +164,7 @@ public class SlicingController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to submit slicing job");
-            return StatusCode(500, "Internal server error");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Internal server error");
         }
     }
 

@@ -16,8 +16,15 @@ type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
 
 export class PrinterSignalRService {
 
+  // Keep a local cache of last statuses for debugging
+  private lastStatuses: Map<string, unknown> = new Map();
+
   private buildConnection(): void {
     const printersSignalrUrl = import.meta.env.VITE_SIGNALR_PRINTERS_URL || 'http://localhost:5245/hubs/printers';
+    // Only emit noisy connection debug when the developer debug flag is enabled
+    if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerSignalR) {
+      console.info('[printerSignalR] Building connection with URL:', printersSignalrUrl);
+    }
     this.connection = new HubConnectionBuilder()
       .withUrl(printersSignalrUrl)
       .withAutomaticReconnect({
@@ -37,7 +44,33 @@ export class PrinterSignalRService {
 
   private setupEventHandlers(): void {
     if (!this.connection) return;
-    this.connection.on('printerupdated', (status: PrinterStatusUpdate) => {
+    this.connection.on('PrinterUpdated', (status: PrinterStatusUpdate) => {
+      try {
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (win.PrintFarmerDebug?.printerSignalR) {
+            try { console.debug('[printerSignalR] Received PrinterUpdated', { id: status.id, state: status.state, isOnline: status.isOnline }); } catch { /* ignore debug stringify errors */ }
+        }
+      } catch {
+        // ignore debug guard failures
+      }
+        // Cache the last status (best-effort)
+      try { this.lastStatuses.set(status.id, status as unknown); } catch {
+        // ignore cache failures
+      }
+      // Expose on window for quick inspection (best-effort)
+      try {
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
+        win.PrintFarmerDebug.lastPrinterUpdate = status as unknown as Record<string, unknown>;
+        win.PrintFarmerDebug.printerSignalR = {
+          connectionId: this.connectionId,
+          isConnected: this.isConnected,
+          lastStatuses: Array.from(this.lastStatuses.entries()).reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {} as Record<string, unknown>)
+        };
+      } catch {
+        // ignore debug exposure failures
+      }
+
       this.printerStatusCallbacks.forEach(cb => {
         try { cb(status); } catch (e) { console.error('Printer status cb error:', e); }
       });
@@ -69,6 +102,12 @@ export class PrinterSignalRService {
       this.reconnectAttempts = 0;
       this.notifyConnectionState(true);
     });
+    // Add debug hooks for connection lifecycle (gated behind debug flag)
+    if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerSignalR) {
+      this.connection.onclose((err) => console.info('[printerSignalR] connection closed', err));
+      this.connection.onreconnecting((err) => console.info('[printerSignalR] reconnecting', err));
+      this.connection.onreconnected((id) => console.info('[printerSignalR] reconnected, connectionId=', id));
+    }
   }
   private connection: HubConnection | null = null;
   private reconnectAttempts = 0;
@@ -92,7 +131,8 @@ export class PrinterSignalRService {
 
   private async loadSettings(): Promise<void> {
     try {
-      this.signalrSettings = await apiClient.getSignalRSettings();
+      // UnifiedSettingsController exposes /api/settings/{keyName}
+      this.signalrSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR'); // calls /api/settings/SignalR
     } catch (error) {
       console.warn('Failed to load SignalR settings, using defaults:', error);
       this.signalrSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
@@ -127,11 +167,18 @@ export class PrinterSignalRService {
         if (this.connection!.state === HubConnectionState.Connecting) return;
         if (this.connection!.state !== HubConnectionState.Disconnected) return;
         try {
-          await this.connection!.start();
-          this.reconnectAttempts = 0;
-          this.notifyConnectionState(true);
+            if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerSignalR) {
+              console.info('[printerSignalR] starting connection');
+            }
+            await this.connection!.start();
+            if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerSignalR) {
+              console.info('[printerSignalR] connected');
+            }
+            this.reconnectAttempts = 0;
+            this.notifyConnectionState(true);
         } catch {
-          this.notifyConnectionState(false);
+            console.error('[printerSignalR] connect failed');
+            this.notifyConnectionState(false);
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             const delay = Math.min(
               this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
@@ -140,6 +187,27 @@ export class PrinterSignalRService {
             this.reconnectAttempts++;
             setTimeout(() => this.connect(), delay);
           }
+        }
+      }
+
+      // Request the current status for a specific printer from the server
+      public async requestPrinterStatus(printerId: string): Promise<void> {
+        if (!this.connection) {
+          this.buildConnection();
+        }
+        try {
+          if (this.connection && this.connection.state === HubConnectionState.Connected) {
+            await this.connection.invoke('RequestPrinterStatus', printerId);
+          } else {
+            // try to connect then invoke
+            await this.connect();
+            if (this.connection && this.connection.state === HubConnectionState.Connected) {
+              await this.connection.invoke('RequestPrinterStatus', printerId);
+            }
+          }
+        } catch (err) {
+          console.warn('[printerSignalR] requestPrinterStatus failed', err);
+          throw err;
         }
       }
 
@@ -233,6 +301,36 @@ export class PrinterSignalRService {
 }
 
 export const printerSignalRService = new PrinterSignalRService();
+
+// Debug helper: get a snapshot of last known statuses (populated by the service)
+export function getPrinterSignalRDebug(): { connectionId: string | null; isConnected: boolean; lastStatuses: Record<string, unknown> } {
+  // Attempt to read cached map via the instance (internal). If not available, return basic info.
+  try {
+    const svc = printerSignalRService as unknown as { lastStatuses?: Map<string, unknown> };
+    const map: Map<string, unknown> = svc.lastStatuses || new Map();
+    return { connectionId: printerSignalRService.connectionId, isConnected: printerSignalRService.isConnected, lastStatuses: Array.from(map.entries()).reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {} as Record<string, unknown>) };
+  } catch {
+    return { connectionId: printerSignalRService.connectionId, isConnected: printerSignalRService.isConnected, lastStatuses: {} };
+  }
+}
+
+// Expose a convenience function on window for interactive debugging
+try {
+  const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+  if (win.PrintFarmerDebug) {
+    win.PrintFarmerDebug.requestPrinterStatus = async (printerId: string) => {
+      try {
+        await printerSignalRService.connect();
+        return await printerSignalRService.requestPrinterStatus(printerId);
+      } catch (err) {
+        console.error('requestPrinterStatus failed', err);
+        throw err;
+      }
+    };
+  }
+} catch {
+  // ignore exposing debug helper
+}
 
 
 

@@ -5,7 +5,7 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: LoginRequest) => Promise<boolean>;
-  register: (userData: RegisterRequest) => Promise<boolean>;
+  register: (userData: RegisterRequest) => Promise<boolean | 'pending'>;
   logout: () => Promise<void>;
   hasRole: (role: string) => boolean;
   hasPermission: (resource: string, action: string) => boolean;

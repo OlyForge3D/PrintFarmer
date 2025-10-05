@@ -149,8 +149,9 @@ export const ModelsPage: React.FC = () => {
       } catch (error) {
         console.error('Upload failed:', error);
         setUploadProgress(prev => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { [file.name]: _omit, ...rest } = prev; // remove failed file key
+          // Create a shallow copy and remove the failed file key to avoid unused var warnings
+          const rest = { ...prev };
+          delete rest[file.name];
           return rest;
         });
       }
@@ -417,7 +418,11 @@ export const ModelsPage: React.FC = () => {
             modelName={slicerModal.modelName}
             availablePrinters={availablePrinters}
             onSliceComplete={(result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => {
-              console.log('Slicing completed:', result);
+              if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.modelsPage) {
+                if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.modelsPage) {
+                  console.log('Slicing completed:', result);
+                }
+              }
               // Could navigate to G-code viewer or print queue
             }}
           />

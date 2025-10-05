@@ -52,7 +52,7 @@ public class SignalRTestController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to send SignalR test message");
-            return StatusCode(500, new { Success = false, Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Success = false, Error = ex.Message });
         }
     }
 
@@ -124,7 +124,7 @@ public class SignalRTestController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to test discovery group functionality");
-            return StatusCode(500, new { Success = false, Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Success = false, Error = ex.Message });
         }
     }
 
@@ -163,7 +163,7 @@ public class SignalRTestController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to get SignalR connection stats");
-            return StatusCode(500, new { Success = false, Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Success = false, Error = ex.Message });
         }
     }
 }

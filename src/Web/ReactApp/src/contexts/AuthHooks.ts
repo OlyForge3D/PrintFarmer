@@ -1,6 +1,13 @@
-import { useAuthInternal } from './AuthContext';
+import { useContext } from 'react';
+import { AuthContext } from './AuthContext';
+import type { AuthContextType } from './AuthContextValue';
 
-// Public hook re-exported from dedicated file to keep AuthContext file focused on provider/component exports.
-export function useAuth() {
+export function useAuthInternal(): AuthContextType {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  return ctx;
+}
+
+export function useAuth(): AuthContextType {
   return useAuthInternal();
 }

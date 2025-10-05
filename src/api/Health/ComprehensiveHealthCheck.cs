@@ -1,6 +1,10 @@
-﻿using Farm.Infrastructure.Data;
+﻿// Suppress hardcoded URI warning for this file
+#pragma warning disable CA1303 // Do not use hardcoded absolute paths or URIs
+#pragma warning disable S1075 // Do not use hardcoded absolute paths or URIs (Sonar)
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -10,12 +14,13 @@ namespace Farm.Web.Api.Health;
 /// Comprehensive health check that validates database connectivity,
 /// external service availability, and system resources
 /// </summary>
-public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger) : IHealthCheck
+public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger, Farm.Infrastructure.Settings.ISettingsService settingsService) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         Dictionary<string, object> checks = new();
         bool overallHealthy = true;
+        bool degraded = false; // Track non-critical degradations (eg. external printers offline)
         List<string> issues = new();
 
         // Database connectivity and initialization
@@ -46,6 +51,131 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 {
                     overallHealthy = false;
                     issues.Add("Database not initialized - no manufacturers found");
+                }
+                else
+                {
+                    using var client = httpClientFactory.CreateClient();
+                    client.Timeout = TimeSpan.FromSeconds(3);
+                    // Determine API base URL for internal health check
+                    const string DefaultApiBaseUrl = "http://localhost:5245";
+                    string? baseUrl = Environment.GetEnvironmentVariable("API_URL")
+                        ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+                        ?? DefaultApiBaseUrl;
+                    if (baseUrl.EndsWith('/'))
+                    {
+                        baseUrl = baseUrl.TrimEnd('/');
+                    }
+
+                    // Catalog API endpoint check (internal HTTP call)
+                    try
+                    {
+                        // Catalog API health check
+                        var resp = await client.GetAsync($"{baseUrl}/api/catalog/manufacturers", cancellationToken);
+                        if (!resp.IsSuccessStatusCode)
+                        {
+                            checks["CatalogApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };
+                            overallHealthy = false;
+                            issues.Add($"Catalog API returned status {(int)resp.StatusCode}");
+                        }
+                        else
+                        {
+                            var json = await resp.Content.ReadAsStringAsync(cancellationToken);
+                            // Try to parse as array
+                            bool valid = false;
+                            int count = 0;
+                            try
+                            {
+                                var doc = System.Text.Json.JsonDocument.Parse(json);
+                                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                {
+                                    count = doc.RootElement.GetArrayLength();
+                                    valid = true;
+                                }
+                            }
+                            catch { }
+                            if (!valid)
+                            {
+                                checks["CatalogApi"] = new { Status = "Unhealthy", Reason = "Invalid JSON returned" };
+                                overallHealthy = false;
+                                issues.Add("Catalog API returned invalid JSON");
+                            }
+                            else if (count == 0)
+                            {
+                                checks["CatalogApi"] = new { Status = "Unhealthy", Count = 0, Reason = "No manufacturers returned" };
+                                overallHealthy = false;
+                                issues.Add("Catalog API returned empty list");
+                            }
+                            else
+                            {
+                                checks["CatalogApi"] = new { Status = "Healthy", Count = count };
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        checks["CatalogApi"] = new { Status = "Unhealthy", Error = ex.Message };
+                        overallHealthy = false;
+                        issues.Add($"Catalog API check failed: {ex.Message}");
+                    }
+
+                    // Filament presets health check (database and API)
+                    try
+                    {
+                        int filamentTypeCount = await dbContext.FilamentTypes.CountAsync(cancellationToken);
+                        checks["FilamentTypesDb"] = new { Status = filamentTypeCount > 0 ? "Healthy" : "Unhealthy", Count = filamentTypeCount };
+                        if (filamentTypeCount == 0)
+                        {
+                            overallHealthy = false;
+                            issues.Add("No filament types found in database");
+                        }
+
+                        // Check /api/filamenttype endpoint
+                        var resp = await client.GetAsync($"{baseUrl}/api/filamenttype", cancellationToken);
+                        if (!resp.IsSuccessStatusCode)
+                        {
+                            checks["FilamentTypesApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };
+                            overallHealthy = false;
+                            issues.Add($"FilamentType API returned status {(int)resp.StatusCode}");
+                        }
+                        else
+                        {
+                            var json = await resp.Content.ReadAsStringAsync(cancellationToken);
+                            bool valid = false;
+                            int count = 0;
+                            try
+                            {
+                                var doc = System.Text.Json.JsonDocument.Parse(json);
+                                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                {
+                                    count = doc.RootElement.GetArrayLength();
+                                    valid = true;
+                                }
+                            }
+                            catch { }
+                            if (!valid)
+                            {
+                                checks["FilamentTypesApi"] = new { Status = "Unhealthy", Reason = "Invalid JSON returned" };
+                                overallHealthy = false;
+                                issues.Add("FilamentType API returned invalid JSON");
+                            }
+                            else if (count == 0)
+                            {
+                                checks["FilamentTypesApi"] = new { Status = "Unhealthy", Count = 0, Reason = "No filament types returned" };
+                                overallHealthy = false;
+                                issues.Add("FilamentType API returned empty list");
+                            }
+                            else
+                            {
+                                checks["FilamentTypesApi"] = new { Status = "Healthy", Count = count };
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        checks["FilamentTypesApi"] = new { Status = "Unhealthy", Error = ex.Message };
+                        overallHealthy = false;
+                        issues.Add($"FilamentType API check failed: {ex.Message}");
+                    }
                 }
             }
         }
@@ -78,11 +208,36 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         // External service connectivity (sample Moonraker check)
         try
         {
-            List<Printer> printers = await dbContext.Printers.Take(1).ToListAsync(cancellationToken);
+            // Select printers to probe for external service health based on settings
+            List<Printer> printers;
+            int printersToCheck = 3; // default fallback
+            try
+            {
+                var s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
+                if (s != null)
+                {
+                    printersToCheck = s.PrintersToCheck;
+                }
+            }
+            catch { }
+
+            if (printersToCheck == 0)
+            {
+                printers = new List<Printer>();
+            }
+            else if (printersToCheck < 0)
+            {
+                printers = await dbContext.Printers.ToListAsync(cancellationToken);
+            }
+            else
+            {
+                printers = await dbContext.Printers.Take(printersToCheck).ToListAsync(cancellationToken);
+            }
             int externalServiceCount = 0;
             int failedServices = 0;
+            var failedDetails = new List<object>();
 
-            foreach (Printer? printer in printers.Take(3)) // Check max 3 printers for performance
+            foreach (Printer? printer in printers)
             {
                 if (printer.Backend == 0) // Moonraker
                 {
@@ -91,33 +246,99 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     {
                         using HttpClient client = httpClientFactory.CreateClient();
                         client.Timeout = TimeSpan.FromSeconds(2);
-                        HttpResponseMessage response = await client.GetAsync($"{printer.ServerUrl}/server/info", cancellationToken);
+                        string attemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info";
+                        var sw = Stopwatch.StartNew();
+                        HttpResponseMessage response = await client.GetAsync(attemptedUrl, cancellationToken);
+                        sw.Stop();
                         if (!response.IsSuccessStatusCode)
                         {
                             failedServices++;
+                            string snippet = "";
+                            try
+                            {
+                                var body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
+                                snippet = body.Length > 200 ? body.Substring(0, 200) : body;
+                            }
+                            catch { }
+
+                            failedDetails.Add(new
+                            {
+                                Id = printer.Id,
+                                Name = printer.Name,
+                                ServerUrl = printer.ServerUrl,
+                                Backend = printer.Backend,
+                                AttemptedUrl = attemptedUrl,
+                                CheckedAtUtc = DateTime.UtcNow,
+                                ElapsedMs = sw.ElapsedMilliseconds,
+                                StatusCode = (int)response.StatusCode,
+                                ResponseSnippet = snippet,
+                                ErrorMessage = "Non-200 response"
+                            });
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
                         failedServices++;
+                        failedDetails.Add(new
+                        {
+                            Id = printer.Id,
+                            Name = printer.Name,
+                            ServerUrl = printer.ServerUrl,
+                            Backend = printer.Backend,
+                            AttemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info",
+                            CheckedAtUtc = DateTime.UtcNow,
+                            ElapsedMs = (long?)null,
+                            ErrorMessage = ex.Message
+                        });
                     }
                 }
             }
 
-            string serviceStatus = failedServices == 0 ? "Healthy" :
-                              failedServices < externalServiceCount ? "Degraded" : "Unhealthy";
+            string serviceStatus = failedServices == 0 ? "Healthy"
+                                  : failedServices < externalServiceCount ? "Degraded" : "Unhealthy";
 
-            checks["ExternalServices"] = new
+            var externalServicesObj = new Dictionary<string, object>
             {
-                Status = serviceStatus,
-                CheckedCount = externalServiceCount,
-                FailedCount = failedServices
+                ["Status"] = serviceStatus,
+                ["CheckedCount"] = externalServiceCount,
+                ["FailedCount"] = failedServices
             };
 
-            if (serviceStatus == "Unhealthy")
+            if (failedDetails.Count > 0)
             {
-                overallHealthy = false;
-                issues.Add($"All external services unreachable ({failedServices}/{externalServiceCount})");
+                externalServicesObj["FailedServicesDetails"] = failedDetails;
+            }
+
+            checks["ExternalServices"] = externalServicesObj;
+
+            // External printers being offline is considered a degradation by default.
+            // Use application settings to determine when the failure threshold should escalate
+            // to an Unhealthy status.
+            int percentFailed = externalServiceCount == 0 ? 0 : (int)Math.Round((double)failedServices / externalServiceCount * 100);
+            int threshold = 100; // default: only unhealthy when 100% fail
+            try
+            {
+                var s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
+                if (s != null)
+                {
+                    threshold = Math.Clamp(s.PercentFailedThreshold, 0, 100);
+                }
+            }
+            catch { }
+
+            if (failedServices > 0)
+            {
+                if (percentFailed >= threshold)
+                {
+                    // Treat as Unhealthy when percentFailed meets/exceeds configured threshold
+                    overallHealthy = false;
+                    issues.Add($"External services unreachable ({failedServices}/{externalServiceCount}) - threshold {threshold}% reached");
+                }
+                else
+                {
+                    degraded = true;
+                    issues.Add($"External services unreachable ({failedServices}/{externalServiceCount}) - percentFailed={percentFailed}% (<{threshold}%)");
+                }
             }
         }
         catch (Exception ex)
@@ -135,12 +356,36 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "Unknown"
         };
 
+        // Determine overall health status: prefer Unhealthy for critical failures,
+        // Degraded when only non-critical external services are affected, otherwise Healthy.
+        HealthStatus finalStatus;
+        string description;
+        if (!overallHealthy)
+        {
+            finalStatus = HealthStatus.Unhealthy;
+            description = string.Join("; ", issues);
+        }
+        else if (degraded)
+        {
+            finalStatus = HealthStatus.Degraded;
+            description = string.Join("; ", issues);
+        }
+        else
+        {
+            finalStatus = HealthStatus.Healthy;
+            description = "All systems operational";
+        }
+
         HealthCheckResult result = new(
-            overallHealthy ? HealthStatus.Healthy : HealthStatus.Unhealthy,
-            description: overallHealthy ? "All systems operational" : string.Join("; ", issues),
+            finalStatus,
+            description: description,
             data: checks
         );
 
         return result;
     }
 }
+
+// Re-enable warning at end of file
+#pragma warning restore CA1303
+#pragma warning restore S1075

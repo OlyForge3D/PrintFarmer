@@ -60,7 +60,7 @@ public class MoonrakerClientTestController(
         catch (Exception ex)
         {
             _logger.LogError($"Error testing MoonrakerClient.GetDirectoryAsync: {ex.Message}");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 
@@ -97,7 +97,7 @@ public class MoonrakerClientTestController(
         catch (Exception ex)
         {
             _logger.LogError($"Error testing MoonrakerClient.GetFileListAsync: {ex.Message}");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 
@@ -134,7 +134,7 @@ public class MoonrakerClientTestController(
         catch (Exception ex)
         {
             _logger.LogError($"Error testing MoonrakerClient.GetFileRootsAsync: {ex.Message}");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 }

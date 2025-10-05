@@ -270,7 +270,25 @@ public record UpdatePrinterDto(
     string? ApiKey = null,
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
-    string? OriginalServerUrl = null);
+    string? OriginalServerUrl = null,
+    // Printer capabilities
+    double? NozzleDiameter = null,
+    string[]? SupportedMaterials = null,
+    double? MaxBuildVolumeX = null,
+    double? MaxBuildVolumeY = null,
+    double? MaxBuildVolumeZ = null,
+    bool? HasHeatedBed = null,
+    bool? HasEnclosure = null,
+    bool? MultiMaterial = null,
+    int? NumberOfExtruders = null,
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+    bool? SupportsAutoLeveling = null,
+    int? MaxPrintSpeed = null,
+    int? BackendPort = null,
+    int? FrontendPort = null);
 
 // Local spools removed; Spoolman is the source of truth
 
@@ -570,16 +588,6 @@ public record StartPrintResultDto(string Message, string Filename);
 /// <summary>
 /// Configuration for network discovery (ranges, timeouts, ports).
 /// </summary>
-public record NetworkDiscoverySettingsDto(
-    List<string> NetworkRanges,
-    int TimeoutMs = 3000,
-    int MaxConcurrentScans = 20,
-    List<int> Ports = null!)
-{
-    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [80])
-    {
-    }
-}
 #pragma warning restore CA1002
 
 // History Models (matching Moonraker structure)
@@ -850,6 +858,7 @@ public record PrinterCapabilitiesDto(
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
+    bool SupportsAutoLeveling = false,
     int NumberOfExtruders = 1,
     int? MinHotendTemp = null,
     int? MaxHotendTemp = null,

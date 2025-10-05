@@ -66,7 +66,7 @@ public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IS
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation($"MoonrakerSubscriptionService starting");
+        logger.LogInformation("MoonrakerSubscriptionService starting");
         _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
         return Task.CompletedTask;
     }
@@ -133,7 +133,6 @@ public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IS
             {
                 logger.LogError(ex, "Error enumerating printers for subscription");
             }
-
             try
             {
                 await CheckForStaleConnectionsAsync(ct);
@@ -300,18 +299,16 @@ public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IS
 
                 if (MoonrakerErrors.IsFatalError(ex))
                 {
-                    logger.LogError(ex, "Fatal error in subscription loop for printer {PrinterName}, stopping reconnection attempts", printer.Name);
+                    logger.LogError(ex, $"Fatal error in subscription loop for printer {printer.Name}, stopping reconnection attempts");
                     break;
                 }
                 else if (MoonrakerErrors.IsTransientError(ex))
                 {
-                    logger.LogWarning(ex, "Transient error for printer {PrinterName}, will retry (attempt {Attempt}/{MaxAttempts})",
-                        printer.Name, metrics.ReconnectAttempts, MaxReconnectAttempts);
+                    logger.LogWarning(ex, $"Transient error for printer {printer.Name}, will retry (attempt {metrics.ReconnectAttempts}/{MaxReconnectAttempts})");
                 }
                 else
                 {
-                    logger.LogError(ex, "Unexpected error for printer {PrinterName} (attempt {Attempt}/{MaxAttempts})",
-                        printer.Name, metrics.ReconnectAttempts, MaxReconnectAttempts);
+                    logger.LogError(ex, $"Unexpected error for printer {printer.Name} (attempt {metrics.ReconnectAttempts}/{MaxReconnectAttempts})");
                 }
 
                 // Send offline status on connection failure
@@ -545,8 +542,7 @@ public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IS
                     JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
                     if (jsonRpcResponse?.Error != null)
                     {
-                        logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Error} (Code: {Code})",
-                            printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
+                        logger.LogWarning($"JSON-RPC error from printer {printer.Name}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
 
                         // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
                         if (jsonRpcResponse.Error.Code == -32700)
@@ -574,7 +570,7 @@ public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IS
                 }
                 catch (JsonException ex)
                 {
-                    logger.LogWarning("Failed to parse JSON-RPC response from printer {PrinterName}: {Error}", printer.Name, ex.Message);
+                    logger.LogWarning($"Failed to parse JSON-RPC response from printer {printer.Name}: {ex.Message}");
 
                     // Track parse errors and trigger fallback if threshold exceeded
                     _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
@@ -628,16 +624,16 @@ public sealed class MoonrakerSubscriptionService(IHubContext<PrinterHub> hub, IS
             }
             else
             {
-                logger.LogWarning("Received unknown JSON-RPC message from printer {PrinterName}: {Message}", printer.Name, message);
+                logger.LogWarning($"Received unknown JSON-RPC message from printer {printer.Name}: {message}");
             }
         }
         catch (JsonException ex)
         {
-            logger.LogError("Failed to parse JSON message from printer {PrinterName}: {Error}. Message: {Message}", printer.Name, ex.Message, message);
+            logger.LogError($"Failed to parse JSON message from printer {printer.Name}: {ex.Message}. Message: {message}");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error processing message from printer {PrinterName}. Message: {Message}", printer.Name, message);
+            logger.LogError(ex, $"Error processing message from printer {printer.Name}. Message: {message}");
         }
     }
 

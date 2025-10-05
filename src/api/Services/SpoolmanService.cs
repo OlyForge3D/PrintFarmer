@@ -9,12 +9,11 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
-public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingService logger, INetworkDiscoverySettingsService networkSettings) : ISpoolmanService
+public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingService logger) : ISpoolmanService
 {
     private readonly HttpClient http = http;
     private readonly AppDbContext db = db;
     private readonly IUnifiedLoggingService logger = logger;
-    private readonly INetworkDiscoverySettingsService networkSettings = networkSettings;
 
     public SpoolmanConfigDto? GetConfig()
     {
@@ -161,12 +160,12 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
 
         // Candidate endpoints for materials
         string[] candidates =
-        [
+        {
             "/api/v1/material",
             "/api/v1/material/",
             "/api/v1/materials",   // fallback (in case of alternative routing)
             "/api/v1/materials/"
-        ];
+        };
 
         foreach (string ep in candidates)
         {
@@ -946,126 +945,26 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
     /// Scans the configured network ranges for available Spoolman instances.
     /// Uses the discovery settings to determine which network ranges to scan.
     /// </summary>
-    public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(CancellationToken ct = default)
+    public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default)
     {
-        // Get network ranges from discovery settings
-        var discoverySettings = networkSettings.GetSettings();
-        if (discoverySettings.NetworkRanges.Count == 0)
+        var results = new List<SpoolmanDiscoveryResult>();
+        if (networkRanges == null)
         {
-            return new[] { new SpoolmanDiscoveryResult("", false, "No network ranges configured in discovery settings") };
+            results.Add(new SpoolmanDiscoveryResult("", false, "No network subnets configured in discovery settings"));
+            return results;
         }
 
-        // Scan each network range for Spoolman instances
-        var tasks = discoverySettings.NetworkRanges
-            .SelectMany(ExpandNetworkRange)
-            .Select(ip => ScanIpForSpoolmanAsync(ip, ct))
-            .ToArray();
-
+        var ips = networkRanges
+            .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning(msg)))
+            .Distinct()
+            .ToList();
+        var tasks = ips.Select(ip => ScanIpForSpoolmanAsync(ip, ct)).ToArray();
         var scanResults = await Task.WhenAll(tasks);
-        return scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error));
+        results.AddRange(scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error)));
+        return results;
     }
 
-    /// <summary>
-    /// Expands a network range specification into individual IP addresses.
-    /// Supports formats like "192.168.1.1-192.168.1.254" and "192.168.1.0/24"
-    /// </summary>
-    private IEnumerable<string> ExpandNetworkRange(string range)
-    {
-        try
-        {
-            // Handle CIDR notation (e.g., "192.168.1.0/24")
-            if (range.Contains('/'))
-            {
-                var parts = range.Split('/');
-                if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var network) && int.TryParse(parts[1], out var prefixLength))
-                {
-                    return ExpandCidrRange(network, prefixLength);
-                }
-            }
 
-            // Handle range notation (e.g., "192.168.1.1-192.168.1.254")
-            if (range.Contains('-'))
-            {
-                var parts = range.Split('-');
-                if (parts.Length == 2 && IPAddress.TryParse(parts[0].Trim(), out var startIp) && IPAddress.TryParse(parts[1].Trim(), out var endIp))
-                {
-                    return ExpandIpRange(startIp, endIp);
-                }
-            }
-
-            // Single IP address
-            if (IPAddress.TryParse(range, out _))
-            {
-                return new[] { range };
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning($"Failed to expand network range '{range}': {ex.Message}");
-        }
-
-        return Enumerable.Empty<string>();
-    }
-
-    /// <summary>
-    /// Expands a CIDR range into individual IP addresses (limited to reasonable subnet sizes)
-    /// </summary>
-    private IEnumerable<string> ExpandCidrRange(IPAddress network, int prefixLength)
-    {
-        // Limit to /16 or smaller subnets to avoid excessive scanning
-        if (prefixLength < 16)
-        {
-            logger.LogWarning($"CIDR range too large (/{prefixLength}), limiting to /16");
-            prefixLength = 16;
-        }
-
-        var networkBytes = network.GetAddressBytes();
-        var hostBits = 32 - prefixLength;
-        var maxHosts = Math.Min(1 << hostBits, 1024); // Limit to 1024 IPs max
-
-        for (int i = 1; i < maxHosts - 1; i++) // Skip network and broadcast
-        {
-            var hostBytes = BitConverter.GetBytes(i);
-            if (BitConverter.IsLittleEndian)
-            {
-                Array.Reverse(hostBytes);
-            }
-
-            var ipBytes = new byte[4];
-            for (int j = 0; j < 4; j++)
-            {
-                ipBytes[j] = (byte)(networkBytes[j] | hostBytes[j]);
-            }
-
-            yield return new IPAddress(ipBytes).ToString();
-        }
-    }
-
-    /// <summary>
-    /// Expands an IP range into individual addresses
-    /// </summary>
-    private IEnumerable<string> ExpandIpRange(IPAddress startIp, IPAddress endIp)
-    {
-        var start = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
-        var end = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
-
-        // Limit range size to prevent excessive scanning
-        if (end - start > 1024)
-        {
-            logger.LogWarning($"IP range too large ({startIp}-{endIp}), limiting to 1024 addresses");
-            end = start + 1024;
-        }
-
-        for (uint ip = start; ip <= end; ip++)
-        {
-            var bytes = BitConverter.GetBytes(ip).Reverse().ToArray();
-            yield return new IPAddress(bytes).ToString();
-        }
-    }
-
-    /// <summary>
-    /// Scans a single IP address for a Spoolman instance on port 7912
-    /// </summary>
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
         var url = $"http://{ip}:7912";
@@ -1113,4 +1012,5 @@ public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingSe
             return new SpoolmanDiscoveryResult(url, false, ex.Message);
         }
     }
+
 }
