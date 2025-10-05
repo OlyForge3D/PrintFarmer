@@ -2824,7 +2824,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(408)]
     [ProducesResponseType(500)]
-    public ActionResult StartDiscoveryStream(CancellationToken ct)
+    public ActionResult StartDiscoveryStream([FromBody] StartDiscoveryRequest? request, CancellationToken ct)
     {
         try
         {
@@ -2842,7 +2842,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                     using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout to allow for multiple networks and slow responses
 
-                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, timeoutCts.Token);
+                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, request?.Backends, timeoutCts.Token);
                 }
                 catch (OperationCanceledException)
                 {

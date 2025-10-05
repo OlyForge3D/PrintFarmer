@@ -743,6 +743,15 @@ export interface DiscoveredPrinterDto {
   version?: string;
 }
 
+// Network discovery settings
+export interface NetworkDiscoverySettingsDto {
+  networkRanges: string[];
+  timeoutMs: number;
+  maxConcurrentScans: number;
+  ports: number[];
+  backends?: PrinterBackend[];
+}
+
 // Discovery streaming types
 export enum DiscoveryStatus {
   Starting = 'Starting',
@@ -750,6 +759,10 @@ export enum DiscoveryStatus {
   Completed = 'Completed',
   Cancelled = 'Cancelled',
   Error = 'Error'
+}
+
+export interface StartDiscoveryRequest {
+  backends?: PrinterBackend[];
 }
 
 export interface DiscoveryProgressDto {

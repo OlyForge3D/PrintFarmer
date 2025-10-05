@@ -16,6 +16,7 @@ public interface INetworkDiscoveryService
 {
     Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default);
     Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default);
+    Task DiscoverPrintersWithProgressAsync(string sessionId, List<PrinterBackend>? backends, CancellationToken cancellationToken = default);
 }
 
 public partial class NetworkDiscoveryService(
@@ -81,12 +82,24 @@ public partial class NetworkDiscoveryService(
 
     public async Task DiscoverPrintersWithProgressAsync(string sessionId, CancellationToken cancellationToken = default)
     {
+        await DiscoverPrintersWithProgressAsync(sessionId, null, cancellationToken);
+    }
+
+    public async Task DiscoverPrintersWithProgressAsync(string sessionId, List<PrinterBackend>? backends, CancellationToken cancellationToken = default)
+    {
         _logger.LogInformation($"Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
 
         NetworkDiscoverySettingsDto settings = _settingsService.GetSettings();
+        
+        // Override backends if provided in the request
+        if (backends != null && backends.Count > 0)
+        {
+            settings = settings with { Backends = backends };
+        }
+        
         bool autoDetectedNetworks = false;
         // Auto-detect network ranges if none configured
         if (settings.NetworkRanges.Count == 0)
@@ -519,7 +532,7 @@ public partial class NetworkDiscoveryService(
                     break;
                 }
 
-                DiscoveredPrinterDto? discovered = await TryDiscoverPrinterAsync(ipAddress, port, settings.TimeoutMs, cancellationToken);
+                DiscoveredPrinterDto? discovered = await TryDiscoverPrinterAsync(ipAddress, port, settings.TimeoutMs, settings.Backends, cancellationToken);
                 if (discovered != null)
                 {
                     // Filter out printers already in the system
@@ -547,42 +560,53 @@ public partial class NetworkDiscoveryService(
         return null;
     }
 
-    private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int port, int timeoutMs, CancellationToken cancellationToken)
+    private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int port, int timeoutMs, List<PrinterBackend>? backends, CancellationToken cancellationToken)
     {
         string baseUrl = $"http://{ipAddress}:{port}";
+
+        // If no backends specified, scan all backends (default behavior)
+        List<PrinterBackend> backendsToScan = backends ?? [PrinterBackend.Moonraker, PrinterBackend.PrusaLink];
 
         try
         {
             _logger.LogDebug("Attempting discovery at {BaseUrl}", baseUrl);
-            // Only allow Moonraker discovery on port 7125
-            if (port == 7125)
+            
+            // Try each backend in the list
+            foreach (PrinterBackend backend in backendsToScan)
             {
-                _logger.LogInformation("Testing Moonraker at {BaseUrl}", baseUrl);
-                PrinterInfo? moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
-                if (moonrakerInfo != null)
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Successfully discovered Moonraker printer at {BaseUrl}", baseUrl);
-                    return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
+                    break;
                 }
-                else
+
+                // Port-specific backend scanning logic
+                if (backend == PrinterBackend.Moonraker && port == 7125)
                 {
-                    _logger.LogDebug("No Moonraker response from {BaseUrl}", baseUrl);
+                    _logger.LogInformation("Testing Moonraker at {BaseUrl}", baseUrl);
+                    PrinterInfo? moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
+                    if (moonrakerInfo != null)
+                    {
+                        _logger.LogInformation("Successfully discovered Moonraker printer at {BaseUrl}", baseUrl);
+                        return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("No Moonraker response from {BaseUrl}", baseUrl);
+                    }
                 }
-            }
-            else if (port == 80)
-            {
-                // Only allow PrusaLink on port 80. Ignore Moonraker on port 80.
-                _logger.LogInformation("Testing PrusaLink at {BaseUrl}", baseUrl);
-                PrinterInfo? prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
-                if (prusaInfo != null)
+                else if (backend == PrinterBackend.PrusaLink && port == 80)
                 {
-                    _logger.LogInformation("Successfully discovered PrusaLink printer at {BaseUrl}", baseUrl);
-                    return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.PrusaLink, prusaInfo);
-                }
-                else
-                {
-                    _logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
-                    // Do NOT test for Moonraker on port 80 anymore. Intentionally skip.
+                    _logger.LogInformation("Testing PrusaLink at {BaseUrl}", baseUrl);
+                    PrinterInfo? prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
+                    if (prusaInfo != null)
+                    {
+                        _logger.LogInformation("Successfully discovered PrusaLink printer at {BaseUrl}", baseUrl);
+                        return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.PrusaLink, prusaInfo);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
+                    }
                 }
             }
         }

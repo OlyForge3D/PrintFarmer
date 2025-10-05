@@ -31,6 +31,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [printerConfigs, setPrinterConfigs] = useState<Record<string, PrinterConfiguration>>({});
+  const [selectedBackends, setSelectedBackends] = useState<Set<PrinterBackend>>(new Set([PrinterBackend.Moonraker, PrinterBackend.PrusaLink]));
 
   const startDiscoveryMutation = useStartDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
@@ -63,7 +64,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
         console.log('[PrintFarmer] PrinterDiscoveryModal: handleStartDiscovery called - starting network scan');
       }
       resetDiscovery(); // Clear previous results
-      const result = await startDiscoveryMutation.mutateAsync();
+      const backends = selectedBackends.size > 0 ? Array.from(selectedBackends) : undefined;
+      const result = await startDiscoveryMutation.mutateAsync({ backends });
       if (window.PrintFarmerDebug?.printerDiscoveryModal) {
         console.log('[PrintFarmer] PrinterDiscoveryModal: Discovery stream started with sessionId:', result.sessionId);
       }
@@ -176,17 +178,54 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 
                 <div className="mb-6">
                   <p className="text-sm text-pf-text-secondary mb-4">
-                    Scan your network for compatible 3D printers (Moonraker, PrusaLink, and SDCP)
+                    Scan your network for compatible 3D printers
                   </p>
+                  
+                  {/* Backend selection */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-pf-text-primary mb-2">
+                      Select backends to scan:
+                    </label>
+                    <div className="flex flex-wrap gap-3">
+                      {[
+                        { value: PrinterBackend.Moonraker, label: 'Moonraker' },
+                        { value: PrinterBackend.PrusaLink, label: 'PrusaLink' },
+                        { value: PrinterBackend.SDCP, label: 'SDCP' },
+                        { value: PrinterBackend.OctoPrint, label: 'OctoPrint' }
+                      ].map(backend => (
+                        <label key={backend.value} className="inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedBackends.has(backend.value)}
+                            onChange={(e) => {
+                              const newBackends = new Set(selectedBackends);
+                              if (e.target.checked) {
+                                newBackends.add(backend.value);
+                              } else {
+                                newBackends.delete(backend.value);
+                              }
+                              setSelectedBackends(newBackends);
+                            }}
+                            disabled={isActive}
+                            className="rounded border-pf-border text-pf-accent focus:ring-pf-accent focus:ring-offset-pf-bg-1 disabled:opacity-50"
+                          />
+                          <span className="ml-2 text-sm text-pf-text-primary">{backend.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   
                   <button
                     onClick={handleStartDiscovery}
-                    disabled={startDiscoveryMutation.isPending || !!isActive}
+                    disabled={startDiscoveryMutation.isPending || !!isActive || selectedBackends.size === 0}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Search className="h-4 w-4 mr-2" />
                     {isActive ? 'Scanning...' : 'Start Network Scan'}
                   </button>
+                  {selectedBackends.size === 0 && (
+                    <p className="text-xs text-pf-error-text mt-2">Please select at least one backend to scan</p>
+                  )}
                 </div>
 
                 {isActive && progress && (() => {
