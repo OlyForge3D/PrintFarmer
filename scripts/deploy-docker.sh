@@ -1005,7 +1005,6 @@ generate_compose_override() {
         
         cat > docker-compose.override.yml << EOF
 # Auto-generated database services
-version: '3.8'
 
 services:
 EOF
@@ -1093,7 +1092,6 @@ generate_host_network_override() {
 # PrintFarmer Microservices Architecture - HOST NETWORK MODE
 # Complete standalone compose file with API in host network mode
 # DO NOT use with docker-compose.microservices.yml (conflicts due to network_mode)
-version: '3.8'
 
 services:
   # Redis for job queuing and worker coordination  
@@ -1291,11 +1289,9 @@ deploy_containers() {
     # We'll use ONLY the host-network compose file which has all services, skipping the base microservices file
     if [ -f docker-compose.host-network.yml ]; then
         # Use host-network file as the PRIMARY file (has all services with API in host mode)
+        # DO NOT load override file - host-network.yml is standalone and already includes database
         compose_cmd=( docker compose --env-file "$ENV_FILE" -f docker-compose.host-network.yml )
-        if [ -f docker-compose.override.yml ]; then
-            compose_cmd+=( -f docker-compose.override.yml )
-        fi
-        print_info "Using host network mode: docker-compose.host-network.yml (standalone, replaces microservices.yml)"
+        print_info "Using host network mode: docker-compose.host-network.yml (standalone, includes all services)"
     elif [ -f docker-compose.override.yml ]; then
         compose_cmd+=( -f docker-compose.override.yml )
     fi
