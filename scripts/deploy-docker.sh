@@ -156,7 +156,7 @@ COMPOSE_FILE=$COMPOSE_FILE
 
 # Database Configuration
 DB_PROVIDER=$DB_PROVIDER
-DB_PASSWORD=$DB_PASSWORD
+DB_PASSWORD=${DB_PASSWORD:-}
 INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
 INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
 INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
@@ -279,9 +279,6 @@ detect_environment() {
         print_error "Docker daemon is not running! Please start Docker."
         exit 1
     fi
-    
-    # Check .NET SDK (optional but recommended for local builds)
-    check_dotnet_sdk
 }
 
 # Check for .NET SDK and offer installation
@@ -430,6 +427,9 @@ choose_architecture() {
             ENV_FILE=".env.monolithic"
             COMPOSE_FILE="docker-compose.yml"
             print_success "Selected: Monolithic deployment"
+            
+            # Check .NET SDK for monolithic (optional but recommended for local builds)
+            check_dotnet_sdk
             ;;
         2|microservices|micro)
             ARCHITECTURE="microservices"
@@ -697,8 +697,33 @@ configure_networking() {
         echo
         
         if [ "$OS" != "linux" ]; then
-            print_warning "Host network mode only works on Linux. Forcing bridge mode."
-            NETWORK_MODE="bridge"
+            print_warning "Host network mode only works on Linux."
+            print_warning "Current OS: $OS (detected)"
+            echo
+            prompt_yes_no "Are you deploying to a Linux server (not this machine)?" "no" "DEPLOYING_TO_LINUX"
+            
+            if [ "$DEPLOYING_TO_LINUX" = "yes" ]; then
+                print_info "Generating configuration for Linux target deployment"
+                echo -e "${YELLOW}For optimal network discovery (broadcast/multicast), choose host mode.${NC}"
+                echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
+                echo
+                prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
+                
+                case "$NETWORK_MODE_CHOICE" in
+                    2|host|Host)
+                        NETWORK_MODE="host"
+                        print_success "Using host network mode for full discovery support"
+                        print_info "API will bind to port ${API_PORT:-5245} on the host"
+                        ;;
+                    *)
+                        NETWORK_MODE="bridge"
+                        print_info "Using bridge mode (cross-platform compatible)"
+                        ;;
+                esac
+            else
+                print_info "Forcing bridge mode for $OS deployment"
+                NETWORK_MODE="bridge"
+            fi
         else
             echo -e "${YELLOW}For optimal network discovery (broadcast/multicast), choose host mode.${NC}"
             echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
@@ -1092,12 +1117,25 @@ deploy_containers() {
 
     # Bring up base services first
     if [ "$DRY_RUN" = "true" ]; then
-        print_info "Dry-run mode: not starting containers. (Would run: docker compose up -d ${profiles_to_enable[*]})"
-    elif "${compose_cmd[@]}" up -d "${profiles_to_enable[@]}"; then
-        print_success "Containers started successfully"
+        if [ ${#profiles_to_enable[@]} -gt 0 ]; then
+            print_info "Dry-run mode: not starting containers. (Would run: docker compose up -d ${profiles_to_enable[*]})"
+        else
+            print_info "Dry-run mode: not starting containers. (Would run: docker compose up -d)"
+        fi
+    elif [ ${#profiles_to_enable[@]} -gt 0 ]; then
+        if "${compose_cmd[@]}" up -d "${profiles_to_enable[@]}"; then
+            print_success "Containers started successfully"
+        else
+            print_error "Failed to start containers"
+            exit 1
+        fi
     else
-        print_error "Failed to start containers"
-        exit 1
+        if "${compose_cmd[@]}" up -d; then
+            print_success "Containers started successfully"
+        else
+            print_error "Failed to start containers"
+            exit 1
+        fi
     fi
 
     # Scaling (only if counts >1). Use service names; if profiles not enabled skip scaling.
