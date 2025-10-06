@@ -54,12 +54,16 @@ prompt_with_default() {
     local default="$2"
     local var_name="$3"
     
+    # If variable already set (from env or loaded config), use it as default
+    if [ -n "${!var_name:-}" ]; then
+        default="${!var_name}"
+    fi
+    
     if [ "$NON_INTERACTIVE" = "true" ]; then
-        # If variable already exported, respect it; else use default
-        if [ -n "${!var_name:-}" ]; then
-            return 0
+        # In non-interactive mode, keep existing value or use default
+        if [ -z "${!var_name:-}" ]; then
+            eval "$var_name=\"$default\""
         fi
-        eval "$var_name=\"$default\""
     else
         echo -e "${YELLOW}$prompt${NC}"
         echo -e "${BLUE}Default: $default${NC}"
@@ -78,21 +82,19 @@ prompt_yes_no() {
     local default="$2"
     local var_name="$3"
     
+    # If variable already set (from env or loaded config), use it as default
+    if [ -n "${!var_name:-}" ]; then
+        default="${!var_name}"
+    fi
+    
     local default_text="y/N"
     if [ "$default" = "y" ] || [ "$default" = "yes" ]; then
         default_text="Y/n"
     fi
     
     if [ "$NON_INTERACTIVE" = "true" ]; then
-        # If pre-set variable, respect truthy/falsey values
-        local current=${!var_name:-}
-        if [ -n "$current" ]; then
-            case "$current" in
-                [Yy]|[Yy]es|true|1) eval "$var_name=\"yes\"" ;;
-                *) eval "$var_name=\"no\"" ;;
-            esac
-        else
-            # fallback to default
+        # In non-interactive mode, keep existing value or use default
+        if [ -z "${!var_name:-}" ]; then
             if [ "$default" = "y" ] || [ "$default" = "yes" ]; then
                 eval "$var_name=\"yes\""
             else
@@ -110,6 +112,125 @@ prompt_yes_no() {
             *) eval "$var_name=\"no\"" ;;
         esac
     fi
+}
+
+# Configuration file location
+CONFIG_FILE=".deploy-config"
+
+# Load previous configuration if it exists
+load_previous_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        print_info "Found previous deployment configuration"
+        
+        # Source the config file to load variables
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE"
+        
+        print_success "Loaded configuration from $CONFIG_FILE"
+        print_info "Previous deployment settings will be used as defaults"
+        echo
+        return 0
+    fi
+    return 1
+}
+
+# Save current configuration for future use
+save_deployment_config() {
+    print_header "💾 Saving Deployment Configuration"
+    
+    print_info "Saving configuration to $CONFIG_FILE for future deployments"
+    
+    cat > "$CONFIG_FILE" << EOF
+# PrintFarmer Deployment Configuration
+# Generated on $(date)
+# This file can be used for non-interactive deployments or as defaults for interactive mode
+#
+# Usage:
+#   Interactive (uses these as defaults): ./scripts/deploy-docker.sh
+#   Non-interactive (uses these exactly):  ./scripts/deploy-docker.sh --non-interactive
+#   Dry-run:                               ./scripts/deploy-docker.sh --dry-run
+
+# Architecture
+ARCHITECTURE=$ARCHITECTURE
+COMPOSE_FILE=$COMPOSE_FILE
+
+# Database Configuration
+DB_PROVIDER=$DB_PROVIDER
+DB_PASSWORD=$DB_PASSWORD
+INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
+INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
+INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
+CONNECTION_STRING=$(printf '%q' "$CONNECTION_STRING")
+
+# Network Configuration
+ENABLE_DISCOVERY=$ENABLE_DISCOVERY
+ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
+NETWORK_RANGES=$(printf '%q' "$NETWORK_RANGES")
+NETWORK_MODE=${NETWORK_MODE:-bridge}
+HTTP_PORT=$HTTP_PORT
+EOF
+
+    if [ "$ARCHITECTURE" = "microservices" ]; then
+        echo "API_PORT=$API_PORT" >> "$CONFIG_FILE"
+    fi
+
+    cat >> "$CONFIG_FILE" << EOF
+
+# Application Settings
+ENVIRONMENT=$ENVIRONMENT
+ENABLE_SWAGGER=$ENABLE_SWAGGER
+ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
+
+# Distributed Slicing
+ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
+ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
+ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
+ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
+ENABLE_PRUSA_WORKER=${ENABLE_PRUSA_WORKER:-no}
+PRUSA_WORKER_COUNT=${PRUSA_WORKER_COUNT:-0}
+PRUSA_HOST_PORT=${PRUSA_HOST_PORT:-8082}
+EOF
+
+    if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# Worker Endpoints (Advanced)
+OVERRIDE_WORKER_ENDPOINTS=yes
+EOF
+        [ "${ENABLE_ORCA_WORKER}" = "yes" ] && echo "ORCA_WORKER_ENDPOINT=${ORCA_WORKER_ENDPOINT}" >> "$CONFIG_FILE"
+        [ "${ENABLE_PRUSA_WORKER}" = "yes" ] && echo "PRUSA_WORKER_ENDPOINT=${PRUSA_WORKER_ENDPOINT}" >> "$CONFIG_FILE"
+    fi
+
+    if [ "${ENABLE_SPOOLMAN:-no}" = "yes" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# Spoolman Integration
+ENABLE_SPOOLMAN=yes
+SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
+SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
+EOF
+    else
+        echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no" >> "$CONFIG_FILE"
+    fi
+
+    if [ "$ARCHITECTURE" = "microservices" ] && [ "${REDIS_PERSIST:-no}" = "yes" ]; then
+        echo "REDIS_PERSIST=yes" >> "$CONFIG_FILE"
+    fi
+
+    cat >> "$CONFIG_FILE" << EOF
+
+# Operating System (detected)
+OS=$OS
+
+# Note: To use this configuration:
+# 1. For interactive mode with these defaults: ./scripts/deploy-docker.sh
+# 2. For non-interactive deployment:          ./scripts/deploy-docker.sh --non-interactive
+# 3. To override specific values:             export VARIABLE=value && ./scripts/deploy-docker.sh --non-interactive
+EOF
+
+    chmod 600 "$CONFIG_FILE"
+    print_success "Configuration saved to $CONFIG_FILE"
+    print_info "Re-run script to use these settings, or edit file to customize"
 }
 
 # Detect OS and Docker environment
@@ -996,6 +1117,9 @@ main() {
         exit 1
     fi
     
+    # Load previous configuration if available (sets defaults for interactive mode)
+    load_previous_config || true
+    
     # Execute setup steps
     detect_environment
     choose_architecture
@@ -1003,6 +1127,7 @@ main() {
     configure_networking
     configure_additional
     validate_configuration
+    save_deployment_config
     generate_env_file
     generate_compose_override
     generate_host_network_override

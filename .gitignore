@@ -31,6 +31,8 @@ node_modules/
 
 # Environment files
 .env
+.env.*
+.deploy-config
 
 # SqlLite Database Files
 *.db
