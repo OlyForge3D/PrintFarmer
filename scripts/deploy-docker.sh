@@ -8,6 +8,8 @@ set -euo pipefail
 # Default flags
 DRY_RUN=false
 NON_INTERACTIVE=false
+TEAR_DOWN=false
+SHOW_HELP=false
 
 # Parse simple flags early (only --dry-run / -n for now)
 for arg in "$@"; do
@@ -17,6 +19,12 @@ for arg in "$@"; do
             ;;
         --non-interactive|--batch|-b)
             NON_INTERACTIVE=true
+            ;;
+        --tear-down|--teardown|--clean)
+            TEAR_DOWN=true
+            ;;
+        --help|-h)
+            SHOW_HELP=true
             ;;
     esac
 done
@@ -114,6 +122,184 @@ prompt_yes_no() {
     fi
 }
 
+# Tear down existing deployment
+tear_down_deployment() {
+    print_header "🧹 Tearing Down PrintFarmer Deployment"
+    
+    print_warning "This will:"
+    echo "  1. Stop and remove ALL Docker containers"
+    echo "  2. Remove ALL Docker volumes (⚠️  ALL DATA WILL BE DELETED!)"
+    echo "  3. Remove all PrintFarmer Docker images"
+    echo "  4. Clean up generated configuration files"
+    echo
+    
+    if [ "$NON_INTERACTIVE" = "false" ]; then
+        echo -e "${RED}⚠️  WARNING: This is a destructive operation!${NC}"
+        echo -e "${RED}   All database data and uploaded files will be permanently deleted.${NC}"
+        echo
+        read -p "Are you sure you want to continue? Type 'yes' to confirm: " confirm
+        
+        if [ "$confirm" != "yes" ]; then
+            print_info "Tear-down cancelled."
+            exit 0
+        fi
+    fi
+    
+    echo
+    print_info "Starting tear-down process..."
+    
+    # 1. Stop all containers
+    print_info "Step 1/6: Stopping all Docker containers..."
+    if docker ps -q | grep -q .; then
+        docker stop $(docker ps -aq) 2>/dev/null || true
+        print_success "Containers stopped"
+    else
+        print_info "No running containers found"
+    fi
+    
+    # 2. Remove all containers
+    print_info "Step 2/6: Removing all Docker containers..."
+    if docker ps -aq | grep -q .; then
+        docker rm $(docker ps -aq) 2>/dev/null || true
+        print_success "Containers removed"
+    else
+        print_info "No containers to remove"
+    fi
+    
+    # 3. Remove all volumes
+    print_info "Step 3/6: Removing all Docker volumes..."
+    if docker volume ls -q | grep -q .; then
+        docker volume rm $(docker volume ls -q) 2>/dev/null || true
+        print_success "Volumes removed"
+    else
+        print_info "No volumes to remove"
+    fi
+    
+    # 4. Remove PrintFarmer images
+    print_info "Step 4/6: Removing PrintFarmer Docker images..."
+    if docker images --format "{{.Repository}}" | grep -q "printfarmer"; then
+        docker images --format "{{.Repository}}:{{.Tag}}" | grep "printfarmer" | xargs -r docker rmi -f 2>/dev/null || true
+        print_success "PrintFarmer images removed"
+    else
+        print_info "No PrintFarmer images to remove"
+    fi
+    
+    # 5. Prune unused networks
+    print_info "Step 5/6: Cleaning up Docker networks..."
+    docker network prune -f > /dev/null 2>&1 || true
+    print_success "Networks cleaned"
+    
+    # 6. Remove generated files
+    print_info "Step 6/6: Removing generated configuration files..."
+    local files_removed=0
+    
+    if [ -f docker-compose.host-network.yml ]; then
+        rm -f docker-compose.host-network.yml
+        echo "  • Removed docker-compose.host-network.yml"
+        ((files_removed++))
+    fi
+    
+    if [ -f docker-compose.override.yml ]; then
+        rm -f docker-compose.override.yml
+        echo "  • Removed docker-compose.override.yml"
+        ((files_removed++))
+    fi
+    
+    if [ -f .env ]; then
+        rm -f .env
+        echo "  • Removed .env"
+        ((files_removed++))
+    fi
+    
+    # Ask about .deploy-config separately
+    if [ -f .deploy-config ]; then
+        if [ "$NON_INTERACTIVE" = "false" ]; then
+            echo
+            print_warning "Found .deploy-config (saved deployment preferences)"
+            read -p "Do you want to keep this file? (y/n) [y]: " keep_config
+            if [ "$keep_config" = "n" ] || [ "$keep_config" = "N" ]; then
+                rm -f .deploy-config
+                echo "  • Removed .deploy-config"
+                ((files_removed++))
+            else
+                print_info "Kept .deploy-config (your preferences will be remembered)"
+            fi
+        else
+            # In non-interactive mode, keep the config by default
+            print_info "Kept .deploy-config (use --non-interactive to auto-remove)"
+        fi
+    fi
+    
+    if [ $files_removed -gt 0 ]; then
+        print_success "Configuration files cleaned"
+    else
+        print_info "No configuration files to remove"
+    fi
+    
+    echo
+    print_success "✨ Tear-down complete!"
+    echo
+    print_info "You can now run './scripts/deploy-docker.sh' to start a fresh deployment."
+    
+    exit 0
+}
+
+# Show help message
+show_help() {
+    cat << EOF
+PrintFarmer Docker Deployment Script
+
+USAGE:
+    ./scripts/deploy-docker.sh [OPTIONS]
+
+OPTIONS:
+    -h, --help              Show this help message
+    -n, --dry-run           Validate configuration without starting containers
+    -b, --batch             Run in non-interactive mode (uses defaults/env vars)
+        --non-interactive   Same as --batch
+    --tear-down             Tear down existing deployment (stops containers, removes
+        --teardown          volumes, cleans up). Useful for starting fresh.
+        --clean             Same as --tear-down
+
+EXAMPLES:
+    # Interactive deployment (recommended for first-time setup)
+    ./scripts/deploy-docker.sh
+
+    # Tear down existing deployment and clean up
+    ./scripts/deploy-docker.sh --tear-down
+
+    # Validate configuration without deploying
+    ./scripts/deploy-docker.sh --dry-run
+
+    # Non-interactive deployment (for automation/CI)
+    ./scripts/deploy-docker.sh --non-interactive
+
+DEPLOYMENT MODES:
+    1. Monolithic      - All services in one container (simplest)
+    2. Microservices   - Separate API, frontend, workers (recommended)
+
+DATABASE OPTIONS:
+    1. PostgreSQL      - Open source, recommended for most users
+    2. SQL Server      - Microsoft SQL Server (choose edition during setup)
+                         • Developer: Free, full-featured (dev/test only)
+                         • Express: Free, production-ready (10GB limit)
+                         • Standard/Enterprise: Requires commercial license
+    3. MySQL           - Popular open source database
+    4. External        - Use your own database server
+
+NETWORK MODES:
+    1. Bridge          - Standard Docker networking (default)
+    2. Host            - Direct host network access (for printer discovery)
+
+For more information, see:
+    - DOCKER_DEPLOYMENT.md
+    - LOCAL_DEVELOPMENT.md
+    - README.md
+
+EOF
+    exit 0
+}
+
 # Configuration file location
 CONFIG_FILE=".deploy-config"
 
@@ -183,6 +369,7 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
 SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
 SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
 SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
+SQLSERVER_EDITION=${SQLSERVER_EDITION:-Developer}
 
 # MySQL Configuration
 MYSQL_DB=${MYSQL_DB:-printfarmer}
@@ -708,6 +895,38 @@ configure_database() {
                 ;;
             2|sqlserver|"SQL Server")
                 DB_PROVIDER="sqlserver"
+                echo
+                echo -e "${BLUE}SQL Server Edition:${NC}"
+                echo "1. Developer - Free, full-featured (recommended for development/testing)"
+                echo "2. Express - Free, limited features (10GB max, production-ready)"
+                echo "3. Standard - Commercial license required"
+                echo "4. Enterprise - Commercial license required"
+                echo
+                prompt_with_default "Choose SQL Server edition [1=Developer, 2=Express, 3=Standard, 4=Enterprise]:" "${SQLSERVER_EDITION:-1}" "SQLSERVER_EDITION_CHOICE"
+                
+                case "$SQLSERVER_EDITION_CHOICE" in
+                    1|developer|Developer)
+                        SQLSERVER_EDITION="Developer"
+                        ;;
+                    2|express|Express)
+                        SQLSERVER_EDITION="Express"
+                        ;;
+                    3|standard|Standard)
+                        SQLSERVER_EDITION="Standard"
+                        print_warning "Standard edition requires a valid SQL Server license"
+                        ;;
+                    4|enterprise|Enterprise)
+                        SQLSERVER_EDITION="Enterprise"
+                        print_warning "Enterprise edition requires a valid SQL Server license"
+                        ;;
+                    *)
+                        SQLSERVER_EDITION="Developer"
+                        print_info "Using Developer edition as default"
+                        ;;
+                esac
+                
+                print_info "Using SQL Server $SQLSERVER_EDITION edition"
+                echo
                 prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
                 prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
                 prompt_with_default "SQL Server host port (1433 is default, use different if port conflict):" "${SQLSERVER_PORT:-1433}" "SQLSERVER_PORT"
@@ -874,6 +1093,37 @@ configure_networking() {
     
     if [ "$ARCHITECTURE" = "microservices" ]; then
         prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
+    fi
+}
+
+# Adjust connection strings for network mode
+adjust_connection_strings_for_network_mode() {
+    # In host network mode, services need to connect to localhost instead of service names
+    if [ "$NETWORK_MODE" = "host" ]; then
+        print_header "🔧 Adjusting Configuration for Host Network Mode"
+        
+        print_info "Host network mode requires using localhost for database connections"
+        
+        # Adjust connection string based on database provider
+        case "$DB_PROVIDER" in
+            postgres)
+                # PostgreSQL: Change from "Host=postgres" to "Host=localhost"
+                CONNECTION_STRING="Host=localhost;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                print_success "PostgreSQL connection string updated for host networking"
+                ;;
+            sqlserver)
+                # SQL Server: Change from "Server=sqlserver" to "Server=localhost,PORT"
+                CONNECTION_STRING="Server=localhost,${SQLSERVER_PORT:-1433};Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
+                print_success "SQL Server connection string updated for host networking (port ${SQLSERVER_PORT:-1433})"
+                ;;
+            mysql)
+                # MySQL: Change from "Server=mysql" to "Server=localhost"
+                CONNECTION_STRING="Server=localhost;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
+                print_success "MySQL connection string updated for host networking"
+                ;;
+        esac
+        
+        print_info "Database will be accessible at localhost:${SQLSERVER_PORT:-5432}"
     fi
 }
 
@@ -1063,6 +1313,7 @@ SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
 SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-$DB_PASSWORD}
 SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
 MSSQL_SA_PASSWORD=${SQLSERVER_PASSWORD:-$DB_PASSWORD}
+MSSQL_PID=${SQLSERVER_EDITION:-Developer}
 ACCEPT_EULA=Y
 EOF
     fi
@@ -1119,6 +1370,7 @@ EOF
     environment:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=\${MSSQL_SA_PASSWORD}
+      - MSSQL_PID=\${MSSQL_PID:-Developer}
     ports:
       - "\${SQLSERVER_PORT:-1433}:1433"
     volumes:
@@ -1686,6 +1938,18 @@ display_final_info() {
 
 # Main execution
 main() {
+    # Handle help mode first
+    if [ "$SHOW_HELP" = "true" ]; then
+        show_help
+        # Function exits, so we never reach here
+    fi
+    
+    # Handle tear-down mode
+    if [ "$TEAR_DOWN" = "true" ]; then
+        tear_down_deployment
+        # Function exits, so we never reach here
+    fi
+    
     print_header "🚀 PrintFarmer Docker Deployment Setup"
     
     print_info "This script will help you deploy PrintFarmer using Docker containers."
@@ -1707,6 +1971,7 @@ main() {
     choose_architecture
     configure_database
     configure_networking
+    adjust_connection_strings_for_network_mode
     configure_additional
     validate_configuration
     save_deployment_config
