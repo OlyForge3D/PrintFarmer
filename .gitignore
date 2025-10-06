@@ -61,3 +61,7 @@ coverage-final.json
 
 # Prevent accidental duplicate copies of the dotnet installer script
 dotnet-install.sh.*
+
+# Deploy script generated compose files
+docker-compose.override.yml
+docker-compose.host-network.yml
