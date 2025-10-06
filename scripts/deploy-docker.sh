@@ -762,8 +762,8 @@ configure_networking() {
     
     # Determine network mode first (affects discovery configuration)
     echo -e "${BLUE}Network Mode for API Container:${NC}"
-    echo "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
-    echo "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
+    echo -e "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
+    echo -e "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
     echo
     
     if [ "$OS" != "linux" ]; then
@@ -1187,9 +1187,9 @@ services:
   database:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: \${POSTGRES_DB:-printfarmer}
-      POSTGRES_USER: \${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     networks:
@@ -1197,7 +1197,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER:-postgres} -d \${POSTGRES_DB:-printfarmer}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-printfarmer}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -1212,9 +1212,9 @@ services:
     network_mode: "host"
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
-      - ASPNETCORE_URLS=http://0.0.0.0:\${API_PORT:-5245}
-      - DB_PROVIDER=\${DB_PROVIDER:-Postgres}
-      - ConnectionStrings__Default=\${ConnectionStrings__Default:-Host=localhost;Database=\${POSTGRES_DB:-printfarmer};Username=\${POSTGRES_USER:-postgres};Password=\${POSTGRES_PASSWORD:-postgres}}
+      - ASPNETCORE_URLS=http://0.0.0.0:${API_PORT:-5245}
+      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=${ConnectionStrings__Default}
       - ConnectionStrings__Redis=localhost:6379
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
       - DOCKER_HOST_NETWORK=true
