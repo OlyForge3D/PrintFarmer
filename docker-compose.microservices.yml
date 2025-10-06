@@ -44,16 +44,19 @@ services:
       context: .
       dockerfile: Dockerfile.api
     ports:
-      - "5001:8080"
+      - "${API_PORT:-5001}:8080"
     networks:
       - printfarmer-network
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:8080
-      - DB_PROVIDER=Postgres
-      - ConnectionStrings__Default=Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password
+      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=${ConnectionStrings__Default:-Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password}
       - ConnectionStrings__Redis=redis:6379
-      - CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080
+      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
+      - DOCKER_HOST_NETWORK=${DOCKER_HOST_NETWORK:-false}
+      - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
+      - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
       - DEPLOYMENT_MODE=microservices
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
