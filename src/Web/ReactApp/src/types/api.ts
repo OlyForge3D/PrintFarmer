@@ -19,24 +19,29 @@ export interface GcodeHarvestResultDto {
 export interface DiscoveredGcodeFileDto {
   id: string;
   harvestOperationId: string;
-  filePath: string;
+  printerPath: string;
   fileName: string;
-  size: number;
-  thumbnailUrl?: string;
-  status: HarvestFileStatus;
-  error?: string;
-  discoveredAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  alreadyInLibrary: boolean;
+  fileSizeBytes: number;
+  modifiedAt?: string;
   fileHash?: string;
-  extractedNozzleDiameter?: number;
-  extractedMaterial?: string;
-  extractedPrintTime?: number;
-  extractedFilamentLength?: number;
+  isSelected?: boolean;
+  alreadyInLibrary: boolean;
+  existingLibraryFileId?: string;
+  processingFailed: boolean;
+  errorMessage?: string;
+  thumbnailUrl?: string;
   extractedSlicerName?: string;
   extractedSlicerVersion?: string;
-  modifiedAt?: string;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+  extractedNozzleDiameter?: number;
+  extractedMaterial?: string;
+  extractedLayerHeight?: string;
+  extractedInfill?: string;
+  // Computed/UI fields (not from backend)
+  status?: HarvestFileStatus;
+  error?: string;
+  filePath?: string; // Alias for printerPath
 }
 
 export enum HarvestFileStatus {
@@ -280,7 +285,7 @@ export interface PrinterModelDto {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackendString;
+  defaultBackend?: PrinterBackend;
   supportedFilamentTypes?: string[];
   
   // Capability properties
@@ -372,8 +377,9 @@ export interface BasicHealthStatus {
 
 // Detailed health (/health, /api/health) produced by ASP.NET Core health checks writer
 // Property names are camelCased by System.Text.Json (see Program.HealthJsonOptions)
+// Note: Backend returns numeric enum values (0=Unhealthy, 1=Degraded, 2=Healthy)
 export interface DetailedHealthStatusEntry {
-  status: string;
+  status: string | number; // Backend sends enum as number, frontend converts to string
   duration: string;
   description?: string;
   data?: Record<string, unknown>;
@@ -449,7 +455,7 @@ export interface UpdateModelRequest {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackendString;
+  defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
   
   // Capability properties
@@ -473,7 +479,7 @@ export interface CreateModelRequest {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackendString;
+  defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
   
   // Capability properties
@@ -565,6 +571,12 @@ export interface GcodeHarvestOperation {
   startedAt: string; // API returns ISO date string
   completedAt?: string; // API returns ISO date string
   error?: string;
+  errorType?: string; // ConnectionError, AuthenticationError, FileSystemError, ValidationError, UnknownError
+  errorPhase?: string; // Discovery, Download, Processing, Completion
+  errorDetails?: string; // JSON with exception details
+  failedResource?: string; // File path or URL that caused failure
+  isRetryable?: boolean; // Whether this error can be retried
+  errorOccurredAt?: string; // ISO date string of when error occurred
   options?: HarvestOptions;
   filesPaths?: string[];
 }

@@ -80,22 +80,50 @@ export class PrinterSignalRService {
         try { cb(update); } catch (e) { console.error('Job queue cb error:', e); }
       });
     });
-    // Discovery events
-    this.connection.on('discoveryprogress', (progress: DiscoveryProgressDto) => {
+    // Discovery events - register both lowercase and PascalCase names because server code sometimes
+    // emits events with different casing (historical inconsistency). Listening for both avoids
+    // missed events when casing differs between server and client.
+    const handleDiscoveryProgress = (progress: DiscoveryProgressDto) => {
+      try {
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (win.PrintFarmerDebug?.discovery) {
+          console.debug('[printerSignalR] DiscoveryProgress event', progress);
+        }
+      } catch { /* ignore */ }
       this.discoveryProgressCallbacks.forEach(cb => {
         try { cb(progress); } catch (e) { console.error('Discovery progress cb error:', e); }
       });
-    });
-    this.connection.on('discoveryprinterfound', (found: DiscoveryPrinterFoundDto) => {
+    };
+    const handleDiscoveryPrinterFound = (found: DiscoveryPrinterFoundDto) => {
+      try {
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (win.PrintFarmerDebug?.discovery) {
+          console.debug('[printerSignalR] DiscoveryPrinterFound event', found);
+        }
+      } catch { /* ignore */ }
       this.discoveryPrinterFoundCallbacks.forEach(cb => {
         try { cb(found); } catch (e) { console.error('Discovery printer found cb error:', e); }
       });
-    });
-    this.connection.on('discoverycompleted', (completed: DiscoveryCompletedDto) => {
+    };
+    const handleDiscoveryCompleted = (completed: DiscoveryCompletedDto) => {
+      try {
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (win.PrintFarmerDebug?.discovery) {
+          console.debug('[printerSignalR] DiscoveryCompleted event', completed);
+        }
+      } catch { /* ignore */ }
       this.discoveryCompletedCallbacks.forEach(cb => {
         try { cb(completed); } catch (e) { console.error('Discovery completed cb error:', e); }
       });
-    });
+    };
+
+    // Register both variants
+    this.connection.on('discoveryprogress', handleDiscoveryProgress);
+    this.connection.on('DiscoveryProgress', handleDiscoveryProgress);
+    this.connection.on('discoveryprinterfound', handleDiscoveryPrinterFound);
+    this.connection.on('DiscoveryPrinterFound', handleDiscoveryPrinterFound);
+    this.connection.on('discoverycompleted', handleDiscoveryCompleted);
+    this.connection.on('DiscoveryCompleted', handleDiscoveryCompleted);
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -237,11 +265,23 @@ export class PrinterSignalRService {
       // Discovery group methods
       public async joinDiscoveryGroup(sessionId: string): Promise<void> {
         if (this.connection && this.connection.state === HubConnectionState.Connected) {
+          try {
+            const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+            if (win.PrintFarmerDebug?.discovery) {
+              console.debug('[printerSignalR] joinDiscoveryGroup invoked', sessionId);
+            }
+          } catch { /* ignore */ }
           await this.connection.invoke('JoinDiscoveryGroupAsync', sessionId);
         }
       }
       public async leaveDiscoveryGroup(sessionId: string): Promise<void> {
         if (this.connection && this.connection.state === HubConnectionState.Connected) {
+          try {
+            const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+            if (win.PrintFarmerDebug?.discovery) {
+              console.debug('[printerSignalR] leaveDiscoveryGroup invoked', sessionId);
+            }
+          } catch { /* ignore */ }
           await this.connection.invoke('LeaveDiscoveryGroupAsync', sessionId);
         }
       }
@@ -330,6 +370,74 @@ try {
   }
 } catch {
   // ignore exposing debug helper
+}
+
+// Additional interactive helpers for discovery debugging (gated by PrintFarmerDebug.discovery)
+try {
+  const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+  if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
+  // Only expose these helpers when the discovery gate is enabled to avoid accidental use in production
+  win.PrintFarmerDebug.joinDiscoveryGroup = async (sessionId: string) => {
+    if (!win.PrintFarmerDebug || !('discovery' in win.PrintFarmerDebug) || !win.PrintFarmerDebug.discovery) {
+      console.warn('Enable discovery debug first: window.PrintFarmerDebug.discovery = true');
+      return;
+    }
+    try {
+      await printerSignalRService.connect();
+      console.debug('[printerSignalR.debug] manual joinDiscoveryGroup', sessionId);
+      await printerSignalRService.joinDiscoveryGroup(sessionId);
+      console.debug('[printerSignalR.debug] joinDiscoveryGroup complete', sessionId);
+    } catch (err) {
+      console.error('[printerSignalR.debug] joinDiscoveryGroup failed', err);
+      throw err;
+    }
+  };
+
+  win.PrintFarmerDebug.leaveDiscoveryGroup = async (sessionId: string) => {
+    if (!win.PrintFarmerDebug || !('discovery' in win.PrintFarmerDebug) || !win.PrintFarmerDebug.discovery) {
+      console.warn('Enable discovery debug first: window.PrintFarmerDebug.discovery = true');
+      return;
+    }
+    try {
+      console.debug('[printerSignalR.debug] manual leaveDiscoveryGroup', sessionId);
+      await printerSignalRService.leaveDiscoveryGroup(sessionId);
+      console.debug('[printerSignalR.debug] leaveDiscoveryGroup complete', sessionId);
+    } catch (err) {
+      console.error('[printerSignalR.debug] leaveDiscoveryGroup failed', err);
+      throw err;
+    }
+  };
+
+  win.PrintFarmerDebug.getSignalRDebug = () => {
+    return getPrinterSignalRDebug();
+  };
+  // Allow attaching runtime discovery event handlers from the console
+  win.PrintFarmerDebug.onDiscoveryProgress = (cb: (p: DiscoveryProgressDto) => void) => {
+    try {
+      return printerSignalRService.onDiscoveryProgress(cb);
+    } catch (err) {
+      console.error('[printerSignalR.debug] onDiscoveryProgress attach failed', err);
+      return () => { /* noop */ };
+    }
+  };
+  win.PrintFarmerDebug.onDiscoveryPrinterFound = (cb: (f: DiscoveryPrinterFoundDto) => void) => {
+    try {
+      return printerSignalRService.onDiscoveryPrinterFound(cb);
+    } catch (err) {
+      console.error('[printerSignalR.debug] onDiscoveryPrinterFound attach failed', err);
+      return () => { /* noop */ };
+    }
+  };
+  win.PrintFarmerDebug.onDiscoveryCompleted = (cb: (c: DiscoveryCompletedDto) => void) => {
+    try {
+      return printerSignalRService.onDiscoveryCompleted(cb);
+    } catch (err) {
+      console.error('[printerSignalR.debug] onDiscoveryCompleted attach failed', err);
+      return () => { /* noop */ };
+    }
+  };
+} catch {
+  // ignore
 }
 
 

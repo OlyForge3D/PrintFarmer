@@ -992,6 +992,23 @@ public enum GcodeHarvestStatusDto
     Cancelled = 3
 }
 
+public enum HarvestErrorTypeDto
+{
+    ConnectionError = 0,
+    AuthenticationError = 1,
+    FileSystemError = 2,
+    ValidationError = 3,
+    UnknownError = 4
+}
+
+public enum HarvestErrorPhaseDto
+{
+    Discovery = 0,
+    Download = 1,
+    Processing = 2,
+    Completion = 3
+}
+
 /// <summary>
 /// Represents a G-code harvesting operation and aggregate progress / results.
 /// </summary>
@@ -1003,6 +1020,12 @@ public record GcodeHarvestOperationDto(
     DateTime? CompletedAt = null,
     GcodeHarvestStatusDto Status = GcodeHarvestStatusDto.Running,
     string? ErrorMessage = null,
+    string? ErrorType = null,
+    string? ErrorPhase = null,
+    string? ErrorDetails = null,
+    string? FailedResource = null,
+    bool IsRetryable = false,
+    DateTime? ErrorOccurredAt = null,
     int FilesFound = 0,
     int FilesProcessed = 0, // Calculated as FilesAdded + FilesSkipped + FilesErrored
     int FilesAdded = 0,
@@ -1029,6 +1052,7 @@ public record DiscoveredGcodeFileDto(
     Guid? ExistingLibraryFileId = null,
     bool ProcessingFailed = false,
     string? ErrorMessage = null,
+    string? ThumbnailUrl = null,
     string? ExtractedSlicerName = null,
     string? ExtractedSlicerVersion = null,
     double? ExtractedPrintTime = null,

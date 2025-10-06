@@ -59,20 +59,35 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
     );
   }
 
-  const renderHealthStatus = (status: string, title: string) => {
-    const isHealthy = status === 'Healthy';
-    const isWarning = status === 'Degraded' || status === 'Warning';
+  // Convert numeric health status enum to string
+  // Backend returns: 0 = Unhealthy, 1 = Degraded, 2 = Healthy
+  const normalizeHealthStatus = (status: string | number): string => {
+    if (typeof status === 'number') {
+      switch (status) {
+        case 2: return 'Healthy';
+        case 1: return 'Degraded';
+        case 0: return 'Unhealthy';
+        default: return 'Unknown';
+      }
+    }
+    return status;
+  };
+
+  const renderHealthStatus = (status: string | number, title: string) => {
+    const normalizedStatus = normalizeHealthStatus(status);
+    const isHealthy = normalizedStatus === 'Healthy';
+    const isWarning = normalizedStatus === 'Degraded' || normalizedStatus === 'Warning';
 
     let icon, colorClass;
     if (isHealthy) {
-      icon = <CheckCircle className="h-5 w-5 text-pf-success" />;
-      colorClass = 'text-pf-success bg-pf-success-bg';
+      icon = <CheckCircle className="h-5 w-5 text-white" />;
+      colorClass = 'text-white bg-pf-success-bg';
     } else if (isWarning) {
-      icon = <AlertCircle className="h-5 w-5 text-pf-warning" />;
-      colorClass = 'text-pf-warning-text bg-pf-warning';
+      icon = <AlertCircle className="h-5 w-5 text-white" />;
+      colorClass = 'text-white bg-pf-warning';
     } else {
-      icon = <XCircle className="h-5 w-5 text-pf-error" />;
-      colorClass = 'text-pf-error-text bg-pf-error-bg';
+      icon = <XCircle className="h-5 w-5 text-white" />;
+      colorClass = 'text-white bg-pf-error-bg';
     }
 
     return (
@@ -81,7 +96,7 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
           {icon}
           <span className="text-sm font-medium">{title}</span>
         </div>
-        <span className="text-xs font-semibold">{status}</span>
+        <span className="text-xs font-semibold">{normalizedStatus}</span>
       </div>
     );
   };

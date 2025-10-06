@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
+import { PageTemplate } from '@/components/PageTemplate';
 import { 
   Users, 
   Plus, 
@@ -319,39 +320,24 @@ export function UserManagementPage() {
 
   if (loading) {
     return (
-      <div className="p-6" aria-busy="true" aria-live="polite" aria-label="Loading users">
-        <h1 className="text-2xl font-bold text-pf-text-primary mb-4 flex items-center">
-          <Users className="h-6 w-6 mr-2" aria-hidden="true" />
-          User Management
-        </h1>
+      <PageTemplate
+        title="User Management"
+        subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
+        icon={Users}
+        maxWidth="max-w-7xl"
+      >
         <TableSkeleton rows={6} cols={6} />
-      </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-pf-text-primary mb-2 flex items-center">
-          <Users className="h-6 w-6 mr-2" />
-          User Management
-        </h1>
-        <p className="text-pf-text-secondary">
-          Manage user accounts, roles, and permissions for PrintFarmer.
-        </p>
-      </div>
-      {/* Controls */}
-      <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
-          />
-        </div>
+    <PageTemplate
+      title="User Management"
+      subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
+      icon={Users}
+      maxWidth="max-w-7xl"
+      actions={
         <button
           onClick={() => {
             const farmUserRole = roles.find(r => r.name === 'farm_user');
@@ -365,6 +351,20 @@ export function UserManagementPage() {
           <Plus className="h-4 w-4 mr-2" />
           Add User
         </button>
+      }
+    >
+      {/* Controls */}
+      <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
+          <input
+            type="text"
+            placeholder="Search users..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-4 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+          />
+        </div>
       </div>
       {/* Users Table */}
       <div className="bg-pf-bg-1 border border-pf-border rounded-lg overflow-hidden">
@@ -785,6 +785,6 @@ export function UserManagementPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageTemplate>
   );
 }

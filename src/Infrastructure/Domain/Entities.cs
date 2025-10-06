@@ -175,12 +175,24 @@ public class GcodeHarvestOperation
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public GcodeHarvestStatus Status { get; set; }
-    public string? ErrorMessage { get; set; }
+
+    // Enhanced error tracking
+    public string? ErrorMessage { get; set; } // User-friendly error message
+    public string? ErrorType { get; set; } // ConnectionError, AuthenticationError, FileSystemError, ValidationError, UnknownError
+    public string? ErrorPhase { get; set; } // Discovery, Download, Processing, Completion
+    public string? ErrorDetails { get; set; } // JSON: { exceptionType, stackTrace, additionalInfo }
+    public string? FailedResource { get; set; } // File path or URL that caused the failure
+    public bool IsRetryable { get; set; } = false; // Whether this error can be retried
+    public DateTime? ErrorOccurredAt { get; set; } // Exact timestamp of error
+
+    // File statistics
     public int FilesFound { get; set; }
     public int FilesAdded { get; set; }
     public int FilesSkipped { get; set; } // Already in library
     public int FilesErrored { get; set; }
     public long TotalBytesProcessed { get; set; }
+
+    // Harvest options
     public bool IncludeSubdirectories { get; set; } = true;
     public long? MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024; // 100MB default
     public DateTime? ModifiedAfter { get; set; } // Only harvest files modified after this date
@@ -195,6 +207,23 @@ public enum GcodeHarvestStatus
     Completed = 1,
     Failed = 2,
     Cancelled = 3
+}
+
+public enum HarvestErrorType
+{
+    ConnectionError = 0,      // Network/connectivity issues
+    AuthenticationError = 1,  // API key or permission problems
+    FileSystemError = 2,      // Can't access files/directories
+    ValidationError = 3,      // File validation failures
+    UnknownError = 4          // Unexpected exceptions
+}
+
+public enum HarvestErrorPhase
+{
+    Discovery = 0,    // Failed during file listing
+    Download = 1,     // Failed during file download
+    Processing = 2,   // Failed during file processing/import
+    Completion = 3    // Failed during finalization
 }
 
 // Discovered G-code files during harvest (before adding to library)

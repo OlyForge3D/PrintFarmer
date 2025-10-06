@@ -1,9 +1,9 @@
 import React from 'react';
 import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings } from 'lucide-react';
-import { SystemHealth, DetailedSystemHealth } from '@/components/SystemHealth';
-import { TEST_IDS, printerItemId, printerModelId, printerNameId } from '@/test/testIds';
+import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard } from 'lucide-react';
+import { DetailedSystemHealth } from '@/components/SystemHealth';
+import { PageTemplate } from '@/components/PageTemplate';
 
 interface StatsCardProps {
   title: string;
@@ -59,11 +59,13 @@ export const PrinterDashboard: React.FC = () => {
   }, [printers, getPrinterStatus]);
 
   return (
-    <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-bold text-pf-text-primary mb-4">Printer Dashboard</h1>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+    <PageTemplate
+      title="Printer Dashboard"
+      subtitle="Overview of your 3D printer farm status"
+      icon={LayoutDashboard}
+      maxWidth="max-w-7xl"
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
           <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircle} />
           <StatsCard title="Printing" value={stats.printing} color="yellow" icon={Play} />
@@ -98,25 +100,14 @@ export const PrinterDashboard: React.FC = () => {
           </div>
         ) : (
           <div>
-            <SystemHealth />
             <div className="mt-8">
               <DetailedSystemHealth />
             </div>
 
-            {printers && printers.length > 0 && (
-              <div data-testid={TEST_IDS.PRINTERS_LIST} role="list" aria-label="Printers list" className="mt-6 space-y-4">
-                {printers.map(p => (
-                  <div data-testid={printerItemId(p.id)} key={p.id} role="listitem" aria-label={`Printer ${p.name}`} className="p-4 bg-pf-bg-1 rounded shadow">
-                    <div data-testid={printerNameId(p.id)} className="font-medium">{p.name}</div>
-                    <div data-testid={printerModelId(p.id)} className="text-sm text-pf-text-secondary">{`${p.manufacturerName ?? ''} ${p.modelName ?? ''}`.trim()}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+
           </div>
         )}
-      </div>
-    </div>
+    </PageTemplate>
   );
 };
 

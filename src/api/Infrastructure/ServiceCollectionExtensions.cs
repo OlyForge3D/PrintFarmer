@@ -96,7 +96,9 @@ public static class ServiceCollectionExtensions
         ActivitySource activitySource = new("PrintFarmer.API");
         _ = services.AddSingleton(_ => activitySource);
         _ = services.AddScoped<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
-        _ = services.AddScoped<IUnifiedLoggingService, UnifiedLoggingService>();
+        // IUnifiedLoggingService must be Singleton because it's used by Singleton services like IHarvestQueue
+        // It only depends on ILogger (Singleton) and IServiceProvider (Singleton), so this is safe
+        _ = services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
         _ = services.AddScoped<Farm.Infrastructure.Normalization.INormalizationEventLogger, Farm.Infrastructure.Normalization.NormalizationEventLogger>();
 
         // HTTP Clients with typed clients
@@ -135,9 +137,15 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<StartupStatus>();
 
         // Harvest queue and gcode harvest service
-        _ = services.AddScoped<IHarvestQueue, InMemoryHarvestQueue>();
+        // IHarvestQueue must be Singleton because it's used by background tasks that outlive HTTP request scopes
+        _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
 
+        // Background worker to process harvest file jobs from the queue
+        _ = services.AddHostedService<HarvestWorkerService>();
+
+        // Realtime update service for Klipper/Moonraker printers
+        _ = services.AddHostedService<MoonrakerSubscriptionService>();
         return services;
     }
 }

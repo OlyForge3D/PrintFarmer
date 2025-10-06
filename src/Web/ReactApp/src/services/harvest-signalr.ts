@@ -28,6 +28,9 @@ export type HarvestFileDiscoveredEvent = {
   fileSize: number;
   status?: string;
   error?: string;
+  thumbnailUrl?: string;
+  extractedSlicer?: string;
+  extractedMaterial?: string;
 };
 type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 

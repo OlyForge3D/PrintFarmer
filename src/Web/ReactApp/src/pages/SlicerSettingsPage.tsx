@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
+import { PageTemplate } from '@/components/PageTemplate';
+import { Settings } from 'lucide-react';
 
 // Lightweight mapping to match server DTOs
 type PerEngineSetting = { path?: string | null; argsTemplate?: string | null };
@@ -37,7 +39,16 @@ export const SlicerSettingsPage: React.FC = () => {
 
   const [openExamplesEngine, setOpenExamplesEngine] = useState<string | null>(null);
 
-  if (isLoading || !local) return <div>Loading...</div>;
+  if (isLoading || !local) return (
+    <PageTemplate
+      title="Slicer Worker Settings"
+      subtitle="Configure local slicer executables and enable/disable the local worker"
+      icon={Settings}
+      maxWidth="max-w-4xl"
+    >
+      <div>Loading...</div>
+    </PageTemplate>
+  );
 
   const updateEngineField = (engine: string, field: 'path' | 'argsTemplate', value: string) => {
     setLocal(prev => {
@@ -61,11 +72,12 @@ export const SlicerSettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Slicer Worker Settings</h1>
-        <p className="text-gray-500">Configure local slicer executables and enable/disable the local worker.</p>
-      </div>
+    <PageTemplate
+      title="Slicer Worker Settings"
+      subtitle="Configure local slicer executables and enable/disable the local worker"
+      icon={Settings}
+      maxWidth="max-w-4xl"
+    >
 
       <div className="bg-white rounded shadow p-4">
         <label className="inline-flex items-center">
@@ -126,7 +138,7 @@ export const SlicerSettingsPage: React.FC = () => {
       </div>
 
       {(saveMutation.error || saveError) && <div className="text-red-600">{(saveError) ?? (saveMutation.error as Error)?.message ?? 'Failed to save settings'}</div>}
-    </div>
+    </PageTemplate>
   );
 };
 

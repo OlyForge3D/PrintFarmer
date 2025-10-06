@@ -88,7 +88,7 @@ function AuthenticatedAppRoutes() {
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
         <Route path="models" element={<ModelsPage />} />
-        <Route path="harvest">
+        <Route path="harvest/*">
           <Route index element={<HarvestPage />} />
           <Route path="history" element={<HarvestHistoryPage />} />
           <Route path="library" element={<HarvestedFilesLibrary />} />

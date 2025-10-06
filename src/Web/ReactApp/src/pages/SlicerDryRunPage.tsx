@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { PageTemplate } from '@/components/PageTemplate';
+import { TestTube } from 'lucide-react';
 
 interface DryRunResult {
   rendered: string;
@@ -37,11 +39,12 @@ export const SlicerDryRunPage: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-pf-text-primary">Slicer Args Dry Run</h1>
-                <p className="text-pf-text-secondary">Validate argument templates without executing the slicer binary.</p>
-            </div>
+        <PageTemplate
+            title="Slicer Args Dry Run"
+            subtitle="Validate argument templates without executing the slicer binary"
+            icon={TestTube}
+            maxWidth="max-w-4xl"
+        >
 
             <div className="bg-pf-bg-1 p-4 rounded shadow-lg border border-pf-border">
                 <label className="block mb-2 font-medium text-pf-text-primary">Engine</label>
@@ -88,7 +91,7 @@ export const SlicerDryRunPage: React.FC = () => {
                     </div>
                 )}
             </div>
-        </div>
+        </PageTemplate>
     );
 };
 

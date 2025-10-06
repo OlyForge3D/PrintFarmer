@@ -6,6 +6,7 @@ import { ColorFamilySelect } from '@/components/ColorFamilySelect';
 import { ColorSwatch } from '@/components/ColorSwatch';
 import { SpoolUsageBar } from '@/components/SpoolUsageBar';
 import { Skeleton } from '@/components/Skeleton';
+import { PageTemplate } from '@/components/PageTemplate';
 import '@/components/spool-components.css';
 
 // Matches backend SpoolmanController (SpoolmanSpoolDto) serialized with camelCase
@@ -399,8 +400,11 @@ export function SpoolsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Spools</h1>
+      <PageTemplate
+        title="Spools"
+        subtitle="Manage and monitor your filament spools from Spoolman"
+        icon={Package}
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" aria-label="Loading spools">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 space-y-3">
@@ -418,12 +422,16 @@ export function SpoolsPage() {
             </div>
           ))}
         </div>
-      </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <PageTemplate
+      title="Spools"
+      subtitle="Manage and monitor your filament spools from Spoolman"
+      icon={Package}
+    >
       {health && (!health.configured || !health.success) && (
         <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded">
           {!health.configured ? (
@@ -847,6 +855,6 @@ export function SpoolsPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageTemplate>
   );
 }

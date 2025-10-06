@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '../components/SettingsPagelet';
 import { SettingInputType } from '../types/SettingInputType';
+import { PageTemplate } from '@/components/PageTemplate';
+import { Settings } from 'lucide-react';
 import {
   fetchSettingsMetadata,
   saveAllSettings,
@@ -166,8 +168,12 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto py-8">
-      <h1 className="text-2xl font-bold mb-6">Settings</h1>
+    <PageTemplate
+      title="Settings"
+      subtitle="Configure PrintFarmer application settings"
+      icon={Settings}
+      maxWidth="max-w-3xl"
+    >
       {loading ? (
         <div className="text-center text-gray-500">Loading settings...</div>
       ) : error ? (
@@ -189,6 +195,6 @@ export function SettingsPage() {
           </button>
         </form>
       )}
-    </div>
+    </PageTemplate>
   );
 }

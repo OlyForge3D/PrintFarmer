@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { PageTemplate } from '@/components/PageTemplate';
+import { ClipboardList } from 'lucide-react';
 
 interface JobStatus {
   id: string;
@@ -40,11 +42,12 @@ export const SlicerJobStatusPage: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-pf-text-primary">Slicer Job Status</h1>
-                <p className="text-pf-text-secondary">Query a job to view scheduling and retry metadata.</p>
-            </div>
+        <PageTemplate
+            title="Slicer Job Status"
+            subtitle="Query a job to view scheduling and retry metadata"
+            icon={ClipboardList}
+            maxWidth="max-w-4xl"
+        >
 
             <div className="bg-pf-bg-1 p-4 rounded border border-pf-border">
                 <label className="block font-medium mb-2 text-pf-text-primary">Job ID</label>
@@ -78,7 +81,7 @@ export const SlicerJobStatusPage: React.FC = () => {
                     </div>
                 )}
             </div>
-        </div>
+        </PageTemplate>
     );
 };
 

@@ -4,7 +4,7 @@ if (!window.PrintFarmerDebug) {
 import React, { useState } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
-import { useDiscoveryStream } from '@/hooks/useSignalR';
+import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
@@ -42,6 +42,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const startDiscoveryMutation = useStartDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
+  const { isConnected: isSignalRConnected } = useSignalRConnection('printer');
+  const [startError, setStartError] = useState<string | null>(null);
   
   // Load manufacturers and models
   const { data: manufacturers = [] } = useManufacturers();
@@ -68,6 +70,12 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       resetDiscovery(); // Clear previous results
       const backends = selectedBackends.size > 0 ? Array.from(selectedBackends) : undefined;
       const result = await startDiscoveryMutation.mutateAsync({ backends });
+      if (!result || !('sessionId' in result) || !result.sessionId) {
+        console.error('[PrintFarmer] startDiscovery returned no sessionId', result);
+        setSessionId(null);
+        setStartError('Discovery API did not return a session id.');
+        return;
+      }
       if (window.PrintFarmerDebug?.printerDiscoveryModal) {
         console.log('[PrintFarmer] PrinterDiscoveryModal: Discovery stream started with sessionId:', result.sessionId);
       }
@@ -208,7 +216,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                               }
                               setSelectedBackends(newBackends);
                             }}
-                            disabled={isActive}
+                            disabled={!!isActive}
                             className="rounded border-pf-border text-pf-accent focus:ring-pf-accent focus:ring-offset-pf-bg-1 disabled:opacity-50"
                           />
                           <span className="ml-2 text-sm text-pf-text-primary">{backend.label}</span>
@@ -228,6 +236,12 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   {selectedBackends.size === 0 && (
                     <p className="text-xs text-pf-error-text mt-2">Please select at least one backend to scan</p>
                   )}
+                  {startError && (
+                    <div className="mt-2 p-2 bg-pf-error border border-pf-error-border rounded">
+                      <p className="text-xs text-pf-error-text">{startError}</p>
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs text-pf-text-tertiary">SignalR: {isSignalRConnected ? 'connected' : 'disconnected'}</div>
                 </div>
 
                 {isActive && progress && (() => {
@@ -513,12 +527,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 }
 
 // Separate component to avoid inline style lint for CSS variable usage
-const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct, step }) => {
+// Updates progress synchronously during render instead of useEffect to prevent delays
+const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct }) => {
   const ref = React.useRef<HTMLDivElement | null>(null);
-  React.useEffect(() => {
+  
+  // Set CSS variable during render (before paint) for immediate updates
+  React.useLayoutEffect(() => {
     if (ref.current) {
       ref.current.style.setProperty('--pf-progress', pct + '%');
     }
   }, [pct]);
-  return <div ref={ref} className={`pf-progress-fill step-${step} bg-pf-accent h-2 rounded-full transition-all duration-300`} aria-hidden="true" />;
+  
+  return <div ref={ref} className="pf-progress-fill bg-pf-accent h-2 rounded-full" aria-hidden="true" />;
 };

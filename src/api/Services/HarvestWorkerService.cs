@@ -151,85 +151,114 @@ public partial class HarvestWorkerService(
                 FilePath = job.FilePath,
                 FileName = job.FileName,
                 Size = job.FileSize,
-                ModifiedAt = job.ModifiedAt,
-                // Set other fields as needed
+                ModifiedAt = job.ModifiedAt.HasValue ? DateTime.SpecifyKind(job.ModifiedAt.Value, DateTimeKind.Utc) : null,
+
+                // Optimization: Use metadata from API if available (avoids file download)
+                ExtractedSlicerName = job.SlicerName,
+                ExtractedSlicerVersion = job.SlicerVersion,
+                ExtractedPrintTime = job.EstimatedTimeSeconds.HasValue ? job.EstimatedTimeSeconds.Value / 60 : null, // Convert seconds to minutes
+                ExtractedFilamentLength = job.FilamentLengthMm,
+                ExtractedNozzleDiameter = null, // Not available in Moonraker metadata
+                ExtractedMaterial = null, // TODO: Parse from slicer settings if available
+                // Convert thumbnail relative path to full URL for Moonraker
+                ThumbnailUrl = !string.IsNullOrEmpty(job.ThumbnailRelativePath) 
+                    ? $"{job.ServerUrl}/server/files/gcodes/{job.ThumbnailRelativePath}" 
+                    : null
             };
 
             _logger.LogInformation($"Created discovered file record for {job.FileName} with ID {discoveredFile.Id}", null, null);
 
-            // Download and process file
-            PrinterBackend backend = (PrinterBackend)printer.Backend;
-            using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, moonraker, prusa, sdcp);
+            // Determine if we need to download the file
+            // We ONLY download if:
+            // 1. Duplicate handling is enabled and we need to calculate hash, OR
+            // 2. No metadata was provided by the API (fallback to extraction)
+            bool needsDownload = operation.DuplicateHandling?.ToLowerInvariant() != "skip" ||
+                                 string.IsNullOrEmpty(job.SlicerName);
 
-            if (fileContent != null)
+            if (needsDownload)
             {
-                _logger.LogInformation($"Successfully downloaded file {job.FileName} ({fileContent.Length} bytes)", null, null);
+                // Download and process file
+                PrinterBackend backend = (PrinterBackend)printer.Backend;
+                using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, moonraker, prusa, sdcp);
 
-                // Calculate hash
-                fileContent.Position = 0;
-                discoveredFile.FileHash = await CalculateFileHashAsync(fileContent);
-
-                // Check if already in library
-                GcodeFile? existingFile = await db.GcodeFiles
-                    .FirstOrDefaultAsync(f => f.FileHash == discoveredFile.FileHash, ct);
-
-                if (existingFile != null)
+                if (fileContent != null)
                 {
-                    string handling = operation.DuplicateHandling?.ToLowerInvariant() ?? "skip";
-                    switch (handling)
+                    _logger.LogInformation($"Successfully downloaded file {job.FileName} ({fileContent.Length} bytes)", null, null);
+
+                    // Calculate hash
+                    fileContent.Position = 0;
+                    discoveredFile.FileHash = await CalculateFileHashAsync(fileContent);
+
+                    // Check if already in library
+                    GcodeFile? existingFile = await db.GcodeFiles
+                        .FirstOrDefaultAsync(f => f.FileHash == discoveredFile.FileHash, ct);
+
+                    if (existingFile != null)
                     {
-                        case "overwrite":
-                            _logger.LogInformation($"Overwriting duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
-                            // Treat as added (new metadata snapshot) but reference existing file id
-                            fileContent.Position = 0;
-                            GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
-                            ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
-                            discoveredFile.AlreadyInLibrary = false;
-                            await IncrementAddedCountAsync(db, operation);
-                            break;
-                        case "rename":
-                            _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy", null, null);
-                            // Generate a new unique name with -copy suffix (in discovered scope)
-                            string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
-                            string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
-                            int copyIndex = 1;
-                            string candidate;
-                            do
-                            {
-                                candidate = $"{baseName}-copy{copyIndex}{ext}";
-                                copyIndex++;
-                            } while (await db.HarvestDiscoveredFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
-                            discoveredFile.FileName = candidate;
-                            fileContent.Position = 0;
-                            GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
-                            ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
-                            await IncrementAddedCountAsync(db, operation);
-                            break;
-                        default: // skip
-                            _logger.LogInformation($"Skipping duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
-                            discoveredFile.AlreadyInLibrary = true;
-                            await IncrementSkippedCountAsync(db, operation);
-                            break;
+                        string handling = operation.DuplicateHandling?.ToLowerInvariant() ?? "skip";
+                        switch (handling)
+                        {
+                            case "overwrite":
+                                _logger.LogInformation($"Overwriting duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
+                                // Treat as added (new metadata snapshot) but reference existing file id
+                                fileContent.Position = 0;
+                                GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
+                                ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
+                                discoveredFile.AlreadyInLibrary = false;
+                                await IncrementAddedCountAsync(db, operation);
+                                break;
+                            case "rename":
+                                _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy", null, null);
+                                // Generate a new unique name with -copy suffix (in discovered scope)
+                                string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
+                                string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
+                                int copyIndex = 1;
+                                string candidate;
+                                do
+                                {
+                                    candidate = $"{baseName}-copy{copyIndex}{ext}";
+                                    copyIndex++;
+                                } while (await db.HarvestDiscoveredFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
+                                discoveredFile.FileName = candidate;
+                                fileContent.Position = 0;
+                                GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
+                                ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
+                                await IncrementAddedCountAsync(db, operation);
+                                break;
+                            default: // skip
+                                _logger.LogInformation($"Skipping duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
+                                discoveredFile.AlreadyInLibrary = true;
+                                await IncrementSkippedCountAsync(db, operation);
+                                break;
+                        }
                     }
+                    else
+                    {
+                        // Extract metadata from file content (fallback if API didn't provide it)
+                        if (string.IsNullOrEmpty(job.SlicerName))
+                        {
+                            fileContent.Position = 0;
+                            GcodeMetadataDto metadata = await ExtractMetadataAsync(fileContent);
+                            ApplyMetadataToDiscoveredFile(discoveredFile, metadata);
+                            _logger.LogInformation($"Extracted metadata from file {job.FileName}: Slicer={discoveredFile.ExtractedSlicerName ?? "Unknown"}, Material={discoveredFile.ExtractedMaterial ?? "Unknown"}", null, null);
+                        }
+                        await IncrementAddedCountAsync(db, operation);
+                    }
+
+                    operation.TotalBytesProcessed += job.FileSize;
                 }
                 else
                 {
-                    // Extract metadata
-                    fileContent.Position = 0;
-                    GcodeMetadataDto metadata = await ExtractMetadataAsync(fileContent);
-                    ApplyMetadataToDiscoveredFile(discoveredFile, metadata);
-                    await IncrementAddedCountAsync(db, operation);
-
-                    _logger.LogInformation($"Extracted metadata from file {job.FileName}: Slicer={discoveredFile.ExtractedSlicerName ?? "Unknown"}, Material={discoveredFile.ExtractedMaterial ?? "Unknown"}", null, null);
+                    _logger.LogWarning($"Failed to download file {job.FileName}", null, null);
+                    await IncrementErrorCountAsync(db, operation);
                 }
-
-                operation.TotalBytesProcessed += job.FileSize;
             }
             else
             {
-                _logger.LogWarning($"Failed to download file {job.FileName}", null, null);
-                // No ProcessingFailed or ErrorMessage fields on HarvestDiscoveredFile
-                await IncrementErrorCountAsync(db, operation);
+                // Optimization: No download needed! We have metadata from API
+                _logger.LogInformation($"Skipping download for {job.FileName} - using metadata from API (Slicer: {job.SlicerName ?? "Unknown"})", null, null);
+                await IncrementAddedCountAsync(db, operation);
+                // Note: TotalBytesProcessed not incremented since we didn't download
             }
 
             // Save discovered file
@@ -246,8 +275,7 @@ public partial class HarvestWorkerService(
                 filePath = discoveredFile.FilePath,
                 fileSize = discoveredFile.Size,
                 status = discoveredFile.AlreadyInLibrary ? "skipped" : "added",
-                // error property removed: HarvestDiscoveredFile does not have error field
-                // thumbnailUrl intentionally omitted if not available
+                thumbnailUrl = discoveredFile.ThumbnailUrl,
                 extractedSlicer = discoveredFile.ExtractedSlicerName,
                 extractedMaterial = discoveredFile.ExtractedMaterial
             }, ct);

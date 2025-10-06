@@ -9,7 +9,7 @@
 #   --no-orca           Skip OrcaSlicer worker container
 #   --no-prusa          Skip PrusaSlicer worker container  
 #   --no-tests          Skip running initial tests
-#   --api-only          Only start the API server (skip React, Redis, and workers)
+#   --api-only          Rebuild and restart ONLY the API server (leaves everything else running)
 #   --clean             Clean build artifacts and containers (preserves database data)
 #   --fresh             Complete fresh start (removes containers AND data volumes)
 #
@@ -86,6 +86,43 @@ check_port() {
 require_cmd() {
   if ! command -v "$1" &> /dev/null; then
     error "Required command '$1' not found. Please install it first."
+  fi
+}
+
+# Utility to clean up orphan/dangling Docker images
+cleanup_orphan_images() {
+  info "Cleaning up orphan Docker images..."
+  if docker images -f "dangling=true" -q | grep -q .; then
+    orphan_count=$(docker images -f "dangling=true" -q | wc -l | tr -d ' ')
+    warn "Removing $orphan_count orphan/dangling Docker image(s)..."
+    docker image prune -f >/dev/null 2>&1 || true
+    success "Orphan Docker images cleaned"
+  else
+    info "No orphan Docker images found"
+  fi
+}
+
+# Utility to remove PrintFarmer worker and base slicer images
+cleanup_slicer_images() {
+  info "Removing slicer worker and base images..."
+  local images=(
+    "printfarmer/orcaslicer-worker"
+    "printfarmer/prusaslicer-worker"
+    "printfarmer/slicer-base"
+    "slicer-base"
+  )
+  local removed=0
+  for img in "${images[@]}"; do
+    if docker image inspect "$img" >/dev/null 2>&1; then
+      warn "Removing image: $img"
+      docker rmi -f "$img" >/dev/null 2>&1 || true
+      removed=$((removed + 1))
+    fi
+  done
+  if [[ $removed -gt 0 ]]; then
+    success "Removed $removed slicer image(s)"
+  else
+    info "No slicer images found to remove"
   fi
 }
 
@@ -208,6 +245,9 @@ fresh_cleanup() {
     fi
   done
   
+  # Remove worker and base images to ensure fresh rebuild
+  cleanup_slicer_images
+  
   # Kill any processes on PrintFarmer ports
   local ports=(5000 5245 7281 3000 6379)  # API, React, Redis ports
   for port in "${ports[@]}"; do
@@ -258,6 +298,9 @@ fresh_cleanup() {
     rm -rf "$REACT_DIR/node_modules/.vite"
     warn "Cleared Vite cache"
   fi
+  
+  # Clean up orphan/dangling Docker images
+  cleanup_orphan_images
   
   success "Fresh cleanup completed - ready for clean startup"
 }
@@ -361,7 +404,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [--foreground] [--no-orca] [--no-prusa] [--no-tests] [--api-only] [--clean] [--fresh]"
       echo ""
       echo "Options:"
-      echo "  --api-only  Only start the API server (skip React, Redis, and workers)"
+      echo "  --api-only  Rebuild and restart ONLY the API server (leaves everything else running)"
       echo "  --clean     Clean build artifacts and containers (keeps data volumes)"
       echo "  --fresh     Fresh start - removes everything including data volumes"
       echo "              (--clean and --fresh are mutually exclusive)"
@@ -372,22 +415,27 @@ done
 
 # Early exit for API-only mode: stop existing API, ensure Docker and Postgres, rebuild and start API only
 if [[ $API_ONLY -eq 1 ]]; then
-  # Stop any process on API port
+  info "API-only mode: rebuilding and restarting only the API server"
+  
+  # Stop any existing API process on the port
   PORT=${API_URL##*:}
-  info "API-only mode: freeing port $PORT"
-  check_port $PORT
+  info "Stopping any process on API port $PORT..."
+  if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    warn "Terminating existing API process on port $PORT"
+    lsof -ti:$PORT | xargs kill -9 2>/dev/null || true
+    sleep 2
+  fi
 
-  # Ensure Docker daemon
+  # Ensure Docker daemon is running (needed for PostgreSQL)
   require_cmd docker
-  info "Checking Docker daemon..."
   if ! docker info > /dev/null 2>&1; then
-    warn "Docker not responsive; attempt to start..."
+    warn "Docker not responsive; attempting to start..."
     if [[ "$OSTYPE" == darwin* ]]; then
       open --background -a Docker
     else
       sudo systemctl restart docker
     fi
-    # wait for Docker
+    # Wait for Docker
     for i in {1..30}; do
       if docker info > /dev/null 2>&1; then
         success "Docker is now responsive"
@@ -400,14 +448,59 @@ if [[ $API_ONLY -eq 1 ]]; then
     fi
   fi
 
-  # Ensure Postgres container for migrations
+  # Ensure Postgres container is running (for API database)
   ensure_postgres_container
 
-  # Build and run API only
-  info "Restoring and building API only..."
+  # Build and start API only
+  info "Building API server..."
   cd "$SRC_DIR"
-  dotnet restore api/Farm.Web.Api.csproj
   dotnet build api/Farm.Web.Api.csproj -c Debug
+  
+  # Create log directory if needed
+  mkdir -p "$LOG_DIR"
+  
+  # Start API server
+  info "Starting API server at $API_URL..."
+  export ASPNETCORE_ENVIRONMENT=Development
+  export DEPLOYMENT_MODE=monolithic
+  export ASPNETCORE_URLS="$API_URL"
+  export ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING"
+  
+  dotnet run --project api/Farm.Web.Api.csproj > "$API_LOG" 2>&1 &
+  API_PID=$!
+  
+  # Wait for API to be ready
+  info "Waiting for API server to be ready..."
+  for i in {1..60}; do
+    if curl -s "$API_URL/healthz" > /dev/null 2>&1; then
+      success "API server ready at $API_URL (PID: $API_PID)"
+      break
+    fi
+    if [[ $i -eq 60 ]]; then
+      error "API server failed to start within 60 seconds. Check logs: $API_LOG"
+    fi
+    sleep 1
+  done
+  
+  # Display summary
+  echo
+  success "🚀 API server restarted successfully!"
+  echo
+  echo "📊 Service Info:"
+  echo "  • API Backend:   $API_URL"
+  echo "  • Process ID:    $API_PID"
+  echo "  • Log File:      $API_LOG"
+  echo
+  echo "🔍 Health Checks:"
+  echo "  • Basic Health:  $API_URL/healthz"
+  echo "  • Detailed:      $API_URL/health"
+  echo
+  echo "To stop the API server:"
+  echo "  kill $API_PID"
+  echo
+  
+  # Exit early - don't continue with the rest of the script
+  exit 0
 fi
 
 # Require Docker for full mode below
@@ -499,23 +592,12 @@ elif [[ $CLEAN -eq 1 ]]; then
       docker rm -f "$cname" >/dev/null 2>&1 || true
     fi
   done
-  # Remove worker images if --clean is present
-  for img in printfarmer/orcaslicer-worker printfarmer/prusaslicer-worker; do
-    if docker image inspect "$img" >/dev/null 2>&1; then
-      warn "Removing worker image: $img (--clean)"
-      docker rmi -f "$img" >/dev/null 2>&1 || true
-    fi
-  done
-  # Remove PrintFarmer Postgres data volume for a truly clean DB
-  # Ensure container is removed before volume
-  if docker ps -a --filter "name=printfarmer-postgres" | grep -q .; then
-    warn "Removing container: printfarmer-postgres before volume removal (--clean)"
-    docker rm -f printfarmer-postgres >/dev/null 2>&1 || true
-  fi
-  if docker volume ls -q | grep -q '^printfarmer-postgres-data$'; then
-    warn "Removing Postgres data volume: printfarmer-postgres-data (--clean)"
-    docker volume rm printfarmer-postgres-data >/dev/null 2>&1 || true
-  fi
+  
+  # Remove worker and base images to ensure clean rebuild
+  cleanup_slicer_images
+  
+  # Clean up orphan/dangling Docker images
+  cleanup_orphan_images
 fi
 
 ## Ensure Postgres container is started only once, after all other containers are built

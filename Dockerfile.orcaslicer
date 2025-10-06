@@ -45,7 +45,12 @@ COPY src/Infrastructure/ ./infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/orcaslicer-worker/ ./orcaslicer-worker/
 
-RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish --no-restore --verbosity minimal
+RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish --no-restore --verbosity minimal && \
+    # Verify critical runtime files exist and are non-empty
+    test -s /app/publish/Farm.OrcaSlicer.Worker.dll && \
+    test -s /app/publish/Farm.OrcaSlicer.Worker.runtimeconfig.json && \
+    echo "[build] Published files verified successfully" || \
+    (echo "[build] ERROR: Critical publish files missing or empty" && exit 1)
 
 ########################################
 # Runtime Stage

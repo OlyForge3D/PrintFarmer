@@ -167,16 +167,18 @@ public partial class GcodeHarvestService(
             {
                 _logger.LogError(ex, $"❌ Background harvest task FAILED for operation {operation.Id}: {ex.Message}");
 
-                // Update the operation status to failed
+                // Update the operation status to failed with detailed error info
                 using IServiceScope scope = _serviceScopeFactory.CreateScope();
                 AppDbContext scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 GcodeHarvestOperation? dbOperation = await scopedDb.GcodeHarvestOperations
                     .FirstOrDefaultAsync(o => o.Id == operation.Id);
                 if (dbOperation != null)
                 {
-                    dbOperation.Status = GcodeHarvestStatus.Failed;
-                    dbOperation.ErrorMessage = $"File discovery failed: {ex.Message}";
-                    dbOperation.CompletedAt = DateTime.UtcNow;
+                    HarvestErrorHelper.SetOperationError(
+                        dbOperation,
+                        ex,
+                        nameof(HarvestErrorPhase.Discovery),
+                        failedResource: printer.ServerUrl);
                     await scopedDb.SaveChangesAsync();
                     _logger.LogError($"💾 Updated operation {operation.Id} status to Failed in database");
                 }
@@ -334,7 +336,20 @@ public partial class GcodeHarvestService(
                     FilePath = fileInfo.Path,
                     FileName = fileInfo.Name,
                     FileSize = fileInfo.Size,
-                    ModifiedAt = fileInfo.ModifiedAt
+                    ModifiedAt = fileInfo.ModifiedAt,
+                    
+                    // Pass metadata from API (avoids downloading files during processing)
+                    SlicerName = fileInfo.SlicerName,
+                    SlicerVersion = fileInfo.SlicerVersion,
+                    EstimatedTimeSeconds = fileInfo.EstimatedTimeSeconds,
+                    FilamentLengthMm = fileInfo.FilamentLengthMm,
+                    FilamentWeightGrams = fileInfo.FilamentWeightGrams,
+                    LayerHeight = fileInfo.LayerHeight,
+                    FirstLayerHeight = fileInfo.FirstLayerHeight,
+                    ObjectHeight = fileInfo.ObjectHeight,
+                    FirstLayerBedTemp = fileInfo.FirstLayerBedTemp,
+                    FirstLayerExtrTemp = fileInfo.FirstLayerExtrTemp,
+                    ThumbnailRelativePath = fileInfo.ThumbnailRelativePath
                 };
 
                 scopedLogger.LogDebug($"Queueing file {fileInfo.Name} with path {fileInfo.Path}");
@@ -369,14 +384,16 @@ public partial class GcodeHarvestService(
         {
             scopedLogger.LogError(ex, $"File discovery failed for operation {operation.Id}");
 
-            // Mark operation as failed
+            // Mark operation as failed with detailed error info
             GcodeHarvestOperation? dbOperation = await scopedDb.GcodeHarvestOperations
                 .FirstOrDefaultAsync(o => o.Id == operation.Id);
             if (dbOperation != null)
             {
-                dbOperation.Status = GcodeHarvestStatus.Failed;
-                dbOperation.ErrorMessage = ex.Message;
-                dbOperation.CompletedAt = DateTime.UtcNow;
+                HarvestErrorHelper.SetOperationError(
+                    dbOperation,
+                    ex,
+                    nameof(HarvestErrorPhase.Discovery),
+                    failedResource: printer.ServerUrl);
                 await scopedDb.SaveChangesAsync();
             }
         }
@@ -957,6 +974,51 @@ public partial class GcodeHarvestService(
                     Size = file.Size,
                     ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
                 };
+                
+                // Optimization: Fetch metadata from Moonraker API instead of downloading the file
+                // This avoids transferring potentially large files over the network just to read metadata
+                try
+                {
+                    GCodeMetadata? metadata = await RetryPolicyHelper.ExecuteWithRetryAsync(
+                        () => client.GetFileMetadataAsync(serverUrl, file.Path),
+                        logger: null,
+                        operationName: $"GetFileMetadataAsync for {file.Path}");
+                    
+                    if (metadata != null)
+                    {
+                        printerFileInfo.SlicerName = metadata.Slicer;
+                        printerFileInfo.SlicerVersion = metadata.SlicerVersion;
+                        printerFileInfo.EstimatedTimeSeconds = metadata.EstimatedTime;
+                        printerFileInfo.FilamentLengthMm = metadata.FilamentTotal;
+                        printerFileInfo.FilamentWeightGrams = metadata.FilamentWeightTotal;
+                        printerFileInfo.LayerHeight = metadata.LayerHeight;
+                        printerFileInfo.FirstLayerHeight = metadata.FirstLayerHeight;
+                        printerFileInfo.ObjectHeight = metadata.ObjectHeight;
+                        printerFileInfo.FirstLayerBedTemp = metadata.FirstLayerBedTemp;
+                        printerFileInfo.FirstLayerExtrTemp = metadata.FirstLayerExtrTemp;
+                        
+                        // Extract largest thumbnail path if available
+                        if (metadata.Thumbnails != null && metadata.Thumbnails.Length > 0)
+                        {
+                            ThumbnailInfo largest = metadata.Thumbnails
+                                .OrderByDescending(t => t.Width * t.Height)
+                                .First();
+                            printerFileInfo.ThumbnailRelativePath = largest.RelativePath;
+                        }
+                        
+                        log.LogDebug($"✅ Fetched metadata for {printerFileInfo.Name}: Slicer={metadata.Slicer ?? "Unknown"}, Time={metadata.EstimatedTime ?? 0}s", null, null);
+                    }
+                    else
+                    {
+                        log.LogDebug("⚠️ No metadata available for {FileName}", printerFileInfo.Name);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "⚠️ Failed to fetch metadata for {FileName}, will extract during processing if needed", printerFileInfo.Name);
+                    // Continue without metadata - file will still be discovered
+                }
+                
                 files.Add(printerFileInfo);
                 log.LogDebug("➕ Added file: {FileName} (Size: {Size} bytes)", printerFileInfo.Name, printerFileInfo.Size);
             }
@@ -1152,6 +1214,12 @@ public partial class GcodeHarvestService(
             operation.CompletedAt,
             MapStatus(operation.Status),
             operation.ErrorMessage,
+            operation.ErrorType,
+            operation.ErrorPhase,
+            operation.ErrorDetails,
+            operation.FailedResource,
+            operation.IsRetryable,
+            operation.ErrorOccurredAt,
             operation.FilesFound,
             filesProcessed, // Include calculated FilesProcessed
             operation.FilesAdded,
@@ -1190,6 +1258,7 @@ public partial class GcodeHarvestService(
             null, // ExistingLibraryFileId (not available)
             file.Status == HarvestFileStatus.Failed, // ProcessingFailed
             file.Error, // ErrorMessage
+            file.ThumbnailUrl, // ThumbnailUrl
             file.ExtractedSlicerName,
             file.ExtractedSlicerVersion,
             file.ExtractedPrintTime,
@@ -1208,6 +1277,20 @@ public partial class GcodeHarvestService(
         public string Path { get; set; } = string.Empty;
         public long Size { get; set; }
         public DateTime? ModifiedAt { get; set; }
+        
+        // Metadata from API (populated during discovery for backends that support it)
+        // This avoids downloading files just to extract metadata
+        public string? SlicerName { get; set; }
+        public string? SlicerVersion { get; set; }
+        public int? EstimatedTimeSeconds { get; set; }
+        public double? FilamentLengthMm { get; set; }
+        public double? FilamentWeightGrams { get; set; }
+        public double? LayerHeight { get; set; }
+        public double? FirstLayerHeight { get; set; }
+        public double? ObjectHeight { get; set; }
+        public double? FirstLayerBedTemp { get; set; }
+        public double? FirstLayerExtrTemp { get; set; }
+        public string? ThumbnailRelativePath { get; set; } // Path to largest thumbnail
     }
 
     /// <summary>

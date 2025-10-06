@@ -21,21 +21,19 @@ public interface INetworkDiscoveryService
 }
 
 public partial class NetworkDiscoveryService(
-    MoonrakerClient moonrakerClient,
-    PrusaLinkClient prusaLinkClient,
     ISettingsService settingsService,
     IHubContext<PrinterHub> hubContext,
     IDiscoveryProgressCache progressCache,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger) : INetworkDiscoveryService
+    IUnifiedLoggingService logger,
+    IEnumerable<DiscoveryProbes.INetworkDiscoveryProbe> discoveryProbes) : INetworkDiscoveryService
 {
-    private readonly MoonrakerClient _moonrakerClient = moonrakerClient;
-    private readonly PrusaLinkClient _prusaLinkClient = prusaLinkClient;
     private readonly ISettingsService _settingsService = settingsService;
     private readonly IHubContext<PrinterHub> _hubContext = hubContext;
     private readonly IDiscoveryProgressCache _progressCache = progressCache;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IEnumerable<DiscoveryProbes.INetworkDiscoveryProbe> _discoveryProbes = discoveryProbes;
 
     public async Task<List<DiscoveredPrinterDto>> DiscoverPrintersAsync(CancellationToken cancellationToken = default)
     {
@@ -44,7 +42,8 @@ public partial class NetworkDiscoveryService(
         // Gather existing printers to exclude from results (fresh scope for safety)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
 
-        NetworkDiscoverySettingsDto settings = _settingsService.Get<NetworkDiscoverySettingsDto>();
+        // Load app settings (NetworkDiscoverySettings is an AppSetting) and map to the DTO used by discovery
+        NetworkDiscoverySettingsDto settings = GetDiscoverySettings();
         // Auto-detect network ranges if none configured
         if (settings.NetworkRanges.Count == 0)
         {
@@ -93,7 +92,8 @@ public partial class NetworkDiscoveryService(
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
         HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
 
-        NetworkDiscoverySettingsDto settings = _settingsService.Get<NetworkDiscoverySettingsDto>();
+        // Load and map discovery settings from AppSetting class
+        NetworkDiscoverySettingsDto settings = GetDiscoverySettings();
 
         // Override backends if provided in the request
         if (backends != null)
@@ -529,26 +529,19 @@ public partial class NetworkDiscoveryService(
     {
         try
         {
-            // Try configured ports in order
-            foreach (int port in settings.Ports)
+            // Use discovery probes to attempt printer detection (each probe knows its own ports)
+            DiscoveredPrinterDto? discovered = await TryDiscoverPrinterAsync(ipAddress, settings.TimeoutMs, cancellationToken);
+            if (discovered != null)
             {
-                if (cancellationToken.IsCancellationRequested)
+                // Filter out printers already in the system
+                if (existingServerUrls.Contains(NormalizeUrl(discovered.ServerUrl)))
                 {
-                    break;
+                    // Already discovered, skip returning
+                    return null;
                 }
-
-                DiscoveredPrinterDto? discovered = await TryDiscoverPrinterAsync(ipAddress, port, settings.TimeoutMs, settings.Backends, cancellationToken);
-                if (discovered != null)
+                else
                 {
-                    // Filter out printers already in the system
-                    if (existingServerUrls.Contains(NormalizeUrl(discovered.ServerUrl)))
-                    {
-                        // Already discovered, skip returning
-                    }
-                    else
-                    {
-                        return discovered;
-                    }
+                    return discovered;
                 }
             }
         }
@@ -565,218 +558,38 @@ public partial class NetworkDiscoveryService(
         return null;
     }
 
-    private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int port, int timeoutMs, List<PrinterBackend>? backends, CancellationToken cancellationToken)
+    private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
-        string baseUrl = $"http://{ipAddress}:{port}";
-
-        // If no backends specified, scan all backends (default behavior)
-        List<PrinterBackend> backendsToScan = backends ?? new List<PrinterBackend> { PrinterBackend.Moonraker, PrinterBackend.PrusaLink };
-
-        try
+        // Use discovery probes to attempt printer detection
+        foreach (var probe in _discoveryProbes)
         {
-            _logger.LogDebug("Attempting discovery at {BaseUrl}", baseUrl);
-
-            // Try each backend in the list
-            foreach (PrinterBackend backend in backendsToScan)
+            if (cancellationToken.IsCancellationRequested)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                break;
+            }
 
-                // Port-specific backend scanning logic
-                if (backend == PrinterBackend.Moonraker && port == 7125)
+            try
+            {
+                _logger.LogDebug($"Trying probe {probe.DisplayName} for {ipAddress}", null, null);
+                DiscoveredPrinterDto? result = await probe.ProbeAsync(ipAddress, timeoutMs, cancellationToken);
+                if (result != null)
                 {
-                    _logger.LogInformation("Testing Moonraker at {BaseUrl}", baseUrl);
-                    PrinterInfo? moonrakerInfo = await TryGetMoonrakerInfoAsync(baseUrl, timeoutMs, cancellationToken);
-                    if (moonrakerInfo != null)
-                    {
-                        _logger.LogInformation("Successfully discovered Moonraker printer at {BaseUrl}", baseUrl);
-                        return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.Moonraker, moonrakerInfo);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("No Moonraker response from {BaseUrl}", baseUrl);
-                    }
-                }
-                else if (backend == PrinterBackend.PrusaLink && port == 80)
-                {
-                    _logger.LogInformation("Testing PrusaLink at {BaseUrl}", baseUrl);
-                    PrinterInfo? prusaInfo = await TryGetPrusaLinkInfoAsync(baseUrl, timeoutMs, cancellationToken);
-                    if (prusaInfo != null)
-                    {
-                        _logger.LogInformation("Successfully discovered PrusaLink printer at {BaseUrl}", baseUrl);
-                        return CreateDiscoveredPrinter(ipAddress, port, PrinterBackend.PrusaLink, prusaInfo);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("No PrusaLink response from {BaseUrl}", baseUrl);
-                    }
+                    _logger.LogInformation($"Successfully discovered {result.Backend} printer at {ipAddress} using {probe.DisplayName}", null, null);
+                    return result;
                 }
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Expected when cancellation is requested
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogDebug(ex, "Failed to discover printer at {BaseUrl}", baseUrl);
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Expected when cancellation is requested
+                throw;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, $"Probe {probe.DisplayName} failed for {ipAddress}");
+            }
         }
 
         return null;
-    }
-
-    private async Task<PrinterInfo?> TryGetMoonrakerInfoAsync(string baseUrl, int timeoutMs, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(timeoutMs);
-
-            // Try to get printer info from Moonraker to get hostname and check if it's online
-            MoonrakerPrinterInfo? printerInfo = await _moonrakerClient.GetPrinterInfoAsync(baseUrl, cts.Token);
-            if (printerInfo != null && !string.IsNullOrEmpty(printerInfo.State))
-            {
-                return new PrinterInfo
-                {
-                    Name = !string.IsNullOrEmpty(printerInfo.Hostname) ? printerInfo.Hostname : ExtractHostnameFromUrl(baseUrl),
-                    Manufacturer = "Unknown",
-                    Model = "Klipper Printer",
-                    Firmware = "Klipper/Moonraker",
-                    Version = printerInfo.SoftwareVersion ?? printerInfo.State ?? "Connected"
-                };
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Expected when cancellation is requested
-            throw;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
-        }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
-        {
-            _logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogDebug(ex, "Moonraker discovery failed for {BaseUrl}", baseUrl);
-        }
-
-        return null;
-    }
-
-    private async Task<PrinterInfo?> TryGetPrusaLinkInfoAsync(string baseUrl, int timeoutMs, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(timeoutMs);
-
-            // Try to get info from PrusaLink API
-            Services.PrinterInfo info = await _prusaLinkClient.ApiClient.GetInfoAsync(baseUrl, null, cts.Token);
-            if (info != null)
-            {
-                return new PrinterInfo
-                {
-                    Name = info.Hostname ?? info.Name ?? ExtractHostnameFromUrl(baseUrl),
-                    Manufacturer = "Prusa Research",
-                    Model = info.Name ?? "Unknown Prusa",
-                    Firmware = "PrusaLink",
-                    Version = info.Serial
-                };
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Expected when cancellation is requested
-            throw;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
-        }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
-        {
-            _logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogDebug(ex, "PrusaLink discovery failed for {BaseUrl}", baseUrl);
-        }
-
-        return null;
-    }
-
-    private static DiscoveredPrinterDto CreateDiscoveredPrinter(string ipAddress, int port, PrinterBackend backend, PrinterInfo info)
-    {
-        // For Moonraker printers on port 80, omit the port number from the URL for cleaner URLs
-        string serverUrl = backend == PrinterBackend.Moonraker && port == 80
-            ? $"http://{ipAddress}"
-            : $"http://{ipAddress}:{port}";
-
-        // Filter out "Unknown" values for manufacturer and model
-        string? manufacturer = IsUnknownValue(info.Manufacturer) ? null : info.Manufacturer;
-        string? model = IsUnknownValue(info.Model) ? null : info.Model;
-
-        // If manufacturer is null, also set model to null
-        if (manufacturer == null)
-        {
-            model = null;
-        }
-
-        return new DiscoveredPrinterDto
-        {
-            IpAddress = ipAddress,
-            Port = port,
-            BackendPort = backend == PrinterBackend.Moonraker ? 7125 : port,
-            FrontendPort = backend == PrinterBackend.Moonraker ? 80 : port,
-            ServerUrl = serverUrl,
-            Backend = backend,
-            Name = info.Name ?? $"Printer-{ipAddress}",
-            Manufacturer = manufacturer,
-            Model = model,
-            Firmware = info.Firmware,
-            Version = info.Version,
-            IsReachable = true,
-            DiscoveredAt = DateTime.UtcNow
-        };
-    }
-
-    private static bool IsUnknownValue(string? value)
-    {
-        return !string.IsNullOrEmpty(value) &&
-               value.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ExtractHostnameFromUrl(string url)
-    {
-        try
-        {
-            Uri uri = new(url);
-            return uri.Host;
-        }
-        catch (ArgumentException)
-        {
-            return "Unknown";
-        }
-        catch (UriFormatException)
-        {
-            return "Unknown";
-        }
-    }
-
-    private sealed class PrinterInfo
-    {
-        public string? Name { get; set; }
-        public string? Manufacturer { get; set; }
-        public string? Model { get; set; }
-        public string? Firmware { get; set; }
-        public string? Version { get; set; }
     }
 
     private static string NormalizeUrl(string url)
@@ -815,5 +628,26 @@ public partial class NetworkDiscoveryService(
             _logger.LogWarning(ex, "Failed loading existing printers for exclusion; proceeding without filter");
         }
         return existingServerUrls;
+    }
+
+    // Map the application AppSetting class to the DTO used by the discovery service.
+    // This isolates the discovery code from the internal AppSetting type and prevents
+    // callers from attempting to request the DTO type directly from ISettingsService.
+    private NetworkDiscoverySettingsDto GetDiscoverySettings()
+    {
+        try
+        {
+            // NetworkDiscoverySettings is registered as an AppSetting and should be available
+            NetworkDiscoverySettings app = _settingsService.Get<NetworkDiscoverySettings>();
+            var ranges = app.DiscoverySubnets ?? new List<string>();
+            var ports = app.Ports ?? new List<int> { 80 };
+            return new NetworkDiscoverySettingsDto(ranges, app.ClientTimeoutMs, app.MaxConcurrentRequests, ports, null);
+        }
+        catch (Exception ex)
+        {
+            // If mapping fails for any reason, log and fall back to the DTO defaults
+            _logger.LogWarning(ex, "Failed to load NetworkDiscoverySettings from settings service; falling back to defaults");
+            return new NetworkDiscoverySettingsDto();
+        }
     }
 }

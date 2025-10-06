@@ -4,6 +4,7 @@ import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFi
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
+import { BackendSelector } from './BackendSelector';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -190,16 +191,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </div>
               <div>
                 <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend</label>
-                <select
+                <BackendSelector
                   value={formData.backend}
-                  onChange={e => handleInputChange('backend', parseInt(e.target.value, 10) as PrinterBackend)}
+                  onChange={(backend) => handleInputChange('backend', backend)}
                   className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                   title="Printer backend"
-                >
-                  <option value={0}>Moonraker</option>
-                  <option value={1}>PrusaLink</option>
-                  <option value={2}>SDCP</option>
-                </select>
+                />
               </div>
             {/* Moonraker/PrusaLink port/API key fields */}
             {formData.backend === PrinterBackend.Moonraker && (

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
+import { PageTemplate } from '@/components/PageTemplate';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
 import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
@@ -174,22 +175,26 @@ export const ModelsPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
-      </div>
+      <PageTemplate
+        title="3D Models"
+        subtitle="Upload and manage your 3D models for slicing and printing"
+        icon={Box}
+        maxWidth="max-w-7xl"
+      >
+        <div className="flex items-center justify-center h-64">
+          <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
+        </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-pf-text-primary">3D Models</h1>
-        <p className="mt-1 text-pf-text-secondary">
-          Upload and manage your 3D models for slicing and printing
-        </p>
-      </div>
-
+    <PageTemplate
+      title="3D Models"
+      subtitle="Upload and manage your 3D models for slicing and printing"
+      icon={Box}
+      maxWidth="max-w-7xl"
+    >
       {/* Upload Area */}
       <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
         <div
@@ -428,6 +433,6 @@ export const ModelsPage: React.FC = () => {
           />
         </Suspense>
       )}
-    </div>
+    </PageTemplate>
   );
 };

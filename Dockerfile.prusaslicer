@@ -32,7 +32,12 @@ COPY src/worker-shared/ ./worker-shared/
 COPY src/prusaslicer-worker/ ./prusaslicer-worker/
 
 RUN dotnet publish ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj \
-    -c Release -o /app/publish --no-restore --verbosity minimal
+    -c Release -o /app/publish --no-restore --verbosity minimal && \
+    # Verify critical runtime files exist and are non-empty
+    test -s /app/publish/Farm.PrusaSlicer.Worker.dll && \
+    test -s /app/publish/Farm.PrusaSlicer.Worker.runtimeconfig.json && \
+    echo "[build] Published files verified successfully" || \
+    (echo "[build] ERROR: Critical publish files missing or empty" && exit 1)
 
 ########################################
 # Runtime Stage (layer on slicer-base)

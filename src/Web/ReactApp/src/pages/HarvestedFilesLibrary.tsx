@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import { GcodeFile } from '@/types/api';
+import { PageTemplate } from '@/components/PageTemplate';
+import { FolderOpen } from 'lucide-react';
 
 export const HarvestedFilesLibrary: React.FC = () => {
   const [files, setFiles] = useState<GcodeFile[]>([]);
@@ -28,8 +30,12 @@ export const HarvestedFilesLibrary: React.FC = () => {
   }, [search, sortBy, sortOrder]);
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Harvested G-code Files</h1>
+    <PageTemplate
+      title="Harvested G-code Files"
+      subtitle="Browse and manage G-code files collected from your printers"
+      icon={FolderOpen}
+      maxWidth="max-w-7xl"
+    >
       <div className="flex flex-wrap gap-4 mb-4 items-end">
         <input
           type="text"
@@ -80,6 +86,6 @@ export const HarvestedFilesLibrary: React.FC = () => {
           </tbody>
         </table>
       )}
-    </div>
+    </PageTemplate>
   );
 };

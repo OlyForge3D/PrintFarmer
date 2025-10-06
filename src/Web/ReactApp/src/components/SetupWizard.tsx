@@ -50,18 +50,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [networkDiscoverySettings, setNetworkDiscoverySettings] = useState<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings | null>(null);
   // Fetch network discovery settings from backend on mount
   useEffect(() => {
-    apiClient.getSettings<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscoverySettings')
+    // The unified settings API expects the AppSetting "key" (AppSettingAttribute.Key),
+    // which for NetworkDiscovery is "NetworkDiscovery" (not the class name).
+    apiClient.getSettings<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscovery')
       .then(settings => setNetworkDiscoverySettings(settings))
       .catch(() => {
-        // fallback to defaults if fetch fails
+        // fallback to server canonical defaults if fetch fails
         setNetworkDiscoverySettings({
           enableDiscovery: true,
-          discoverySubnets: ["10.0.0.0/24"],
-          clientTimeoutMs: 50,
-          requestDelayMs: 5,
-          maxConcurrentRequests: 1,
-          maxRetries: 0,
-          ports: [80, 7912],
+          discoverySubnets: ["10.0.0.0/24","10.0.5.0/24"],
+          clientTimeoutMs: 200,
+          requestDelayMs: 100,
+          maxConcurrentRequests: 20,
+          maxRetries: 2,
+          ports: [80],
         });
       });
   }, []);
@@ -501,11 +503,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       {/* Advanced network scan settings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="clientTimeoutMs">Client Timeout (ms)</label>
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="clientTimeoutMs">Client Timeout (ms)</label>
           <input
             id="clientTimeoutMs"
             type="number"
-            className="input input-bordered w-full"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.clientTimeoutMs ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, clientTimeoutMs: Number(e.target.value) } : s)}
             min={100}
@@ -513,11 +515,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="requestDelayMs">Request Delay (ms)</label>
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="requestDelayMs">Request Delay (ms)</label>
           <input
             id="requestDelayMs"
             type="number"
-            className="input input-bordered w-full"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.requestDelayMs ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, requestDelayMs: Number(e.target.value) } : s)}
             min={0}
@@ -525,11 +527,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="maxConcurrentRequests">Max Concurrent Requests</label>
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="maxConcurrentRequests">Max Concurrent Requests</label>
           <input
             id="maxConcurrentRequests"
             type="number"
-            className="input input-bordered w-full"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.maxConcurrentRequests ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxConcurrentRequests: Number(e.target.value) } : s)}
             min={1}
@@ -537,11 +539,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="maxRetries">Max Retries</label>
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="maxRetries">Max Retries</label>
           <input
             id="maxRetries"
             type="number"
-            className="input input-bordered w-full"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.maxRetries ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxRetries: Number(e.target.value) } : s)}
             min={0}

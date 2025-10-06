@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { HubConnectionState } from '@microsoft/signalr';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { printerSignalRService } from '@/services/printer-signalr';
@@ -80,6 +81,10 @@ export function usePrinterStatusUpdates(
         // Swallow debug failures
       }
       if (printerIdsRef.current && !printerIdsRef.current.includes(status.id)) return;
+      
+      // Update state normally - React will batch these appropriately
+      // Note: Printer status updates are less frequent than discovery progress,
+      // so batching is acceptable here
       setLatestUpdate(status);
       setPrinterStatuses(prev => new Map(prev.set(status.id, status)));
       onUpdateRef.current?.(status);
@@ -307,7 +312,10 @@ export function useDiscoveryProgress(
 
   const unsubscribe = printerSignalRService.onDiscoveryProgress?.((progressUpdate) => {
     if (progressUpdate.sessionId === sessionId) {
-      setProgress(progressUpdate);
+      // Force synchronous render to bypass React batching for smooth progress updates
+      flushSync(() => {
+        setProgress(progressUpdate);
+      });
       onProgress?.(progressUpdate);
     }
   });
