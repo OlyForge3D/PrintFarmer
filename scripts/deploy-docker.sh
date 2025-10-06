@@ -127,7 +127,19 @@ load_previous_config() {
         source "$CONFIG_FILE"
         
         print_success "Loaded configuration from $CONFIG_FILE"
-        print_info "Previous deployment settings will be used as defaults"
+        
+        # Display key settings that will be used as defaults
+        if [ -n "${ARCHITECTURE:-}" ]; then
+            echo -e "  ${BLUE}Architecture:${NC} $ARCHITECTURE"
+        fi
+        if [ -n "${DB_PROVIDER:-}" ]; then
+            echo -e "  ${BLUE}Database:${NC} $DB_PROVIDER"
+        fi
+        if [ -n "${NETWORK_MODE:-}" ]; then
+            echo -e "  ${BLUE}Network Mode:${NC} $NETWORK_MODE"
+        fi
+        
+        print_info "Previous settings will be used as defaults (press Enter to accept)"
         echo
         return 0
     fi
@@ -419,7 +431,13 @@ choose_architecture() {
     echo "   • Supports PostgreSQL, SQL Server, MySQL"
     echo
     
-    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices]:" "1" "ARCH_CHOICE"
+    # Use previous architecture as default, or "1" for new deployments
+    local default_choice="1"
+    if [ "${ARCHITECTURE:-}" = "microservices" ]; then
+        default_choice="2"
+    fi
+    
+    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices]:" "$default_choice" "ARCH_CHOICE"
     
     case "$ARCH_CHOICE" in
         1|monolithic|mono)
@@ -598,7 +616,10 @@ configure_database() {
         echo "2. External database - Requires separate setup"
         echo
         
-        prompt_with_default "Database provider [sqlite/postgres/sqlserver/mysql]:" "sqlite" "DB_PROVIDER"
+        # Use previous DB provider as default, or "sqlite" for new deployments
+        local default_provider="${DB_PROVIDER:-sqlite}"
+        
+        prompt_with_default "Database provider [sqlite/postgres/sqlserver/mysql]:" "$default_provider" "DB_PROVIDER"
         
         case "$DB_PROVIDER" in
             sqlite)
@@ -628,7 +649,10 @@ configure_database() {
         echo "4. External database - Your own database server"
         echo
         
-        prompt_with_default "Database provider [postgres/sqlserver/mysql/external]:" "postgres" "DB_PROVIDER"
+        # Use previous DB provider as default, or "postgres" for new deployments
+        local default_provider="${DB_PROVIDER:-postgres}"
+        
+        prompt_with_default "Database provider [postgres/sqlserver/mysql/external]:" "$default_provider" "DB_PROVIDER"
         
         case "$DB_PROVIDER" in
             postgres)
