@@ -2,7 +2,8 @@
 
 **For:** Production deployment with network discovery  
 **Platform:** Ubuntu Server 20.04+ (Linux required)  
-**Last Updated:** October 6, 2025
+**Last Updated:** October 6, 2025  
+**New:** Configuration persistence - settings auto-saved for easy re-deployment!
 
 ---
 
@@ -28,7 +29,7 @@ cd PrintFarmer
 
 ## Quick Deployment (Host Network Mode)
 
-### Option 1: Interactive
+### Option 1: Interactive (First Time)
 
 ```bash
 ./scripts/deploy-docker.sh
@@ -43,8 +44,23 @@ cd PrintFarmer
 - HTTP Port: `8080`
 - API Port: `5245`
 
-### Option 2: Non-Interactive (Recommended)
+**✨ New:** Your settings are automatically saved to `.deploy-config`!
 
+### Option 2: Interactive Re-Deployment
+
+```bash
+# Run script again - previous settings used as defaults!
+./scripts/deploy-docker.sh
+
+# Just press Enter to accept previous values
+# Or type new values to change settings
+```
+
+**No need to remember your choices - they're loaded automatically!**
+
+### Option 3: Non-Interactive (Hands-Off)
+
+**First deployment:**
 ```bash
 export ARCHITECTURE=microservices
 export DB_PROVIDER=Postgres
@@ -59,8 +75,16 @@ export ENVIRONMENT=Production
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
+**Re-deployment (uses saved config):**
+```bash
+# That's it! Config automatically loaded
+./scripts/deploy-docker.sh --non-interactive
+```
+
 **Wait for:**
 ```
+💾 Saving Deployment Configuration
+✅ Configuration saved to .deploy-config
 ✅ Deployment successful!
 Frontend: http://localhost:8080
 API: http://localhost:5245
@@ -207,6 +231,82 @@ docker compose --env-file .env.microservices up -d
 
 ---
 
+## Configuration Persistence
+
+### Automatic Configuration Saving
+
+**Every deployment automatically saves your settings to `.deploy-config`**
+
+**Benefits:**
+- ✅ **Re-deployment is instant** - Run script with no prompts
+- ✅ **No need to remember settings** - Everything saved automatically
+- ✅ **Easy troubleshooting** - Review your exact configuration
+- ✅ **Consistent deployments** - Same settings every time
+
+### View Your Configuration
+
+```bash
+# See your saved settings
+cat .deploy-config
+
+# Example output:
+# ARCHITECTURE=microservices
+# DB_PROVIDER=Postgres
+# NETWORK_MODE=host
+# HTTP_PORT=8080
+# ...
+```
+
+### Quick Re-Deployment
+
+```bash
+# Stop containers
+docker compose --env-file .env.microservices down
+
+# Update code
+git pull
+
+# Re-deploy with saved config (no prompts!)
+./scripts/deploy-docker.sh --non-interactive
+
+# That's it! Uses all your previous settings
+```
+
+### Update Specific Settings
+
+```bash
+# Option 1: Edit config file directly
+nano .deploy-config
+# Change: ORCA_WORKER_COUNT=1 → ORCA_WORKER_COUNT=4
+./scripts/deploy-docker.sh --non-interactive
+
+# Option 2: Override with environment variable
+export ORCA_WORKER_COUNT=4
+./scripts/deploy-docker.sh --non-interactive
+
+# Option 3: Run interactively (previous values as defaults)
+./scripts/deploy-docker.sh
+# Press Enter to keep old values, or type new ones
+```
+
+### Security Note
+
+⚠️ **`.deploy-config` contains passwords** - keep it secure!
+
+```bash
+# Check permissions (should be 600)
+ls -la .deploy-config
+# -rw------- 1 user user ... .deploy-config
+
+# Already gitignored - won't be committed
+git status .deploy-config
+# fatal: pathspec '.deploy-config' did not match any files
+```
+
+**See:** `docs/DEPLOYMENT_CONFIG_PERSISTENCE.md` for complete documentation
+
+---
+
 ## Security Checklist
 
 - [ ] Changed default database password
@@ -214,6 +314,7 @@ docker compose --env-file .env.microservices up -d
 - [ ] Restricted CORS to known origins
 - [ ] Using HTTPS reverse proxy (nginx/traefik)
 - [ ] Regular backups configured
+- [ ] Secured `.deploy-config` file (permissions 600)
 - [ ] Monitoring/alerting set up
 
 ---

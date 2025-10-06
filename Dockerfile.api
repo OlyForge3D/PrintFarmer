@@ -1,5 +1,6 @@
 # API-Only Dockerfile
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+# Build for AMD64 to avoid ARM64 protoc crash on Apple Silicon
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
@@ -8,12 +9,13 @@ RUN apt-get update && \
     apt-get install -y curl iputils-ping iproute2 net-tools dnsutils && \
     rm -rf /var/lib/apt/lists/*
 
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy project files
 COPY src/shared/*.csproj ./shared/
 COPY src/api/*.csproj ./api/
+COPY src/Infrastructure/*.csproj ./Infrastructure/
 # Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto
 COPY Directory.Build.props ./

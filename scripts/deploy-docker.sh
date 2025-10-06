@@ -279,6 +279,128 @@ detect_environment() {
         print_error "Docker daemon is not running! Please start Docker."
         exit 1
     fi
+    
+    # Check .NET SDK (optional but recommended for local builds)
+    check_dotnet_sdk
+}
+
+# Check for .NET SDK and offer installation
+check_dotnet_sdk() {
+    echo
+    print_info "Checking for .NET SDK..."
+    
+    if command -v dotnet &> /dev/null; then
+        DOTNET_VERSION=$(dotnet --version 2>/dev/null || echo "unknown")
+        print_success ".NET SDK found: $DOTNET_VERSION"
+        
+        # Check if version meets minimum requirement (9.0)
+        if [[ "$DOTNET_VERSION" =~ ^9\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
+            print_success ".NET SDK version is compatible"
+        else
+            print_warning ".NET SDK version $DOTNET_VERSION detected"
+            print_warning "PrintFarmer requires .NET 9.0 or later"
+            print_info "Docker builds will still work, but local development may have issues"
+        fi
+    else
+        print_warning ".NET SDK not found"
+        print_info "While Docker deployment doesn't require .NET SDK on the host,"
+        print_info "having it installed allows for local development and debugging."
+        echo
+        
+        if [ "$NON_INTERACTIVE" = "true" ]; then
+            print_info "Skipping .NET SDK installation in non-interactive mode"
+            print_info "To install manually, visit: https://dotnet.microsoft.com/download"
+            return 0
+        fi
+        
+        prompt_yes_no "Would you like to install .NET SDK now?" "no" "INSTALL_DOTNET"
+        
+        if [ "$INSTALL_DOTNET" = "yes" ]; then
+            install_dotnet_sdk
+        else
+            print_info "Continuing without .NET SDK installation"
+            print_info "You can install it later from: https://dotnet.microsoft.com/download"
+        fi
+    fi
+}
+
+# Install .NET SDK using official installation script
+install_dotnet_sdk() {
+    print_header "📦 Installing .NET SDK"
+    
+    local install_script="dotnet-install.sh"
+    local install_url="https://dot.net/v1/dotnet-install.sh"
+    
+    # Download installation script
+    print_info "Downloading .NET installation script..."
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$install_url" -o "$install_script"
+    elif command -v wget &> /dev/null; then
+        wget -q "$install_url" -O "$install_script"
+    else
+        print_error "Neither curl nor wget found. Cannot download .NET installer."
+        print_info "Please install .NET manually: https://dotnet.microsoft.com/download"
+        return 1
+    fi
+    
+    if [ ! -f "$install_script" ]; then
+        print_error "Failed to download .NET installation script"
+        return 1
+    fi
+    
+    chmod +x "$install_script"
+    print_success "Installation script downloaded"
+    
+    # Install .NET SDK 9.0 (required version)
+    print_info "Installing .NET SDK 9.0..."
+    print_info "This may take a few minutes..."
+    
+    if [ "$OS" = "windows" ]; then
+        print_warning "Automated .NET installation not supported on Windows"
+        print_info "Please download and install from: https://dotnet.microsoft.com/download"
+        print_info "After installation, re-run this script"
+        rm -f "$install_script"
+        exit 1
+    fi
+    
+    # Run installation script
+    if ./"$install_script" --channel 9.0 --install-dir "$HOME/.dotnet"; then
+        print_success ".NET SDK 9.0 installed successfully"
+        
+        # Add to PATH for current session
+        export PATH="$HOME/.dotnet:$PATH"
+        export DOTNET_ROOT="$HOME/.dotnet"
+        
+        # Provide instructions for permanent PATH setup
+        echo
+        print_info "To make .NET available in future sessions, add to your shell profile:"
+        echo
+        if [ "$OS" = "macos" ]; then
+            echo "  echo 'export PATH=\"\$HOME/.dotnet:\$PATH\"' >> ~/.zshrc"
+            echo "  echo 'export DOTNET_ROOT=\"\$HOME/.dotnet\"' >> ~/.zshrc"
+        else
+            echo "  echo 'export PATH=\"\$HOME/.dotnet:\$PATH\"' >> ~/.bashrc"
+            echo "  echo 'export DOTNET_ROOT=\"\$HOME/.dotnet\"' >> ~/.bashrc"
+        fi
+        echo
+        
+        # Verify installation
+        if command -v dotnet &> /dev/null; then
+            DOTNET_VERSION=$(dotnet --version)
+            print_success "Verified: .NET SDK $DOTNET_VERSION is now available"
+        else
+            print_warning "Installation completed but 'dotnet' command not found in PATH"
+            print_info "You may need to start a new terminal session"
+        fi
+        
+        # Clean up
+        rm -f "$install_script"
+    else
+        print_error ".NET SDK installation failed"
+        print_info "Please install manually: https://dotnet.microsoft.com/download"
+        rm -f "$install_script"
+        return 1
+    fi
 }
 
 # Choose deployment architecture
