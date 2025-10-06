@@ -161,8 +161,8 @@ public partial class HarvestWorkerService(
                 ExtractedNozzleDiameter = null, // Not available in Moonraker metadata
                 ExtractedMaterial = null, // TODO: Parse from slicer settings if available
                 // Convert thumbnail relative path to full URL for Moonraker
-                ThumbnailUrl = !string.IsNullOrEmpty(job.ThumbnailRelativePath) 
-                    ? $"{job.ServerUrl}/server/files/gcodes/{job.ThumbnailRelativePath}" 
+                ThumbnailUrl = !string.IsNullOrEmpty(job.ThumbnailRelativePath)
+                    ? $"{job.ServerUrl}/server/files/gcodes/{job.ThumbnailRelativePath}"
                     : null
             };
 
@@ -205,7 +205,7 @@ public partial class HarvestWorkerService(
                                 GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
                                 ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
                                 discoveredFile.AlreadyInLibrary = false;
-                                await IncrementAddedCountAsync(db, operation);
+                                // FilesAdded will be incremented during import phase, not discovery
                                 break;
                             case "rename":
                                 _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy", null, null);
@@ -223,7 +223,7 @@ public partial class HarvestWorkerService(
                                 fileContent.Position = 0;
                                 GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
                                 ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
-                                await IncrementAddedCountAsync(db, operation);
+                                // FilesAdded will be incremented during import phase, not discovery
                                 break;
                             default: // skip
                                 _logger.LogInformation($"Skipping duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
@@ -242,7 +242,7 @@ public partial class HarvestWorkerService(
                             ApplyMetadataToDiscoveredFile(discoveredFile, metadata);
                             _logger.LogInformation($"Extracted metadata from file {job.FileName}: Slicer={discoveredFile.ExtractedSlicerName ?? "Unknown"}, Material={discoveredFile.ExtractedMaterial ?? "Unknown"}", null, null);
                         }
-                        await IncrementAddedCountAsync(db, operation);
+                        // FilesAdded will be incremented during import phase, not discovery
                     }
 
                     operation.TotalBytesProcessed += job.FileSize;
@@ -257,7 +257,7 @@ public partial class HarvestWorkerService(
             {
                 // Optimization: No download needed! We have metadata from API
                 _logger.LogInformation($"Skipping download for {job.FileName} - using metadata from API (Slicer: {job.SlicerName ?? "Unknown"})", null, null);
-                await IncrementAddedCountAsync(db, operation);
+                // FilesAdded will be incremented during import phase, not discovery
                 // Note: TotalBytesProcessed not incremented since we didn't download
             }
 
@@ -294,6 +294,9 @@ public partial class HarvestWorkerService(
             {
                 _logger.LogWarning($"File {job.FileName} with ID {discoveredFile.Id} was NOT found in database after save", null, null);
             }
+
+            // Check if operation should be marked as complete
+            await CheckAndCompleteOperationAsync(db, job.OperationId, ct);
         }
         catch (Exception ex)
         {
@@ -311,6 +314,9 @@ public partial class HarvestWorkerService(
                 error = ex.Message
                 // thumbnailUrl, extractedSlicer, extractedMaterial omitted if not available
             }, ct);
+
+            // Check if operation should be marked as complete even after error
+            await CheckAndCompleteOperationAsync(db, job.OperationId, ct);
         }
     }
 
@@ -518,11 +524,8 @@ public partial class HarvestWorkerService(
         await db.SaveChangesAsync();
     }
 
-    private static async Task IncrementAddedCountAsync(AppDbContext db, GcodeHarvestOperation operation)
-    {
-        operation.FilesAdded++;
-        await db.SaveChangesAsync();
-    }
+    // Note: FilesAdded is now incremented during import phase in GcodeHarvestService.ImportSelectedFilesAsync
+    // This ensures the counter only reflects files actually imported to the library, not just discovered
 
     private static async Task IncrementErrorCountAsync(AppDbContext db, GcodeHarvestOperation operation)
     {
@@ -539,6 +542,50 @@ public partial class HarvestWorkerService(
         {
             operation.FilesErrored++;
             await db.SaveChangesAsync();
+        }
+    }
+
+    private async Task CheckAndCompleteOperationAsync(AppDbContext db, Guid operationId, CancellationToken ct)
+    {
+        // Get the operation
+        GcodeHarvestOperation? operation = await db.GcodeHarvestOperations
+            .FirstOrDefaultAsync(o => o.Id == operationId, ct);
+
+        if (operation == null || operation.Status != GcodeHarvestStatus.Running)
+        {
+            return; // Operation doesn't exist or is not running
+        }
+
+        // Count total discovered files for this operation
+        int discoveredCount = await db.HarvestDiscoveredFiles
+            .Where(f => f.HarvestOperationId == operationId)
+            .CountAsync(ct);
+
+        // Check if we've processed all expected files
+        // FilesAdded + FilesSkipped + FilesErrored should equal the total discovered files
+        int totalProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
+
+        _logger.LogDebug($"Operation {operationId}: Discovered={discoveredCount}, Processed={totalProcessed} (Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored})", null, null);
+
+        if (discoveredCount > 0 && discoveredCount == totalProcessed)
+        {
+            // All files have been processed, mark operation as complete
+            operation.Status = GcodeHarvestStatus.Completed;
+            operation.CompletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            _logger.LogInformation($"Operation {operationId} completed: {operation.FilesAdded} added, {operation.FilesSkipped} skipped, {operation.FilesErrored} errors", null, null);
+
+            // Emit completion event via SignalR
+            await _harvestHub.Clients.Group($"harvest-{operationId}").SendAsync("HarvestOperationCompleted", new
+            {
+                operationId = operationId,
+                status = "Completed",
+                filesAdded = operation.FilesAdded,
+                filesSkipped = operation.FilesSkipped,
+                filesErrored = operation.FilesErrored,
+                completedAt = operation.CompletedAt
+            }, ct);
         }
     }
 

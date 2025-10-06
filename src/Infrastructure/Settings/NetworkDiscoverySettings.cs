@@ -18,7 +18,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     /// <summary>
     /// List of subnets to scan, e.g. ["10.0.0.0/24", "192.168.1.0/24"]
     /// </summary>
-    private static readonly string[] DefaultSubnets = new[] { "10.0.0.0/24" };
+    private static readonly string[] DefaultSubnets = new[] { "10.0.0.0/24", "10.0.5.0/24" };
 
     [SettingDisplay(Name = "Discovery Subnets", Description = "List of subnets to scan (CIDR notation).", InputType = SettingInputType.Array, IsMulti = true)]
     [JsonPropertyName("discoverySubnets")]

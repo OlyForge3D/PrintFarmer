@@ -337,7 +337,7 @@ public partial class GcodeHarvestService(
                     FileName = fileInfo.Name,
                     FileSize = fileInfo.Size,
                     ModifiedAt = fileInfo.ModifiedAt,
-                    
+
                     // Pass metadata from API (avoids downloading files during processing)
                     SlicerName = fileInfo.SlicerName,
                     SlicerVersion = fileInfo.SlicerVersion,
@@ -731,6 +731,9 @@ public partial class GcodeHarvestService(
 
                 _db.GcodeFiles.Add(gcodeFile);
                 importedCount++;
+
+                // Increment the operation's FilesAdded counter (only when successfully imported to library)
+                operation.FilesAdded++;
             }
             catch (Exception ex)
             {
@@ -974,7 +977,7 @@ public partial class GcodeHarvestService(
                     Size = file.Size,
                     ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
                 };
-                
+
                 // Optimization: Fetch metadata from Moonraker API instead of downloading the file
                 // This avoids transferring potentially large files over the network just to read metadata
                 try
@@ -983,7 +986,7 @@ public partial class GcodeHarvestService(
                         () => client.GetFileMetadataAsync(serverUrl, file.Path),
                         logger: null,
                         operationName: $"GetFileMetadataAsync for {file.Path}");
-                    
+
                     if (metadata != null)
                     {
                         printerFileInfo.SlicerName = metadata.Slicer;
@@ -996,7 +999,7 @@ public partial class GcodeHarvestService(
                         printerFileInfo.ObjectHeight = metadata.ObjectHeight;
                         printerFileInfo.FirstLayerBedTemp = metadata.FirstLayerBedTemp;
                         printerFileInfo.FirstLayerExtrTemp = metadata.FirstLayerExtrTemp;
-                        
+
                         // Extract largest thumbnail path if available
                         if (metadata.Thumbnails != null && metadata.Thumbnails.Length > 0)
                         {
@@ -1005,7 +1008,7 @@ public partial class GcodeHarvestService(
                                 .First();
                             printerFileInfo.ThumbnailRelativePath = largest.RelativePath;
                         }
-                        
+
                         log.LogDebug($"✅ Fetched metadata for {printerFileInfo.Name}: Slicer={metadata.Slicer ?? "Unknown"}, Time={metadata.EstimatedTime ?? 0}s", null, null);
                     }
                     else
@@ -1018,7 +1021,7 @@ public partial class GcodeHarvestService(
                     log.LogWarning(ex, "⚠️ Failed to fetch metadata for {FileName}, will extract during processing if needed", printerFileInfo.Name);
                     // Continue without metadata - file will still be discovered
                 }
-                
+
                 files.Add(printerFileInfo);
                 log.LogDebug("➕ Added file: {FileName} (Size: {Size} bytes)", printerFileInfo.Name, printerFileInfo.Size);
             }
@@ -1277,7 +1280,7 @@ public partial class GcodeHarvestService(
         public string Path { get; set; } = string.Empty;
         public long Size { get; set; }
         public DateTime? ModifiedAt { get; set; }
-        
+
         // Metadata from API (populated during discovery for backends that support it)
         // This avoids downloading files just to extract metadata
         public string? SlicerName { get; set; }

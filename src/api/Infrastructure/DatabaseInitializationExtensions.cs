@@ -17,13 +17,13 @@ public static class DatabaseInitializationExtensions
         using var scope = app.Services.CreateScope();
         var services = scope.ServiceProvider;
         var logger = services.GetRequiredService<IUnifiedLoggingService>();
-        
+
         try
         {
             // STEP 1: Ensure database schema exists FIRST (before any services query it)
             var db = services.GetRequiredService<AppDbContext>();
             logger.LogInformation("[Startup] Ensuring database schema exists...");
-            
+
             if (app.Environment.IsDevelopment())
             {
                 await db.Database.EnsureCreatedAsync();
@@ -39,12 +39,12 @@ public static class DatabaseInitializationExtensions
             var dbSettingsService = services.GetRequiredService<SettingsService>();
             var dbSettings = dbSettingsService.Get<DatabaseSettings>();
             var dbInitializer = services.GetRequiredService<DatabaseInitializer>();
-            
+
             int retryCount = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_COUNT"), out int rc) ? rc : 3;
             int retryDelay = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_DELAY"), out int rd) ? rd : 2;
 
             logger.LogInformation($"[Startup] Initializing database provider: {dbSettings.Provider}");
-            
+
             // STEP 3: Run initialization and seeding
             await dbInitializer.InitializeAsync(dbSettings.Provider, retryCount, retryDelay);
             logger.LogInformation("[Startup] Database initialization complete");
@@ -55,7 +55,7 @@ public static class DatabaseInitializationExtensions
             // STEP 4: Mark application as ready
             var startupStatus = services.GetRequiredService<StartupStatus>();
             startupStatus.MarkReady();
-            
+
             logger.LogInformation("[Startup] Application ready to serve requests");
         }
         catch (Exception ex)
