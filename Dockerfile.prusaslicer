@@ -45,7 +45,7 @@ RUN dotnet publish ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj \
 ########################################
 # Assets Stage (download & extract Prusa AppImage)
 ########################################
-FROM slicer-base AS prusaassets
+FROM printfarmer-slicer-base AS prusaassets
 USER root
 WORKDIR /tmp
 ARG PRUSASLICER_VERSION
@@ -153,7 +153,7 @@ RUN set -e; echo "[prusaassets] Resolving PrusaSlicer version=${PRUSASLICER_VERS
 ########################################
 # Final Runtime Stage
 ########################################
-FROM slicer-base AS final
+FROM printfarmer-slicer-base AS final
 ARG PRUSASLICER_VERSION
 ARG ALLOW_STUB
 LABEL component="prusaslicer-worker" \

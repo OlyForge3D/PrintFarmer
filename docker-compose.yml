@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.slicer-base
-    image: slicer-base
+    image: printfarmer-slicer-base
     profiles:
       - orca
       - prusa
@@ -34,6 +34,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+    image: printfarmer-api
     ports:
       - "5001:5001" # HTTP API / SignalR
     environment:
@@ -81,6 +82,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    image: printfarmer-frontend
     ports:
       - "3000:80"
     environment:
@@ -102,6 +104,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.orcaslicer
+    image: printfarmer-orcaslicer-worker
     profiles:
       - orca
     environment:
@@ -132,6 +135,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prusaslicer
+    image: printfarmer-prusaslicer-worker
     profiles:
       - prusa
     environment:

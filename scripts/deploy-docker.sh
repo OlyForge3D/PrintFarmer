@@ -1136,6 +1136,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+    image: printfarmer-api
     # HOST NETWORK MODE: Direct host network access (no ports/networks allowed)
     network_mode: "host"
     environment:
@@ -1174,7 +1175,7 @@ services:
       dockerfile: Dockerfile.orcaslicer
     profiles:
       - orca
-    image: orcaslicer-worker
+    image: printfarmer-orcaslicer-worker
     ports:
       - "8081:8080"
     networks:
@@ -1206,7 +1207,7 @@ services:
       dockerfile: Dockerfile.prusaslicer
     profiles:
       - prusa
-    image: prusaslicer-worker
+    image: printfarmer-prusaslicer-worker
     restart: unless-stopped
     ports:
       - "8082:8080"
@@ -1238,6 +1239,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    image: printfarmer-frontend
     ports:
       - "${HTTP_PORT:-8080}:80"
     networks:
@@ -1300,11 +1302,25 @@ deploy_containers() {
 
     if [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
-    elif "${compose_cmd[@]}" build --no-cache; then
-        print_success "Docker images built successfully"
     else
-        print_error "Failed to build Docker images"
-        exit 1
+        # Build slicer-base first if workers are enabled (required dependency)
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ] || [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
+            print_info "Building printfarmer-slicer-base image (required for worker containers)..."
+            if docker build -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .; then
+                print_success "printfarmer-slicer-base image built successfully"
+            else
+                print_error "Failed to build printfarmer-slicer-base image"
+                exit 1
+            fi
+        fi
+        
+        # Now build all services
+        if "${compose_cmd[@]}" build --no-cache; then
+            print_success "Docker images built successfully"
+        else
+            print_error "Failed to build Docker images"
+            exit 1
+        fi
     fi
     
     print_info "Step 2/3: Starting containers..."
