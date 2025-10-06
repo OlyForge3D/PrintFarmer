@@ -182,6 +182,7 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
 # SQL Server Configuration
 SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
 SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
+SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
 
 # MySQL Configuration
 MYSQL_DB=${MYSQL_DB:-printfarmer}
@@ -709,6 +710,7 @@ configure_database() {
                 DB_PROVIDER="sqlserver"
                 prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
                 prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
+                prompt_with_default "SQL Server host port (1433 is default, use different if port conflict):" "${SQLSERVER_PORT:-1433}" "SQLSERVER_PORT"
                 DB_PASSWORD="$SQLSERVER_PASSWORD"
                 CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
                 INCLUDE_SQLSERVER="yes"
@@ -1058,6 +1060,8 @@ EOF
 
 # SQL Server Configuration
 SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
+SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-$DB_PASSWORD}
+SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
 MSSQL_SA_PASSWORD=${SQLSERVER_PASSWORD:-$DB_PASSWORD}
 ACCEPT_EULA=Y
 EOF
@@ -1116,7 +1120,7 @@ EOF
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=\${MSSQL_SA_PASSWORD}
     ports:
-      - "1433:1433"
+      - "\${SQLSERVER_PORT:-1433}:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
     healthcheck:
@@ -1227,7 +1231,7 @@ DBEOF
       MSSQL_SA_PASSWORD: ${SQLSERVER_PASSWORD}
       MSSQL_PID: ${MSSQL_PID:-Developer}
     ports:
-      - "1433:1433"
+      - "${SQLSERVER_PORT:-1433}:1433"
     networks:
       - printfarmer-network
     volumes:
