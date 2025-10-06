@@ -1310,31 +1310,23 @@ deploy_containers() {
     print_info "Step 2/3: Starting containers..."
     print_info "Bringing up services with configuration from $ENV_FILE"
 
-    # Activate profiles for enabled workers (compose v2 profiles) in monolithic architecture
-    local profiles_to_enable=()
+    # Activate profiles for enabled workers (compose v2 profiles)
+    # Build complete compose command with profiles BEFORE the 'up' subcommand
+    local final_compose_cmd=("${compose_cmd[@]}")
+    
     if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
-        profiles_to_enable+=(--profile orca)
+        final_compose_cmd+=(--profile orca)
     fi
     if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 0 ]; then
-        profiles_to_enable+=(--profile prusa)
+        final_compose_cmd+=(--profile prusa)
     fi
 
-    # Bring up base services first
+    # Bring up services
     if [ "$DRY_RUN" = "true" ]; then
-        if [ ${#profiles_to_enable[@]} -gt 0 ]; then
-            print_info "Dry-run mode: not starting containers. (Would run: docker compose up -d ${profiles_to_enable[*]})"
-        else
-            print_info "Dry-run mode: not starting containers. (Would run: docker compose up -d)"
-        fi
-    elif [ ${#profiles_to_enable[@]} -gt 0 ]; then
-        if "${compose_cmd[@]}" up -d "${profiles_to_enable[@]}"; then
-            print_success "Containers started successfully"
-        else
-            print_error "Failed to start containers"
-            exit 1
-        fi
+        print_info "Dry-run mode: not starting containers."
+        print_info "Would run: ${final_compose_cmd[*]} up -d"
     else
-        if "${compose_cmd[@]}" up -d; then
+        if "${final_compose_cmd[@]}" up -d; then
             print_success "Containers started successfully"
         else
             print_error "Failed to start containers"
@@ -1345,11 +1337,11 @@ deploy_containers() {
     # Scaling (only if counts >1). Use service names; if profiles not enabled skip scaling.
     if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
         print_info "Scaling OrcaSlicer workers to $ORCA_WORKER_COUNT replicas"
-        "${compose_cmd[@]}" up -d --scale orcaslicer-worker="$ORCA_WORKER_COUNT"
+        "${final_compose_cmd[@]}" up -d --scale orcaslicer-worker="$ORCA_WORKER_COUNT"
     fi
     if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 1 ]; then
         print_info "Scaling PrusaSlicer workers to $PRUSA_WORKER_COUNT replicas"
-        "${compose_cmd[@]}" up -d --scale prusaslicer-worker="$PRUSA_WORKER_COUNT"
+        "${final_compose_cmd[@]}" up -d --scale prusaslicer-worker="$PRUSA_WORKER_COUNT"
     fi
     
     if [ "$DRY_RUN" = "true" ]; then
