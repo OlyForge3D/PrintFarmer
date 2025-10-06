@@ -174,6 +174,20 @@ INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
 INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
 CONNECTION_STRING=$(printf '%q' "$CONNECTION_STRING")
 
+# PostgreSQL Configuration
+POSTGRES_DB=${POSTGRES_DB:-printfarmer}
+POSTGRES_USER=${POSTGRES_USER:-postgres}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+
+# SQL Server Configuration
+SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
+SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
+
+# MySQL Configuration
+MYSQL_DB=${MYSQL_DB:-printfarmer}
+MYSQL_USER=${MYSQL_USER:-root}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+
 # Network Configuration
 ENABLE_DISCOVERY=$ENABLE_DISCOVERY
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
@@ -616,27 +630,48 @@ configure_database() {
         echo "2. External database - Requires separate setup"
         echo
         
-        # Use previous DB provider as default, or "sqlite" for new deployments
-        local default_provider="${DB_PROVIDER:-sqlite}"
+        # Map DB_PROVIDER to menu choice number for default
+        local default_choice="1"
+        case "${DB_PROVIDER:-sqlite}" in
+            sqlite) default_choice="1" ;;
+            postgres|sqlserver|mysql) default_choice="2" ;;
+        esac
         
-        prompt_with_default "Database provider [sqlite/postgres/sqlserver/mysql]:" "$default_provider" "DB_PROVIDER"
+        prompt_with_default "Choose database [1=SQLite, 2=External]:" "$default_choice" "DB_CHOICE"
         
-        case "$DB_PROVIDER" in
-            sqlite)
+        case "$DB_CHOICE" in
+            1|sqlite|SQLite)
+                DB_PROVIDER="sqlite"
                 CONNECTION_STRING="Data Source=/data/farm.db"
                 print_success "Using SQLite - Data will persist in Docker volume"
                 ;;
-            postgres)
-                prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                ;;
-            sqlserver)
-                prompt_with_default "SQL Server connection string:" "Server=your-sql-server;Database=printfarmer;User Id=sa;Password=YourStrong!Password;TrustServerCertificate=True;" "CONNECTION_STRING"
-                ;;
-            mysql)
-                prompt_with_default "MySQL connection string:" "Server=your-mysql-host;Database=printfarmer;User=root;Password=your-password;" "CONNECTION_STRING"
+            2|external|External|postgres|sqlserver|mysql)
+                # If user selected 2 but we don't have a previous provider, ask which one
+                if [ "$DB_CHOICE" = "2" ] || [ "$DB_CHOICE" = "external" ] || [ "$DB_CHOICE" = "External" ]; then
+                    local prev_external="${DB_PROVIDER:-postgres}"
+                    [ "$prev_external" = "sqlite" ] && prev_external="postgres"
+                    prompt_with_default "External database type [postgres/sqlserver/mysql]:" "$prev_external" "DB_PROVIDER"
+                fi
+                
+                case "$DB_PROVIDER" in
+                    postgres)
+                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
+                        ;;
+                    sqlserver)
+                        prompt_with_default "SQL Server connection string:" "Server=your-sql-server;Database=printfarmer;User Id=sa;Password=YourStrong!Password;TrustServerCertificate=True;" "CONNECTION_STRING"
+                        ;;
+                    mysql)
+                        prompt_with_default "MySQL connection string:" "Server=your-mysql-host;Database=printfarmer;User=root;Password=your-password;" "CONNECTION_STRING"
+                        ;;
+                    *)
+                        print_warning "Unknown database type, using SQLite as fallback"
+                        DB_PROVIDER="sqlite"
+                        CONNECTION_STRING="Data Source=/data/farm.db"
+                        ;;
+                esac
                 ;;
             *)
-                print_warning "Unknown database provider, using SQLite as fallback"
+                print_warning "Unknown choice, using SQLite as fallback"
                 DB_PROVIDER="sqlite"
                 CONNECTION_STRING="Data Source=/data/farm.db"
                 ;;
@@ -649,37 +684,72 @@ configure_database() {
         echo "4. External database - Your own database server"
         echo
         
-        # Use previous DB provider as default, or "postgres" for new deployments
-        local default_provider="${DB_PROVIDER:-postgres}"
+        # Map DB_PROVIDER to menu choice number for default
+        local default_choice="1"
+        case "${DB_PROVIDER:-postgres}" in
+            postgres) default_choice="1" ;;
+            sqlserver) default_choice="2" ;;
+            mysql) default_choice="3" ;;
+            external) default_choice="4" ;;
+        esac
         
-        prompt_with_default "Database provider [postgres/sqlserver/mysql/external]:" "$default_provider" "DB_PROVIDER"
+        prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server, 3=MySQL, 4=External]:" "$default_choice" "DB_CHOICE"
         
-        case "$DB_PROVIDER" in
-            postgres)
-                prompt_with_default "PostgreSQL password:" "postgres" "DB_PASSWORD"
-                CONNECTION_STRING="Host=postgres;Database=printfarmer;Username=postgres;Password=$DB_PASSWORD"
+        case "$DB_CHOICE" in
+            1|postgres|PostgreSQL)
+                DB_PROVIDER="postgres"
+                prompt_with_default "PostgreSQL database name:" "${POSTGRES_DB:-printfarmer}" "POSTGRES_DB"
+                prompt_with_default "PostgreSQL username:" "${POSTGRES_USER:-postgres}" "POSTGRES_USER"
+                prompt_with_default "PostgreSQL password:" "${POSTGRES_PASSWORD:-postgres}" "POSTGRES_PASSWORD"
+                DB_PASSWORD="$POSTGRES_PASSWORD"
+                CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
                 INCLUDE_POSTGRES="yes"
                 ;;
-            sqlserver)
-                prompt_with_default "SQL Server SA password:" "YourStrong!Password123" "DB_PASSWORD"
-                CONNECTION_STRING="Server=sqlserver;Database=printfarmer;User Id=sa;Password=$DB_PASSWORD;TrustServerCertificate=True;"
+            2|sqlserver|"SQL Server")
+                DB_PROVIDER="sqlserver"
+                prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
+                prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
+                DB_PASSWORD="$SQLSERVER_PASSWORD"
+                CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
                 INCLUDE_SQLSERVER="yes"
                 ;;
-            mysql)
-                prompt_with_default "MySQL root password:" "example" "DB_PASSWORD"
-                CONNECTION_STRING="Server=mysql;Database=printfarmer;User=root;Password=$DB_PASSWORD;"
+            3|mysql|MySQL)
+                DB_PROVIDER="mysql"
+                prompt_with_default "MySQL database name:" "${MYSQL_DB:-printfarmer}" "MYSQL_DB"
+                prompt_with_default "MySQL username:" "${MYSQL_USER:-root}" "MYSQL_USER"
+                prompt_with_default "MySQL password:" "${MYSQL_PASSWORD:-example}" "MYSQL_PASSWORD"
+                DB_PASSWORD="$MYSQL_PASSWORD"
+                CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
                 INCLUDE_MYSQL="yes"
                 ;;
-            external)
+            4|external|External)
                 prompt_with_default "External database provider [postgres/sqlserver/mysql]:" "postgres" "EXT_DB_TYPE"
-                prompt_with_default "Connection string:" "Host=your-host;Database=printfarmer;Username=user;Password=password" "CONNECTION_STRING"
+                prompt_with_default "Database host:" "your-host" "EXT_DB_HOST"
+                prompt_with_default "Database name:" "printfarmer" "EXT_DB_NAME"
+                prompt_with_default "Database username:" "user" "EXT_DB_USER"
+                prompt_with_default "Database password:" "password" "EXT_DB_PASSWORD"
+                
+                case "$EXT_DB_TYPE" in
+                    postgres)
+                        CONNECTION_STRING="Host=$EXT_DB_HOST;Database=$EXT_DB_NAME;Username=$EXT_DB_USER;Password=$EXT_DB_PASSWORD"
+                        ;;
+                    sqlserver)
+                        CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User Id=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;TrustServerCertificate=True;"
+                        ;;
+                    mysql)
+                        CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;"
+                        ;;
+                esac
                 DB_PROVIDER="$EXT_DB_TYPE"
                 ;;
             *)
-                print_warning "Unknown database provider, using PostgreSQL as fallback"
+                print_warning "Unknown choice, using PostgreSQL as fallback"
                 DB_PROVIDER="postgres"
+                POSTGRES_DB="printfarmer"
+                POSTGRES_USER="postgres"
+                POSTGRES_PASSWORD="postgres"
                 DB_PASSWORD="postgres"
-                CONNECTION_STRING="Host=postgres;Database=printfarmer;Username=postgres;Password=$DB_PASSWORD"
+                CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
                 INCLUDE_POSTGRES="yes"
                 ;;
         esac
@@ -971,9 +1041,9 @@ EOF
         cat >> "$ENV_FILE" << EOF
 
 # PostgreSQL Configuration
-POSTGRES_DB=printfarmer
-POSTGRES_USER=postgres  
-POSTGRES_PASSWORD=$DB_PASSWORD
+POSTGRES_DB=${POSTGRES_DB:-printfarmer}
+POSTGRES_USER=${POSTGRES_USER:-postgres}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-$DB_PASSWORD}
 EOF
     fi
     
@@ -981,7 +1051,8 @@ EOF
         cat >> "$ENV_FILE" << EOF
 
 # SQL Server Configuration
-MSSQL_SA_PASSWORD=$DB_PASSWORD
+SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
+MSSQL_SA_PASSWORD=${SQLSERVER_PASSWORD:-$DB_PASSWORD}
 ACCEPT_EULA=Y
 EOF
     fi
@@ -990,8 +1061,10 @@ EOF
         cat >> "$ENV_FILE" << EOF
 
 # MySQL Configuration
-MYSQL_ROOT_PASSWORD=$DB_PASSWORD
-MYSQL_DATABASE=printfarmer
+MYSQL_DB=${MYSQL_DB:-printfarmer}
+MYSQL_USER=${MYSQL_USER:-root}
+MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-$DB_PASSWORD}
+MYSQL_DATABASE=${MYSQL_DB:-printfarmer}
 EOF
     fi
     
@@ -1114,9 +1187,9 @@ services:
   database:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: printfarmer
-      POSTGRES_USER: printfarmer
-      POSTGRES_PASSWORD: printfarmer_password
+      POSTGRES_DB: \${POSTGRES_DB:-printfarmer}
+      POSTGRES_USER: \${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     networks:
@@ -1124,7 +1197,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]
+      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER:-postgres} -d \${POSTGRES_DB:-printfarmer}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -1139,9 +1212,9 @@ services:
     network_mode: "host"
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
-      - ASPNETCORE_URLS=http://0.0.0.0:${API_PORT:-5245}
-      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
-      - ConnectionStrings__Default=${ConnectionStrings__Default:-Host=localhost;Database=printfarmer;Username=printfarmer;Password=printfarmer_password}
+      - ASPNETCORE_URLS=http://0.0.0.0:\${API_PORT:-5245}
+      - DB_PROVIDER=\${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=\${ConnectionStrings__Default:-Host=localhost;Database=\${POSTGRES_DB:-printfarmer};Username=\${POSTGRES_USER:-postgres};Password=\${POSTGRES_PASSWORD:-postgres}}
       - ConnectionStrings__Redis=localhost:6379
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
       - DOCKER_HOST_NETWORK=true
