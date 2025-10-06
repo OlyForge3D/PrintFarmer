@@ -666,66 +666,21 @@ configure_database() {
 configure_networking() {
     print_header "🌐 Network Configuration"
     
-    echo -e "${BLUE}Network discovery allows PrintFarmer to automatically find 3D printers on your network.${NC}"
+    # Determine network mode first (affects discovery configuration)
+    echo -e "${BLUE}Network Mode for API Container:${NC}"
+    echo "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
+    echo "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
     echo
     
-    if [ "$OS" = "macos" ]; then
-        print_warning "macOS Docker has limited WiFi access. Network discovery may not work for WiFi-connected printers."
-        print_info "Consider using local development instead of Docker on macOS."
+    if [ "$OS" != "linux" ]; then
+        print_warning "Host network mode only works on Linux."
+        print_warning "Current OS: $OS (detected)"
         echo
-    fi
-    
-    prompt_yes_no "Enable network discovery?" "yes" "ENABLE_DISCOVERY"
-    
-    if [ "$ENABLE_DISCOVERY" = "yes" ]; then
-        echo
-        echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
-        echo "Common ranges:"
-        echo "  • 192.168.0.0/16 (Most home networks: 192.168.x.x)"
-        echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
-        echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
-        echo
+        prompt_yes_no "Are you deploying to a Linux server (not this machine)?" "no" "DEPLOYING_TO_LINUX"
         
-        prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
-        ALLOW_LOCAL_NETWORK="true"
-        
-        # Host network mode configuration (Linux only)
-        echo
-        echo -e "${BLUE}Network Mode for API Container:${NC}"
-        echo "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
-        echo "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
-        echo
-        
-        if [ "$OS" != "linux" ]; then
-            print_warning "Host network mode only works on Linux."
-            print_warning "Current OS: $OS (detected)"
-            echo
-            prompt_yes_no "Are you deploying to a Linux server (not this machine)?" "no" "DEPLOYING_TO_LINUX"
-            
-            if [ "$DEPLOYING_TO_LINUX" = "yes" ]; then
-                print_info "Generating configuration for Linux target deployment"
-                echo -e "${YELLOW}For optimal network discovery (broadcast/multicast), choose host mode.${NC}"
-                echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
-                echo
-                prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
-                
-                case "$NETWORK_MODE_CHOICE" in
-                    2|host|Host)
-                        NETWORK_MODE="host"
-                        print_success "Using host network mode for full discovery support"
-                        print_info "API will bind to port ${API_PORT:-5245} on the host"
-                        ;;
-                    *)
-                        NETWORK_MODE="bridge"
-                        print_info "Using bridge mode (cross-platform compatible)"
-                        ;;
-                esac
-            else
-                print_info "Forcing bridge mode for $OS deployment"
-                NETWORK_MODE="bridge"
-            fi
-        else
-            echo -e "${YELLOW}For optimal network discovery (broadcast/multicast), choose host mode.${NC}"
+        if [ "$DEPLOYING_TO_LINUX" = "yes" ]; then
+            print_info "Generating configuration for Linux target deployment"
+            echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
             echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
             echo
             prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
@@ -741,11 +696,74 @@ configure_networking() {
                     print_info "Using bridge mode (cross-platform compatible)"
                     ;;
             esac
+        else
+            print_info "Forcing bridge mode for $OS deployment"
+            NETWORK_MODE="bridge"
         fi
     else
-        ALLOW_LOCAL_NETWORK="false"
-        NETWORK_RANGES=""
-        NETWORK_MODE="bridge"
+        echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
+        echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
+        echo
+        prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
+        
+        case "$NETWORK_MODE_CHOICE" in
+            2|host|Host)
+                NETWORK_MODE="host"
+                print_success "Using host network mode for full discovery support"
+                print_info "API will bind to port ${API_PORT:-5245} on the host"
+                ;;
+            *)
+                NETWORK_MODE="bridge"
+                print_info "Using bridge mode (cross-platform compatible)"
+                ;;
+        esac
+    fi
+    
+    echo
+    
+    # Configure discovery based on network mode
+    if [ "$NETWORK_MODE" = "host" ]; then
+        # Host mode: Auto-enable discovery with sensible defaults
+        print_success "Network discovery automatically enabled with host networking"
+        ENABLE_DISCOVERY="yes"
+        ALLOW_LOCAL_NETWORK="true"
+        
+        echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
+        echo "Common ranges:"
+        echo "  • 192.168.0.0/16 (Most home networks: 192.168.x.x)"
+        echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
+        echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
+        echo
+        
+        prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
+    else
+        # Bridge mode: Ask about discovery
+        echo -e "${BLUE}Network discovery allows PrintFarmer to find 3D printers on your network.${NC}"
+        echo
+        
+        if [ "$OS" = "macos" ]; then
+            print_warning "macOS Docker has limited WiFi access. Network discovery may not work for WiFi-connected printers."
+            print_info "Consider using local development instead of Docker on macOS."
+            echo
+        fi
+        
+        prompt_yes_no "Enable network discovery?" "yes" "ENABLE_DISCOVERY"
+        
+        if [ "$ENABLE_DISCOVERY" = "yes" ]; then
+            echo
+            echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
+            echo "Common ranges:"
+            echo "  • 192.168.0.0/16 (Most home networks: 192.168.x.x)"
+            echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
+            echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
+            echo
+            
+            prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
+            ALLOW_LOCAL_NETWORK="true"
+        else
+            ALLOW_LOCAL_NETWORK="false"
+            NETWORK_RANGES=""
+        fi
     fi
     
     echo
