@@ -864,6 +864,12 @@ configure_networking() {
     echo -e "${BLUE}Configure external access:${NC}"
     prompt_with_default "HTTP port for web access:" "8080" "HTTP_PORT"
     
+    # Warn about port 80 requiring elevated privileges
+    if [ "$HTTP_PORT" = "80" ] && [ "$OS" = "linux" ]; then
+        print_warning "Port 80 requires elevated privileges. Docker must be running with proper permissions."
+        print_info "If containers fail to start, consider using port 8080 or run with: sudo docker compose ..."
+    fi
+    
     if [ "$ARCHITECTURE" = "microservices" ]; then
         prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
     fi
@@ -1161,7 +1167,8 @@ generate_host_network_override() {
         print_info "Creating complete host network compose file (standalone)"
         print_warning "This file includes ALL services with API configured for host networking"
         
-        cat > docker-compose.host-network.yml << 'EOF'
+        # Start the compose file
+        cat > docker-compose.host-network.yml << 'MAINEOF'
 # PrintFarmer Microservices Architecture - HOST NETWORK MODE
 # Complete standalone compose file with API in host network mode
 # DO NOT use with docker-compose.microservices.yml (conflicts due to network_mode)
@@ -1183,7 +1190,13 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
-  # Database (configured via override file - postgres/sqlserver/mysql)
+MAINEOF
+
+        # Add the appropriate database service based on DB_PROVIDER
+        case "${DB_PROVIDER:-postgres}" in
+            postgres)
+                cat >> docker-compose.host-network.yml << 'DBEOF'
+  # PostgreSQL Database
   database:
     image: postgres:15-alpine
     environment:
@@ -1202,6 +1215,59 @@ services:
       timeout: 5s
       retries: 5
 
+DBEOF
+                ;;
+            sqlserver)
+                cat >> docker-compose.host-network.yml << 'DBEOF'
+  # SQL Server Database
+  database:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQLSERVER_PASSWORD}
+      MSSQL_PID: ${MSSQL_PID:-Developer}
+    ports:
+      - "1433:1433"
+    networks:
+      - printfarmer-network
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P ${SQLSERVER_PASSWORD} -Q 'SELECT 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+DBEOF
+                ;;
+            mysql)
+                cat >> docker-compose.host-network.yml << 'DBEOF'
+  # MySQL Database
+  database:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB:-printfarmer}
+      MYSQL_USER: ${MYSQL_USER:-printfarmer}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    networks:
+      - printfarmer-network
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+DBEOF
+                ;;
+        esac
+
+        # Continue with the rest of the services (API, workers, frontend)
+        cat >> docker-compose.host-network.yml << 'RESTEOF'
   # PrintFarmer API - Using HOST NETWORK MODE for full network discovery
   api:
     build:
@@ -1333,13 +1399,15 @@ networks:
 volumes:
   redis_data:
   postgres_data:
+  sqlserver_data:
+  mysql_data:
   app_data:
   model_uploads:
   gcode_storage:
   slicer_profiles:
   orcaslicer_temp:
   prusaslicer_temp:
-EOF
+RESTEOF
         
         print_success "Host network compose file created: docker-compose.host-network.yml"
         print_warning "API will bind directly to host port ${API_PORT:-5245}"
@@ -1459,22 +1527,30 @@ verify_deployment() {
     print_info "Testing health endpoints..."
     
     # Test basic health
-    if curl -sf "$api_url/healthz" >/dev/null; then
+    if curl -sf "$api_url/healthz" >/dev/null 2>&1; then
         print_success "Basic health check: OK"
     else
-        print_warning "Basic health check: FAILED"
-        print_info "This might be normal if the service is still starting up"
+        print_warning "Basic health check: FAILED (this might be normal if services are still starting)"
+        print_info "Tip: Run 'docker compose logs frontend' to see frontend logs"
+        print_info "Tip: Run 'docker compose ps' to check container status"
     fi
     
-    # Test comprehensive health
-    if curl -sf "$api_url/health" >/dev/null; then
+    # Test comprehensive health  
+    if curl -sf "$api_url/health" >/dev/null 2>&1; then
         print_success "Comprehensive health check: OK" 
     else
         print_warning "Comprehensive health check: FAILED"
+        print_info "Waiting 10 seconds for services to fully start..."
+        sleep 10
+        if curl -sf "$api_url/health" >/dev/null 2>&1; then
+            print_success "Comprehensive health check: OK (after retry)"
+        else
+            print_warning "Still failing - check logs with: docker compose logs"
+        fi
     fi
     
     # Test API endpoints
-    if curl -sf "$api_url/api/printers" >/dev/null; then
+    if curl -sf "$api_url/api/printers" >/dev/null 2>&1; then
         print_success "API endpoints: OK"
     else
         print_warning "API endpoints: Not ready yet"
@@ -1497,7 +1573,7 @@ display_final_info() {
     
     # Determine the hostname/IP to show in URLs
     local SERVER_HOST="localhost"
-    if [ "$DEPLOYING_TO_LINUX" = "yes" ] || [ "$OS" = "linux" ]; then
+    if [ "${DEPLOYING_TO_LINUX:-no}" = "yes" ] || [ "$OS" = "linux" ]; then
         # Try to get the primary IP address
         if command -v hostname >/dev/null 2>&1; then
             # Try hostname -I first (works on most Linux)
@@ -1568,6 +1644,37 @@ display_final_info() {
         echo -e "${BLUE}  • Override: docker-compose.override.yml${NC}"
     fi
     echo
+    
+    # Troubleshooting section
+    if [ "$DRY_RUN" != "true" ]; then
+        echo -e "${YELLOW}Troubleshooting:${NC}"
+        echo -e "${BLUE}  • Check container status: docker compose ps${NC}"
+        echo -e "${BLUE}  • View all logs: docker compose logs${NC}"
+        echo -e "${BLUE}  • Check specific service: docker compose logs frontend${NC}"
+        echo -e "${BLUE}  • Restart a service: docker compose restart frontend${NC}"
+        
+        # Port 80 specific troubleshooting
+        if [ "$HTTP_PORT" = "80" ]; then
+            echo
+            echo -e "${YELLOW}Port 80 Notes:${NC}"
+            echo -e "${BLUE}  • Requires elevated privileges on Linux${NC}"
+            echo -e "${BLUE}  • Check if port is bound: sudo netstat -tlnp | grep :80${NC}"
+            echo -e "${BLUE}  • If connection refused, check firewall: sudo ufw status${NC}"
+        fi
+        
+        # Remote access troubleshooting
+        if [ "$SERVER_HOST" != "localhost" ]; then
+            echo
+            echo -e "${YELLOW}Remote Access Notes:${NC}"
+            echo -e "${BLUE}  • Ensure firewall allows port $HTTP_PORT${NC}"
+            if [ "$ARCHITECTURE" = "microservices" ]; then
+                echo -e "${BLUE}  • Ensure firewall allows port $API_PORT${NC}"
+            fi
+            echo -e "${BLUE}  • Test from server: curl http://localhost:$HTTP_PORT/healthz${NC}"
+            echo -e "${BLUE}  • Check Docker networks: docker network ls${NC}"
+        fi
+        echo
+    fi
     
     print_info "For troubleshooting, see: DOCKER_DEPLOYMENT.md"
     print_info "For local development, see: LOCAL_DEVELOPMENT.md"
