@@ -1494,14 +1494,44 @@ display_final_info() {
         print_success "PrintFarmer is now running!"
     fi
     echo
-    echo -e "${GREEN}Access URLs:${NC}"
-    echo -e "${BLUE}  🌐 Web Interface: http://localhost:$HTTP_PORT${NC}"
     
-    if [ "$ARCHITECTURE" = "microservices" ]; then
-        echo -e "${BLUE}  🔧 Direct API: http://localhost:$API_PORT${NC}"
+    # Determine the hostname/IP to show in URLs
+    local SERVER_HOST="localhost"
+    if [ "$DEPLOYING_TO_LINUX" = "yes" ] || [ "$OS" = "linux" ]; then
+        # Try to get the primary IP address
+        if command -v hostname >/dev/null 2>&1; then
+            # Try hostname -I first (works on most Linux)
+            local detected_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$detected_ip" ]; then
+                # Fallback: try ip route (works on most Linux)
+                detected_ip=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
+            fi
+            if [ -z "$detected_ip" ]; then
+                # Fallback: try hostname -i
+                detected_ip=$(hostname -i 2>/dev/null | awk '{print $1}')
+            fi
+            if [ -n "$detected_ip" ] && [ "$detected_ip" != "127.0.0.1" ]; then
+                SERVER_HOST="$detected_ip"
+            else
+                # Last resort: use hostname
+                SERVER_HOST=$(hostname 2>/dev/null || echo "localhost")
+            fi
+        fi
     fi
     
-    echo -e "${BLUE}  ❤️  Health Check: http://localhost:$HTTP_PORT/healthz${NC}"
+    echo -e "${GREEN}Access URLs:${NC}"
+    echo -e "${BLUE}  🌐 Web Interface: http://$SERVER_HOST:$HTTP_PORT${NC}"
+    
+    if [ "$ARCHITECTURE" = "microservices" ]; then
+        echo -e "${BLUE}  🔧 Direct API: http://$SERVER_HOST:$API_PORT${NC}"
+    fi
+    
+    echo -e "${BLUE}  ❤️  Health Check: http://$SERVER_HOST:$HTTP_PORT/healthz${NC}"
+    
+    # Show localhost alternative if we're showing an IP
+    if [ "$SERVER_HOST" != "localhost" ]; then
+        echo -e "${BLUE}  📍 Local access: http://localhost:$HTTP_PORT${NC}"
+    fi
     echo
     
     echo -e "${GREEN}Management Commands:${NC}"
