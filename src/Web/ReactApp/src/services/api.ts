@@ -153,7 +153,8 @@ export class ApiClient {
 
   // Import selected discovered G-code files
   async importSelectedGcodeFiles(dto: { harvestOperationId: string; fileIds: string[] }): Promise<GcodeHarvestResultDto> {
-    const resp = await this.client.post<GcodeHarvestResultDto>(`/harvest/import-selected`, dto);
+    // Backend exposes this endpoint under /api/gcode-harvest/import
+    const resp = await this.client.post<GcodeHarvestResultDto>(`/gcode-harvest/import`, dto);
     return resp.data;
   }
 
