@@ -19,14 +19,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddPrintFarmerDatabase(this IServiceCollection services, IConfiguration configuration)
     {
         string provider = configuration.GetValue<string>("DB_PROVIDER")?.ToLower() ?? "sqlite";
-        string connectionStringKey = provider switch
-        {
-            "sqlserver" => "SqlServer",
-            "postgres" or "postgresql" => "Postgres",
-            "mysql" => "MySql",
-            _ => "Default"
-        };
-        string connectionString = configuration.GetConnectionString(connectionStringKey)
+        
+        // Always use "Default" connection string key for all providers
+        string connectionString = configuration.GetConnectionString("Default")
             ?? configuration.GetValue<string>("DB_CONNECTION")
             ?? "Data Source=farm.db";
 
