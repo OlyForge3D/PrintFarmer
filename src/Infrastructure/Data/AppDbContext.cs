@@ -78,11 +78,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(p => p.Manufacturer)
              .WithMany()
              .HasForeignKey(p => p.ManufacturerId)
-             .OnDelete(DeleteBehavior.SetNull);
+             .OnDelete(DeleteBehavior.Restrict); // Changed from SetNull - ManufacturerId is not nullable
             b.HasOne(p => p.Model)
              .WithMany()
              .HasForeignKey(p => p.ModelId)
-             .OnDelete(DeleteBehavior.SetNull);
+             .OnDelete(DeleteBehavior.Restrict); // Changed from SetNull - ModelId is not nullable
             b.Property(p => p.DateAcquired);
         });
 
