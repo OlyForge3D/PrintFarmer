@@ -1704,6 +1704,7 @@ DBEOF
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://0.0.0.0:${API_PORT:-5245}
+      - API_URL=http://localhost:${API_PORT:-5245}
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
       - ConnectionStrings__Default=${ConnectionStrings__Default}
       - ConnectionStrings__Redis=localhost:6379
