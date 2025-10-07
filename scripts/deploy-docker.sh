@@ -130,7 +130,8 @@ tear_down_deployment() {
     echo "  1. Stop and remove ALL Docker containers"
     echo "  2. Remove ALL Docker volumes (⚠️  ALL DATA WILL BE DELETED!)"
     echo "  3. Remove all PrintFarmer Docker images"
-    echo "  4. Clean up generated configuration files"
+    echo "  4. Prune orphaned and dangling images"
+    echo "  5. Clean up generated configuration files"
     echo
     
     if [ "$NON_INTERACTIVE" = "false" ]; then
@@ -149,7 +150,7 @@ tear_down_deployment() {
     print_info "Starting tear-down process..."
     
     # 1. Stop all containers
-    print_info "Step 1/6: Stopping all Docker containers..."
+    print_info "Step 1/7: Stopping all Docker containers..."
     if docker ps -q | grep -q .; then
         docker stop $(docker ps -aq) 2>/dev/null || true
         print_success "Containers stopped"
@@ -158,7 +159,7 @@ tear_down_deployment() {
     fi
     
     # 2. Remove all containers
-    print_info "Step 2/6: Removing all Docker containers..."
+    print_info "Step 2/7: Removing all Docker containers..."
     if docker ps -aq | grep -q .; then
         docker rm $(docker ps -aq) 2>/dev/null || true
         print_success "Containers removed"
@@ -167,7 +168,7 @@ tear_down_deployment() {
     fi
     
     # 3. Remove all volumes
-    print_info "Step 3/6: Removing all Docker volumes..."
+    print_info "Step 3/7: Removing all Docker volumes..."
     if docker volume ls -q | grep -q .; then
         docker volume rm $(docker volume ls -q) 2>/dev/null || true
         print_success "Volumes removed"
@@ -176,7 +177,7 @@ tear_down_deployment() {
     fi
     
     # 4. Remove PrintFarmer images
-    print_info "Step 4/6: Removing PrintFarmer Docker images..."
+    print_info "Step 4/7: Removing PrintFarmer Docker images..."
     if docker images --format "{{.Repository}}" | grep -q "printfarmer"; then
         docker images --format "{{.Repository}}:{{.Tag}}" | grep "printfarmer" | xargs -r docker rmi -f 2>/dev/null || true
         print_success "PrintFarmer images removed"
@@ -185,12 +186,17 @@ tear_down_deployment() {
     fi
     
     # 5. Prune unused networks
-    print_info "Step 5/6: Cleaning up Docker networks..."
+    print_info "Step 5/7: Cleaning up Docker networks..."
     docker network prune -f > /dev/null 2>&1 || true
     print_success "Networks cleaned"
     
-    # 6. Remove generated files
-    print_info "Step 6/6: Removing generated configuration files..."
+    # 6. Prune orphaned/dangling images
+    print_info "Step 6/7: Pruning orphaned and dangling images..."
+    docker image prune -f > /dev/null 2>&1 || true
+    print_success "Orphaned images pruned"
+    
+    # 7. Remove generated files
+    print_info "Step 7/7: Removing generated configuration files..."
     local files_removed=0
     
     if [ -f docker-compose.host-network.yml ]; then
