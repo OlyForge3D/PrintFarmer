@@ -1949,7 +1949,7 @@ deploy_containers() {
         
         while [ $elapsed -lt $max_wait ]; do
             # Check if all containers are healthy
-            local unhealthy_count=$(docker compose --env-file "$ENV_FILE" ps --format json 2>/dev/null | grep -c '"Health":"starting"\|"Health":"unhealthy"' || echo "0")
+            local unhealthy_count=$(docker compose --env-file "$ENV_FILE" ps --format json 2>/dev/null | grep -E '"Health":"(starting|unhealthy)"' | wc -l | tr -d ' ')
             
             if [ "$unhealthy_count" -eq 0 ]; then
                 all_healthy=true
