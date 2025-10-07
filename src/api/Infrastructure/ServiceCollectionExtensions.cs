@@ -58,8 +58,8 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<ISettingsService>(sp =>
             sp.GetRequiredService<SettingsService>());
 
-        // Settings initialization from environment variables
-        _ = services.AddSingleton<SettingsInitializationService>();
+        // Settings initialization from environment variables (scoped to match ISettingsService)
+        _ = services.AddScoped<SettingsInitializationService>();
 
         return services;
     }
