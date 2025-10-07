@@ -1996,23 +1996,22 @@ verify_deployment() {
     
     # Test basic health endpoint
     print_info "Testing basic health endpoint..."
-    if curl -sf "$api_url/healthz" >/dev/null 2>&1; then
-        local basic_health=$(curl -s "$api_url/healthz")
-        if echo "$basic_health" | grep -q '"status":"ok"'; then
-            print_success "✓ Basic health check: OK"
-        else
-            print_warning "✗ Basic health check: Unexpected response: $basic_health"
-            health_check_failed=true
-        fi
+    local basic_health=$(curl -s "$api_url/healthz" 2>/dev/null)
+    if [ -n "$basic_health" ] && echo "$basic_health" | grep -q '"status":"ok"'; then
+        print_success "✓ Basic health check: OK"
     else
-        print_warning "✗ Basic health check: FAILED (endpoint not responding)"
+        print_warning "✗ Basic health check: FAILED (endpoint not responding or unexpected response)"
+        if [ -n "$basic_health" ]; then
+            print_info "Response received: $basic_health"
+        fi
         health_check_failed=true
     fi
     
     # Test comprehensive health endpoint
     print_info "Testing comprehensive health endpoint..."
-    if curl -sf "$api_url/health" >/dev/null 2>&1; then
-        local health_json=$(curl -s "$api_url/health")
+    local health_json=$(curl -s "$api_url/health" 2>/dev/null)
+    
+    if [ -n "$health_json" ]; then
         local health_status=$(echo "$health_json" | grep -o '"status":"[^"]*"' | head -1 | cut -d '"' -f4)
         
         if [ "$health_status" = "Healthy" ]; then
@@ -2024,10 +2023,10 @@ verify_deployment() {
                 echo "$health_json" | jq -r '
                     .results | to_entries[] | 
                     "  • \(.key): \(.value.description // .value.status // "OK")"
-                ' 2>/dev/null || echo "$health_json" | grep -o '"[^"]*":"[^"]*"' | head -10
+                ' 2>/dev/null || true
             fi
         else
-            print_warning "✗ Comprehensive health check: Status = $health_status"
+            print_warning "✗ Comprehensive health check: Status = ${health_status:-unknown}"
             print_info "Full health check result:"
             if command -v jq >/dev/null 2>&1; then
                 echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
@@ -2037,12 +2036,13 @@ verify_deployment() {
             health_check_failed=true
         fi
     else
-        print_warning "✗ Comprehensive health check: FAILED"
+        print_warning "✗ Comprehensive health check: FAILED (no response)"
         
         # Retry once after brief delay
         print_info "Retrying after 5 seconds..."
         sleep 5
-        if curl -sf "$api_url/health" >/dev/null 2>&1; then
+        health_json=$(curl -s "$api_url/health" 2>/dev/null)
+        if [ -n "$health_json" ] && echo "$health_json" | grep -q '"status":"Healthy"'; then
             print_success "✓ Comprehensive health check: OK (after retry)"
         else
             print_warning "✗ Still failing - services may need more time to start"
