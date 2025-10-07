@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Controllers;
 /// Manages printer capabilities for job queue matching
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/printer-capabilities")]
 [Tags("Printer Capabilities")]
 public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingService logger, IPrinterCapabilityDiscoveryService discoveryService) : ControllerBase
 {

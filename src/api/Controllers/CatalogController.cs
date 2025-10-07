@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 /// Provides endpoints for managing printer manufacturer and model catalog data.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/catalog")]
 [Tags("Catalog")]
 public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache) : ControllerBase
 {

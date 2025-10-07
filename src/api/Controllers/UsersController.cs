@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Controllers;
 /// Only accessible by administrators.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/users")]
 [Authorize(Roles = "farm_admin")]
 public class UsersController(
     AppDbContext db,

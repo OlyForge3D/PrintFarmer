@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Controllers;
 /// Controller for testing SignalR connectivity and functionality
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/signalr-test")]
 public class SignalRTestController(
     IHubContext<PrinterHub> hubContext,
     IUnifiedLoggingService logger) : ControllerBase

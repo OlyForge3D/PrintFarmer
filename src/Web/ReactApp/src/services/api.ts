@@ -381,34 +381,34 @@ export class ApiClient {
   // ============ Filament Type API methods ============
 
   async getFilamentTypes(): Promise<FilamentTypeDto[]> {
-    const response = await this.client.get<FilamentTypeDto[]>('/filamenttype');
+    const response = await this.client.get<FilamentTypeDto[]>('/filament-types');
     return response.data;
   }
 
   async createFilamentType(filamentType: CreateFilamentTypeRequest): Promise<FilamentTypeDto> {
-    const response = await this.client.post<FilamentTypeDto>('/filamenttype', filamentType);
+    const response = await this.client.post<FilamentTypeDto>('/filament-types', filamentType);
     return response.data;
   }
 
   async updateFilamentType(id: string, filamentType: UpdateFilamentTypeRequest): Promise<void> {
-    await this.client.put(`/filamenttype/${id}`, filamentType);
+    await this.client.put(`/filament-types/${id}`, filamentType);
   }
 
   async deleteFilamentType(id: string): Promise<void> {
-    await this.client.delete(`/filamenttype/${id}`);
+    await this.client.delete(`/filament-types/${id}`);
   }
 
   async getFilamentPresets(): Promise<FilamentPresets> {
-    const response = await this.client.get<{ presets: FilamentPresets }>('/filamenttype/presets');
+    const response = await this.client.get<{ presets: FilamentPresets }>('/filament-types/presets');
     return response.data.presets;
   }
 
   async saveFilamentPresets(presets: FilamentPresets): Promise<void> {
-    await this.client.post('/filamenttype/presets', { presets });
+    await this.client.post('/filament-types/presets', { presets });
   }
 
   async importFilamentTypesFromSpoolman(): Promise<SpoolmanFilamentImportResult> {
-    const response = await this.client.post<SpoolmanFilamentImportResult>('/filamenttype/import-from-spoolman');
+    const response = await this.client.post<SpoolmanFilamentImportResult>('/filament-types/import-from-spoolman');
     return response.data;
   }
 

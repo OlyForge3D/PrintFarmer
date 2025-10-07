@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
-[Route("api/[controller]")]
+[Route("api/schema-health")]
 [ApiController]
 public class SchemaHealthController(AppDbContext dbContext) : ControllerBase
 {

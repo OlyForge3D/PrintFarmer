@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Web.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/auth")]
 [Tags("Authentication")]
 public class AuthController(IAuthenticationService authService, IUnifiedLoggingService logger) : ControllerBase
 {

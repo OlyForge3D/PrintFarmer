@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// Controller for managing print job queues and job assignment
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/queue")]
 [Tags("Job Queue Management")]
 
 public class QueueController(IUnifiedLoggingService logger, AppDbContext context) : ControllerBase

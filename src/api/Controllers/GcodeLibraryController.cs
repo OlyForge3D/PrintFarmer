@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Controllers;
 /// Manages the G-code file library
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/gcode-library")]
 [Tags("G-code Library")]
 public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {

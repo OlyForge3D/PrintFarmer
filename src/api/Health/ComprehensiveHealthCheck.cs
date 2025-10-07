@@ -129,8 +129,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                             issues.Add("No filament types found in database");
                         }
 
-                        // Check /api/filamenttype endpoint
-                        var resp = await client.GetAsync($"{baseUrl}/api/filamenttype", cancellationToken);
+                        // Check /api/filament-types endpoint
+                        var resp = await client.GetAsync($"{baseUrl}/api/filament-types", cancellationToken);
                         if (!resp.IsSuccessStatusCode)
                         {
                             checks["FilamentTypesApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };

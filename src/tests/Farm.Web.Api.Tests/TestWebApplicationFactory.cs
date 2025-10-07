@@ -8,6 +8,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 // PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
 namespace Farm.Web.Api.Tests;
@@ -15,6 +17,7 @@ namespace Farm.Web.Api.Tests;
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly string _dbPath;
+    private SqliteConnection? _inMemorySqliteConnection;
     public Mock<INetworkDiscoveryService> MockNetworkDiscoveryService { get; private set; }
     public Mock<IMoonrakerClient> MockMoonrakerClient { get; private set; }
     public Mock<IPrusaLinkClient> MockPrusaLinkClient { get; private set; }
@@ -79,6 +82,58 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            // If requested, replace the AppDbContext registration with a SQLite in-memory
+            // connection which preserves relational semantics for tests. Enable by setting
+            // the environment variable TEST_USE_SQLITE_INMEMORY=true in the test process.
+            var useInMemorySqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
+
+            if (useInMemorySqlite)
+            {
+                // Force Development environment so startup uses EnsureCreated (not Migrate) which
+                // reliably creates schema for the in-memory SQLite provider used in tests.
+                Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+
+                // Use a shared in-memory SQLite database by using a file: URI with shared cache.
+                // Keep one SqliteConnection open for the lifetime of the factory so the
+                // in-memory database is preserved across connections opened by EF Core.
+                var memDbName = $"unittest_{Guid.NewGuid():N}";
+                var memConnString = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
+
+                // Override connection strings so Program.cs registrations will use the in-memory DB
+                Environment.SetEnvironmentVariable("ConnectionStrings__Default", memConnString);
+                Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", memConnString);
+
+                _inMemorySqliteConnection = new SqliteConnection(memConnString);
+                _inMemorySqliteConnection.Open();
+                // Re-register AppDbContext to use the opened connection so the host will
+                // use the exact same in-memory database instance. This guarantees
+                // that EnsureCreated and any DbContext resolved later (e.g. in
+                // SettingsService) operate on the same database.
+                try
+                {
+                    // Remove any existing descriptors that reference AppDbContext so
+                    // we can replace the registration.
+                    var descriptorsToRemove = services.Where(d =>
+                        (d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("AppDbContext")) ||
+                        (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext"))
+                    ).ToList();
+
+                    foreach (var d in descriptorsToRemove)
+                    {
+                        services.Remove(d);
+                    }
+
+                    // Register AppDbContext to use the opened SqliteConnection instance
+                    services.AddDbContext<Farm.Infrastructure.Data.AppDbContext>(opts =>
+                    {
+                        opts.UseSqlite(_inMemorySqliteConnection);
+                    });
+                }
+                catch
+                {
+                    // Best-effort; don't throw in test registration path
+                }
+            }
             // Remove existing service registrations
             // Disable background hosted services that would talk to external systems during tests
             var moonrakerHosted = services.SingleOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MoonrakerSubscriptionService));
@@ -160,7 +215,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         });
 
-        // Set up default mock behaviors
+    // Set up default mock behaviors
         MockPrusaLinkClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Farm.Web.Api.Services.PrusaCompositeStatus(
                 IsOnline: true,
@@ -197,7 +252,26 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // Default analysis behavior: return null (analysis optional) to keep tests deterministic
         MockModelAnalysisService.Setup(x => x.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ModelAnalysisResult?)null);
-        return base.CreateHost(builder);
+        // Build the real host. After constructing the host (but before starting it), ensure
+        // the database schema exists on the host service provider. This guarantees the
+        // SettingsService won't hit missing tables during startup.
+        var host = base.CreateHost(builder);
+
+        try
+        {
+            if (_inMemorySqliteConnection != null)
+            {
+                using var scope = host.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+                db.Database.EnsureCreated();
+            }
+        }
+        catch
+        {
+            // Best-effort; don't mask original host creation errors. Let test startup handle failures.
+        }
+
+        return host;
     }
 
     private void SetupDefaultMockBehaviors()
@@ -291,6 +365,18 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     public new void Dispose()
     {
         base.Dispose();
+        try
+        {
+            // Dispose in-memory connection if used
+            if (_inMemorySqliteConnection != null)
+            {
+                _inMemorySqliteConnection.Close();
+                _inMemorySqliteConnection.Dispose();
+                _inMemorySqliteConnection = null;
+            }
+        }
+        catch { }
+
         TryDelete();
     }
 }

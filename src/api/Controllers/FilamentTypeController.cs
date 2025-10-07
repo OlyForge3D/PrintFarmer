@@ -17,7 +17,7 @@ namespace Farm.Web.Api.Controllers;
 /// Provides endpoints for managing filament types and their temperature presets.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/filament-types")]
 [Tags("Filament Types")]
 public class FilamentTypeController : ControllerBase
 {

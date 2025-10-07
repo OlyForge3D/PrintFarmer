@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Controllers;
 /// Supports Moonraker, PrusaLink, and SDCP printer backends.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/printers")]
 [Tags("Printers")]
 public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, IHttpClientFactory httpClientFactory) : ControllerBase
 {

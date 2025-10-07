@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 /// Used during first-run to create initial admin user and configure the system.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/setup")]
 public class SetupController(
     AppDbContext db,
     IAuthenticationService authService,

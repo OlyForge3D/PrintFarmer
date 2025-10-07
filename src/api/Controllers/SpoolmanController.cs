@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Controllers;
 /// Provides endpoints for integrating with Spoolman filament management system.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/spoolman")]
 [Tags("Spoolman Integration")]
 public class SpoolmanController(
     SpoolmanService spoolman,

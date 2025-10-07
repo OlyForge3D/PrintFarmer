@@ -413,10 +413,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         const enabled = filamentPresets.filter(f => f.enabled);
         const payload: Record<string, { hotend: number; bed: number }> = {};
         enabled.forEach(f => { payload[f.name] = { hotend: f.hotend, bed: f.bed }; });
-        await fetch('/api/filamenttype/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ presets: payload }) });
+  await fetch('/api/filament-types/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ presets: payload }) });
         const disabledIds = filamentPresets.filter(f => !f.enabled && f.id).map(f => f.id!);
         for (const id of disabledIds) {
-          try { await fetch(`/api/filamenttype/${id}`, { method: 'DELETE' }); } catch {/* ignore individual failures */}
+          try { await fetch(`/api/filament-types/${id}`, { method: 'DELETE' }); } catch {/* ignore individual failures */}
         }
       }
 
