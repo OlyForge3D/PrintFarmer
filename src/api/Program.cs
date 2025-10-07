@@ -436,6 +436,23 @@ builder.WebHost.UseUrls("http://0.0.0.0:5245");
 #pragma warning restore S1075 // URIs should not be hardcoded
 WebApplication app = builder.Build();
 
+// Initialize settings from environment variables on first run
+try
+{
+    using var scope = app.Services.CreateScope();
+    var settingsInit = scope.ServiceProvider.GetRequiredService<SettingsInitializationService>();
+
+    // Initialize key settings from environment variables if not already in database
+    settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
+    settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+
+    app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "[Startup] Settings initialization from environment variables failed (non-fatal)");
+}
+
 // Early liveness endpoint (process up) + readiness separate
 app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
 

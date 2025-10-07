@@ -97,6 +97,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   useEffect(() => { setSpoolmanEnabledCtx(spoolmanEnabled); }, [spoolmanEnabled, setSpoolmanEnabledCtx]);
   useEffect(() => { setSpoolmanBaseUrlCtx(spoolmanUrl); }, [spoolmanUrl, setSpoolmanBaseUrlCtx]);
 
+  // Fetch Spoolman settings from backend on mount (pre-populate from deployment config)
+  useEffect(() => {
+    apiClient.getSettings<import("@/types/SpoolmanSettings").SpoolmanSettings>('Spoolman')
+      .then(settings => {
+        if (settings?.baseUrl) {
+          setSpoolmanUrl(settings.baseUrl);
+          setSpoolmanEnabled(true);
+        }
+      })
+      .catch(() => {
+        // Silently fail - user can configure manually
+      });
+  }, []);
+
   // Network scanning for Spoolman discovery
   const { isScanning, results: scanResults, error: scanError, scanNetwork, reset: resetScan, availableInstances } = useSpoolmanNetworkScan();
 

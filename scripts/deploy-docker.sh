@@ -388,6 +388,10 @@ ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
 NETWORK_RANGES=$(printf '%q' "$NETWORK_RANGES")
 NETWORK_MODE=${NETWORK_MODE:-bridge}
 HTTP_PORT=$HTTP_PORT
+
+# Application Settings - Pre-populate Setup Wizard  
+PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}
+PFARM__NetworkDiscovery__DiscoverySubnets=$(printf '%q' "$NETWORK_RANGES")
 EOF
 
     if [ "$ARCHITECTURE" = "microservices" ]; then
@@ -428,6 +432,9 @@ EOF
 ENABLE_SPOOLMAN=yes
 SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
 SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
+
+# Application Settings - Pre-populate Setup Wizard
+PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
 EOF
     else
         echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no" >> "$CONFIG_FILE"
@@ -1719,6 +1726,9 @@ DBEOF
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://localhost:8081}
       - SlicerOrchestrator__Workers__PrusaSlicer=${PRUSA_WORKER_ENDPOINT:-http://localhost:8082}
+      - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
+      - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
+      - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
       - app_data:/data
       - model_uploads:/app/uploads

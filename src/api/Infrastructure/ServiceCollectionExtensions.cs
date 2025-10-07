@@ -19,7 +19,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddPrintFarmerDatabase(this IServiceCollection services, IConfiguration configuration)
     {
         string provider = configuration.GetValue<string>("DB_PROVIDER")?.ToLower() ?? "sqlite";
-        
+
         // Always use "Default" connection string key for all providers
         string connectionString = configuration.GetConnectionString("Default")
             ?? configuration.GetValue<string>("DB_CONNECTION")
@@ -57,6 +57,9 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IUnifiedLoggingService>()));
         _ = services.AddScoped<ISettingsService>(sp =>
             sp.GetRequiredService<SettingsService>());
+
+        // Settings initialization from environment variables
+        _ = services.AddSingleton<SettingsInitializationService>();
 
         return services;
     }

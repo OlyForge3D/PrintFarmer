@@ -3,69 +3,44 @@ using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
-public class SpoolmanService(HttpClient http, AppDbContext db, IUnifiedLoggingService logger) : ISpoolmanService
+public class SpoolmanService(HttpClient http, ISettingsService settingsService, IUnifiedLoggingService logger) : ISpoolmanService
 {
     private readonly HttpClient http = http;
-    private readonly AppDbContext db = db;
+    private readonly ISettingsService settingsService = settingsService;
     private readonly IUnifiedLoggingService logger = logger;
 
     public SpoolmanConfigDto? GetConfig()
     {
-        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-        if (row is null)
+        SpoolmanSettings? settings = settingsService.Get<SpoolmanSettings>();
+        if (settings is null || string.IsNullOrWhiteSpace(settings.BaseUrl))
         {
-            // One-time migration from legacy JSON file if present
-            try
-            {
-                string legacyPath = Path.Combine(AppContext.BaseDirectory, "spoolman.config.json");
-                if (File.Exists(legacyPath))
-                {
-                    string text = File.ReadAllText(legacyPath);
-                    SpoolmanConfigDto? cfg = JsonSerializer.Deserialize<SpoolmanConfigDto>(text);
-                    if (cfg is not null && !string.IsNullOrWhiteSpace(cfg.BaseUrl))
-                    {
-                        SetConfig(cfg);
-                        row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-                    }
-                }
-            }
-            catch { }
+            return null;
         }
-        return row is null ? null : new SpoolmanConfigDto(row.BaseUrl);
+        return new SpoolmanConfigDto(settings.BaseUrl);
     }
 
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
         string? baseUrl = NormalizeBaseUrl(config.BaseUrl);
-        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-        if (row is null)
-        {
-            row = new SpoolmanConfig { Id = 1, BaseUrl = baseUrl ?? string.Empty };
-            db.SpoolmanConfigs.Add(row);
-        }
-        else
-        {
-            row.BaseUrl = baseUrl ?? string.Empty;
-            db.SpoolmanConfigs.Update(row);
-        }
-        db.SaveChanges();
+
+        SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
+        settings.BaseUrl = baseUrl ?? string.Empty;
+        settingsService.Save(settings);
     }
 
     public void ClearConfig()
     {
-        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-        if (row is not null)
-        {
-            db.SpoolmanConfigs.Remove(row);
-            db.SaveChanges();
-        }
+        SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
+        settings.BaseUrl = string.Empty;
+        settingsService.Save(settings);
     }
 
     private static string? NormalizeBaseUrl(string? url)

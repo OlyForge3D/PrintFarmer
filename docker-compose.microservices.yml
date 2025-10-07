@@ -64,6 +64,9 @@ services:
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://orcaslicer-worker:8080}
       - SlicerOrchestrator__Workers__PrusaSlicer=${PRUSA_WORKER_ENDPOINT:-http://prusaslicer-worker:8080}
+      - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
+      - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
+      - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
       - app_data:/data
       - model_uploads:/app/uploads
