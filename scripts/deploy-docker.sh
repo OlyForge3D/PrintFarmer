@@ -1124,7 +1124,136 @@ adjust_connection_strings_for_network_mode() {
         esac
         
         print_info "Database will be accessible at localhost:${SQLSERVER_PORT:-5432}"
+        
+        # Also generate a custom Nginx config for frontend to proxy to localhost API
+        generate_host_network_nginx_config
     fi
+}
+
+# Generate Nginx config and Dockerfile for host network mode
+# In host mode, frontend (bridge network) must proxy to host.docker.internal:API_PORT instead of api:5001
+generate_host_network_nginx_config() {
+    print_info "Generating Nginx config for host network mode..."
+    
+    mkdir -p deploy/nginx/conf.d.host
+    
+    # Create the custom Nginx config with host.docker.internal and actual API port
+    cat > deploy/nginx/conf.d.host/frontend-app.conf << NGINXEOF
+server {
+    listen 80;
+    server_name localhost;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Cache static assets (immutable build output)
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Dedicated health check endpoint
+    location /health {
+        access_log off;
+        default_type text/plain;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        return 200 "OK\n";
+    }
+
+    # Explicit index.html handling
+    location = /index.html {
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+        try_files /index.html =404;
+    }
+
+    # SPA routing fallback
+    location / {
+        try_files \$uri \$uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+    }
+
+    # Proxy API requests (HOST MODE: API is on host network, accessible via host.docker.internal)
+    location ^~ /api/ {
+        proxy_pass http://host.docker.internal:${API_PORT:-5245};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+    }
+
+    # Proxy SignalR hub (WebSockets & long polling)
+    location ^~ /hubs/ {
+        proxy_pass http://host.docker.internal:${API_PORT:-5245};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
+NGINXEOF
+    
+    print_success "Created host-network Nginx config at deploy/nginx/conf.d.host/frontend-app.conf"
+    
+    # Also create a custom Dockerfile for frontend that uses this config
+    cat > Dockerfile.frontend.host << 'DOCKEREOF'
+# Host Network Mode Frontend Dockerfile
+# Uses custom Nginx config that proxies to host.docker.internal
+FROM node:18-alpine AS build
+
+ARG VITE_API_BASE_URL=http://localhost:5245/api
+ARG VITE_SIGNALR_PRINTERS_URL=http://localhost:5245/hubs/printers
+ARG VITE_SIGNALR_HARVEST_URL=http://localhost:5245/hubs/harvest
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL} \
+    VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}
+
+WORKDIR /app
+
+COPY src/Web/ReactApp/package*.json ./
+RUN npm install --silent
+
+COPY src/Web/ReactApp/ ./
+RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL" && npm run build
+
+# Production stage with Nginx
+FROM nginx:alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY deploy/nginx/nginx-frontend.conf /etc/nginx/nginx.conf
+
+# USE HOST MODE CONFIG - proxies to host.docker.internal instead of 'api' service
+COPY deploy/nginx/conf.d.host/*.conf /etc/nginx/conf.d/
+
+RUN rm -f /etc/nginx/conf.d/default.conf || true
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:80/ || exit 1
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+DOCKEREOF
+    
+    print_success "Created host-network Dockerfile at Dockerfile.frontend.host"
 }
 
 # Configure additional settings
@@ -1639,8 +1768,8 @@ DBEOF
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
-    image: printfarmer-frontend
+      dockerfile: Dockerfile.frontend.host  # Custom Dockerfile for host network mode
+    image: printfarmer-frontend-host
     ports:
       - "${HTTP_PORT:-8080}:80"
     networks:
@@ -1649,7 +1778,6 @@ DBEOF
       - VITE_API_BASE_URL=http://localhost:${API_PORT:-5245}/api
       - VITE_SIGNALR_PRINTERS_URL=http://localhost:${API_PORT:-5245}/hubs/printers
       - VITE_SIGNALR_HARVEST_URL=http://localhost:${API_PORT:-5245}/hubs/harvest
-      - NGINX_PROXY_API=http://localhost:${API_PORT:-5245}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 30s
