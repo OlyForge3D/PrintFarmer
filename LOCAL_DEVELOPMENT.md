@@ -314,9 +314,11 @@ Schema creation currently relies on `EnsureCreated()` (no migrations yet during 
 To temporarily switch providers for local testing (example PostgreSQL running on localhost or Docker network):
 ```bash
 export DB_PROVIDER=Postgres
-export ConnectionStrings__Postgres="Host=localhost;Database=printfarmer;Username=dev;Password=devpass"
+export ConnectionStrings__Default="Host=localhost;Database=printfarmer;Username=dev;Password=devpass"
 dotnet run --project api/Farm.Web.Api.csproj
 ```
+**Note:** All providers use the unified `ConnectionStrings__Default` environment variable. The connection string format varies based on the provider.
+
 Fallback: if `DB_PROVIDER` is unset or unsupported, the application silently uses SQLite.
 
 ### Catalog Normalization & Duplicate Handling (Local Dev)
