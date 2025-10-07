@@ -1938,9 +1938,38 @@ deploy_containers() {
     if [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run complete. No containers launched."
     else
-        print_success "Step 3/3: Containers are starting..."
-        print_info "Waiting for services to be ready..."
-        sleep 15
+        print_success "Step 3/3: Containers starting..."
+        print_info "Waiting for all services to be healthy..."
+        
+        # Wait for containers to be healthy (with timeout)
+        local max_wait=120  # 2 minutes total
+        local wait_interval=5
+        local elapsed=0
+        local all_healthy=false
+        
+        while [ $elapsed -lt $max_wait ]; do
+            # Check if all containers are healthy
+            local unhealthy_count=$(docker compose --env-file "$ENV_FILE" ps --format json 2>/dev/null | grep -c '"Health":"starting"\|"Health":"unhealthy"' || echo "0")
+            
+            if [ "$unhealthy_count" -eq 0 ]; then
+                all_healthy=true
+                print_success "All containers are healthy!"
+                break
+            fi
+            
+            # Show progress
+            if [ $((elapsed % 15)) -eq 0 ]; then
+                print_info "Still waiting for services to become healthy... ($elapsed seconds elapsed)"
+                docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy" || true
+            fi
+            
+            sleep $wait_interval
+            elapsed=$((elapsed + wait_interval))
+        done
+        
+        if [ "$all_healthy" = false ]; then
+            print_warning "Some services may still be starting after ${max_wait}s. Checking detailed status..."
+        fi
     fi
 }
 
@@ -1962,50 +1991,128 @@ verify_deployment() {
     docker compose --env-file "$ENV_FILE" ps
     echo
     
-    print_info "Testing health endpoints..."
+    print_info "Running comprehensive health checks..."
+    local health_check_failed=false
     
-    # Test basic health
+    # Test basic health endpoint
+    print_info "Testing basic health endpoint..."
     if curl -sf "$api_url/healthz" >/dev/null 2>&1; then
-        print_success "Basic health check: OK"
+        local basic_health=$(curl -s "$api_url/healthz")
+        if echo "$basic_health" | grep -q '"status":"ok"'; then
+            print_success "✓ Basic health check: OK"
+        else
+            print_warning "✗ Basic health check: Unexpected response: $basic_health"
+            health_check_failed=true
+        fi
     else
-        print_warning "Basic health check: FAILED (this might be normal if services are still starting)"
-        print_info "Tip: Run 'docker compose logs frontend' to see frontend logs"
-        print_info "Tip: Run 'docker compose ps' to check container status"
+        print_warning "✗ Basic health check: FAILED (endpoint not responding)"
+        health_check_failed=true
     fi
     
-    # Test comprehensive health  
+    # Test comprehensive health endpoint
+    print_info "Testing comprehensive health endpoint..."
     if curl -sf "$api_url/health" >/dev/null 2>&1; then
-        print_success "Comprehensive health check: OK" 
-    else
-        print_warning "Comprehensive health check: FAILED"
-        print_info "Waiting 10 seconds for services to fully start..."
-        sleep 10
-        if curl -sf "$api_url/health" >/dev/null 2>&1; then
-            print_success "Comprehensive health check: OK (after retry)"
+        local health_json=$(curl -s "$api_url/health")
+        local health_status=$(echo "$health_json" | grep -o '"status":"[^"]*"' | head -1 | cut -d '"' -f4)
+        
+        if [ "$health_status" = "Healthy" ]; then
+            print_success "✓ Comprehensive health check: Healthy"
+            
+            # Parse and display key health metrics
+            if command -v jq >/dev/null 2>&1; then
+                print_info "Health check details:"
+                echo "$health_json" | jq -r '
+                    .results | to_entries[] | 
+                    "  • \(.key): \(.value.description // .value.status // "OK")"
+                ' 2>/dev/null || echo "$health_json" | grep -o '"[^"]*":"[^"]*"' | head -10
+            fi
         else
-            print_warning "Still failing - check logs with: docker compose logs"
+            print_warning "✗ Comprehensive health check: Status = $health_status"
+            print_info "Full health check result:"
+            if command -v jq >/dev/null 2>&1; then
+                echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
+            else
+                echo "$health_json"
+            fi
+            health_check_failed=true
+        fi
+    else
+        print_warning "✗ Comprehensive health check: FAILED"
+        
+        # Retry once after brief delay
+        print_info "Retrying after 5 seconds..."
+        sleep 5
+        if curl -sf "$api_url/health" >/dev/null 2>&1; then
+            print_success "✓ Comprehensive health check: OK (after retry)"
+        else
+            print_warning "✗ Still failing - services may need more time to start"
+            print_info "Tip: Run 'docker compose --env-file $ENV_FILE logs api' to see API logs"
+            health_check_failed=true
         fi
     fi
     
     # Test API endpoints
+    print_info "Testing API endpoints..."
     if curl -sf "$api_url/api/printers" >/dev/null 2>&1; then
-        print_success "API endpoints: OK"
+        print_success "✓ API endpoints: OK (/api/printers responding)"
     else
-        print_warning "API endpoints: Not ready yet"
+        print_warning "✗ API endpoints: Not ready yet"
+        health_check_failed=true
+    fi
+    
+    # Test worker health if enabled
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+        print_info "Testing OrcaSlicer worker..."
+        local orca_url="http://localhost:${ORCA_HOST_PORT:-8081}"
+        if curl -sf "$orca_url/healthz" >/dev/null 2>&1; then
+            print_success "✓ OrcaSlicer worker: Healthy"
+        else
+            print_warning "✗ OrcaSlicer worker: Not responding"
+            health_check_failed=true
+        fi
+    fi
+    
+    if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
+        print_info "Testing PrusaSlicer worker..."
+        local prusa_url="http://localhost:${PRUSA_HOST_PORT:-8082}"
+        if curl -sf "$prusa_url/healthz" >/dev/null 2>&1; then
+            print_success "✓ PrusaSlicer worker: Healthy"
+        else
+            print_warning "✗ PrusaSlicer worker: Not responding"
+            health_check_failed=true
+        fi
     fi
     
     echo
-    print_success "Deployment verification completed!"
+    if [ "$health_check_failed" = true ]; then
+        print_warning "⚠️  Some health checks failed. Services may still be initializing."
+        print_info "Wait a few moments and check manually:"
+        print_info "  • Health: curl http://localhost:$HTTP_PORT/health | jq"
+        print_info "  • Logs:   docker compose --env-file $ENV_FILE logs -f"
+        echo
+        return 1
+    else
+        print_success "✅ All health checks passed!"
+        echo
+        return 0
+    fi
 }
 
 # Display final information
 display_final_info() {
+    local verification_passed="${1:-true}"
+    
     print_header "🎉 Deployment Complete"
     
     if [ "$DRY_RUN" = "true" ]; then
         print_success "Dry-run summary (no containers started)"
     else
-        print_success "PrintFarmer is now running!"
+        if [ "$verification_passed" = true ]; then
+            print_success "✅ PrintFarmer is now running and healthy!"
+        else
+            print_warning "⚠️  PrintFarmer is deployed but some health checks failed"
+            print_info "Services may still be initializing - check status below"
+        fi
     fi
     echo
     
@@ -2086,10 +2193,26 @@ display_final_info() {
     # Troubleshooting section
     if [ "$DRY_RUN" != "true" ]; then
         echo -e "${YELLOW}Troubleshooting:${NC}"
-        echo -e "${BLUE}  • Check container status: docker compose ps${NC}"
-        echo -e "${BLUE}  • View all logs: docker compose logs${NC}"
-        echo -e "${BLUE}  • Check specific service: docker compose logs frontend${NC}"
-        echo -e "${BLUE}  • Restart a service: docker compose restart frontend${NC}"
+        echo -e "${BLUE}  • Check container status: docker compose --env-file $ENV_FILE ps${NC}"
+        echo -e "${BLUE}  • View all logs: docker compose --env-file $ENV_FILE logs${NC}"
+        echo -e "${BLUE}  • Check specific service: docker compose --env-file $ENV_FILE logs api${NC}"
+        echo -e "${BLUE}  • Restart a service: docker compose --env-file $ENV_FILE restart api${NC}"
+        
+        # Show additional help if verification failed
+        if [ "$verification_passed" = false ]; then
+            echo
+            echo -e "${YELLOW}⚠️  Health Check Failures - Common Solutions:${NC}"
+            echo -e "${BLUE}  1. Check API container logs:${NC}"
+            echo -e "     docker compose --env-file $ENV_FILE logs api | tail -50"
+            echo -e "${BLUE}  2. Check if API crashed (exit code):${NC}"
+            echo -e "     docker ps -a | grep api"
+            echo -e "${BLUE}  3. Restart API container:${NC}"
+            echo -e "     docker compose --env-file $ENV_FILE restart api"
+            echo -e "${BLUE}  4. Rebuild and restart:${NC}"
+            echo -e "     docker compose --env-file $ENV_FILE up -d --build api"
+            echo -e "${BLUE}  5. Check health manually (wait 30s then):${NC}"
+            echo -e "     curl http://localhost:$HTTP_PORT/health | jq"
+        fi
         
         # Port 80 specific troubleshooting
         if [ "$HTTP_PORT" = "80" ]; then
@@ -2162,10 +2285,20 @@ main() {
     generate_compose_override
     generate_host_network_override
     deploy_containers
-    verify_deployment
-    display_final_info
     
-    print_success "Setup completed successfully! 🎉"
+    # Run verification and capture result
+    local verification_passed=true
+    verify_deployment || verification_passed=false
+    
+    display_final_info "$verification_passed"
+    
+    if [ "$verification_passed" = true ]; then
+        print_success "Setup completed successfully! 🎉"
+    else
+        print_warning "Setup completed with warnings - please check health status above"
+        print_info "Services may need a few more moments to fully initialize"
+        exit 1
+    fi
 }
 
 # Run main function
