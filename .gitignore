@@ -34,6 +34,10 @@ node_modules/
 .env.*
 .deploy-config
 
+# Docker generated files (created by deployment script)
+docker-compose.host-network.yml
+.env.microservices
+
 # SqlLite Database Files
 *.db
 *.db-shm
