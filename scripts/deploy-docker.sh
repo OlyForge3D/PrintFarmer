@@ -1214,7 +1214,7 @@ NGINXEOF
     print_success "Created host-network Nginx config at deploy/nginx/conf.d.host/frontend-app.conf"
     
     # Also create a custom Dockerfile for frontend that uses this config
-    cat > Dockerfile.frontend.host << 'DOCKEREOF'
+    cat > Dockerfile.frontend-host << 'DOCKEREOF'
 # Host Network Mode Frontend Dockerfile
 # Uses custom Nginx config that proxies to host.docker.internal
 FROM node:18-alpine AS build
@@ -1253,7 +1253,7 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 DOCKEREOF
     
-    print_success "Created host-network Dockerfile at Dockerfile.frontend.host"
+    print_success "Created host-network Dockerfile at Dockerfile.frontend-host"
 }
 
 # Configure additional settings
@@ -1794,7 +1794,11 @@ DBEOF
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend.host  # Custom Dockerfile for host network mode
+      dockerfile: Dockerfile.frontend-host  # Custom Dockerfile for host network mode
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_SIGNALR_PRINTERS_URL: /hubs/printers
+        VITE_SIGNALR_HARVEST_URL: /hubs/harvest
     image: printfarmer-frontend-host
     ports:
       - "${HTTP_PORT:-8080}:80"
@@ -1803,10 +1807,6 @@ DBEOF
     # CRITICAL for Linux: Map host.docker.internal to host gateway so Nginx can reach host-network API
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    environment:
-      - VITE_API_BASE_URL=http://localhost:${API_PORT:-5245}/api
-      - VITE_SIGNALR_PRINTERS_URL=http://localhost:${API_PORT:-5245}/hubs/printers
-      - VITE_SIGNALR_HARVEST_URL=http://localhost:${API_PORT:-5245}/hubs/harvest
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 30s
