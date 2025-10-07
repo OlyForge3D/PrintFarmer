@@ -1774,6 +1774,9 @@ DBEOF
       - "${HTTP_PORT:-8080}:80"
     networks:
       - printfarmer-network
+    # CRITICAL for Linux: Map host.docker.internal to host gateway so Nginx can reach host-network API
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - VITE_API_BASE_URL=http://localhost:${API_PORT:-5245}/api
       - VITE_SIGNALR_PRINTERS_URL=http://localhost:${API_PORT:-5245}/hubs/printers
