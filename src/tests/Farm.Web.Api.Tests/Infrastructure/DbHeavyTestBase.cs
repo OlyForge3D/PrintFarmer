@@ -30,9 +30,22 @@ public abstract class DbHeavyTestBase<TEntryPoint> : IClassFixture<WebApplicatio
         }
         else
         {
-            _connection = new SqliteConnection("DataSource=:memory:;Cache=Shared");
+            // Prefer a global shared connection when a collection fixture created one.
+            var global = Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection;
+            if (global != null)
+            {
+                _connection = global;
+            }
+            else
+            {
+                _connection = new SqliteConnection("DataSource=:memory:;Cache=Shared");
+            }
         }
-        _connection.Open();
+        // Ensure connection is open (if it's a global fixture connection it may already be open)
+        if (_connection.State != System.Data.ConnectionState.Open)
+        {
+            _connection.Open();
+        }
 
         // Ensure the schema is created on the connection before DI uses it
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -47,11 +60,21 @@ public abstract class DbHeavyTestBase<TEntryPoint> : IClassFixture<WebApplicatio
         {
             builder.ConfigureServices(services =>
             {
-                var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-                if (descriptor != null)
+                // Remove any existing registrations that reference AppDbContext so our
+                // test-provided SqliteConnection is used for all DbContext instances.
+                var descriptorsToRemove = services.Where(d =>
+                    (d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("AppDbContext")) ||
+                    (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext")) ||
+                    (d.ServiceType == typeof(DbContextOptions<AppDbContext>))
+                ).ToList();
+                foreach (var d in descriptorsToRemove)
                 {
-                    services.Remove(descriptor);
+                    services.Remove(d);
                 }
+
+                // Register the opened connection instance and re-register AppDbContext
+                // to use that exact connection so the in-memory DB schema/seed are visible
+                // to the real host's DbContext instances.
                 services.AddSingleton(_connection);
                 services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection));
             });

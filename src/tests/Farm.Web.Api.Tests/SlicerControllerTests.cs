@@ -14,13 +14,13 @@ namespace Farm.Web.Api.Tests;
 /// Integration tests for SlicerController (slicer integration and profile management)
 /// </summary>
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
+[Collection("SharedSqliteFixtureCollection")]
 [TestTiming]
 public class SlicerControllerTests : DbHeavyTestBase<Program>
 {
     private readonly HttpClient _client;
 
-    public SlicerControllerTests() : base(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>())
+    public SlicerControllerTests() : base(new CustomWebApplicationFactory())
     {
         _client = _factory.CreateClient();
     }

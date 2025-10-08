@@ -27,7 +27,7 @@ public class DatabaseInitializer
     /// <summary>
     /// Initialize database with retry logic for container startup scenarios
     /// </summary>
-    public async Task InitializeAsync(string dbProvider, int maxRetries = 10, int delaySeconds = 5)
+    public virtual async Task InitializeAsync(string dbProvider, int maxRetries = 10, int delaySeconds = 5)
     {
         _logger.LogInformation($"[DB] Starting database initialization for provider: {dbProvider}");
 
@@ -130,7 +130,7 @@ public class DatabaseInitializer
     }
 
     // === BEGIN: Seeding logic merged from DatabaseSeeder ===
-    public async Task SeedAllAsync()
+    public virtual async Task SeedAllAsync()
     {
         await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
         await SeedCatalogDataAsync();    // This creates printer model/filament type relationships

@@ -99,11 +99,11 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
               <label key={ext} className="flex items-center gap-1.5 text-xs text-pf-text-primary cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={options.fileTypes.includes(ext)}
+                  checked={Array.isArray(options.fileTypes) && options.fileTypes.includes(ext)}
                   onChange={e => {
                     setOptions(o => e.target.checked
-                      ? { ...o, fileTypes: [...o.fileTypes, ext] }
-                      : { ...o, fileTypes: o.fileTypes.filter(t => t !== ext) }
+                      ? { ...o, fileTypes: [...(Array.isArray(o.fileTypes) ? o.fileTypes : []), ext] }
+                      : { ...o, fileTypes: (Array.isArray(o.fileTypes) ? o.fileTypes.filter(t => t !== ext) : []) }
                     );
                   }}
                   className="w-4 h-4 rounded border-pf-border bg-pf-panel text-pf-accent focus:ring-2 focus:ring-pf-accent cursor-pointer"

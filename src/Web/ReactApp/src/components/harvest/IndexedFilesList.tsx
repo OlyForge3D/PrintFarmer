@@ -29,15 +29,15 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         fileIds,
       });
       toast.success(`Imported: ${result.importedCount}, Skipped: ${result.skippedCount}, Failed: ${result.failedCount}`);
-      setFiles(prev => prev.map(f =>
-        result.importedFileIds.includes(f.id)
-          ? { ...f, status: HarvestFileStatus.Complete, error: '' }
-          : result.skippedFileIds.includes(f.id)
-            ? { ...f, status: HarvestFileStatus.Skipped, error: '' }
-            : result.failedFileIds.includes(f.id)
-              ? { ...f, status: HarvestFileStatus.Failed, error: result.errors?.[f.id] || f.error }
-              : f
-      ));
+      setFiles(prev => prev.map(f => {
+        const imported = Array.isArray(result.importedFileIds) && result.importedFileIds.includes(f.id);
+        const skipped = Array.isArray(result.skippedFileIds) && result.skippedFileIds.includes(f.id);
+        const failed = Array.isArray(result.failedFileIds) && result.failedFileIds.includes(f.id);
+        if (imported) return { ...f, status: HarvestFileStatus.Complete, error: '' };
+        if (skipped) return { ...f, status: HarvestFileStatus.Skipped, error: '' };
+        if (failed) return { ...f, status: HarvestFileStatus.Failed, error: result.errors?.[f.id] || f.error };
+        return f;
+      }));
       setSelected(new Set());
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : 'Unknown error';
