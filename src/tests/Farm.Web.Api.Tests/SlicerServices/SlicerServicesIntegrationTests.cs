@@ -1,9 +1,9 @@
-﻿using Farm.Web.Api.Services.SlicerServices;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Farm.Infrastructure.Telemetry;
 using Moq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;

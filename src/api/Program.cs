@@ -680,19 +680,8 @@ if (isMonolithicDeployment)
 }
 
 // Initialize database (ensures schema exists before resolving SettingsService)
-// Resolve required services once from a scope and pass them into the initializer to avoid
-// resolving services multiple times inside the initializer itself.
-await using AsyncServiceScope _initScope = app.Services.CreateAsyncScope();
-{
-    IServiceProvider _sp = _initScope.ServiceProvider;
-    IUnifiedLoggingService _logger = _sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-    AppDbContext _db = _sp.GetRequiredService<AppDbContext>();
-    ISettingsService _dbSettingsSvc = _sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>();
-    IDatabaseInitializer _dbInitializer = _sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer>();
-    IStartupStatus _startupStatusResolved = _sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
-
-    await app.InitializeDatabaseAsync(_logger, _db, _dbSettingsSvc, _dbInitializer, _startupStatusResolved);
-}
+// Delegate initialization to ProgramHelpers to keep Program.cs minimal and avoid nested blocks (addresses S1199)
+await ProgramHelpers.InitializeDatabaseAsync(app);
 
 await app.RunAsync();
 

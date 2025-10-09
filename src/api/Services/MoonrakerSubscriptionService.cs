@@ -539,91 +539,14 @@ public sealed class MoonrakerSubscriptionService(
             // Check if this is a JSON-RPC response (has "id" field)
             if (root.TryGetProperty("id", out _))
             {
-                // This is a response to a request we made
-                try
-                {
-                    JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
-                    if (jsonRpcResponse?.Error != null)
-                    {
-                        _logger.LogWarning($"JSON-RPC error from printer {printer.Name}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
-
-                        // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
-                        if (jsonRpcResponse.Error.Code == -32700)
-                        {
-                            _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
-                            int errorCount = _parseErrorCounts[printer.Id];
-
-                            if (errorCount >= MaxParseErrorsBeforeFallback)
-                            {
-                                _logger.LogWarning($"JSON-RPC parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {printer.Name}. Triggering HTTP polling fallback.");
-                                await TriggerHttpPollingFallbackAsync(printer, ct);
-                            }
-                        }
-                        return;
-                    }
-
-                    // Handle subscription acknowledgement which carries current state
-                    if (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object &&
-                        root.TryGetProperty("id", out JsonElement idProp) && idProp.GetInt32() == 101 &&
-                        res.TryGetProperty("status", out JsonElement statusObj))
-                    {
-                        _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-                        await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, ct);
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning($"Failed to parse JSON-RPC response from printer {printer.Name}: {ex.Message}");
-
-                    // Track parse errors and trigger fallback if threshold exceeded
-                    _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
-                    int errorCount = _parseErrorCounts[printer.Id];
-
-                    if (errorCount >= MaxParseErrorsBeforeFallback)
-                    {
-                        _logger.LogWarning($"Parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {printer.Name}. Triggering HTTP polling fallback.");
-                        await TriggerHttpPollingFallbackAsync(printer, ct);
-                    }
-                }
+                // Response handling extracted to reduce nesting
+                await HandleJsonRpcResponseAsync(root, message, printer, ct);
             }
             // Check if this is a JSON-RPC notification (has "method" field but no "id")
             else if (root.TryGetProperty("method", out JsonElement methodProp))
             {
-                string? method = methodProp.GetString();
-                _logger.LogDebug($"Received notification {method} from printer {printer.Name}");
-
-                switch (method)
-                {
-                    case "notify_status_update":
-                        if (root.TryGetProperty("params", out JsonElement p) && p.ValueKind == JsonValueKind.Array && p.GetArrayLength() > 0)
-                        {
-                            _logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
-                                printer.Name, p[0].GetRawText());
-                            await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, ct);
-                        }
-                        break;
-
-                    case "notify_klippy_disconnected":
-                        _logger.LogWarning("Klippy disconnected for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
-                        SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy disconnected");
-                        await SendOfflineStatusAsync(printer.Id, ct);
-                        break;
-
-                    case "notify_klippy_ready":
-                        _logger.LogInformation("Klippy ready for printer {PrinterName}, switching to WebSocket real-time mode", printer.Name);
-                        SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
-                        break;
-
-                    case "notify_klippy_shutdown":
-                        _logger.LogWarning("Klippy shutdown for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
-                        SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy shutdown");
-                        await SendShutdownStatusAsync(printer.Id, ct);
-                        break;
-
-                    default:
-                        _logger.LogDebug($"Unhandled notification method {method} from printer {printer.Name}");
-                        break;
-                }
+                // Notification handling extracted to reduce nesting
+                await HandleJsonRpcNotificationAsync(methodProp, root, printer, ct);
             }
             else
             {
@@ -637,6 +560,96 @@ public sealed class MoonrakerSubscriptionService(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error processing message from printer {printer.Name}. Message: {message}");
+        }
+    }
+
+    // Extracted handler for JSON-RPC responses (was inlined in ProcessJsonRpcMessageAsync)
+    private async Task HandleJsonRpcResponseAsync(JsonElement root, string message, Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
+            if (jsonRpcResponse?.Error != null)
+            {
+                _logger.LogWarning($"JSON-RPC error from printer {printer.Name}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+
+                // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
+                if (jsonRpcResponse.Error.Code == -32700)
+                {
+                    _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
+                    int errorCount = _parseErrorCounts[printer.Id];
+
+                    if (errorCount >= MaxParseErrorsBeforeFallback)
+                    {
+                        _logger.LogWarning($"JSON-RPC parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {printer.Name}. Triggering HTTP polling fallback.");
+                        await TriggerHttpPollingFallbackAsync(printer, ct);
+                    }
+                }
+                return;
+            }
+
+            // Handle subscription acknowledgement which carries current state
+            if (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object &&
+                root.TryGetProperty("id", out JsonElement idProp) && idProp.GetInt32() == 101 &&
+                res.TryGetProperty("status", out JsonElement statusObj))
+            {
+                _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
+                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, ct);
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning($"Failed to parse JSON-RPC response from printer {printer.Name}: {ex.Message}");
+
+            // Track parse errors and trigger fallback if threshold exceeded
+            _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
+            int errorCount = _parseErrorCounts[printer.Id];
+
+            if (errorCount >= MaxParseErrorsBeforeFallback)
+            {
+                _logger.LogWarning($"Parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {printer.Name}. Triggering HTTP polling fallback.");
+                await TriggerHttpPollingFallbackAsync(printer, ct);
+            }
+        }
+    }
+
+    // Extracted handler for JSON-RPC notifications (was inlined in ProcessJsonRpcMessageAsync)
+    private async Task HandleJsonRpcNotificationAsync(JsonElement methodProp, JsonElement root, Printer printer, CancellationToken ct)
+    {
+        string? method = methodProp.GetString();
+        _logger.LogDebug($"Received notification {method} from printer {printer.Name}");
+
+        switch (method)
+        {
+            case "notify_status_update":
+                if (root.TryGetProperty("params", out JsonElement p) && p.ValueKind == JsonValueKind.Array && p.GetArrayLength() > 0)
+                {
+                    _logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
+                        printer.Name, p[0].GetRawText());
+                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, ct);
+                }
+                break;
+
+            case "notify_klippy_disconnected":
+                _logger.LogWarning("Klippy disconnected for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy disconnected");
+                await SendOfflineStatusAsync(printer.Id, ct);
+                break;
+
+            case "notify_klippy_ready":
+                _logger.LogInformation("Klippy ready for printer {PrinterName}, switching to WebSocket real-time mode", printer.Name);
+                SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
+                break;
+
+            case "notify_klippy_shutdown":
+                _logger.LogWarning("Klippy shutdown for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy shutdown");
+                await SendShutdownStatusAsync(printer.Id, ct);
+                break;
+
+            default:
+                _logger.LogDebug($"Unhandled notification method {method} from printer {printer.Name}");
+                break;
         }
     }
 
