@@ -72,6 +72,7 @@ const navigation: NavigationItem[] = [
     icon: Settings,
     requiredRole: 'farm_admin',
     children: [
+      { name: 'Printers', href: '/admin/printers', icon: Printer },
       { name: 'Catalog', href: '/catalog', icon: Layers },
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Spools', href: '/spools', icon: Box },
