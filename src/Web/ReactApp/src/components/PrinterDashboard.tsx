@@ -1,7 +1,12 @@
 import React from 'react';
-import { usePrintersWithCameraUrls } from '@/hooks/useApi';
+import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard } from 'lucide-react';
+import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard, Edit, Trash2 } from 'lucide-react';
+import { ImagePlaceholder } from '@/components/icons';
+import { toast } from 'sonner';
+import type { Printer } from '@/types/api';
+import { EditPrinterModal } from '@/components/EditPrinterModal';
+import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
 
@@ -44,6 +49,12 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrintersWithCameraUrls();
   const { getPrinterStatus } = usePrinterStatusUpdates();
+  const deletePrinterMutation = useDeletePrinter();
+
+  const [editPrinterId, setEditPrinterId] = React.useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = React.useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = React.useState<{ isOpen: boolean; printers: Printer[] }>({ isOpen: false, printers: [] });
+  const [failedImages, setFailedImages] = React.useState<Record<string, boolean>>({});
 
   const stats = React.useMemo(() => {
     const userPrinters = printers ?? [];
@@ -57,6 +68,28 @@ export const PrinterDashboard: React.FC = () => {
     const paused = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('paused')).length;
     return { total, online, printing, paused, offline: total - online };
   }, [printers, getPrinterStatus]);
+
+  const handleEditPrinter = (printerId: string) => {
+    setEditPrinterId(printerId);
+    setShowEditModal(true);
+  };
+
+  const handleDeleteSinglePrinter = (printer: Printer) => {
+    setDeleteConfirmation({ isOpen: true, printers: [printer] });
+    toast(`Delete: "${printer.name}" — confirm to proceed`, { duration: 3000 });
+  };
+
+  const handleDeleteConfirm = async () => {
+    try {
+      await Promise.all(deleteConfirmation.printers.map((printer) => deletePrinterMutation.mutateAsync(printer.id)));
+      setDeleteConfirmation({ isOpen: false, printers: [] });
+    } catch (err) {
+      // swallow - toast handled in hook
+      console.error('Failed to delete printers', err);
+    }
+  };
+
+  const handleDeleteCancel = () => setDeleteConfirmation({ isOpen: false, printers: [] });
 
   return (
     <PageTemplate
@@ -104,7 +137,108 @@ export const PrinterDashboard: React.FC = () => {
               <DetailedSystemHealth />
             </div>
 
+            {/* Printers list - accessible list with test ids for tests */}
+            {printers && printers.length > 0 && (
+              <div className="mt-6">
+                <ul role="list" aria-label="Printers list" data-testid="printers-list" className="space-y-4">
+                  {printers.map((p) => {
+                    const status = (getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string;
+                    const isPrinting = status.toLowerCase().includes('printing');
+                    const isOnline = !!p.isOnline || ['operational', 'ready', 'idle'].some(x => status.toLowerCase().includes(x));
+                    const backendName = (() => {
+                      switch (p.backend) {
+                        case 0: return 'Moonraker';
+                        case 1: return 'PrusaLink';
+                        case 2: return 'SDCP';
+                        case 3: return 'OctoPrint';
+                        default: return 'Unknown';
+                      }
+                    })();
 
+                    return (
+                      <li
+                        key={p.id}
+                        role="listitem"
+                        aria-label={`Printer ${p.name}`}
+                        data-testid={`printer-item-${p.id}`}
+                        className="bg-pf-bg-1 rounded-lg p-4 shadow flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-4">
+                          {/* Thumbnail / snapshot placeholder */}
+                          <div className="w-12 h-12 md:w-16 md:h-16 bg-pf-border flex items-center justify-center rounded overflow-hidden">
+                            {/* Show image when available and not failed; otherwise show a skeleton placeholder */}
+                            {p.thumbnailUrl && !failedImages[p.id] ? (
+                              <img
+                                src={p.thumbnailUrl}
+                                alt={`${p.name} thumbnail`}
+                                className="w-full h-full object-cover rounded"
+                                loading="lazy"
+                                onError={() => setFailedImages(prev => ({ ...prev, [p.id]: true }))}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center bg-pf-loading animate-pulse">
+                                <ImagePlaceholder className="w-6 h-6 text-pf-text-secondary" />
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-base font-medium">{p.name}</div>
+                            <div className="text-sm text-pf-text-secondary">
+                              {p.manufacturerName ? `${p.manufacturerName} ${p.modelName ?? ''}` : (p.modelName ?? '')}
+                            </div>
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${isOnline ? 'bg-pf-status-online-bg text-pf-status-online-text' : 'bg-pf-border-medium text-pf-text-secondary'}`}>
+                                {isOnline ? 'Online' : 'Offline'}
+                              </span>
+                              {isPrinting && <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-warning text-pf-text-primary">Printing</span>}
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-bg-2 text-pf-text-secondary">{backendName}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            aria-label={`Edit ${p.name}`}
+                            title="Edit"
+                            type="button"
+                            className="p-1 rounded hover:bg-pf-bg-2"
+                            onClick={() => handleEditPrinter(p.id)}
+                          >
+                            <Edit className="w-5 h-5 text-pf-text-secondary" />
+                          </button>
+                          <button
+                            aria-label={`Delete ${p.name}`}
+                            title="Delete"
+                            type="button"
+                            className="p-1 rounded hover:bg-pf-bg-2"
+                            onClick={() => handleDeleteSinglePrinter(p)}
+                          >
+                            <Trash2 className="w-5 h-5 text-pf-text-secondary" />
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            {/* Edit/Delete Modals for inline actions */}
+            {showEditModal && (
+              <EditPrinterModal
+                printerId={editPrinterId}
+                isOpen={showEditModal}
+                onClose={() => setShowEditModal(false)}
+                onSuccess={() => { setShowEditModal(false); /* optionally refetch printers via parent if available */ }}
+              />
+            )}
+            {deleteConfirmation.isOpen && (
+              <DeleteConfirmationModal
+                isOpen={deleteConfirmation.isOpen}
+                printers={deleteConfirmation.printers}
+                onConfirm={handleDeleteConfirm}
+                onCancel={handleDeleteCancel}
+              />
+            )}
           </div>
         )}
     </PageTemplate>
