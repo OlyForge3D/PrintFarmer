@@ -16,17 +16,17 @@ public static class Program
 {
     public static void Main(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
         // Configure logging
-        builder.Logging.ClearProviders();
-        builder.Logging.AddConsole();
+        _ = builder.Logging.ClearProviders();
+        _ = builder.Logging.AddConsole();
 
         // Add Redis connection
-        builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
+        _ = builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
         {
-            var configuration = provider.GetService<IConfiguration>();
-            var raw = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
+            IConfiguration configuration = provider.GetRequiredService<IConfiguration>();
+            string raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
             if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
             {
                 raw = raw.TrimEnd(',') + ",abortConnect=false";
@@ -37,41 +37,51 @@ public static class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
+                ILoggerFactory? loggerFactory = provider.GetService<Microsoft.Extensions.Logging.ILoggerFactory>();
+                ILogger? logger = loggerFactory?.CreateLogger("PrusaSlicer.Startup");
+                if (logger != null)
+                {
+                    logger.LogWarning(ex, "[startup][redis] Initial Redis connection failed: {Message}", ex.Message);
+                }
+                else
+                {
+                    Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
+                }
                 return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
             }
         });
 
         // HTTP clients
-        builder.Services.AddHttpClient<HttpProgressReporter>(); // shared progress reporter
-        builder.Services.AddHttpClient<PrusaSlicingPipelineService>(); // engine-specific pipeline
+        _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared progress reporter
+        _ = builder.Services.AddHttpClient<PrusaSlicingPipelineService>(); // engine-specific pipeline
 
         // Worker services (shared + engine specific)
-        builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
-        builder.Services.AddSingleton<IPrusaBinaryDetector, PrusaBinaryDetector>(); // engine specific
-        builder.Services.AddScoped<ISlicingPipelineService, PrusaSlicingPipelineService>(); // engine pipeline implements shared interface
-        builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+        _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
+        _ = builder.Services.AddSingleton<IPrusaBinaryDetector, PrusaBinaryDetector>(); // engine specific
+        _ = builder.Services.AddScoped<ISlicingPipelineService, PrusaSlicingPipelineService>(); // engine pipeline implements shared interface
+        _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+        _ = builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Infrastructure.Telemetry.UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer)
-        builder.Services.AddHostedService<GracefulShutdownService>(); // shared
-        builder.Services.AddHostedService<QueueConsumerService>(); // derived
+        _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
+        _ = builder.Services.AddHostedService<QueueConsumerService>(); // derived
 
         // Health checks
-        builder.Services.AddHealthChecks()
+        _ = builder.Services.AddHealthChecks()
             .AddCheck<WorkerLivenessHealthCheck>("liveness")
             .AddCheck<WorkerReadinessHealthCheck>("readiness")
             .AddCheck<PrusaBinaryHealthCheck>("prusa_binary")
             .AddCheck<RedisHealthCheck>("redis");
 
-        var app = builder.Build();
+        WebApplication app = builder.Build();
 
         if (app.Environment.IsDevelopment())
         {
-            app.UseDeveloperExceptionPage();
+            _ = app.UseDeveloperExceptionPage();
         }
 
         // Liveness
-        app.MapHealthChecks("/healthz", new HealthCheckOptions
+        _ = app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
             Predicate = c => c.Name == "liveness",
             ResponseWriter = async (context, report) =>
@@ -86,14 +96,14 @@ public static class Program
         });
 
         // Relaxed readiness flag
-        var relaxedEnv = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
-        var relaxedReadiness = !string.IsNullOrEmpty(relaxedEnv) && relaxedEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
+        string? relaxedEnv = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
+        bool relaxedReadiness = !string.IsNullOrEmpty(relaxedEnv) && relaxedEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
         if (relaxedReadiness)
         {
             app.Logger.LogWarning("WORKER_RELAXED_READINESS=true -> prusa_binary will be excluded from readiness evaluation.");
         }
 
-        app.MapHealthChecks("/health/ready", new HealthCheckOptions
+        _ = app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
             Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary"),
             ResponseWriter = async (context, report) =>
@@ -112,12 +122,12 @@ public static class Program
             }
         });
 
-        app.MapHealthChecks("/ready", new HealthCheckOptions
+        _ = app.MapHealthChecks("/ready", new HealthCheckOptions
         {
             Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary")
         });
 
-        app.MapGet("/", (IPrusaBinaryDetector detector) => Results.Ok(new
+        _ = app.MapGet("/", (IPrusaBinaryDetector detector) => Results.Ok(new
         {
             service = "prusaslicer-worker",
             version = "1.0.0",
@@ -126,7 +136,7 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
-        var prusaDetector = app.Services.GetRequiredService<IPrusaBinaryDetector>();
+        IPrusaBinaryDetector prusaDetector = app.Services.GetRequiredService<IPrusaBinaryDetector>();
         if (!prusaDetector.IsRealBinaryPresent())
         {
             app.Logger.LogWarning("PrusaSlicer binary not present (stub in use) - readiness will be unhealthy for prusa_binary.");

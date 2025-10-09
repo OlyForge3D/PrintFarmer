@@ -20,7 +20,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
         foreach (string e in list)
         {
             string norm = e.StartsWith('.') ? e : "." + e;
-            _extensions.TryAdd(norm, 0);
+            _ = _extensions.TryAdd(norm, 0);
         }
     }
 
@@ -37,7 +37,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
         _extensions.Clear();
         foreach (string? e in cleaned)
         {
-            _extensions.TryAdd(e, 0);
+            _ = _extensions.TryAdd(e, 0);
         }
     }
 }
@@ -47,15 +47,10 @@ public interface IGcodeUploadQuotaService
     bool TryAddUsage(string userId, long bytes, out long usedBytes, out long limitBytes);
 }
 
-public class InMemoryGcodeUploadQuotaService : IGcodeUploadQuotaService
+public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 1024 * 1024) : IGcodeUploadQuotaService
 {
-    private readonly long _dailyLimitBytes;
+    private readonly long _dailyLimitBytes = dailyLimitBytes;
     private readonly ConcurrentDictionary<string, (DateOnly day, long bytes)> _usage = new();
-
-    public InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 1024 * 1024) // 2 GB default
-    {
-        _dailyLimitBytes = dailyLimitBytes;
-    }
 
     public bool TryAddUsage(string userId, long bytes, out long usedBytes, out long limitBytes)
     {

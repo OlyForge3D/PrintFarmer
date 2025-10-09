@@ -1,11 +1,12 @@
-﻿using Farm.Web.Api.Services.SlicerServices.Process;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
 public static class SlicerProgressMonitor
 {
-    public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, ILogger? logger, CancellationToken ct, Func<Guid, CancellationToken, Task>? onParserCompleted = null, Func<Guid, string, CancellationToken, Task>? onParserFailure = null)
+    public static async Task MonitorAsync(Guid jobId, IProcessHandle processHandle, ISlicerProgressNotifier notifier, IProgressParser parser, IUnifiedLoggingService? logger, CancellationToken ct, Func<Guid, CancellationToken, Task>? onParserCompleted = null, Func<Guid, string, CancellationToken, Task>? onParserFailure = null)
     {
         ArgumentNullException.ThrowIfNull(processHandle);
         ArgumentNullException.ThrowIfNull(parser);
@@ -29,7 +30,7 @@ public static class SlicerProgressMonitor
                         }
                         catch (Exception ex)
                         {
-                            logger?.LogDebug(ex, "Progress parser threw while handling a line for job {JobId}", jobId);
+                            logger?.LogDebug(ex, $"Progress parser threw while handling a line for job {jobId}");
                         }
 
                         if (parsed != null)
@@ -48,7 +49,7 @@ public static class SlicerProgressMonitor
                                 }
                                 catch (Exception ex)
                                 {
-                                    logger?.LogDebug(ex, "onParserCompleted callback threw for job {JobId}", jobId);
+                                    logger?.LogDebug(ex, $"onParserCompleted callback threw for job {jobId}");
                                 }
                             }
                             else if (parsed.State == SlicerProgressState.Failed)
@@ -63,7 +64,7 @@ public static class SlicerProgressMonitor
                                 }
                                 catch (Exception ex)
                                 {
-                                    logger?.LogDebug(ex, "onParserFailure callback threw for job {JobId}", jobId);
+                                    logger?.LogDebug(ex, $"onParserFailure callback threw for job {jobId}");
                                 }
 
                                 // Ask the underlying process to terminate as an early stop
@@ -88,7 +89,7 @@ public static class SlicerProgressMonitor
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            logger?.LogWarning(ex, "Error monitoring slicer process for job {JobId}", jobId);
+            logger?.LogWarning(ex, $"Error monitoring slicer process for job {jobId}");
         }
     }
 }

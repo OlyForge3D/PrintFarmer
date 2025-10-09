@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,18 +11,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/moonraker-test")]
 [Tags("Moonraker Diagnostics")]
-public class MoonrakerDiagnosticsController : ControllerBase
+public class MoonrakerDiagnosticsController(
+    IMoonrakerClient moonrakerClient,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IMoonrakerClient _moonrakerClient;
-    private readonly ILogger<MoonrakerDiagnosticsController> _logger;
-
-    public MoonrakerDiagnosticsController(
-        IMoonrakerClient moonrakerClient,
-        ILogger<MoonrakerDiagnosticsController> logger)
-    {
-        _moonrakerClient = moonrakerClient;
-        _logger = logger;
-    }
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Test endpoint to invoke GetFileRootsAsync directly
@@ -37,7 +32,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
         {
             return BadRequest("url is required");
         }
-        _logger.LogInformation("MoonrakerDiagnostics: GetFileRoots called for {Url}", url);
+        _logger.LogInformation($"MoonrakerDiagnostics: GetFileRoots called for {url}", null, null);
 
         try
         {
@@ -57,8 +52,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                     if (retryCount > 0)
                     {
                         int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                        _logger.LogInformation("Retry {RetryCount}/{MaxRetries} after {DelayMs}ms",
-                            retryCount, MaxRetries, delay);
+                        _logger.LogInformation($"Retry {retryCount}/{MaxRetries} after {delay}ms", null, null);
                         await Task.Delay(delay);
                     }
 
@@ -69,8 +63,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                 {
                     lastException = ex;
                     retryCount++;
-                    _logger.LogWarning(ex, "GetFileRootsAsync attempt {RetryCount}/{MaxRetries} failed",
-                        retryCount, MaxRetries);
+                    _logger.LogWarning(ex, $"GetFileRootsAsync attempt {retryCount}/{MaxRetries} failed", null, null);
                 }
             }
 
@@ -78,7 +71,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
             {
                 if (roots is { Length: > 0 })
                 {
-                    _logger.LogInformation("GetFileRootsAsync succeeded, found {RootCount} roots", roots.Length);
+                    _logger.LogInformation($"GetFileRootsAsync succeeded, found {roots.Length} roots", null, null);
                     return Ok(roots);
                 }
 
@@ -86,12 +79,12 @@ public class MoonrakerDiagnosticsController : ControllerBase
             }
 
             // failure path
-            _logger.LogError(lastException, "GetFileRootsAsync failed after retries");
+            _logger.LogError(lastException!, $"GetFileRootsAsync failed after retries", null, null);
             return Problem($"GetFileRootsAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "MoonrakerDiagnostics: Error calling GetFileRootsAsync");
+            _logger.LogError(ex, $"MoonrakerDiagnostics: Error calling GetFileRootsAsync", null, null);
             return Problem($"Error: {ex.Message}", statusCode: 500);
         }
     }
@@ -109,7 +102,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
         {
             return BadRequest("url is required");
         }
-        _logger.LogInformation("MoonrakerDiagnostics: GetDirectory called for {Url}, path {Path}", url, path);
+        _logger.LogInformation($"MoonrakerDiagnostics: GetDirectory called for {url}, path {path}", null, null);
 
         try
         {
@@ -129,8 +122,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                     if (retryCount > 0)
                     {
                         int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                        _logger.LogInformation("Retry GetDirectoryAsync {RetryCount}/{MaxRetries} after {DelayMs}ms",
-                            retryCount, MaxRetries, delay);
+                        _logger.LogInformation($"Retry GetDirectoryAsync {retryCount}/{MaxRetries} after {delay}ms", null, null);
                         await Task.Delay(delay);
                     }
 
@@ -141,8 +133,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                 {
                     lastException = ex;
                     retryCount++;
-                    _logger.LogWarning(ex, "GetDirectoryAsync attempt {RetryCount}/{MaxRetries} failed",
-                        retryCount, MaxRetries);
+                    _logger.LogWarning(ex, $"GetDirectoryAsync attempt {retryCount}/{MaxRetries} failed", null, null);
                 }
             }
 
@@ -150,21 +141,21 @@ public class MoonrakerDiagnosticsController : ControllerBase
             {
                 if (directory is not null)
                 {
-                    _logger.LogInformation("GetDirectoryAsync completed, directoryInfo is not null");
+                    _logger.LogInformation($"GetDirectoryAsync completed, directoryInfo is not null", null, null);
                     return Ok(directory);
                 }
 
-                _logger.LogInformation("GetDirectoryAsync completed, directoryInfo is null");
+                _logger.LogInformation($"GetDirectoryAsync completed, directoryInfo is null", null, null);
                 return NotFound("Directory info not found");
             }
 
             // failure path
-            _logger.LogError(lastException, "GetDirectoryAsync failed after retries");
+            _logger.LogError(lastException!, $"GetDirectoryAsync failed after retries", null, null);
             return Problem($"GetDirectoryAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "MoonrakerDiagnostics: Error calling GetDirectoryAsync");
+            _logger.LogError(ex, $"MoonrakerDiagnostics: Error calling GetDirectoryAsync", null, null);
             return Problem($"Error: {ex.Message}", statusCode: 500);
         }
     }
@@ -182,7 +173,8 @@ public class MoonrakerDiagnosticsController : ControllerBase
         {
             return BadRequest("url is required");
         }
-        _logger.LogInformation("MoonrakerDiagnostics: GetDetailedFileList called for {Url}, root {Root}, path {Path}", url, root, path);
+
+        _logger.LogInformation($"MoonrakerDiagnostics: GetDetailedFileList called for {url}, root {root}, path {(path ?? string.Empty)}", null, null);
 
         try
         {
@@ -202,8 +194,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                     if (retryCount > 0)
                     {
                         int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                        _logger.LogInformation("Retry GetDetailedFileListAsync {RetryCount}/{MaxRetries} after {DelayMs}ms",
-                            retryCount, MaxRetries, delay);
+                        _logger.LogInformation($"Retry GetDetailedFileListAsync {retryCount}/{MaxRetries} after {delay}ms", null, null);
                         await Task.Delay(delay);
                     }
 
@@ -214,8 +205,7 @@ public class MoonrakerDiagnosticsController : ControllerBase
                 {
                     lastException = ex;
                     retryCount++;
-                    _logger.LogWarning(ex, "GetDetailedFileListAsync attempt {RetryCount}/{MaxRetries} failed",
-                        retryCount, MaxRetries);
+                    _logger.LogWarning(ex, $"GetDetailedFileListAsync attempt {retryCount}/{MaxRetries} failed", null, null);
                 }
             }
 
@@ -223,21 +213,21 @@ public class MoonrakerDiagnosticsController : ControllerBase
             {
                 if (fileList is { Length: > 0 })
                 {
-                    _logger.LogInformation("GetDetailedFileListAsync returned {Count} files", fileList.Length);
+                    _logger.LogInformation($"GetDetailedFileListAsync returned {fileList.Length} files", null, null);
                     return Ok(fileList);
                 }
 
-                _logger.LogInformation("GetDetailedFileListAsync returned 0 files");
+                _logger.LogInformation($"GetDetailedFileListAsync returned 0 files", null, null);
                 return Ok(Array.Empty<MoonrakerFileInfo>());
             }
 
             // failure path
-            _logger.LogError(lastException, "GetDetailedFileListAsync failed after retries");
+            _logger.LogError(lastException!, $"GetDetailedFileListAsync failed after retries", null, null);
             return Problem($"GetDetailedFileListAsync failed after {MaxRetries} attempts", statusCode: 500);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "MoonrakerDiagnostics: Error calling GetDetailedFileListAsync");
+            _logger.LogError(ex, $"MoonrakerDiagnostics: Error calling GetDetailedFileListAsync", null, null);
             return Problem($"Error: {ex.Message}", statusCode: 500);
         }
     }

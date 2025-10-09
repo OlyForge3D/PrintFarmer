@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // shared interfaces
 using Farm.Web.Shared;
 
@@ -9,12 +10,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 {
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
-    private readonly ILogger<OrcaSlicingPipelineService> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly string _workingDirectory;
     private readonly string _storageEndpoint;
     private readonly string _orcaSlicerBinaryPath;
 
-    public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration)
+    public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, IUnifiedLoggingService logger, IConfiguration configuration)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _progressReporter = progressReporter ?? throw new ArgumentNullException(nameof(progressReporter));
@@ -36,7 +37,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         Directory.CreateDirectory(jobWorkDir);
         try
         {
-            _logger.LogInformation("Starting slicing pipeline for job {JobId}", job.Id);
+            _logger.LogInformation($"Starting slicing pipeline for job {job.Id}");
             await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
             var stlFilePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 20, "Preparing slicer configuration", cancellationToken);
@@ -70,7 +71,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed cleanup {Dir}", jobWorkDir);
+                _logger.LogWarning(ex, $"Failed cleanup {jobWorkDir}");
             }
         }
     }
@@ -158,7 +159,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _logger.LogWarning(ex, "Error monitoring slicing progress for job {JobId}", jobId); }
+        catch (Exception ex) { _logger.LogWarning(ex, $"Error monitoring slicing progress for job {jobId}"); }
     }
 
     private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)

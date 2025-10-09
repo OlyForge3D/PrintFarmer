@@ -3,6 +3,8 @@ import { useTelemetry } from '@/telemetry/useTelemetry';
 import type { Span } from '@opentelemetry/api';
 import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
+import { PageTemplate } from '@/components/PageTemplate';
+import { Activity } from 'lucide-react';
 
 interface TelemetryStats {
   operationsCount: number;
@@ -93,22 +95,20 @@ export function ObservabilityDashboard() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-pf-text-primary">System Observability</h2>
-          <p className="text-pf-text-secondary mt-1">
-            Real-time system monitoring and telemetry data
-          </p>
-        </div>
+    <PageTemplate
+      title="System Observability"
+      subtitle="Real-time system monitoring and telemetry data"
+      icon={Activity}
+      maxWidth="max-w-7xl"
+      actions={
         <button
           onClick={handleRefresh}
           className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-success-hover transition-colors"
         >
           Refresh Data
         </button>
-      </div>
-
+      }
+    >
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
@@ -185,6 +185,6 @@ export function ObservabilityDashboard() {
       <div className="mt-8">
         <UnifiedLoggingDashboard />
       </div>
-    </div>
+    </PageTemplate>
   );
 }

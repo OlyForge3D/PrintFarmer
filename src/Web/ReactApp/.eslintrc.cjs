@@ -24,6 +24,10 @@ module.exports = {
   ],
   parser: '@typescript-eslint/parser',
   plugins: ['@typescript-eslint', 'react-refresh', 'import'],
+  // Register local plugin directory under the name 'local'
+  // ESLint will resolve this when run from the project root
+  pluginPaths: ['eslint-rules'],
+  plugins: ['@typescript-eslint', 'react-refresh', 'import', 'local'],
   parserOptions: {
     ecmaVersion: 2022,
     sourceType: 'module',
@@ -35,6 +39,8 @@ module.exports = {
   rules: {
     'react-refresh/only-export-components': ['error', { allowConstantExport: true }],
     'no-restricted-imports': ['error', { paths: restrictedImports }],
+    // Custom local rule to detect unguarded console / raw JSX dumps
+    'local/pf-no-unguarded-console': 'warn',
   '@typescript-eslint/no-explicit-any': ['error', { ignoreRestArgs: false }],
   },
   overrides: [

@@ -27,7 +27,7 @@ This document summarizes the comprehensive infrastructure improvements implement
 catch (Exception ex)
 {
     Console.WriteLine($"Failed to get history job {jobId}: {ex.Message}");
-    return StatusCode(500, "Failed to retrieve history job");
+    return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve history job");
 }
 
 // NEW: Structured, traceable error handling
@@ -35,7 +35,7 @@ catch (HttpRequestException ex)
 {
     logger.LogError(ex, "Network error retrieving history job {JobId} for printer {PrinterId} from {ServerUrl}", 
         jobId, id, printer.ServerUrl);
-    return StatusCode(502, "Unable to connect to printer");
+    return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
 }
 // Global handler provides consistent format with correlation IDs
 ```

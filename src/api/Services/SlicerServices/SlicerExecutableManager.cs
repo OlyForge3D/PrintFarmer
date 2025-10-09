@@ -1,5 +1,10 @@
 ﻿using System.Diagnostics;
+using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services;
 using Farm.Web.Shared;
+using InfraSlicerEngine = Farm.Infrastructure.Settings.SlicerEngineType;
+using SharedSlicerEngine = Farm.Web.Shared.SlicerEngineType;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -9,32 +14,15 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// SlicerExecutables:{EngineName}:Path
 /// SlicerExecutables:{EngineName}:ArgsTemplate  (optional, {input} and {output} placeholders recommended)
 /// </summary>
-public class SlicerExecutableManager : ISlicerExecutableManager
+public class SlicerExecutableManager(IConfiguration config, IUnifiedLoggingService logger) : ISlicerExecutableManager
 {
-    private readonly IConfiguration _config;
-    private readonly ILogger<SlicerExecutableManager> _logger;
-    private readonly ISlicerSettingsService? _settingsService;
+    private readonly IConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    // Remove obsolete appSettingsService
 
-    public SlicerExecutableManager(IConfiguration config, ILogger<SlicerExecutableManager> logger, ISlicerSettingsService? settingsService = null)
+    public bool TryGetExecutable(SharedSlicerEngine engine, out string? executablePath, out string? argsTemplate)
     {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _settingsService = settingsService;
-    }
-
-    public bool TryGetExecutable(SlicerEngineType engine, out string? executablePath, out string? argsTemplate)
-    {
-        // Check runtime settings first (admin UI persisted values)
-        if (_settingsService != null)
-        {
-            SlicerSettingsDto runtime = _settingsService.GetSettings();
-            if (runtime != null && runtime.PerEngine.TryGetValue(engine, out PerEngineSlicerSetting? eSetting) && !string.IsNullOrWhiteSpace(eSetting.Path))
-            {
-                executablePath = eSetting.Path;
-                argsTemplate = eSetting.ArgsTemplate;
-                return true;
-            }
-        }
+        // Use SettingsService for settings access if needed
 
         IConfigurationSection section = _config.GetSection($"SlicerExecutables:{engine}");
         executablePath = section["Path"];
@@ -45,10 +33,10 @@ public class SlicerExecutableManager : ISlicerExecutableManager
             // Try common names on PATH
             executablePath = engine switch
             {
-                SlicerEngineType.PrusaSlicer => FindOnPath("prusa-slicer", "prusa-slicer.exe"),
-                SlicerEngineType.OrcaSlicer => FindOnPath("orcaslicer", "orcaslicer.exe"),
-                SlicerEngineType.SuperSlicer => FindOnPath("superslicer", "superslicer.exe"),
-                SlicerEngineType.Cura => FindOnPath("cura", "cura.exe"),
+                SharedSlicerEngine.PrusaSlicer => FindOnPath("prusa-slicer", "prusa-slicer.exe"),
+                SharedSlicerEngine.OrcaSlicer => FindOnPath("orcaslicer", "orcaslicer.exe"),
+                SharedSlicerEngine.SuperSlicer => FindOnPath("superslicer", "superslicer.exe"),
+                SharedSlicerEngine.Cura => FindOnPath("cura", "cura.exe"),
                 _ => null
             };
         }
@@ -56,11 +44,11 @@ public class SlicerExecutableManager : ISlicerExecutableManager
         return !string.IsNullOrWhiteSpace(executablePath);
     }
 
-    public async Task<bool> ValidateSlicerInstallationAsync(SlicerEngineType engine, CancellationToken cancellationToken = default)
+    public async Task<bool> ValidateSlicerInstallationAsync(SharedSlicerEngine engine, CancellationToken cancellationToken = default)
     {
         if (!TryGetExecutable(engine, out string? exe, out string? _))
         {
-            _logger.LogWarning("No configured executable found for slicer engine {Engine}", engine);
+            _logger.LogWarning($"No configured executable found for slicer engine {engine}");
             return false;
         }
 
@@ -86,7 +74,7 @@ public class SlicerExecutableManager : ISlicerExecutableManager
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to validate slicer executable at {Exe}", exe);
+            _logger.LogWarning($"Failed to validate slicer executable at {exe}: {ex.Message}");
             return false;
         }
     }

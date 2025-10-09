@@ -1,6 +1,6 @@
 ﻿using System.Net;
 using System.Text;
-using Farm.Web.Api.Data;
+using Farm.Infrastructure.Data;
 using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;

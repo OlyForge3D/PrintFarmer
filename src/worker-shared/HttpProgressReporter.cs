@@ -1,19 +1,19 @@
 ﻿using System.Text;
 using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Worker.Core;
 
 public class HttpProgressReporter : IProgressReporter
 {
     private readonly HttpClient _httpClient;
-    private readonly ILogger<HttpProgressReporter> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly string _apiBaseUrl;
     private readonly string _workerId;
 
-    public HttpProgressReporter(HttpClient httpClient, ILogger<HttpProgressReporter> logger, IConfiguration configuration)
+    public HttpProgressReporter(HttpClient httpClient, IUnifiedLoggingService logger, IConfiguration configuration)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,12 +36,12 @@ public class HttpProgressReporter : IProgressReporter
             var response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Progress report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
+                _logger.LogWarning($"Progress report failed {jobId} status {response.StatusCode}");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reporting progress {JobId}", jobId);
+            _logger.LogError(ex, $"Error reporting progress {jobId}");
         }
     }
 
@@ -67,12 +67,12 @@ public class HttpProgressReporter : IProgressReporter
             var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Completion report failed {JobId} status {StatusCode}", job.Id, response.StatusCode);
+                _logger.LogWarning($"Completion report failed {job.Id} status {response.StatusCode}");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reporting completion {JobId}", job.Id);
+            _logger.LogError(ex, $"Error reporting completion {job.Id}");
         }
     }
 
@@ -84,12 +84,12 @@ public class HttpProgressReporter : IProgressReporter
             var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failure report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
+                _logger.LogWarning($"Failure report failed {jobId} status {response.StatusCode}");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reporting failure {JobId}", jobId);
+            _logger.LogError(ex, $"Error reporting failure {jobId}");
         }
     }
 }

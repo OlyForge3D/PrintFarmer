@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Tests.TestUtils;
 using Farm.Web.Shared;
-using Microsoft.Extensions.Logging;
 using Moq;
 using StackExchange.Redis;
 
@@ -16,18 +16,18 @@ public class RedisSlicerJobQueueTests
 {
     private readonly Mock<IConnectionMultiplexer> _mockRedis;
     private readonly Mock<IDatabase> _mockDatabase;
-    private readonly Mock<ILogger<RedisSlicerJobQueue>> _mockLogger;
+    private readonly TestLoggingService _testLogger;
     private readonly RedisSlicerJobQueue _queue;
 
     public RedisSlicerJobQueueTests()
     {
         _mockRedis = new Mock<IConnectionMultiplexer>();
         _mockDatabase = new Mock<IDatabase>();
-        _mockLogger = new Mock<ILogger<RedisSlicerJobQueue>>();
+        _testLogger = new TestLoggingService();
 
         _mockRedis.Setup(r => r.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(_mockDatabase.Object);
 
-        _queue = new RedisSlicerJobQueue(_mockRedis.Object, _mockLogger.Object);
+        _queue = new RedisSlicerJobQueue(_mockRedis.Object, _testLogger);
     }
 
     [Fact]
@@ -540,7 +540,7 @@ public class RedisSlicerJobQueueTests
     public void Constructor_NullRedisConnection_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new RedisSlicerJobQueue(null!, _mockLogger.Object));
+        Assert.Throws<ArgumentNullException>(() => new RedisSlicerJobQueue(null!, _testLogger));
     }
 
     [Fact]

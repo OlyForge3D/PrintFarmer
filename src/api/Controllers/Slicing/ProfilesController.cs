@@ -1,5 +1,6 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain; // for SlicerType enum if namespace differs
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,16 +10,10 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
-public class ProfilesController : ControllerBase
+public class ProfilesController(AppDbContext context, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _context;
-    private readonly ILogger<ProfilesController> _logger;
-
-    public ProfilesController(AppDbContext context, ILogger<ProfilesController> logger)
-    {
-        _context = context;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     [HttpPost]
     [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status201Created)]
@@ -62,8 +57,8 @@ public class ProfilesController : ControllerBase
                 IsPublic = request.IsPublic,
                 CreatedAt = DateTime.UtcNow
             };
-            _context.SlicerProfiles.Add(profile);
-            await _context.SaveChangesAsync();
+            _ = _context.SlicerProfiles.Add(profile);
+            _ = await _context.SaveChangesAsync();
             SlicerProfileResponseDto response = new()
             {
                 Id = profile.Id,
@@ -85,7 +80,7 @@ public class ProfilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create profile");
+            _logger.LogError(ex, $"Failed to create profile: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create profile");
         }
     }
@@ -129,8 +124,8 @@ public class ProfilesController : ControllerBase
         {
             return NotFound();
         }
-        _context.SlicerProfiles.Remove(profile);
-        await _context.SaveChangesAsync();
+        _ = _context.SlicerProfiles.Remove(profile);
+        _ = await _context.SaveChangesAsync();
         return NoContent();
     }
 
@@ -190,7 +185,7 @@ public class ProfilesController : ControllerBase
                     p.BedTemperature,
                     supports = p.EnableSupports,
                     p.Material,
-                    quality = p.Quality.ToString().ToLowerInvariant()
+                    quality = p.Quality.ToString()
                 })
                 .ToListAsync();
 
@@ -225,7 +220,7 @@ public class ProfilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get profiles");
+            _logger.LogError(ex, $"Failed to get profiles: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get available profiles");
         }
     }

@@ -1,32 +1,25 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Web.Api.Services.Authentication;
 
-public class AuthenticationService : IAuthenticationService
+public class AuthenticationService(
+    AppDbContext context,
+    IPasswordHashingService passwordHashing,
+    IConfiguration configuration,
+    IUnifiedLoggingService logger) : IAuthenticationService
 {
-    private readonly AppDbContext _context;
-    private readonly IPasswordHashingService _passwordHashing;
-    private readonly IConfiguration _configuration;
-    private readonly ILogger<AuthenticationService> _logger;
-
-    public AuthenticationService(
-        AppDbContext context,
-        IPasswordHashingService passwordHashing,
-        IConfiguration configuration,
-        ILogger<AuthenticationService> logger)
-    {
-        _context = context;
-        _passwordHashing = passwordHashing;
-        _configuration = configuration;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IPasswordHashingService _passwordHashing = passwordHashing;
+    private readonly IConfiguration _configuration = configuration;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {
@@ -35,31 +28,31 @@ public class AuthenticationService : IAuthenticationService
             User? user = await GetUserByUsernameAsync(username);
             if (user == null)
             {
-                _logger.LogWarning("Authentication failed for username: {Username} - user not found", username);
+                _logger.LogWarning($"Authentication failed for username: {username} - user not found", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
             if (!user.IsActive)
             {
-                _logger.LogWarning("Authentication failed for username: {Username} - user is inactive", username);
+                _logger.LogWarning($"Authentication failed for username: {username} - user is inactive", null, null);
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
 
             if (!_passwordHashing.VerifyPassword(password, user.PasswordHash))
             {
-                _logger.LogWarning("Authentication failed for username: {Username} - invalid password", username);
+                _logger.LogWarning($"Authentication failed for username: {username} - invalid password", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
             // Update last login time
             user.LastLogin = DateTime.UtcNow;
             user.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
 
-            _logger.LogInformation("User {Username} authenticated successfully", username);
+            _logger.LogInformation($"User {username} authenticated successfully", null, null);
 
             return new AuthenticationResult(
                 true,
@@ -70,7 +63,7 @@ public class AuthenticationService : IAuthenticationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during authentication for username: {Username}", username);
+            _logger.LogError(ex, $"Error during authentication for username: {username}", null, null);
             return new AuthenticationResult(false, Error: "Authentication service error");
         }
     }
@@ -110,13 +103,13 @@ public class AuthenticationService : IAuthenticationService
                 PasswordHash = _passwordHashing.HashPassword(request.Password),
                 FirstName = request.FirstName,
                 LastName = request.LastName,
-                IsActive = true,
+                IsActive = false, // Require admin approval before login
                 EmailConfirmed = false, // TODO: Implement email confirmation
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
-            _context.Users.Add(user);
+            _ = _context.Users.Add(user);
 
             // Assign default "farm_user" role
             Role? defaultRole = await _context.Roles
@@ -133,15 +126,15 @@ public class AuthenticationService : IAuthenticationService
                     IsActive = true
                 };
 
-                _context.UserRoles.Add(userRole);
+                _ = _context.UserRoles.Add(userRole);
             }
 
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
 
-            _logger.LogInformation("User {Username} registered successfully", request.Username);
+            _logger.LogInformation($"User {request.Username} registered successfully", null, null);
 
             return new AuthenticationResult(
                 true,
@@ -152,7 +145,7 @@ public class AuthenticationService : IAuthenticationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during registration for username: {Username}", request?.Username);
+            _logger.LogError(ex, $"Error during registration for username: {(request?.Username ?? "NULL")}", null, null);
             return new AuthenticationResult(false, Error: "Registration service error");
         }
     }
@@ -164,7 +157,7 @@ public class AuthenticationService : IAuthenticationService
         if (string.IsNullOrWhiteSpace(rawKey) || rawKey.Length < 32)
         {
             // S6781: Do not log secret key values
-            _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
+            _logger.LogError($"JWT key is missing or too short. Minimum 32 characters recommended.", null, null);
             throw new InvalidOperationException("Secure JWT key not configured");
         }
         // S6781: Secure usage, not disclosed or logged
@@ -375,7 +368,7 @@ public class AuthenticationService : IAuthenticationService
 
         user.PasswordHash = _passwordHashing.HashPassword(newPassword);
         user.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
 
         return true;
     }

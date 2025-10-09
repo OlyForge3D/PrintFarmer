@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './styles/icons.css'
 import App from './App.tsx'
 import { SpoolmanProvider } from './contexts/SpoolmanContext'
 import { initializeTelemetry } from './telemetry/config'
@@ -11,10 +12,11 @@ initializeTelemetry();
 // Service worker control: allow disabling & forced unregister via build-time flag
 // Set VITE_DISABLE_SW=true to completely unregister and clear caches.
 // Otherwise (in production) we register sw.js for PWA/offline support.
+// Dev-local safety: always unregister service workers and clear caches when running on localhost or in dev mode.
+// This prevents stale cached assets from being served during active development.
 if ('serviceWorker' in navigator) {
-  const disable = import.meta.env.VITE_DISABLE_SW === 'true';
-  if (disable) {
-    // Force unregister + cache purge on load
+  const isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || import.meta.env.DEV;
+  if (isLocalDev) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.getRegistrations()
         .then(regs => Promise.all(regs.map(r => r.unregister())))
@@ -24,14 +26,15 @@ if ('serviceWorker' in navigator) {
           .then(keys => Promise.all(keys.map(k => caches.delete(k))))
           .catch(() => { /* ignore */ });
       }
-      // Optional: log for diagnostics (remove later if noisy)
-      console.info('[SW] Unregistered all service workers and cleared caches due to VITE_DISABLE_SW=true');
+      console.info('[SW] Unregistered service workers and cleared caches (dev/localhost)');
     });
-  } else if (import.meta.env.PROD) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {/* ignore */})
-    })
   }
+}
+// Production: register PWA service worker
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {/* ignore */})
+  })
 }
 
 createRoot(document.getElementById('root')!).render(

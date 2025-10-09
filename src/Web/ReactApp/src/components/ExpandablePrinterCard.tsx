@@ -35,11 +35,12 @@ function getBackendIcon(backend: PrinterBackend | number | string) {
       return <span title="Other" aria-label="Other" role="img" className="mr-1">🖨️</span>;
   }
 }
-import { useState, useEffect } from 'react';
+import { useState, useLayoutEffect } from 'react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
+import { renderUnknown } from '@/utils/renderUnknown';
 import { 
   ChevronDown, 
   ExternalLink,
@@ -80,9 +81,28 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const [lastKnownY, setLastKnownY] = useState<number | null>(null);
   const [lastKnownZ, setLastKnownZ] = useState<number | null>(null);
   
-  const { getPrinterStatus } = usePrinterStatusUpdates();
+  const { printerStatuses } = usePrinterStatusUpdates();
   
-  const status = getPrinterStatus(printer.id);
+  // Get status from the Map - this will cause re-render when printerStatuses changes
+  const status = printerStatuses.get(printer.id);
+  
+  // Debug logging to track status updates
+  useLayoutEffect(() => {
+    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+    if (win.PrintFarmerDebug?.expandablePrinterCard) {
+      console.log('[ExpandablePrinterCard] Status update:', {
+        printerId: printer.id,
+        printerName: printer.name,
+        status,
+        hotendTemp: status?.hotendTemp,
+        bedTemp: status?.bedTemp,
+        x: status?.x,
+        y: status?.y,
+        z: status?.z,
+      });
+    }
+  }, [status, printer.id, printer.name]);
+  
   const isOnline = status?.isOnline ?? printer.isOnline;
   const state = status?.state ?? printer.state;
   const isPrinting = state === 'printing';
@@ -99,7 +119,9 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   );
 
   // Update last known values when new data is available
-  useEffect(() => {
+  // useLayoutEffect runs synchronously after DOM mutations but before browser paint
+  // This ensures real-time updates without the batching delays of useEffect
+  useLayoutEffect(() => {
     // Initialize from printer data if we don't have last known values and status is null
     if (lastKnownHotendTemp === null && (status?.hotendTemp === null || status?.hotendTemp === undefined) && printer.hotendTemp !== null && printer.hotendTemp !== undefined) {
       setLastKnownHotendTemp(printer.hotendTemp);
@@ -210,7 +232,8 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   // Function to check if an axis is homed based on the homedAxes string from Moonraker
   const isAxisHomed = (axis: string): boolean => {
     const homedAxes = status?.homedAxes || '';
-    if (window.PrintFarmerDebug?.expandablePrinterCard) {
+    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+    if (win.PrintFarmerDebug?.expandablePrinterCard) {
       console.log(`[PrintFarmer] ExpandablePrinterCard: Checking axis ${axis}, homedAxes from status:`, homedAxes);
     }
     return homedAxes.includes(axis.toLowerCase());
@@ -380,7 +403,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   if (!isExpanded) {
     // Collapsed view - matching Blazor structure
     return (
-      <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg">
+      <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg min-w-[26rem] max-w-[26rem]">
         <div className="flex justify-between items-start mb-4 gap-4">
           <div className="flex justify-between items-start flex-1 gap-4">
             <div className="flex-1">
@@ -455,7 +478,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           <button
             onClick={() => handleControlAction('pause')}
             disabled={!isPrinting}
-            className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Pause className="h-3 w-3 mr-1" />
             Pause
@@ -463,7 +486,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           <button
             onClick={() => handleControlAction('resume')}
             disabled={!isPaused}
-            className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Play className="h-3 w-3 mr-1" />
             Resume
@@ -471,7 +494,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           <button
             onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
             disabled={!isOnline}
-            className={`inline-flex items-center px-3 py-1.5 text-xs font-medium border rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border rounded disabled:opacity-50 disabled:cursor-not-allowed ${
               isShutdown 
                 ? 'border-amber-700 text-white bg-amber-700 hover:bg-amber-600 hover:border-amber-600'
                 : 'border-red-700 text-white bg-red-700 hover:bg-red-600 hover:border-red-600'
@@ -483,26 +506,57 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </button>
         </div>
 
-        {showCamera && (
-          <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-            {cameraStreamUrl ? (
-              <img 
-                src={cameraStreamUrl} 
-                alt="webcam snapshot"
-                className="max-w-full max-h-full object-contain"
-                onError={(e) => e.currentTarget.style.display = 'none'}
-                onLoad={(e) => e.currentTarget.style.display = 'block'}
-              />
-            ) : (
-              <div className="text-center text-pf-text-secondary p-4">
-                <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No camera configured</p>
-              </div>
-            )}
+        {/* Progress bar for active prints */}
+        {isOnline && status?.progress !== undefined && status.progress > 0 && (
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
+              <span className="truncate flex-1">{status.jobName || 'Printing...'}</span>
+              <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
+            </div>
+            <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
+              {(() => {
+                const pct = Math.max(0, Math.min(100, status.progress));
+                // Use inline style for dynamic width - necessary for progress bar
+                return (
+                  <div 
+                    className="bg-pf-success h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${pct}%` }}
+                  >
+                    <span className="sr-only">Print progress: {Math.round(pct)}%</span>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 
-        {/* History Modal */}
+              {showCamera && (
+                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                  {cameraStreamUrl ? (
+                    <img 
+                      src={cameraStreamUrl} 
+                      alt="webcam snapshot"
+                      className="max-w-full max-h-full object-contain"
+                      onError={(e) => e.currentTarget.style.display = 'none'}
+                      onLoad={(e) => e.currentTarget.style.display = 'block'}
+                    />
+                  ) : (
+                    <div className="text-center text-pf-text-secondary p-4">
+                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No camera configured</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Optional debug panel controlled by window.PrintFarmerDebug.expandablePrinterCardDisplay */}
+              {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
+                <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                  {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
+                </div>
+              )}
+        
+  {/* History Modal */}
         <PrinterHistoryModal
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
@@ -514,7 +568,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
 
   // Expanded view - matching Blazor structure exactly
   return (
-    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border`}>
+    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border min-w-[26rem] max-w-[26rem]`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">
@@ -603,6 +657,30 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         </div>
       </div>
 
+      {/* Progress bar for active prints */}
+      {isOnline && status?.progress !== undefined && status.progress > 0 && (
+        <div className="mb-4">
+          <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
+            <span className="truncate flex-1">{status.jobName || 'Printing...'}</span>
+            <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
+          </div>
+          <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
+            {(() => {
+              const pct = Math.max(0, Math.min(100, status.progress));
+              // Use inline style for dynamic width - necessary for progress bar
+              return (
+                <div 
+                  className="bg-pf-success h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                >
+                  <span className="sr-only">Print progress: {Math.round(pct)}%</span>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Temps Section */}
       <div className="mb-2">
         <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Temps</div>
@@ -681,7 +759,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           ].map((preset) => (
             <button
               key={preset.name}
-              className={`px-2 py-1 text-xs font-medium text-white rounded ${preset.color} hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`w-14 py-1 text-xs font-medium text-white rounded ${preset.color} hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed`}
               disabled={isPrinting}
               onClick={() => handleApplyPreset(preset.name)}
             >
@@ -689,7 +767,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             </button>
           ))}
           <button
-            className="px-2 py-1 text-xs font-medium text-white rounded bg-blue-600 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-14 py-1 text-xs font-medium text-white rounded bg-blue-600 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={isPrinting}
             title="Cooldown"
             onClick={() => handleApplyPreset('cooldown')}
@@ -907,17 +985,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             </div>
             
             <div className="flex items-start mt-0">
-              <button 
-                className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
-                disabled={isPrinting}
-                onClick={() => {
-                  if (window.PrintFarmerDebug?.expandablePrinterCard) {
-                    console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
-                  }
-                }}
-              >
-                GO
-              </button>
+                <button
+                  className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
+                  disabled={isPrinting}
+                  onClick={() => {
+                    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+                    if (win.PrintFarmerDebug?.expandablePrinterCard) {
+                      console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
+                    }
+                  }}
+                >
+                  GO
+                </button>
             </div>
           </div>
         </div>

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterHistoryModalProps {
   isOpen: boolean;
@@ -94,14 +95,16 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   const [limit, setLimit] = useState(50);
   const [order, setOrder] = useState<string>('desc');
   
-  // Conditional debug logging for PrinterHistoryModal
-  if (window.PrintFarmerDebug?.printerHistory) {
-    console.log('[PrintFarmer] PrinterHistoryModal render:', {
-      isOpen,
-      printerName: printer.name,
-      printerId: printer.id,
-      printer
-    });
+  // Conditional debug logging for PrinterHistoryModal (guarded)
+  try {
+    const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+    if (pf?.printerHistory) {
+      if (pf.printerHistory === true) {
+        console.log('[PrintFarmer] PrinterHistoryModal render:', { isOpen, printerName: printer.name, printerId: printer.id });
+      }
+    }
+  } catch {
+    // ignore debug guard failures
   }
 
   const { 
@@ -120,15 +123,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   } = usePrinterHistoryTotals(printer.id);
 
   if (!isOpen) {
-    if (window.PrintFarmerDebug?.printerHistory) {
-      console.log('[PrintFarmer] PrinterHistoryModal: Modal not open, returning null');
-    }
     return null;
-  }
-
-  console.log('Modal is open, rendering modal with portal');
-  if (window.PrintFarmerDebug?.printerHistory) {
-    console.log('[PrintFarmer] PrinterHistoryModal: Modal is open, rendering modal with portal');
   }
 
   const modalContent = (
@@ -371,9 +366,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                                   {Object.entries(job.metadata).map(([key, value]) => (
                                     <div key={key} className="flex justify-between">
                                       <span className="font-medium">{key}:</span>
-                                      <span className="text-pf-text-tertiary">
-                                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                      </span>
+                                      <span className="text-pf-text-tertiary">{renderUnknown(value)}</span>
                                     </div>
                                   ))}
                                 </div>

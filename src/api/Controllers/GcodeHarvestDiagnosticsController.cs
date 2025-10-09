@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,18 +11,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-harvest")]
 [Tags("G-code Harvesting Diagnostics")]
-public class GcodeHarvestDiagnosticsController : ControllerBase
+public class GcodeHarvestDiagnosticsController(
+IUnifiedLoggingService logger,
+IGcodeHarvestService harvestService) : ControllerBase
 {
-    private readonly ILogger<GcodeHarvestDiagnosticsController> _logger;
-    private readonly IGcodeHarvestService _harvestService;
-
-    public GcodeHarvestDiagnosticsController(
-    ILogger<GcodeHarvestDiagnosticsController> logger,
-    IGcodeHarvestService harvestService)
-    {
-        _logger = logger;
-        _harvestService = harvestService;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IGcodeHarvestService _harvestService = harvestService;
 
     /// <summary>
     /// Extract metadata from an uploaded G-code file
@@ -52,8 +47,8 @@ public class GcodeHarvestDiagnosticsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to analyze G-code file {FileName}", file.FileName);
-            return StatusCode(500, "Failed to analyze G-code file");
+            _logger.LogError(ex, $"Failed to analyze G-code file {file.FileName}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to analyze G-code file");
         }
     }
 
@@ -75,8 +70,8 @@ public class GcodeHarvestDiagnosticsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error enabling debug logs");
-            return StatusCode(500, new { success = false, error = ex.Message });
+            _logger.LogError(ex, $"Error enabling debug logs: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message });
         }
     }
 }

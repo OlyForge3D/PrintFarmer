@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { renderUnknown } from '@/utils/renderUnknown';
+import { PageTemplate } from '@/components/PageTemplate';
+import { TestTube } from 'lucide-react';
 
 interface DryRunResult {
   rendered: string;
@@ -36,15 +39,16 @@ export const SlicerDryRunPage: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-pf-text-primary">Slicer Args Dry Run</h1>
-                <p className="text-pf-text-secondary">Validate argument templates without executing the slicer binary.</p>
-            </div>
+        <PageTemplate
+            title="Slicer Args Dry Run"
+            subtitle="Validate argument templates without executing the slicer binary"
+            icon={TestTube}
+            maxWidth="max-w-4xl"
+        >
 
             <div className="bg-pf-bg-1 p-4 rounded shadow-lg border border-pf-border">
                 <label className="block mb-2 font-medium text-pf-text-primary">Engine</label>
-                <select value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="border border-pf-border rounded px-2 py-1 bg-pf-bg-0 text-pf-text-primary">
+                <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="border border-pf-border rounded px-2 py-1 bg-pf-bg-0 text-pf-text-primary">
                     <option>OrcaSlicer</option>
                     <option>PrusaSlicer</option>
                 </select>
@@ -63,7 +67,7 @@ export const SlicerDryRunPage: React.FC = () => {
                 {result && (
                     <div className="mt-4 bg-pf-bg-2 p-3 rounded border border-pf-border">
                         <div className="font-medium text-pf-text-primary">Rendered Args</div>
-                        <pre className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">{result.rendered}</pre>
+                        <pre className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">{renderUnknown(result.rendered)}</pre>
 
                         <div className="mt-3">
                             <div className="font-medium text-pf-text-primary">Issues</div>
@@ -78,14 +82,16 @@ export const SlicerDryRunPage: React.FC = () => {
                             </ul>
                         </div>
 
-                        <div className="mt-3">
-                            <div className="font-medium text-pf-text-primary">Sample placeholders</div>
-                            <pre className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">{JSON.stringify(result.samplePlaceholders, null, 2)}</pre>
-                        </div>
+                                                <div className="mt-3">
+                                                        <div className="font-medium text-pf-text-primary">Sample placeholders</div>
+                                                        <div className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">
+                                                            {renderUnknown(result.samplePlaceholders)}
+                                                        </div>
+                                                </div>
                     </div>
                 )}
             </div>
-        </div>
+        </PageTemplate>
     );
 };
 

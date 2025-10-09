@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { X, AlertCircle, Check } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes } from '@/hooks/useApi';
-import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterBackendString } from '@/types/api';
+import type { PrinterModelDto, UpdateModelRequest, MotionTypeString } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
+import { BackendSelector } from './BackendSelector';
 
 interface EditModelModalProps {
   model: PrinterModelDto | null;
@@ -387,17 +388,12 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-pf-text-secondary mb-1">Default Backend</label>
-                    <select
-                      value={formData.defaultBackend || ''}
-                      onChange={e => handleInputChange('defaultBackend', e.target.value ? e.target.value as PrinterBackendString : undefined)}
+                    <BackendSelector
+                      value={formData.defaultBackend}
+                      onChange={(backend) => handleInputChange('defaultBackend', backend)}
                       className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       title="Default Backend"
-                    >
-                      <option value="">Select backend...</option>
-                      <option value="Moonraker">Moonraker</option>
-                      <option value="PrusaLink">PrusaLink</option>
-                      <option value="SDCP">SDCP</option>
-                    </select>
+                    />
                   </div>
                 </div>
               </div>

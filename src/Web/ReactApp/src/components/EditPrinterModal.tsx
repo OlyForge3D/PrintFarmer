@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, Check } from 'lucide-react';
-import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes } from '@/hooks/useApi';
+import { X, AlertCircle, Check, Loader2 } from 'lucide-react';
+import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
+import { BackendSelector } from './BackendSelector';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -23,6 +24,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [formData, setFormData] = useState<UpdatePrinterDto | null>(null);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+  const [lastModelId, setLastModelId] = useState<string | undefined>();
+  
+  // Fetch default capabilities for the selected model
+  const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
 
   useEffect(() => {
     if (printerDetails) {
@@ -55,9 +60,40 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         supportsAutoLeveling: printerDetails.capabilities?.supportsAutoLeveling,
         maxPrintSpeed: printerDetails.capabilities?.maxPrintSpeed,
       });
+      // Prevent applying model defaults immediately after loading existing printer
+      setLastModelId(printerDetails.modelId);
       setSelectedManufacturer(printerDetails.manufacturerId);
     }
   }, [printerDetails]);
+  
+  // Update capability fields when default capabilities are fetched for a new model
+  useEffect(() => {
+    // Only update if modelId has changed and we have default capabilities
+    if (formData?.modelId && formData.modelId !== lastModelId && defaultCapabilities) {
+      setFormData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          nozzleDiameter: defaultCapabilities.nozzleDiameter ?? prev.nozzleDiameter,
+          supportedMaterials: defaultCapabilities.supportedMaterials ?? prev.supportedMaterials,
+          maxBuildVolumeX: defaultCapabilities.maxBuildVolumeX ?? prev.maxBuildVolumeX,
+          maxBuildVolumeY: defaultCapabilities.maxBuildVolumeY ?? prev.maxBuildVolumeY,
+          maxBuildVolumeZ: defaultCapabilities.maxBuildVolumeZ ?? prev.maxBuildVolumeZ,
+          hasHeatedBed: defaultCapabilities.hasHeatedBed,
+          hasEnclosure: defaultCapabilities.hasEnclosure,
+          multiMaterial: defaultCapabilities.multiMaterial,
+          numberOfExtruders: defaultCapabilities.numberOfExtruders,
+          minHotendTemp: defaultCapabilities.minHotendTemp ?? prev.minHotendTemp,
+          maxHotendTemp: defaultCapabilities.maxHotendTemp ?? prev.maxHotendTemp,
+          minBedTemp: defaultCapabilities.minBedTemp ?? prev.minBedTemp,
+          maxBedTemp: defaultCapabilities.maxBedTemp ?? prev.maxBedTemp,
+          supportsAutoLeveling: defaultCapabilities.supportsAutoLeveling,
+          maxPrintSpeed: defaultCapabilities.maxPrintSpeed ?? prev.maxPrintSpeed,
+        };
+      });
+      setLastModelId(formData.modelId);
+    }
+  }, [formData?.modelId, defaultCapabilities, lastModelId]);
 
   const handleInputChange = (field: keyof UpdatePrinterDto, value: unknown) => {
     setFormData(prev => prev ? { ...prev, [field]: value } : prev);
@@ -155,16 +191,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </div>
               <div>
                 <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend</label>
-                <select
+                <BackendSelector
                   value={formData.backend}
-                  onChange={e => handleInputChange('backend', parseInt(e.target.value, 10) as PrinterBackend)}
+                  onChange={(backend) => handleInputChange('backend', backend)}
                   className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                   title="Printer backend"
-                >
-                  <option value={0}>Moonraker</option>
-                  <option value={1}>PrusaLink</option>
-                  <option value={2}>SDCP</option>
-                </select>
+                />
               </div>
             {/* Moonraker/PrusaLink port/API key fields */}
             {formData.backend === PrinterBackend.Moonraker && (
@@ -255,7 +287,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   <label className="block text-sm font-medium text-pf-text-secondary mb-1">Printer Type</label>
                   <div className="px-3 py-2 rounded-lg bg-pf-bg-2 border border-pf-border text-pf-text-secondary">
                     {(() => {
-                      // Try to get printer type from model motion type (enum)
+                      // Try to get motion type from selected model first
+                      if (formData.modelId && filteredModels) {
+                        const selectedModel = filteredModels.find(m => m.id === formData.modelId);
+                        if (selectedModel?.motionType) {
+                          return selectedModel.motionType;
+                        }
+                      }
+                      // Fallback to printer details (for initial load)
                       const modelMotionType = printerDetails?.modelMotionType;
                       if (modelMotionType !== undefined) {
                         const typeNames = ['Cartesian', 'CoreXY', 'Delta', 'Unknown'];
@@ -305,7 +344,15 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
             {/* Printer Capabilities Section */}
             <div className="border-t pt-5 mt-5">
-              <h4 className="text-lg font-medium text-pf-text-primary mb-4">Printer Capabilities</h4>
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-medium text-pf-text-primary">Printer Capabilities</h4>
+                {isLoadingCapabilities && formData.modelId && (
+                  <div className="flex items-center text-sm text-pf-text-secondary">
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Loading defaults...
+                  </div>
+                )}
+              </div>
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>

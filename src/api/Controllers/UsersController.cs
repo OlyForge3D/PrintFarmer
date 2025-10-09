@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -14,26 +15,18 @@ namespace Farm.Web.Api.Controllers;
 /// Only accessible by administrators.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/users")]
 [Authorize(Roles = "farm_admin")]
-public class UsersController : ControllerBase
+public class UsersController(
+    AppDbContext db,
+    IAuthenticationService authService,
+    IPasswordHashingService passwordHashingService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly IAuthenticationService _authService;
-    private readonly IPasswordHashingService _passwordHashingService;
-    private readonly ILogger<UsersController> _logger;
-
-    public UsersController(
-        AppDbContext db,
-        IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        ILogger<UsersController> logger)
-    {
-        _db = db;
-        _authService = authService;
-        _passwordHashingService = passwordHashingService;
-        _logger = logger;
-    }
+    private readonly AppDbContext _db = db;
+    private readonly IAuthenticationService _authService = authService;
+    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Gets all users in the system.
@@ -124,7 +117,7 @@ public class UsersController : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
 
-        _db.Users.Add(user);
+        _ = _db.Users.Add(user);
 
         // Assign roles if provided
         if (request.RoleIds is { Length: > 0 })
@@ -134,7 +127,7 @@ public class UsersController : ControllerBase
                 Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
-                    _db.UserRoles.Add(new UserRole
+                    _ = _db.UserRoles.Add(new UserRole
                     {
                         Id = Guid.NewGuid(),
                         UserId = user.Id,
@@ -146,11 +139,10 @@ public class UsersController : ControllerBase
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("User {UserId} created new user {NewUserId} ({Username})",
-            currentUserId, user.Id, user.Username);
+        _logger.LogInformation($"User {currentUserId} created new user {user.Id} ({user.Username})");
 
         // Return the created user with roles and permissions
         UserDto? createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
@@ -205,7 +197,7 @@ public class UsersController : ControllerBase
                 Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
-                    _db.UserRoles.Add(new UserRole
+                    _ = _db.UserRoles.Add(new UserRole
                     {
                         Id = Guid.NewGuid(),
                         UserId = id,
@@ -217,11 +209,10 @@ public class UsersController : ControllerBase
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("User {UserId} updated user {UpdatedUserId} ({Username})",
-            currentUserId, user.Id, user.Username);
+        _logger.LogInformation($"User {currentUserId} updated user {user.Id} ({user.Username})");
 
         // Return the updated user with roles and permissions
         UserDto? updatedUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
@@ -254,11 +245,10 @@ public class UsersController : ControllerBase
         _db.UserRoles.RemoveRange(userRoles);
 
         // Remove the user
-        _db.Users.Remove(user);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.Users.Remove(user);
+        _ = await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("User {UserId} deleted user {DeletedUserId} ({Username})",
-            currentUserId, user.Id, user.Username);
+        _logger.LogInformation($"User {currentUserId} deleted user {user.Id} ({user.Username})");
 
         return NoContent();
     }

@@ -1,6 +1,6 @@
 ﻿using Farm.Web.Api.Services;
+using Farm.Web.Api.Tests.TestUtils;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Farm.Web.Api.Tests;
@@ -9,13 +9,13 @@ public class GracefulShutdownServiceTests
 {
     private readonly Mock<IServiceProvider> _mockServiceProvider;
     private readonly Mock<IHostApplicationLifetime> _mockAppLifetime;
-    private readonly Mock<ILogger<GracefulShutdownService>> _mockLogger;
+    private readonly TestLoggingService _testLogger;
 
     public GracefulShutdownServiceTests()
     {
         _mockServiceProvider = new Mock<IServiceProvider>();
         _mockAppLifetime = new Mock<IHostApplicationLifetime>();
-        _mockLogger = new Mock<ILogger<GracefulShutdownService>>();
+        _testLogger = new TestLoggingService();
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public class GracefulShutdownServiceTests
         var service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
-            _mockLogger.Object);
+            _testLogger);
         var cancellationToken = CancellationToken.None;
         _mockAppLifetime.Setup(x => x.ApplicationStopping)
             .Returns(new CancellationToken());
@@ -44,7 +44,7 @@ public class GracefulShutdownServiceTests
         var service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
-            _mockLogger.Object);
+            _testLogger);
         var cancellationToken = CancellationToken.None;
 
         // Act & Assert
@@ -58,7 +58,7 @@ public class GracefulShutdownServiceTests
         var service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
-            _mockLogger.Object);
+            _testLogger);
 
         // Assert
         Assert.NotNull(service);
@@ -71,7 +71,7 @@ public class GracefulShutdownServiceTests
         var service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
-            _mockLogger.Object);
+            _testLogger);
 
         // Assert
         Assert.True(service is IHostedService);

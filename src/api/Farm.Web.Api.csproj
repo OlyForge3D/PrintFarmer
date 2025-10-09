@@ -9,12 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+  <ProjectReference Include="../Infrastructure/Farm.Infrastructure.csproj" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.4" />
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.8" />
+    <!-- Explicitly reference newer Microsoft.Data.SqlClient to fix reflection bug with .NET 9 -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.9" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.9" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
@@ -46,6 +49,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
+  <!-- Removed old Farm.Infrastructure reference after folder rename -->
   </ItemGroup>
 
   <ItemGroup>

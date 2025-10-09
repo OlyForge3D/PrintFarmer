@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -8,18 +9,12 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/gcode-harvest/test/moonraker")]
-public class GcodeHarvestTestController : ControllerBase
+public class GcodeHarvestTestController(
+    IUnifiedLoggingService logger,
+    IMoonrakerClient moonrakerClient) : ControllerBase
 {
-    private readonly ILogger<GcodeHarvestTestController> _logger;
-    private readonly IMoonrakerClient _moonrakerClient;
-
-    public GcodeHarvestTestController(
-        ILogger<GcodeHarvestTestController> logger,
-        IMoonrakerClient moonrakerClient)
-    {
-        _logger = logger;
-        _moonrakerClient = moonrakerClient;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
 
     /// <summary>
     /// Test endpoint for MoonrakerClient.GetDirectoryAsync
@@ -42,19 +37,17 @@ public class GcodeHarvestTestController : ControllerBase
 
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetDirectoryAsync with serverUrl={ServerUrl}, path={Path}, extended={Extended}",
-                serverUrl, path, extended);
+            _logger.LogInformation($"Testing MoonrakerClient.GetDirectoryAsync with serverUrl={serverUrl}, path={path}, extended={extended}");
 
             Services.DirectoryInfo? directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
 
             if (directoryInfo == null)
             {
-                _logger.LogWarning("GetDirectoryAsync returned null result");
+                _logger.LogWarning($"GetDirectoryAsync returned null result");
                 return NotFound("Directory not found or error occurred");
             }
 
-            _logger.LogInformation("GetDirectoryAsync succeeded. Found {FileCount} files and {DirCount} directories",
-                directoryInfo.Files?.Length ?? 0, directoryInfo.Dirs?.Length ?? 0);
+            _logger.LogInformation($"GetDirectoryAsync succeeded. Found {directoryInfo.Files?.Length ?? 0} files and {directoryInfo.Dirs?.Length ?? 0} directories");
 
             return Ok(new
             {
@@ -66,8 +59,8 @@ public class GcodeHarvestTestController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetDirectoryAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            _logger.LogError($"Error testing MoonrakerClient.GetDirectoryAsync: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 
@@ -89,23 +82,23 @@ public class GcodeHarvestTestController : ControllerBase
 
         try
         {
-            _logger.LogInformation("Testing MoonrakerClient.GetFileListAsync with serverUrl={ServerUrl}", serverUrl);
+            _logger.LogInformation($"Testing MoonrakerClient.GetFileListAsync with serverUrl={serverUrl}");
 
             string[] files = await _moonrakerClient.GetFileListAsync(serverUrl, ct);
 
-            _logger.LogInformation("GetFileListAsync succeeded. Found {FileCount} files", files.Length);
+            _logger.LogInformation($"GetFileListAsync succeeded. Found {files.Length} files");
 
             return Ok(new
             {
                 success = true,
-                files = files,
+                files,
                 count = files.Length
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error testing MoonrakerClient.GetFileListAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            _logger.LogError($"Error testing MoonrakerClient.GetFileListAsync: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 }

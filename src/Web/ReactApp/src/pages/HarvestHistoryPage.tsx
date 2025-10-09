@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
 import { Link } from 'react-router-dom';
+import { PageTemplate } from '@/components/PageTemplate';
+import { History } from 'lucide-react';
 
 
 export function HarvestHistoryPage() {
@@ -84,23 +86,27 @@ export function HarvestHistoryPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-pf-text-0">Harvest History</h1>
-        </div>
+      <PageTemplate
+        title="Harvest History"
+        subtitle="View and analyze past harvest operations"
+        icon={History}
+        maxWidth="max-w-7xl"
+      >
         <div className="flex items-center justify-center py-12">
           <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
         </div>
-      </div>
+      </PageTemplate>
     );
   }
 
   if (error) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-pf-text-0">Harvest History</h1>
-        </div>
+      <PageTemplate
+        title="Harvest History"
+        subtitle="View and analyze past harvest operations"
+        icon={History}
+        maxWidth="max-w-7xl"
+      >
         <div className="bg-red-50 dark:bg-red-900/50 border border-red-200 dark:border-red-800 rounded-lg p-4">
           <div className="flex">
             <div className="ml-3">
@@ -121,7 +127,7 @@ export function HarvestHistoryPage() {
             </div>
           </div>
         </div>
-      </div>
+      </PageTemplate>
     );
   }
 
@@ -129,18 +135,20 @@ export function HarvestHistoryPage() {
   // const filteredOperations = statusFilter ? operations.filter(op => getStatusString(op.status) === statusFilter) : operations;
   // Use operations directly if backend supports status param
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-pf-text-0">Harvest History</h1>
-        <div className="flex space-x-3">
-          <Link
-            to="/harvest"
-            className="bg-pf-accent hover:bg-pf-accent-dark text-white px-4 py-2 rounded-lg font-medium"
-          >
-            Back to Harvest
-          </Link>
-        </div>
-      </div>
+    <PageTemplate
+      title="Harvest History"
+      subtitle="View and analyze past harvest operations"
+      icon={History}
+      maxWidth="max-w-7xl"
+      actions={
+        <Link
+          to="/harvest"
+          className="bg-pf-accent hover:bg-pf-accent-dark text-white px-4 py-2 rounded-lg font-medium"
+        >
+          Back to Harvest
+        </Link>
+      }
+    >
 
       {/* Summary - moved to top */}
       {operations.length > 0 && (
@@ -312,6 +320,6 @@ export function HarvestHistoryPage() {
           />
         </div>
       )}
-    </div>
+    </PageTemplate>
   );
 }

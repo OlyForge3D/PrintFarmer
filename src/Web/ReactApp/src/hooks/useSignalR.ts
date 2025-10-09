@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { HubConnectionState } from '@microsoft/signalr';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { printerSignalRService } from '@/services/printer-signalr';
@@ -6,32 +7,35 @@ import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/type
 
 // ============ Connection Hook ============
 
-export function useSignalRConnection() {
+export function useSignalRConnection(service: 'harvest' | 'printer' = 'harvest') {
+  // Choose which SignalR service to observe. Default preserves existing behavior (harvest).
+  const svc = service === 'printer' ? printerSignalRService : harvestSignalRService;
+
   const [connectionState, setConnectionState] = useState<HubConnectionState>(
-    harvestSignalRService.connectionState
+    svc.connectionState
   );
   const [connectionId, setConnectionId] = useState<string | null>(
-    harvestSignalRService.connectionId
+    svc.connectionId
   );
 
   useEffect(() => {
-    // Connect on mount
-    harvestSignalRService.connect();
+    // Connect on mount for the selected service
+    svc.connect();
 
     // Subscribe to connection state changes
-    const unsubscribe = harvestSignalRService.onConnectionStateChange(() => {
-      setConnectionState(harvestSignalRService.connectionState);
-      setConnectionId(harvestSignalRService.connectionId);
+    const unsubscribe = svc.onConnectionStateChange(() => {
+      setConnectionState(svc.connectionState);
+      setConnectionId(svc.connectionId);
     });
 
     // Update initial state
-    setConnectionState(harvestSignalRService.connectionState);
-    setConnectionId(harvestSignalRService.connectionId);
+    setConnectionState(svc.connectionState);
+    setConnectionId(svc.connectionId);
 
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [service, svc]);
 
   return {
     connectionState,
@@ -65,7 +69,22 @@ export function usePrinterStatusUpdates(
   useEffect(() => {
     printerSignalRService.connect();
     const handleStatusUpdate = (status: PrinterStatusUpdate) => {
+      try {
+        // Expose debug info for live inspection in browser console (guarded)
+          const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+          if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
+          (win.PrintFarmerDebug as Record<string, unknown>).lastPrinterUpdate = status as unknown as Record<string, unknown>;
+        if (win.PrintFarmerDebug?.usePrinterStatusUpdates) {
+          console.debug('[usePrinterStatusUpdates] received status update', status.id, status.state, status.isOnline);
+        }
+      } catch {
+        // Swallow debug failures
+      }
       if (printerIdsRef.current && !printerIdsRef.current.includes(status.id)) return;
+      
+      // Update state normally - React will batch these appropriately
+      // Note: Printer status updates are less frequent than discovery progress,
+      // so batching is acceptable here
       setLatestUpdate(status);
       setPrinterStatuses(prev => new Map(prev.set(status.id, status)));
       onUpdateRef.current?.(status);
@@ -293,7 +312,10 @@ export function useDiscoveryProgress(
 
   const unsubscribe = printerSignalRService.onDiscoveryProgress?.((progressUpdate) => {
     if (progressUpdate.sessionId === sessionId) {
-      setProgress(progressUpdate);
+      // Force synchronous render to bypass React batching for smooth progress updates
+      flushSync(() => {
+        setProgress(progressUpdate);
+      });
       onProgress?.(progressUpdate);
     }
   });
@@ -378,7 +400,10 @@ export function useDiscoveryStream(sessionId?: string) {
     let cancelled = false;
     (async () => {
       try {
-        console.debug('[Discovery] Joining SignalR discovery group', { sessionId });
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+        if (win.PrintFarmerDebug?.discovery) {
+          console.debug('[Discovery] Joining SignalR discovery group', { sessionId });
+        }
         await printerSignalRService.joinDiscoveryGroup?.(sessionId);
       } catch (err) {
         if (!cancelled) {

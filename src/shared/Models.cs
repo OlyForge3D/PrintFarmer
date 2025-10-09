@@ -270,7 +270,25 @@ public record UpdatePrinterDto(
     string? ApiKey = null,
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
-    string? OriginalServerUrl = null);
+    string? OriginalServerUrl = null,
+    // Printer capabilities
+    double? NozzleDiameter = null,
+    string[]? SupportedMaterials = null,
+    double? MaxBuildVolumeX = null,
+    double? MaxBuildVolumeY = null,
+    double? MaxBuildVolumeZ = null,
+    bool? HasHeatedBed = null,
+    bool? HasEnclosure = null,
+    bool? MultiMaterial = null,
+    int? NumberOfExtruders = null,
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+    bool? SupportsAutoLeveling = null,
+    int? MaxPrintSpeed = null,
+    int? BackendPort = null,
+    int? FrontendPort = null);
 
 // Local spools removed; Spoolman is the source of truth
 
@@ -542,6 +560,13 @@ public record DiscoveryCompletedDto(
 );
 
 /// <summary>
+/// Request to start a network discovery session with optional backend filtering.
+/// </summary>
+public record StartDiscoveryRequest(
+    IReadOnlyList<PrinterBackend>? Backends = null
+);
+
+/// <summary>
 /// States representing the lifecycle of a discovery session.
 /// </summary>
 public enum DiscoveryStatus
@@ -574,9 +599,10 @@ public record NetworkDiscoverySettingsDto(
     List<string> NetworkRanges,
     int TimeoutMs = 3000,
     int MaxConcurrentScans = 20,
-    List<int> Ports = null!)
+    List<int> Ports = null!,
+    List<PrinterBackend>? Backends = null)
 {
-    public NetworkDiscoverySettingsDto() : this([], 3000, 20, [80])
+    public NetworkDiscoverySettingsDto() : this(new List<string>(), 3000, 20, new List<int> { 80 }, null)
     {
     }
 }
@@ -850,6 +876,7 @@ public record PrinterCapabilitiesDto(
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
+    bool SupportsAutoLeveling = false,
     int NumberOfExtruders = 1,
     int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
@@ -965,6 +992,23 @@ public enum GcodeHarvestStatusDto
     Cancelled = 3
 }
 
+public enum HarvestErrorTypeDto
+{
+    ConnectionError = 0,
+    AuthenticationError = 1,
+    FileSystemError = 2,
+    ValidationError = 3,
+    UnknownError = 4
+}
+
+public enum HarvestErrorPhaseDto
+{
+    Discovery = 0,
+    Download = 1,
+    Processing = 2,
+    Completion = 3
+}
+
 /// <summary>
 /// Represents a G-code harvesting operation and aggregate progress / results.
 /// </summary>
@@ -976,6 +1020,12 @@ public record GcodeHarvestOperationDto(
     DateTime? CompletedAt = null,
     GcodeHarvestStatusDto Status = GcodeHarvestStatusDto.Running,
     string? ErrorMessage = null,
+    string? ErrorType = null,
+    string? ErrorPhase = null,
+    string? ErrorDetails = null,
+    string? FailedResource = null,
+    bool IsRetryable = false,
+    DateTime? ErrorOccurredAt = null,
     int FilesFound = 0,
     int FilesProcessed = 0, // Calculated as FilesAdded + FilesSkipped + FilesErrored
     int FilesAdded = 0,
@@ -1002,6 +1052,7 @@ public record DiscoveredGcodeFileDto(
     Guid? ExistingLibraryFileId = null,
     bool ProcessingFailed = false,
     string? ErrorMessage = null,
+    string? ThumbnailUrl = null,
     string? ExtractedSlicerName = null,
     string? ExtractedSlicerVersion = null,
     double? ExtractedPrintTime = null,

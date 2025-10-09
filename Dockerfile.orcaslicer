@@ -16,7 +16,7 @@ ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
 
 # Pre-install tooling in a separate layer for better caching
-FROM slicer-base AS orca-tools
+FROM printfarmer-slicer-base AS orca-tools
 USER root
 RUN set -e; apk add --no-cache curl ca-certificates jq 2>/dev/null || (apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates jq fuse libfuse2 squashfs-tools libarchive-tools p7zip-full file && rm -rf /var/lib/apt/lists/*)
@@ -29,8 +29,11 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy shared + worker project files first (restore layer caching)
+
+# Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
+COPY src/Infrastructure/*.csproj ./infrastructure/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
 
@@ -38,10 +41,16 @@ RUN dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj
 
 # Copy sources
 COPY src/shared/ ./shared/
+COPY src/Infrastructure/ ./infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/orcaslicer-worker/ ./orcaslicer-worker/
 
-RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish --no-restore --verbosity minimal
+RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish --no-restore --verbosity minimal && \
+    # Verify critical runtime files exist and are non-empty
+    test -s /app/publish/Farm.OrcaSlicer.Worker.dll && \
+    test -s /app/publish/Farm.OrcaSlicer.Worker.runtimeconfig.json && \
+    echo "[build] Published files verified successfully" || \
+    (echo "[build] ERROR: Critical publish files missing or empty" && exit 1)
 
 ########################################
 # Runtime Stage
@@ -129,7 +138,7 @@ RUN set -e; echo "[orcaassets] Resolving OrcaSlicer version=${ORCASLICER_VERSION
 ########################################
 # Final Runtime Stage
 ########################################
-FROM slicer-base AS final
+FROM printfarmer-slicer-base AS final
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
 LABEL component="orcaslicer-worker" \

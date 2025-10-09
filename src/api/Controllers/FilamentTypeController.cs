@@ -1,10 +1,15 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Startup;
-using Farm.Web.Shared;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -12,53 +17,81 @@ namespace Farm.Web.Api.Controllers;
 /// Provides endpoints for managing filament types and their temperature presets.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/filament-types")]
 [Tags("Filament Types")]
-public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus, SpoolmanService spoolmanService) : ControllerBase
+public class FilamentTypeController(AppDbContext db, Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus, ISpoolmanService spoolmanService, IUnifiedLoggingService logger) : ControllerBase
 {
+    private readonly AppDbContext db = db;
+    private readonly Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus = startupStatus;
+    private readonly ISpoolmanService spoolmanService = spoolmanService;
+    private readonly IUnifiedLoggingService logger = logger;
+
     /// <summary>
     /// Gets all available filament types.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all filament types ordered by name</returns>
     /// <response code="200">Returns the list of filament types</response>
+    /// <response code="503">If the system is still initializing</response>
     [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
+    [ProducesResponseType(typeof(IEnumerable<Shared.FilamentTypeDto>), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<Shared.FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
     {
         // Ensure initialization is complete to prevent race conditions during startup
-        if (!startupStatus.IsReady)
+        try
         {
-            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-        }
+            if (!startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
 
-        List<FilamentTypeDto> list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
-            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
-            .ToListAsync(ct);
-        return Ok(list);
+            // Uncomment the next line to force a test exception for log verification
+            //throw new InvalidOperationException("[FilamentTypeController] Forced test exception for error logging verification.");
+
+            List<Shared.FilamentTypeDto> list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
+                .Select(f => new Shared.FilamentTypeDto(f.Id, f.Name, new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
+                .ToListAsync(ct);
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "[FilamentTypeController] TEST ERROR LOG: Exception captured in GetFilamentTypesAsync: {Message}", ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
     }
 
     /// <summary>
-    /// Gets filament types as a dictionary for presets.
+    /// Gets filament types as a dictionary for presets (from the database).
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>Dictionary of filament type names to temperature targets</returns>
     /// <response code="200">Returns the filament presets dictionary</response>
+    /// <response code="503">If the system is still initializing</response>
     [HttpGet("presets")]
-    [ProducesResponseType(typeof(FilamentPresetsDto), 200)]
+    [ProducesResponseType(typeof(Shared.FilamentPresetsDto), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
+    public async Task<ActionResult<Shared.FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
     {
-        // Ensure initialization is complete to prevent race conditions during startup
-        if (!startupStatus.IsReady)
+        try
         {
-            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            if (!startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+            Dictionary<string, Shared.TempTargets> presets = await db.FilamentTypes
+                .AsNoTracking()
+                .OrderBy(f => f.Name)
+                .ToDictionaryAsync(
+                    f => f.Name,
+                    f => new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), ct);
+            return Ok(new Shared.FilamentPresetsDto(presets));
         }
-
-        Dictionary<string, TempTargets> filamentTypes = await db.FilamentTypes.AsNoTracking()
-            .ToDictionaryAsync(f => f.Name.ToLowerInvariant(), f => new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), ct);
-        return Ok(new FilamentPresetsDto(filamentTypes));
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Error in GetFilamentPresetsAsync: {Message}", ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
     }
 
     /// <summary>
@@ -71,10 +104,10 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     /// <response code="400">If the filament type data is invalid</response>
     /// <response code="409">If a filament type with the same name already exists</response>
     [HttpPost]
-    [ProducesResponseType(typeof(FilamentTypeDto), 201)]
+    [ProducesResponseType(typeof(Shared.FilamentTypeDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
-    public async Task<ActionResult<FilamentTypeDto>> CreateFilamentTypeAsync([FromBody] CreateFilamentTypeRequest request, CancellationToken ct)
+    public async Task<ActionResult<Shared.FilamentTypeDto>> CreateFilamentTypeAsync([FromBody] Shared.CreateFilamentTypeRequest request, CancellationToken ct)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Name))
         {
@@ -85,7 +118,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         FilamentType? existing = await db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(f => f.Name == trimmed, ct);
         if (existing is not null)
         {
-            return Conflict(new FilamentTypeDto(existing.Id, existing.Name, new TempTargets(existing.DefaultHotendTemp, existing.DefaultBedTemp)));
+            return Conflict(new Shared.FilamentTypeDto(existing.Id, existing.Name, new Shared.TempTargets(existing.DefaultHotendTemp, existing.DefaultBedTemp)));
         }
 
         FilamentType filamentType = new()
@@ -97,11 +130,11 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
             CreatedAt = DateTime.UtcNow
         };
 
-        db.FilamentTypes.Add(filamentType);
-        await db.SaveChangesAsync(ct);
+        _ = db.FilamentTypes.Add(filamentType);
+        _ = await db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(GetFilamentTypesAsync), new { id = filamentType.Id },
-            new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp)));
+            new Shared.FilamentTypeDto(filamentType.Id, filamentType.Name, new Shared.TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp)));
     }
 
     /// <summary>
@@ -118,7 +151,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
-    public async Task<IActionResult> UpdateFilamentTypeAsync(Guid id, [FromBody] UpdateFilamentTypeRequest request, CancellationToken ct)
+    public async Task<IActionResult> UpdateFilamentTypeAsync(Guid id, [FromBody] Shared.UpdateFilamentTypeRequest request, CancellationToken ct)
     {
         if (request is null)
         {
@@ -139,7 +172,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         filamentType.DefaultHotendTemp = request.DefaultTemperatures.Hotend;
         filamentType.DefaultBedTemp = request.DefaultTemperatures.Bed;
 
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -162,13 +195,13 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
             return NotFound();
         }
 
-        db.FilamentTypes.Remove(filamentType);
-        await db.SaveChangesAsync(ct);
+        _ = db.FilamentTypes.Remove(filamentType);
+        _ = await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
     /// <summary>
-    /// Saves filament presets from a dictionary format (for backward compatibility).
+    /// Saves filament presets from a dictionary format (updates the database).
     /// </summary>
     /// <param name="presets">The filament presets to save</param>
     /// <param name="ct">Cancellation token for the operation</param>
@@ -178,38 +211,36 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     [HttpPost("presets")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
-    public async Task<IActionResult> SaveFilamentPresetsAsync([FromBody] FilamentPresetsDto presets, CancellationToken ct)
+    public async Task<IActionResult> SaveFilamentPresetsAsync([FromBody] Shared.FilamentPresetsDto presets, CancellationToken ct)
     {
         if (presets?.Presets == null)
         {
             return BadRequest("Presets are required");
         }
-
-        foreach (KeyValuePair<string, TempTargets> preset in presets.Presets)
+        foreach (KeyValuePair<string, Shared.TempTargets> kvp in presets.Presets)
         {
-            string name = preset.Key.Trim();
-            FilamentType? existing = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
-
-            if (existing != null)
+            string name = kvp.Key.Trim();
+            Shared.TempTargets tempTargets = kvp.Value;
+            FilamentType? filamentType = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
+            if (filamentType == null)
             {
-                existing.DefaultHotendTemp = preset.Value.Hotend;
-                existing.DefaultBedTemp = preset.Value.Bed;
-            }
-            else
-            {
-                FilamentType newType = new()
+                filamentType = new FilamentType
                 {
                     Id = Guid.NewGuid(),
                     Name = name,
-                    DefaultHotendTemp = preset.Value.Hotend,
-                    DefaultBedTemp = preset.Value.Bed,
+                    DefaultHotendTemp = tempTargets.Hotend,
+                    DefaultBedTemp = tempTargets.Bed,
                     CreatedAt = DateTime.UtcNow
                 };
-                db.FilamentTypes.Add(newType);
+                _ = db.FilamentTypes.Add(filamentType);
+            }
+            else
+            {
+                filamentType.DefaultHotendTemp = tempTargets.Hotend;
+                filamentType.DefaultBedTemp = tempTargets.Bed;
             }
         }
-
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -222,10 +253,10 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     /// <response code="400">If Spoolman is not configured</response>
     /// <response code="503">If system is still initializing</response>
     [HttpPost("import-from-spoolman")]
-    [ProducesResponseType(typeof(SpoolmanFilamentImportResult), 200)]
+    [ProducesResponseType(typeof(Shared.SpoolmanFilamentImportResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<SpoolmanFilamentImportResult>> ImportFromSpoolmanAsync(CancellationToken ct)
+    public async Task<ActionResult<Shared.SpoolmanFilamentImportResult>> ImportFromSpoolmanAsync(CancellationToken ct)
     {
         // Ensure initialization is complete to prevent race conditions during startup
         if (!startupStatus.IsReady)
@@ -234,8 +265,7 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         }
 
         // Check if Spoolman is configured
-        SpoolmanConfigDto? config = spoolmanService.GetConfig();
-        if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
+        if (spoolmanService.GetConfig() is not Shared.SpoolmanConfigDto config || string.IsNullOrWhiteSpace(config.BaseUrl))
         {
             return BadRequest(new { message = "Spoolman is not configured. Please configure Spoolman integration first." });
         }
@@ -243,15 +273,15 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
         try
         {
             // Get all materials from Spoolman's material endpoint (more direct and efficient)
-            IReadOnlyList<SpoolmanMaterialDto> materials = await spoolmanService.ListMaterialsAsync(ct);
+            IReadOnlyList<Shared.SpoolmanMaterialDto> materials = await spoolmanService.ListMaterialsAsync(ct);
 
             // Extract unique material names (filament types)
             HashSet<string> uniqueMaterials = new(StringComparer.OrdinalIgnoreCase);
-            foreach (SpoolmanMaterialDto material in materials)
+            foreach (Shared.SpoolmanMaterialDto material in materials)
             {
                 if (!string.IsNullOrWhiteSpace(material.Name))
                 {
-                    uniqueMaterials.Add(material.Name.Trim());
+                    _ = uniqueMaterials.Add(material.Name.Trim());
                 }
             }
 
@@ -286,14 +316,14 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
                     CreatedAt = DateTime.UtcNow
                 };
 
-                db.FilamentTypes.Add(newFilamentType);
+                _ = db.FilamentTypes.Add(newFilamentType);
                 importedNames.Add(materialName);
                 importedCount++;
             }
 
-            await db.SaveChangesAsync(ct);
+            _ = await db.SaveChangesAsync(ct);
 
-            return Ok(new SpoolmanFilamentImportResult(
+            return Ok(new Shared.SpoolmanFilamentImportResult(
                 ImportedCount: importedCount,
                 SkippedCount: skippedCount,
                 TotalSpoolmanMaterials: uniqueMaterials.Count,
@@ -311,26 +341,26 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     /// </summary>
     private static int GetDefaultHotendTemp(string material)
     {
-        string upperMaterial = material.ToUpperInvariant();
-        if (upperMaterial.Contains("PLA"))
+        // Use OrdinalIgnoreCase comparisons directly without allocating an upper-case copy
+        if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
         { return 205; }
-        if (upperMaterial.Contains("ABS"))
+        if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
         { return 230; }
-        if (upperMaterial.Contains("PETG"))
+        if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase))
         { return 240; }
-        if (upperMaterial.Contains("ASA"))
+        if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
         { return 245; }
-        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE"))
+        if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
         { return 260; }
-        if (upperMaterial.Contains("PCTG"))
+        if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
         { return 235; }
-        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX"))
+        if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
         { return 220; }
-        if (upperMaterial.Contains("WOOD"))
+        if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
         { return 210; }
-        if (upperMaterial.Contains("NYLON"))
+        if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase))
         { return 250; }
-        if (upperMaterial.Contains("CARBON"))
+        if (material.Contains("CARBON", StringComparison.OrdinalIgnoreCase))
         { return 260; }
         return 210; // Default for unknown materials
     }
@@ -340,26 +370,26 @@ public class FilamentTypeController(AppDbContext db, StartupStatus startupStatus
     /// </summary>
     private static int GetDefaultBedTemp(string material)
     {
-        string upperMaterial = material.ToUpperInvariant();
-        if (upperMaterial.Contains("PLA"))
+        // Prefer direct OrdinalIgnoreCase checks instead of material.ToUpperInvariant()
+        if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
         { return 60; }
-        if (upperMaterial.Contains("ABS"))
+        if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
         { return 100; }
-        if (upperMaterial.Contains("PETG"))
+        if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase))
         { return 85; }
-        if (upperMaterial.Contains("ASA"))
+        if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
         { return 100; }
-        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE"))
+        if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
         { return 110; }
-        if (upperMaterial.Contains("PCTG"))
+        if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
         { return 80; }
-        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX"))
+        if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
         { return 60; }
-        if (upperMaterial.Contains("WOOD"))
+        if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
         { return 65; }
-        if (upperMaterial.Contains("NYLON"))
+        if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase))
         { return 80; }
-        if (upperMaterial.Contains("CARBON"))
+        if (material.Contains("CARBON", StringComparison.OrdinalIgnoreCase))
         { return 100; }
         return 70; // Default for unknown materials
     }

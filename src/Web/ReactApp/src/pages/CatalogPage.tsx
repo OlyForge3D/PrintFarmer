@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { Plus, Edit, Trash2, Save, X, Settings } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, X, Settings, Database } from 'lucide-react';
 import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
+import { PageTemplate } from '@/components/PageTemplate';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
@@ -190,18 +191,26 @@ export function CatalogPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-pf-text-secondary">Loading catalog...</div>
-      </div>
+      <PageTemplate
+        title="Catalog"
+        subtitle="Manage printer manufacturers, models, and filament types"
+        icon={Database}
+        maxWidth="max-w-7xl"
+      >
+        <div className="flex items-center justify-center h-64">
+          <div className="text-pf-text-secondary">Loading catalog...</div>
+        </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Catalog</h1>
-      </div>
-
+    <PageTemplate
+      title="Catalog"
+      subtitle="Manage printer manufacturers, models, and filament types"
+      icon={Database}
+      maxWidth="max-w-7xl"
+    >
       {error && (
         <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded">
           {error}
@@ -504,6 +513,6 @@ export function CatalogPage() {
           closeEditModal();
         }}
       />
-    </div>
+    </PageTemplate>
   );
 }

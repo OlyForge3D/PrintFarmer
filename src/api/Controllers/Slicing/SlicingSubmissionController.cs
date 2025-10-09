@@ -1,7 +1,8 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,12 +16,12 @@ public class SlicingSubmissionController : ControllerBase
 {
     private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
     private readonly ISlicerFileStorage _fileStorage;
-    private readonly ILogger<SlicingSubmissionController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
     private readonly AppDbContext _context;
 
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, ILogger<SlicingSubmissionController> logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env, AppDbContext context)
+    public SlicingSubmissionController(ISlicerFileStorage fileStorage, IUnifiedLoggingService logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env, AppDbContext context)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(tempPathProvider);
@@ -28,7 +29,7 @@ public class SlicingSubmissionController : ControllerBase
         _logger = logger;
         // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
         string tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
-        Directory.CreateDirectory(tempRoot);
+        _ = Directory.CreateDirectory(tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -131,8 +132,7 @@ public class SlicingSubmissionController : ControllerBase
 
             // Determine authenticated user. In test environment allow a deterministic fallback user id
             Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
-            Guid userId;
-            if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
+            if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
             {
                 if (_env.IsEnvironment("Testing"))
                 {
@@ -196,14 +196,14 @@ public class SlicingSubmissionController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
 
-                SlicingJobStore.Add(storeJob);
+                _ = SlicingJobStore.Add(storeJob);
             }
 
             return Accepted(sliceResult);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to enqueue slicing job");
+            _logger.LogError(ex, $"Failed to enqueue slicing job: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }
@@ -229,7 +229,7 @@ public class SlicingSubmissionController : ControllerBase
         // Validate that the model file exists on disk
         if (!System.IO.File.Exists(model.FilePath))
         {
-            _logger.LogError("Model file not found on disk: {FilePath} for model {ModelId}", model.FilePath, modelId);
+            _logger.LogError($"Model file not found on disk: {model.FilePath} for model {modelId}");
             return NotFound("Model file not found on disk");
         }
 
@@ -281,8 +281,7 @@ public class SlicingSubmissionController : ControllerBase
 
             // Determine authenticated user
             Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
-            Guid userId;
-            if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
+            if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
             {
                 if (_env.IsEnvironment("Testing"))
                 {
@@ -344,16 +343,16 @@ public class SlicingSubmissionController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
 
-                SlicingJobStore.Add(storeJob);
+                _ = SlicingJobStore.Add(storeJob);
             }
 
-            _logger.LogInformation("Slicing job submitted for uploaded model {ModelId} ({OriginalFileName})", modelId, model.OriginalFileName);
+            _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.OriginalFileName})");
 
             return Accepted(sliceResult);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to enqueue slicing job for uploaded model {ModelId}", modelId);
+            _logger.LogError(ex, $"Failed to enqueue slicing job for uploaded model {modelId}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
         }
     }

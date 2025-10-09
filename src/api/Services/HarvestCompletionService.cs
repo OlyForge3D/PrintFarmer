@@ -1,5 +1,6 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -8,23 +9,17 @@ namespace Farm.Web.Api.Services;
 /// Background service to monitor harvest operations and mark them as completed
 /// when all files are processed
 /// </summary>
-public class HarvestCompletionService : BackgroundService
+public class HarvestCompletionService(
+    IServiceProvider serviceProvider,
+    IUnifiedLoggingService logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<HarvestCompletionService> _logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IUnifiedLoggingService _logger = logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
-
-    public HarvestCompletionService(
-        IServiceProvider serviceProvider,
-        ILogger<HarvestCompletionService> logger)
-    {
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("HarvestCompletionService started");
+        _logger.LogInformation($"HarvestCompletionService started", null, null);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -35,12 +30,12 @@ public class HarvestCompletionService : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("HarvestCompletionService stopping due to cancellation");
+                _logger.LogInformation($"HarvestCompletionService stopping due to cancellation", null, null);
                 break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in HarvestCompletionService");
+                _logger.LogError(ex, $"Error in HarvestCompletionService", null, null);
                 await Task.Delay(CheckInterval, stoppingToken);
             }
         }
@@ -48,7 +43,8 @@ public class HarvestCompletionService : BackgroundService
 
     private async Task CheckForCompletedOperationsAsync(CancellationToken ct)
     {
-        using IServiceScope scope = _serviceProvider.CreateScope();
+        // Use an async scope when awaiting EF Core calls to ensure proper async disposal
+        await using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Find running operations that might be completed
@@ -56,25 +52,21 @@ public class HarvestCompletionService : BackgroundService
             .Where(o => o.Status == GcodeHarvestStatus.Running && o.FilesFound > 0)
             .ToListAsync(ct);
 
-        _logger.LogInformation("Found {OperationCount} running harvest operations to check", runningOperations.Count);
+        _logger.LogInformation($"Found {runningOperations.Count} running harvest operations to check", null, null);
 
         foreach (GcodeHarvestOperation? operation in runningOperations)
         {
             // Count processed files (added + skipped + errored)
             int processedFiles = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
 
-            _logger.LogInformation(
-                "Operation {OperationId}: Found={FilesFound}, Added={FilesAdded}, Skipped={FilesSkipped}, Errored={FilesErrored}, Processed={ProcessedFiles}",
-                operation.Id, operation.FilesFound, operation.FilesAdded, operation.FilesSkipped, operation.FilesErrored, processedFiles);
+            _logger.LogInformation($"Operation {operation.Id}: Found={operation.FilesFound}, Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored}, Processed={processedFiles}", null, null);
 
             // Get the count of discovered files for this operation
             int discoveredFileCount = await db.HarvestDiscoveredFiles
                 .Where(d => d.HarvestOperationId == operation.Id)
                 .CountAsync(ct);
 
-            _logger.LogInformation(
-                "Operation {OperationId}: Found {DiscoveredFileCount} files in the DiscoveredGcodeFiles table",
-                operation.Id, discoveredFileCount);
+            _logger.LogInformation($"Operation {operation.Id}: Found {discoveredFileCount} files in the DiscoveredGcodeFiles table", null, null);
 
             if (processedFiles >= operation.FilesFound)
             {
@@ -82,11 +74,9 @@ public class HarvestCompletionService : BackgroundService
                 operation.Status = GcodeHarvestStatus.Completed;
                 operation.CompletedAt = DateTime.UtcNow;
 
-                _logger.LogInformation(
-                    "Marking operation {OperationId} as completed. Processed {ProcessedFiles}/{TotalFiles} files",
-                    operation.Id, processedFiles, operation.FilesFound);
+                _logger.LogInformation($"Marking operation {operation.Id} as completed. Processed {processedFiles}/{operation.FilesFound} files", null, null);
 
-                await db.SaveChangesAsync(ct);
+                _ = await db.SaveChangesAsync(ct);
             }
         }
     }

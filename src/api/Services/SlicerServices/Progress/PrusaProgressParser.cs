@@ -2,12 +2,12 @@
 
 namespace Farm.Web.Api.Services.SlicerServices.Progress;
 
-public class PrusaProgressParser : IProgressParser
+public partial class PrusaProgressParser : IProgressParser
 {
     // Examples parsed:
     // "Progress: 45%"
     // "Layer 10/100" => percentage = 10/100
-    private static readonly Regex PercentRegex = new(@"(?i)progress[:\s]+(?<pct>\d{1,3})%", RegexOptions.Compiled);
+    private static readonly Regex PercentRegex = MyRegex();
     private static readonly Regex LayerRegex = new(@"(?i)layer\s+(?<idx>\d+)\s*/\s*(?<total>\d+)", RegexOptions.Compiled);
 
     private static readonly (int Start, int End, string Message)[] _phases =
@@ -28,9 +28,7 @@ public class PrusaProgressParser : IProgressParser
             return null;
         }
 
-        string lower = line.ToLowerInvariant();
-
-        if (lower.Contains('%'))
+        if (line.Contains('%'))
         {
             string digits = string.Concat(line.Where(char.IsDigit));
             if (!string.IsNullOrEmpty(digits) && int.TryParse(digits, out int p))
@@ -39,29 +37,25 @@ public class PrusaProgressParser : IProgressParser
                 return new SlicerProgress(clamped, line);
             }
         }
-
-        if (lower.Contains("loading") || lower.Contains("load"))
+        if (line.Contains("loading", StringComparison.OrdinalIgnoreCase) || line.Contains("load", StringComparison.OrdinalIgnoreCase))
         {
             _phaseIdx = Math.Max(_phaseIdx, 1);
         }
-
-        if (lower.Contains("analyzing") || lower.Contains("toolpath") || lower.Contains("toolpaths"))
+        if (line.Contains("analyzing", StringComparison.OrdinalIgnoreCase) || line.Contains("toolpath", StringComparison.OrdinalIgnoreCase) || line.Contains("toolpaths", StringComparison.OrdinalIgnoreCase))
         {
             _phaseIdx = Math.Max(_phaseIdx, 2);
         }
-
-        if (lower.Contains("writing") || lower.Contains("writing g-code") || lower.Contains("exporting"))
+        if (line.Contains("writing", StringComparison.OrdinalIgnoreCase) || line.Contains("writing g-code", StringComparison.OrdinalIgnoreCase) || line.Contains("exporting", StringComparison.OrdinalIgnoreCase))
         {
             _phaseIdx = Math.Max(_phaseIdx, 3);
         }
-
-        if (lower.Contains("done") || lower.Contains("finished"))
+        if (line.Contains("done", StringComparison.OrdinalIgnoreCase) || line.Contains("finished", StringComparison.OrdinalIgnoreCase))
         {
             _phaseIdx = Math.Max(_phaseIdx, 4);
         }
 
-        (int Start, int End, string Message) phase = _phases[Math.Min(_phaseIdx, _phases.Length - 1)];
-        int progress = phase.Start + (phase.End - phase.Start) / 2;
+        (int Start, int End, string Message) = _phases[Math.Min(_phaseIdx, _phases.Length - 1)];
+        int progress = Start + (End - Start) / 2;
         return new SlicerProgress(progress, line);
     }
 
@@ -101,4 +95,7 @@ public class PrusaProgressParser : IProgressParser
 
         return null;
     }
+
+    [GeneratedRegex(@"(?i)progress[:\s]+(?<pct>\d{1,3})%", RegexOptions.Compiled, "en-US")]
+    private static partial Regex MyRegex();
 }

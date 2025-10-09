@@ -1,64 +1,25 @@
 import React, { useMemo, useState } from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
-import { SystemHealth } from '@/components/SystemHealth';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
+import { PageTemplate } from '@/components/PageTemplate';
 import type { Printer } from '@/types/api';
-import { 
-  Printer as PrinterIcon, 
-  CheckCircle, 
-  Play, 
-  Pause,
-  Search,
-  Settings,
-  LayoutGrid,
-  List
-} from 'lucide-react';
 
-interface StatsCardProps {
-  title: string;
-  value: number;
-  icon: React.ComponentType<{ className?: string }>;
-  color: 'blue' | 'green' | 'yellow' | 'gray';
-}
+import { Printer as PrinterIcon, Search, LayoutGrid, List } from 'lucide-react';
 
-function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
-  const colorClasses = {
-    blue: 'bg-pf-loading text-pf-text-primary',
-    green: 'bg-pf-status-online-bg text-pf-status-online-text',
-    yellow: 'bg-pf-warning text-pf-text-primary',
-    gray: 'bg-pf-border-medium text-pf-text-secondary',
-  };
 
-  return (
-    <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg">
-      <div className="p-5">
-        <div className="flex items-center">
-          <div className="flex-shrink-0">
-            <div className={`p-3 rounded-md ${colorClasses[color]}`}>
-              <Icon className="h-6 w-6" />
-            </div>
-          </div>
-          <div className="ml-5 w-0 flex-1">
-            <dl>
-              <dt className="text-sm font-medium text-pf-text-tertiary truncate uppercase tracking-wide">{title}</dt>
-              <dd className="text-lg font-bold text-pf-text-primary">{value}</dd>
-            </dl>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
+type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
 type ViewMode = 'cards' | 'table';
+
+
+
 
 export function PrintersPage() {
   const { hasPermission } = useAuth();
@@ -77,43 +38,47 @@ export function PrintersPage() {
     isOpen: boolean;
     printers: Printer[];
   }>({ isOpen: false, printers: [] });
-  
-  const { getPrinterStatus } = usePrinterStatusUpdates();
+
+  // Filter state
+  const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
+  const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
 
   // Filter printers for the current user (for now show all printers since userId isn't on Printer)
   const userPrinters = useMemo(() => {
-    return printers || [];
-  }, [printers]);
+    let filtered = printers || [];
+    // State filter
+    if (stateFilter !== 'all') {
+      filtered = filtered.filter(p => {
+        const state = (p.state || '').toLowerCase();
+        if (stateFilter === 'online') return p.isOnline;
+        if (stateFilter === 'printing') return state.includes('printing');
+        if (stateFilter === 'paused') return state.includes('paused');
+        if (stateFilter === 'offline') return !p.isOnline;
+        return true;
+      });
+    }
+    // Backend filter
+    if (backendFilter !== 'all') {
+      filtered = filtered.filter(p => {
+        let backendName = '';
+        if (typeof p.backend === 'string') {
+          backendName = p.backend;
+        } else if (typeof p.backend === 'number') {
+          switch (p.backend) {
+            case 0: backendName = 'Moonraker'; break;
+            case 1: backendName = 'PrusaLink'; break;
+            case 2: backendName = 'SDCP'; break;
+            case 3: backendName = 'OctoPrint'; break;
+            default: backendName = '';
+          }
+        }
+        return backendName === backendFilter;
+      });
+    }
+    return filtered;
+  }, [printers, stateFilter, backendFilter]);
 
-  // Statistics calculations
-  const stats = useMemo(() => {
-    const total = userPrinters.length;
-    const online = userPrinters.filter(p => {
-      const status = getPrinterStatus(p.id);
-      return status?.state?.toLowerCase().includes('operational') || 
-             status?.state?.toLowerCase().includes('ready') ||
-             status?.state?.toLowerCase().includes('idle') ||
-             p.isOnline;
-    }).length;
-    const printing = userPrinters.filter(p => {
-      const status = getPrinterStatus(p.id);
-      return status?.state?.toLowerCase().includes('printing') ||
-             p.state?.toLowerCase().includes('printing');
-    }).length;
-    const paused = userPrinters.filter(p => {
-      const status = getPrinterStatus(p.id);
-      return status?.state?.toLowerCase().includes('paused') ||
-             p.state?.toLowerCase().includes('paused');
-    }).length;
 
-    return {
-      total,
-      online,
-      printing,
-      paused,
-      offline: total - online
-    };
-  }, [userPrinters, getPrinterStatus]);
 
   const handleDeleteClick = (printers: Printer[]) => {
     setDeleteConfirmation({ isOpen: true, printers });
@@ -200,78 +165,86 @@ export function PrintersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-pf-text-primary">Printers</h1>
-            <p className="text-pf-text-secondary mt-1">
-              {viewMode === 'cards' ? 'Monitor and manage your 3D printers' : 'Manage your 3D printer fleet with bulk operations'}
-            </p>
+    <PageTemplate
+      title="Printers"
+      subtitle={viewMode === 'cards' ? 'Monitor and manage your 3D printers' : 'Manage your 3D printer fleet with bulk operations'}
+      icon={PrinterIcon}
+      maxWidth="max-w-7xl"
+    >
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
+        <div></div>
+        <div className="flex flex-col md:flex-row md:items-center gap-3">
+          {/* State Filter */}
+          <select
+            value={stateFilter}
+            onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
+            className="border border-pf-border rounded-lg px-3 py-1.5 text-sm bg-pf-bg-1 text-pf-text-primary"
+            aria-label="Filter by printer state"
+          >
+            <option value="all">All States</option>
+            <option value="online">Online</option>
+            <option value="printing">Printing</option>
+            <option value="paused">Paused</option>
+            <option value="offline">Offline</option>
+          </select>
+          {/* Backend Filter */}
+          <select
+            value={backendFilter}
+            onChange={e => setBackendFilter(e.target.value as BackendFilter)}
+            className="border border-pf-border rounded-lg px-3 py-1.5 text-sm bg-pf-bg-1 text-pf-text-primary"
+            aria-label="Filter by backend"
+          >
+            <option value="all">All Backends</option>
+            <option value="Moonraker">Moonraker</option>
+            <option value="PrusaLink">PrusaLink</option>
+            <option value="SDCP">SDCP</option>
+            <option value="OctoPrint">OctoPrint</option>
+          </select>
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'cards'
+                  ? 'bg-pf-accent text-white shadow-sm'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+              }`}
+              title="Card View"
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">Cards</span>
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'table'
+                  ? 'bg-pf-accent text-white shadow-sm'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
+              }`}
+              title="Table View"
+            >
+              <List className="h-4 w-4" />
+              <span className="hidden sm:inline">Table</span>
+            </button>
           </div>
-          
-          <div className="flex items-center space-x-3">
-            {/* View Mode Toggle */}
-            <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
+          {hasPermission('printers', 'create') && (
+            <>
               <button
-                onClick={() => setViewMode('cards')}
-                className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  viewMode === 'cards'
-                    ? 'bg-pf-accent text-white shadow-sm'
-                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                }`}
-                title="Card View"
+                onClick={() => {
+                  setShowDiscovery(true);
+                }}
+                className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
               >
-                <LayoutGrid className="h-4 w-4" />
-                <span className="hidden sm:inline">Cards</span>
+                <Search className="h-4 w-4" />
+                <span>Discover</span>
               </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  viewMode === 'table'
-                    ? 'bg-pf-accent text-white shadow-sm'
-                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                }`}
-                title="Table View"
-              >
-                <List className="h-4 w-4" />
-                <span className="hidden sm:inline">Table</span>
-              </button>
-            </div>
-
-            {hasPermission('printers', 'create') && (
-              <>
-                <button
-                  onClick={() => {
-                    console.log('Discover button clicked - setting showDiscovery to true');
-                    setShowDiscovery(true);
-                  }}
-                  className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
-                >
-                  <Search className="h-4 w-4" />
-                  <span>Discover</span>
-                </button>
-                
-                <AddPrinterButton onSuccess={refetchPrinters} />
-              </>
-            )}
-          </div>
+              <AddPrinterButton onSuccess={refetchPrinters} />
+            </>
+          )}
         </div>
+      </div>
 
-        {/* Statistics Cards - Only show in cards view */}
-        {viewMode === 'cards' && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-              <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
-              <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircle} />
-              <StatsCard title="Printing" value={stats.printing} color="yellow" icon={Play} />
-              <StatsCard title="Paused" value={stats.paused} color="yellow" icon={Pause} />
-              <StatsCard title="Offline" value={stats.offline} color="gray" icon={Settings} />
-            </div>
 
-            <SystemHealth />
-          </>
-        )}
 
         {/* Content Area */}
         <div className="space-y-6">
@@ -296,7 +269,7 @@ export function PrintersPage() {
               </div>
             </div>
           ) : viewMode === 'cards' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-[repeat(auto-fit,26rem)] gap-6 justify-start">
               {userPrinters.map((printer) => (
                 <ExpandablePrinterCard
                   key={printer.id}
@@ -336,7 +309,6 @@ export function PrintersPage() {
           onClose={() => setShowEditModal(false)}
           onSuccess={() => { setShowEditModal(false); refetchPrinters(); }}
         />
-      </div>
-    </div>
+    </PageTemplate>
   );
 }

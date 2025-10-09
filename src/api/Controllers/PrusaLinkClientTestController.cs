@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,18 +10,12 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/client-test/prusalink")]
-public class PrusaLinkClientTestController : ControllerBase
+public class PrusaLinkClientTestController(
+    IUnifiedLoggingService logger,
+    IPrusaLinkClient prusaLinkClient) : ControllerBase
 {
-    private readonly ILogger<PrusaLinkClientTestController> _logger;
-    private readonly IPrusaLinkClient _prusaLinkClient;
-
-    public PrusaLinkClientTestController(
-        ILogger<PrusaLinkClientTestController> logger,
-        IPrusaLinkClient prusaLinkClient)
-    {
-        _logger = logger;
-        _prusaLinkClient = prusaLinkClient;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IPrusaLinkClient _prusaLinkClient = prusaLinkClient;
 
     /// <summary>
     /// Test endpoint to fetch printer status from a PrusaLink instance
@@ -48,7 +43,7 @@ public class PrusaLinkClientTestController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error testing PrusaLinkClient.GetStatusAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 
@@ -78,7 +73,7 @@ public class PrusaLinkClientTestController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error testing PrusaLinkClient.GetFileListAsync");
-            return StatusCode(500, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message, stackTrace = ex.StackTrace });
         }
     }
 }

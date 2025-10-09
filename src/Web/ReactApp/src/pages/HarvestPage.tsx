@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Route, Routes } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { PageTemplate } from '@/components/PageTemplate';
+import { Sparkles } from 'lucide-react';
 import { 
   Printer, 
   GcodeHarvestStatus,
-  GcodeHarvestOperation
+  GcodeHarvestOperation,
+  PrinterBackend
 } from '@/types/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { usePrinters, useCancelHarvestOperation } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/harvest-signalr';
@@ -17,6 +19,7 @@ import { apiClient } from '@/services/api';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
 import { VirtualizedPrinterGrid } from '@/components/harvest/VirtualizedPrinterGrid';
 import { AccessDenied } from '@/components/common/AccessDenied';
+import { BackendSelector } from '@/components/BackendSelector';
 // import { IndexedFilesList } from '@/components/harvest/IndexedFilesList';
 
 export const HarvestPage: React.FC = () => {
@@ -28,12 +31,13 @@ export const HarvestPage: React.FC = () => {
   >({});
   const [compact, setCompact] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [backendFilter, setBackendFilter] = useState<string>('');
+  const [backendFilter, setBackendFilter] = useState<PrinterBackend | undefined>(undefined);
   const cancelHarvestMutation = useCancelHarvestOperation();
   const { hasPermission } = useAuth();
   const [optimisticOps, setOptimisticOps] = useState<GcodeHarvestOperation[]>([]);
-  const { data: printers } = usePrinters();
+  const { data: printers, isLoading: printersLoading, error: printersError } = usePrinters();
   const { getPrinterStatus } = usePrinterStatusUpdates();
+  
   const { data: harvestOperations, refetch: refetchOperations } = useQuery({
     queryKey: ['harvest-operations'],
     queryFn: () => apiClient.getHarvestOperations(),
@@ -86,8 +90,8 @@ export const HarvestPage: React.FC = () => {
         (p.manufacturerName?.toLowerCase().includes(term) ?? false)
       );
     }
-    if (backendFilter) {
-      result = result.filter((p: Printer) => p.backend === Number(backendFilter));
+    if (backendFilter !== undefined) {
+      result = result.filter((p: Printer) => p.backend === backendFilter);
     }
     // Grouping logic can be added here if needed
     return result;
@@ -168,79 +172,75 @@ export const HarvestPage: React.FC = () => {
   // const reachableSelectedCount = selectedPrinters.filter(id => printersWithLive.find(p => p.id === id && (p.isReachable || p.isOnline))).length;
 
   return (
-    <Routes>
-      <Route path="*" element={
-        <div className="p-6 space-y-6">
-          {/* Details panel overlay */}
-          {selectedOperation && (
-            <HarvestOperationDetails
-              operation={selectedOperation}
-              onClose={() => setSelectedOperation(null)}
-              perFileProgress={perFileProgressMap[selectedOperation.id] || {}}
-            />
-          )}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <h1 className="text-2xl font-bold text-pf-text-primary">G-code Harvest</h1>
-            <div className="flex flex-wrap gap-2 items-center">
-              {activeOperations.length > 0 && (
-                <button
-                  onClick={async () => {
-                    let successCount = 0;
-                    let errorCount = 0;
-                    for (const op of activeOperations) {
-                      try {
-                        await cancelHarvestMutation.mutateAsync(op.id);
-                        toast.success(`Cancelled: ${op.printerName}`);
-                        successCount++;
-                      } catch {
-                        toast.error(`Failed to cancel: ${op.printerName}`);
-                        errorCount++;
-                      }
+    <PageTemplate
+      title="G-code Harvest"
+      subtitle="Start harvesting G-code files from your printers"
+      icon={Sparkles}
+      maxWidth="max-w-7xl"
+    >
+      {/* Details panel overlay */}
+      {selectedOperation && (
+        <HarvestOperationDetails
+          operation={selectedOperation}
+          onClose={() => setSelectedOperation(null)}
+          perFileProgress={perFileProgressMap[selectedOperation.id] || {}}
+        />
+      )}
+          
+          <div className="flex flex-wrap gap-2 items-center mb-6">
+            {activeOperations.length > 0 && (
+              <button
+                onClick={async () => {
+                  let successCount = 0;
+                  let errorCount = 0;
+                  for (const op of activeOperations) {
+                    try {
+                      await cancelHarvestMutation.mutateAsync(op.id);
+                      toast.success(`Cancelled: ${op.printerName}`);
+                      successCount++;
+                    } catch {
+                      toast.error(`Failed to cancel: ${op.printerName}`);
+                      errorCount++;
                     }
-                    if (successCount && !errorCount) {
-                      toast.success('All harvest operations cancelled');
-                    } else if (successCount && errorCount) {
-                      toast.warning(`${successCount} cancelled, ${errorCount} failed`);
-                    } else if (errorCount) {
-                      toast.error('Failed to cancel any operations');
-                    }
-                  }}
-                  className="pf-btn pf-btn-danger"
-                  disabled={cancelHarvestMutation.isPending}
-                >
-                  {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel All'}
-                </button>
-              )}
-            </div>
+                  }
+                  if (successCount && !errorCount) {
+                    toast.success('All harvest operations cancelled');
+                  } else if (successCount && errorCount) {
+                    toast.warning(`${successCount} cancelled, ${errorCount} failed`);
+                  } else if (errorCount) {
+                    toast.error('Failed to cancel any operations');
+                  }
+                }}
+                className="pf-btn pf-btn-danger"
+                disabled={cancelHarvestMutation.isPending}
+              >
+                {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel All'}
+              </button>
+            )}
           </div>
+
           {/* Virtualized printer grid for scalable fleets */}
           <div className="mt-6">
             {/* Search, filter, group controls */}
             <div className="flex flex-wrap gap-3 mb-4 items-end">
               <div>
-                <label className="block text-xs font-medium text-pf-text-secondary mb-1">Search</label>
+                <label className="block text-sm font-medium text-pf-text-secondary mb-1">Search</label>
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
                   placeholder="Search printers..."
-                  className="pf-input w-48"
+                  className="w-48 px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-pf-text-secondary mb-1">Backend</label>
-                <select
-                  aria-label="Backend filter"
+                <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend</label>
+                <BackendSelector
                   value={backendFilter}
-                  onChange={e => setBackendFilter(e.target.value)}
-                  className="pf-input w-36"
-                >
-                  <option value="">All</option>
-                  <option value="0">Moonraker</option>
-                  <option value="1">PrusaLink</option>
-                  <option value="2">SDCP</option>
-                  <option value="3">OctoPrint</option>
-                </select>
+                  onChange={setBackendFilter}
+                  className="w-36 px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
+                  placeholder="All backends"
+                />
               </div>
               {/* Grouping control placeholder */}
               {/* <div>
@@ -266,7 +266,35 @@ export const HarvestPage: React.FC = () => {
                 aria-label="Toggle compact card layout"
               />
             </div>
-            <VirtualizedPrinterGrid
+
+            {/* Loading and error states */}
+            {printersLoading && (
+              <div className="text-center py-8 text-pf-text-secondary">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent mx-auto mb-2" />
+                <p>Loading printers...</p>
+              </div>
+            )}
+
+            {printersError && (
+              <div className="bg-pf-error-bg border border-pf-error-border text-pf-error-text rounded-lg p-4 mb-4">
+                <p className="font-semibold">Failed to load printers</p>
+                <p className="text-sm mt-1">{printersError.message || 'Unknown error occurred'}</p>
+              </div>
+            )}
+
+            {!printersLoading && !printersError && filteredPrinters.length === 0 && (
+              <div className="text-center py-8 text-pf-text-secondary">
+                <p className="text-lg font-semibold mb-2">No printers found</p>
+                <p className="text-sm">
+                  {printers && printers.length === 0 
+                    ? 'Add printers in the Printers page to get started.'
+                    : 'Try adjusting your search or filter criteria.'}
+                </p>
+              </div>
+            )}
+
+            {!printersLoading && !printersError && filteredPrinters.length > 0 && (
+              <VirtualizedPrinterGrid
               printers={filteredPrinters}
               operations={Object.fromEntries(activeOperations.map(op => [op.printerId, op]))}
               onStartHarvest={(printerId, options) => {
@@ -301,9 +329,8 @@ export const HarvestPage: React.FC = () => {
               cardWidth={compact ? 180 : 320}
               compact={compact}
             />
+            )}
           </div>
-        </div>
-      } />
-    </Routes>
+        </PageTemplate>
   );
 };

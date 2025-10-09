@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -7,18 +8,12 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Web.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/auth")]
 [Tags("Authentication")]
-public class AuthController : ControllerBase
+public class AuthController(IAuthenticationService authService, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IAuthenticationService _authService;
-    private readonly ILogger<AuthController> _logger;
-
-    public AuthController(IAuthenticationService authService, ILogger<AuthController> logger)
-    {
-        _authService = authService;
-        _logger = logger;
-    }
+    private readonly IAuthenticationService _authService = authService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
@@ -58,6 +53,19 @@ public class AuthController : ControllerBase
 
         AuthenticationResult result = await _authService.RegisterAsync(request);
 
+        // If registration succeeded but user is not active, inform user that admin approval is required
+        if (result.Success && result.User is { IsActive: false })
+        {
+            // Never return a JWT for unapproved users
+            return Ok(new AuthenticationResult(
+                Success: true,
+                Token: null,
+                ExpiresAt: null,
+                User: result.User,
+                Error: "Registration successful. Your account requires admin approval before you can log in."
+            ));
+        }
+
         if (result.Success)
         {
             return Ok(result);
@@ -72,7 +80,7 @@ public class AuthController : ControllerBase
     {
         // For JWT tokens, logout is typically handled client-side by removing the token
         // In the future, we could implement a token blacklist for enhanced security
-        _logger.LogInformation("User {UserId} logged out", User.FindFirstValue(ClaimTypes.NameIdentifier));
+        _logger.LogInformation($"User {User.FindFirstValue(ClaimTypes.NameIdentifier)} logged out");
 
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
@@ -82,7 +90,7 @@ public class AuthController : ControllerBase
     [Authorize]
     public Task<IActionResult> LogoutGetAsync()
     {
-        _logger.LogInformation("User {UserId} logged out (GET)", User.FindFirstValue(ClaimTypes.NameIdentifier));
+        _logger.LogInformation($"User {User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)} logged out (GET)");
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
 

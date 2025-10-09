@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -40,8 +40,8 @@ public class PasswordPolicyController(AppDbContext db) : ControllerBase
         PasswordPolicy? entity = await db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
         if (entity == null)
         {
-            entity = new Domain.PasswordPolicy();
-            db.PasswordPolicies.Add(entity);
+            entity = new PasswordPolicy();
+            _ = db.PasswordPolicies.Add(entity);
         }
 
         if (request.MinLength.HasValue)
@@ -69,7 +69,7 @@ public class PasswordPolicyController(AppDbContext db) : ControllerBase
             entity.RequireSymbol = request.RequireSymbol.Value;
         }
         entity.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
         return await GetAsync(ct);
     }
 }

@@ -1,9 +1,10 @@
-﻿using Farm.Slicer.Worker.Core;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.OrcaSlicer.Worker.Health;
 
-public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, ILogger<WorkerReadinessHealthCheck> logger) : IHealthCheck
+public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, IUnifiedLoggingService logger) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
@@ -11,7 +12,7 @@ public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, 
         {
             var state = workerStateService.GetWorkerState();
             var isReady = state.IsInitialized && !state.IsShuttingDown && state.ActiveJobs < state.MaxConcurrentJobs;
-            logger.LogDebug("Readiness - Ready {IsReady} Active {Active}/{Max}", isReady, state.ActiveJobs, state.MaxConcurrentJobs);
+            logger.LogDebug($"Readiness - Ready {isReady} Active {state.ActiveJobs}/{state.MaxConcurrentJobs}");
             var data = new Dictionary<string, object>
             {
                 ["initialized"] = state.IsInitialized,
@@ -24,7 +25,7 @@ public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, 
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Readiness check failed");
+            logger.LogError(ex, $"Readiness check failed");
             return Task.FromResult(HealthCheckResult.Unhealthy("Readiness check failed", ex));
         }
     }

@@ -1,60 +1,54 @@
 ﻿using System.Diagnostics;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services;
 
 /// <summary>
 /// Background service that periodically updates dynamic printer capabilities
 /// </summary>
-public class PrinterCapabilityUpdateService : BackgroundService
+public class PrinterCapabilityUpdateService(
+    IServiceScopeFactory scopeFactory,
+    IUnifiedLoggingService logger,
+    IPrintFarmerTelemetryService telemetry) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<PrinterCapabilityUpdateService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly TimeSpan _updateInterval = TimeSpan.FromMinutes(15); // Update every 15 minutes
-    private readonly IPrintFarmerTelemetryService _telemetry;
-
-    public PrinterCapabilityUpdateService(
-        IServiceProvider serviceProvider,
-        ILogger<PrinterCapabilityUpdateService> logger,
-        IPrintFarmerTelemetryService telemetry)
-    {
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-        _telemetry = telemetry;
-    }
+    private readonly IPrintFarmerTelemetryService _telemetry = telemetry;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using Activity? activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.ExecuteAsync");
-        _logger.LogInformation("PrinterCapabilityUpdateService started");
+        _logger.LogInformation($"PrinterCapabilityUpdateService started", null, null);
 
         // Add startup delay to allow server initialization to complete
         try
         {
-            _logger.LogInformation("PrinterCapabilityUpdateService waiting 30 seconds for server initialization");
+            _logger.LogInformation($"PrinterCapabilityUpdateService waiting 30 seconds for server initialization", null, null);
             using Activity? startupActivity = _telemetry.StartActivity("PrinterCapabilityUpdateService.StartupDelay");
             await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("PrinterCapabilityUpdateService cancelled during startup delay");
+            _logger.LogInformation($"PrinterCapabilityUpdateService cancelled during startup delay", null, null);
             return;
         }
 
-        _logger.LogInformation("PrinterCapabilityUpdateService beginning update cycle");
+        _logger.LogInformation($"PrinterCapabilityUpdateService beginning update cycle", null, null);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 using Activity? updateActivity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCycle");
-                _logger.LogDebug("Starting printer capability update cycle");
+                _logger.LogDebug($"Starting printer capability update cycle", null, null);
                 await UpdateCapabilitiesAsync(stoppingToken);
-                _logger.LogDebug("Completed printer capability update cycle, waiting {Minutes} minutes", _updateInterval.TotalMinutes);
+                _logger.LogDebug($"Completed printer capability update cycle, waiting {_updateInterval.TotalMinutes} minutes", null, null);
                 await Task.Delay(_updateInterval, stoppingToken);
             }
             catch (OperationCanceledException)
@@ -64,7 +58,7 @@ public class PrinterCapabilityUpdateService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in PrinterCapabilityUpdateService");
+                _logger.LogError(ex, $"Error in PrinterCapabilityUpdateService", null, null);
                 // Wait a bit before retrying on error
                 try
                 {
@@ -77,34 +71,34 @@ public class PrinterCapabilityUpdateService : BackgroundService
             }
         }
 
-        _logger.LogInformation("PrinterCapabilityUpdateService stopped");
+        _logger.LogInformation($"PrinterCapabilityUpdateService stopped", null, null);
     }
 
     private async Task UpdateCapabilitiesAsync(CancellationToken cancellationToken)
     {
-        using IServiceScope scope = _serviceProvider.CreateScope();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         using Activity? activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCapabilitiesAsync");
 
         try
         {
-            _logger.LogDebug("Getting AppDbContext and IPrinterCapabilityDiscoveryService from DI");
+            _logger.LogDebug($"Getting AppDbContext and IPrinterCapabilityDiscoveryService from DI", null, null);
             AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             IPrinterCapabilityDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<IPrinterCapabilityDiscoveryService>();
-            _logger.LogDebug("Successfully got services from DI");
+            _logger.LogDebug($"Successfully got services from DI", null, null);
 
             // Early return if no printers are registered to prevent hanging
-            _logger.LogDebug("Checking printer count");
+            _logger.LogDebug($"Checking printer count", null, null);
             int printerCount = await context.Printers.CountAsync(cancellationToken);
-            _logger.LogDebug("Found {PrinterCount} registered printers", printerCount);
+            _logger.LogDebug($"Found {printerCount} registered printers", null, null);
 
             if (printerCount == 0)
             {
-                _logger.LogDebug("No printers registered, skipping capability updates");
+                _logger.LogDebug($"No printers registered, skipping capability updates", null, null);
                 return;
             }
 
             // Get all printers with capabilities that haven't been updated recently
-            _logger.LogDebug("Querying stale printer capabilities");
+            _logger.LogDebug($"Querying stale printer capabilities", null, null);
             DateTime staleThreshold = DateTime.UtcNow.AddHours(-2); // Update if older than 2 hours
             List<PrinterCapabilities> capabilities = await context.PrinterCapabilities
                 .Include(c => c.Printer)
@@ -114,15 +108,15 @@ public class PrinterCapabilityUpdateService : BackgroundService
                 .Take(10) // Limit to 10 printers per update cycle to avoid overload
                 .ToListAsync(cancellationToken);
 
-            _logger.LogDebug("Found {CapabilitiesCount} stale printer capabilities to update", capabilities.Count);
+            _logger.LogDebug($"Found {capabilities.Count} stale printer capabilities to update", null, null);
 
             if (capabilities.Count == 0)
             {
-                _logger.LogDebug("No capabilities need updating");
+                _logger.LogDebug($"No capabilities need updating", null, null);
                 return;
             }
 
-            _logger.LogInformation("Updating capabilities for {Count} printers", capabilities.Count);
+            _logger.LogInformation($"Updating capabilities for {capabilities.Count} printers", null, null);
 
             foreach (PrinterCapabilities? capability in capabilities)
             {
@@ -133,23 +127,23 @@ public class PrinterCapabilityUpdateService : BackgroundService
 
                 try
                 {
-                    await discoveryService.RefreshCapabilitiesAsync(capability, capability.Printer, cancellationToken);
-                    _logger.LogDebug("Updated capabilities for printer {PrinterName}", capability.Printer.Name);
+                    _ = await discoveryService.RefreshCapabilitiesAsync(capability, capability.Printer, cancellationToken);
+                    _logger.LogDebug($"Updated capabilities for printer {capability.Printer.Name}", null, null);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to update capabilities for printer {PrinterName}", capability.Printer.Name);
+                    _logger.LogWarning(ex, $"Failed to update capabilities for printer {capability.Printer.Name}", null, null);
                     // Update timestamp even on failure to avoid constant retries
                     capability.LastUpdated = DateTime.UtcNow;
                 }
             }
 
-            await context.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Successfully updated capabilities for {Count} printers", capabilities.Count);
+            _ = await context.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation($"Successfully updated capabilities for {capabilities.Count} printers", null, null);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating printer capabilities");
+            _logger.LogError(ex, $"Error updating printer capabilities", null, null);
         }
     }
 }

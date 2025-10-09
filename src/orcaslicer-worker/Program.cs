@@ -16,16 +16,16 @@ public static class Program
 {
     public static void Main(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-        builder.Logging.ClearProviders();
-        builder.Logging.AddConsole();
+        _ = builder.Logging.ClearProviders();
+        _ = builder.Logging.AddConsole();
 
         // Redis
-        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+        _ = builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
-            var configuration = builder.Configuration;
-            var raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
+            ConfigurationManager configuration = builder.Configuration;
+            string raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
             if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
             {
                 raw = raw.TrimEnd(',') + ",abortConnect=false";
@@ -36,40 +36,57 @@ public static class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
+                // Resolve ILoggerFactory from the factory-provided service provider to avoid
+                // creating a second service provider via BuildServiceProvider(). This
+                // eliminates the ASP0000 diagnostic and ensures singletons are not duplicated.
+                ILoggerFactory loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
+                ILogger? logger = loggerFactory.CreateLogger("OrcaSlicer.Startup");
+                if (logger != null)
+                {
+                    logger.LogWarning(ex, "[startup][redis] Initial Redis connection failed: {Message}", ex.Message);
+                }
+                else
+                {
+                    Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
+                }
+
+                // Fall back to a local connect attempt with a safe default
                 return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
             }
         });
 
         // HTTP clients
-        builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
-        builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
+        _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
+        _ = builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
 
         // Worker services (shared core + engine specific)
-        builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
-        builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
-        builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
-        builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+        _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
+        _ = builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
+        _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
+        _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+
+
+        _ = builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Infrastructure.Telemetry.UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer derived)
-        builder.Services.AddHostedService<GracefulShutdownService>(); // shared
-        builder.Services.AddHostedService<QueueConsumerService>(); // derived
+        _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
+        _ = builder.Services.AddHostedService<QueueConsumerService>(); // derived
 
         // Health checks
-        builder.Services.AddHealthChecks()
+        _ = builder.Services.AddHealthChecks()
             .AddCheck<WorkerLivenessHealthCheck>("liveness")
             .AddCheck<WorkerReadinessHealthCheck>("readiness")
             .AddCheck<OrcaBinaryHealthCheck>("orca_binary")
             .AddCheck<RedisHealthCheck>("redis");
 
-        var app = builder.Build();
+        WebApplication app = builder.Build();
 
         if (app.Environment.IsDevelopment())
         {
-            app.UseDeveloperExceptionPage();
+            _ = app.UseDeveloperExceptionPage();
         }
 
-        app.MapHealthChecks("/healthz", new HealthCheckOptions
+        _ = app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
             Predicate = c => c.Name == "liveness",
             ResponseWriter = async (context, report) =>
@@ -83,14 +100,14 @@ public static class Program
             }
         });
 
-        var relaxedEnv = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
-        var relaxedReadiness = !string.IsNullOrEmpty(relaxedEnv) && relaxedEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
+        string? relaxedEnv = Environment.GetEnvironmentVariable("WORKER_RELAXED_READINESS");
+        bool relaxedReadiness = !string.IsNullOrEmpty(relaxedEnv) && relaxedEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
         if (relaxedReadiness)
         {
             app.Logger.LogWarning("WORKER_RELAXED_READINESS=true -> orca_binary will be excluded from readiness evaluation.");
         }
 
-        app.MapHealthChecks("/health/ready", new HealthCheckOptions
+        _ = app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
             Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
             ResponseWriter = async (context, report) =>
@@ -109,12 +126,12 @@ public static class Program
             }
         });
 
-        app.MapHealthChecks("/ready", new HealthCheckOptions
+        _ = app.MapHealthChecks("/ready", new HealthCheckOptions
         {
             Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
         });
 
-        app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
+        _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
         {
             service = "orcaslicer-worker",
             version = "1.0.0",
@@ -123,7 +140,7 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
-        var orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
+        IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
         if (!orcaDetector.IsRealBinaryPresent())
         {
             app.Logger.LogWarning("OrcaSlicer binary not present (stub in use) - readiness will be unhealthy for orca_binary.");

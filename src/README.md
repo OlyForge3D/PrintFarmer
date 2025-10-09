@@ -47,20 +47,23 @@ Selection order:
 - Env var DB_PROVIDER
 - Defaults to Sqlite
 
-Connection strings come from appsettings.json (ConnectionStrings) and can be overridden by env vars, e.g. ConnectionStrings__Postgres.
+**Connection String Configuration:**
+- All database providers use a **single unified connection string key**: `ConnectionStrings__Default`
+- Can be set via environment variable `ConnectionStrings__Default` or in appsettings.json under `ConnectionStrings:Default`
+- The provider-specific format is determined by the `DB_PROVIDER` setting
 
 ### Provider-agnostic migrations
 
 The server uses shared EF Core migrations that work across all supported providers. The migration system:
-- Tries to run `Database.Migrate()` for all providers first
-- Falls back to `Database.EnsureCreated()` if migrations fail
+- In Development: Uses `Database.EnsureCreated()` to auto-create schema
+- In Production: Uses `Database.Migrate()` to apply migrations (requires migrations to exist)
 - Can be forced to use `EnsureCreated` with DB_INIT_MODE=EnsureCreated or DISABLE_EF_MIGRATIONS=1
 
 Examples:
 - DB_PROVIDER=Sqlite, ConnectionStrings__Default=Data Source=farm.db
-- DB_PROVIDER=Postgres, ConnectionStrings__Postgres=Host=localhost;Database=printfarmer;Username=postgres;Password=postgres
-- DB_PROVIDER=SqlServer, ConnectionStrings__SqlServer=Server=localhost;Database=printfarmer;Trusted_Connection=True;TrustServerCertificate=True;
-- DB_PROVIDER=MySql, ConnectionStrings__MySql=Server=localhost;Database=printfarmer;User=root;Password=example;
+- DB_PROVIDER=Postgres, ConnectionStrings__Default=Host=localhost;Database=printfarmer;Username=postgres;Password=postgres
+- DB_PROVIDER=SqlServer, ConnectionStrings__Default=Server=localhost;Database=printfarmer;Trusted_Connection=True;TrustServerCertificate=True;
+- DB_PROVIDER=MySql, ConnectionStrings__Default=Server=localhost;Database=printfarmer;User=root;Password=example;
 
 ### Testing different providers
 
@@ -74,8 +77,8 @@ For local testing with different database providers:
    # Test with PostgreSQL
    cd src
    export DB_PROVIDER=Postgres
-   export ConnectionStrings__Postgres="Host=localhost;Database=printfarmer;Username=postgres;Password=postgres"
-   dotnet run --project ./server/Farm.Web.Server.csproj
+   export ConnectionStrings__Default="Host=localhost;Database=printfarmer;Username=postgres;Password=postgres"
+   dotnet run --project ./api/Farm.Web.Api.csproj
    ```
 
 2. **Automated testing script:**

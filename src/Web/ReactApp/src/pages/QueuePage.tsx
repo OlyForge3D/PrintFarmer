@@ -1,10 +1,17 @@
 import React from 'react';
 import { QueueOverview } from '@/components/queue/QueueOverview';
+import { PageTemplate } from '@/components/PageTemplate';
+import { ListOrdered } from 'lucide-react';
 
 export const QueuePage: React.FC = () => {
   return (
-    <div className="container mx-auto px-4 py-8">
+    <PageTemplate
+      title="Print Queue"
+      subtitle="Manage and monitor your print queue"
+      icon={ListOrdered}
+      maxWidth="max-w-7xl"
+    >
       <QueueOverview />
-    </div>
+    </PageTemplate>
   );
 };

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Tests;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -23,8 +24,10 @@ public class MoonrakerClientTests
                 return responder(req);
             });
 
+#pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
         var http = new HttpClient(handler.Object);
-        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance) as IMoonrakerClient;
+#pragma warning restore CA2000
+        var client = new MoonrakerClient(http, new TestUtils.TestLoggingService()) as IMoonrakerClient;
         return (client, handler, recorded);
     }
 
@@ -143,8 +146,8 @@ public class MoonrakerClientTests
         });
 
         var cs = await client.GetCompositeStatusAsync(Base);
-    cs.IsOnline.Should().BeTrue();
-    cs.State.Should().Be("standby"); // print_stats.state (job state) is used in composite status
+        cs.IsOnline.Should().BeTrue();
+        cs.State.Should().Be("standby"); // print_stats.state (job state) is used in composite status
         cs.X.Should().Be(10.0);
         cs.Y.Should().Be(20.0);
         cs.Z.Should().Be(5.0);

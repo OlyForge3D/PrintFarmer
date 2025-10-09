@@ -1,8 +1,9 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text; // Needed for Encoding when deriving secondary hash
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -17,14 +18,14 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
 public class ModelController : ControllerBase
 {
-    private readonly ILogger<ModelController> _logger;
+    private readonly IUnifiedLoggingService _logger;
     private readonly AppDbContext _context;
     private readonly string _modelsPath;
     private readonly IModelAnalysisService _analysisService;
     private readonly IVirusScanner _virusScanner;
     private readonly IThumbnailGenerationService _thumbnailService;
 
-    public ModelController(ILogger<ModelController> logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner, IThumbnailGenerationService thumbnailService)
+    public ModelController(IUnifiedLoggingService logger, AppDbContext context, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner, IThumbnailGenerationService thumbnailService)
     {
         _logger = logger;
         _context = context;
@@ -37,7 +38,7 @@ public class ModelController : ControllerBase
         // Ensure models directory exists
         if (!Directory.Exists(_modelsPath))
         {
-            Directory.CreateDirectory(_modelsPath);
+            _ = Directory.CreateDirectory(_modelsPath);
         }
     }
 
@@ -60,9 +61,10 @@ public class ModelController : ControllerBase
         // Validate file extension
         string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
         string originalName = modelFile.FileName ?? string.Empty;
-        string fileExtension = Path.GetExtension(originalName).ToLowerInvariant();
+        string fileExtension = Path.GetExtension(originalName);
 
-        if (!allowedExtensions.Contains(fileExtension))
+        // Use an OrdinalIgnoreCase comparison for extension membership checks
+        if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
         }
@@ -89,7 +91,7 @@ public class ModelController : ControllerBase
                 // Calculate hash
                 // Use static HashData API (CA1850)
                 byte[] hashBytes = await SHA256.HashDataAsync(memoryStream);
-                fileHash = Convert.ToHexString(hashBytes);
+                fileHash = ToHexLower(hashBytes);
 
                 // Write to file
                 memoryStream.Position = 0;
@@ -108,14 +110,14 @@ public class ModelController : ControllerBase
                         System.IO.File.Delete(filePath);
                     }
 
-                    _logger.LogWarning("Upload rejected - file {FileName} flagged as infected", originalName);
+                    _logger.LogWarning($"Upload rejected - file {originalName} flagged as infected");
                     return BadRequest("Uploaded file failed security scan");
                 }
             }
             catch (Exception ex)
             {
                 // Don't fail the upload if the scanner is unavailable — log and continue
-                _logger.LogWarning(ex, "Virus scanner failed or unavailable; continuing without scan for {FileName}", originalName);
+                _logger.LogWarning($"Virus scanner failed or unavailable; continuing without scan for {originalName}: {ex.Message}");
             }
 
             // Analyze model metadata (dimensions, triangle count) where possible
@@ -126,7 +128,7 @@ public class ModelController : ControllerBase
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Model analysis failed for {FileName}; marking model as valid but without metadata", originalName);
+                _logger.LogWarning($"Model analysis failed for {originalName}; marking model as valid but without metadata: {ex.Message}");
             }
 
             // Duplicate handling strategy (test-aligned):
@@ -141,8 +143,8 @@ public class ModelController : ControllerBase
             if (existingModel != null)
             {
                 string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.OriginalFileName);
-                string existingExt = Path.GetExtension(existingModel.OriginalFileName).ToLowerInvariant();
-                bool isSameExtension = existingExt == fileExtension;
+                string existingExt = Path.GetExtension(existingModel.OriginalFileName);
+                bool isSameExtension = string.Equals(existingExt, fileExtension, StringComparison.OrdinalIgnoreCase);
                 bool bothDuplicatePrefix = existingBaseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase)
                     && baseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase);
                 bool baseNamesMatch = string.Equals(existingBaseName, baseName, StringComparison.OrdinalIgnoreCase);
@@ -170,9 +172,10 @@ public class ModelController : ControllerBase
                 }
 
                 // Force uniqueness: derive a new hash incorporating original name + extension
-                byte[] composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName.ToLowerInvariant());
+                // Use originalName as provided when deriving secondary hash to avoid unnecessary culture-sensitive allocations
+                byte[] composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName);
                 byte[] newHashBytes = SHA256.HashData(composite);
-                fileHash = Convert.ToHexString(newHashBytes);
+                fileHash = ToHexLower(newHashBytes);
             }
 
             // Create database entity
@@ -196,8 +199,8 @@ public class ModelController : ControllerBase
                 VolumeM3 = analysis?.VolumeMm3
             };
 
-            _context.Models3D.Add(model);
-            await _context.SaveChangesAsync();
+            _ = _context.Models3D.Add(model);
+            _ = await _context.SaveChangesAsync();
 
             // Generate thumbnail if supported
             if (_thumbnailService.IsFormatSupported(model.FileFormat))
@@ -211,7 +214,7 @@ public class ModelController : ControllerBase
                     string? thumbnailDir = Path.GetDirectoryName(thumbnailPath);
                     if (thumbnailDir != null && !Directory.Exists(thumbnailDir))
                     {
-                        Directory.CreateDirectory(thumbnailDir);
+                        _ = Directory.CreateDirectory(thumbnailDir);
                     }
 
                     bool thumbnailGenerated = await _thumbnailService.GenerateThumbnailAsync(
@@ -225,17 +228,17 @@ public class ModelController : ControllerBase
                     if (thumbnailGenerated)
                     {
                         model.ThumbnailPath = thumbnailPath;
-                        await _context.SaveChangesAsync();
-                        _logger.LogDebug("Thumbnail generated for model {ModelId}", modelId);
+                        _ = await _context.SaveChangesAsync();
+                        _logger.LogDebug($"Thumbnail generated for model {modelId}");
                     }
                     else
                     {
-                        _logger.LogWarning("Failed to generate thumbnail for model {ModelId}", modelId);
+                        _logger.LogWarning($"Failed to generate thumbnail for model {modelId}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Exception during thumbnail generation for model {ModelId}", modelId);
+                    _logger.LogWarning($"Exception during thumbnail generation for model {modelId}: {ex.Message}");
                     // Don't fail the upload if thumbnail generation fails
                 }
             }
@@ -252,15 +255,14 @@ public class ModelController : ControllerBase
                 Url = $"/api/3d-models/{modelId}/file"
             };
 
-            _logger.LogInformation("Model uploaded: {ModelId} ({FileName}, {FileSize} bytes)",
-                modelId, modelFile.FileName, modelFile.Length);
+            _logger.LogInformation($"Model uploaded: {modelId} ({modelFile.FileName}, {modelFile.Length} bytes)");
 
             // Use named route to ensure reliable URL generation after switching to explicit plural base route
             return CreatedAtRoute("GetModel", new { id = modelId }, result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to upload model file: {FileName}", modelFile.FileName);
+            _logger.LogError($"Failed to upload model file: {modelFile.FileName}: {ex.Message}");
 
             // Clean up file if it was partially created
             if (IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
@@ -302,7 +304,7 @@ public class ModelController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to list models");
+            _logger.LogError($"Failed to list models: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
         }
     }
@@ -364,14 +366,27 @@ public class ModelController : ControllerBase
         }
 
         string fileExtension = Path.GetExtension(model.FilePath);
-        string contentType = fileExtension.ToLowerInvariant() switch
+        string contentType;
+        if (string.Equals(fileExtension, ".stl", StringComparison.OrdinalIgnoreCase))
         {
-            ".stl" => "application/vnd.ms-pki.stl",
-            ".3mf" => "model/3mf",
-            ".obj" => "text/plain",
-            ".ply" => "application/octet-stream",
-            _ => "application/octet-stream"
-        };
+            contentType = "application/vnd.ms-pki.stl";
+        }
+        else if (string.Equals(fileExtension, ".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "model/3mf";
+        }
+        else if (string.Equals(fileExtension, ".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "text/plain";
+        }
+        else if (string.Equals(fileExtension, ".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "application/octet-stream";
+        }
+        else
+        {
+            contentType = "application/octet-stream";
+        }
 
         return PhysicalFile(model.FilePath, contentType, model.OriginalFileName);
     }
@@ -441,15 +456,15 @@ public class ModelController : ControllerBase
             }
 
             // Remove from database
-            _context.Models3D.Remove(model);
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation("Model deleted: {ModelId}", id);
+            _ = _context.Models3D.Remove(model);
+            _ = await _context.SaveChangesAsync();
+            _logger.LogInformation($"Model deleted: {id}");
+            _logger.LogInformation($"Model deleted: {id}");
             return NoContent();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete model: {ModelId}", id);
+            _logger.LogError($"Failed to delete model: {id}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete model");
         }
     }
@@ -470,11 +485,11 @@ public class ModelController : ControllerBase
         }
 
         List<string> issues = new();
-        string fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
+        string fileExtension = Path.GetExtension(modelFile.FileName);
 
         // Check file extension
         string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
-        if (!allowedExtensions.Contains(fileExtension))
+        if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
         {
             issues.Add($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
         }
@@ -513,15 +528,38 @@ public class ModelController : ControllerBase
 
     private static ModelFileFormat GetFileFormat(string extension)
     {
-        return extension.ToLowerInvariant() switch
+        if (string.Equals(extension, ".stl", StringComparison.OrdinalIgnoreCase))
         {
-            ".stl" => ModelFileFormat.STL,
-            ".3mf" => ModelFileFormat.TMF,
-            ".obj" => ModelFileFormat.OBJ,
-            ".ply" => ModelFileFormat.PLY,
-            ".step" => ModelFileFormat.STEP,
-            _ => ModelFileFormat.STL
-        };
+            return ModelFileFormat.STL;
+        }
+
+        if (string.Equals(extension, ".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.TMF;
+        }
+
+        if (string.Equals(extension, ".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.OBJ;
+        }
+
+        if (string.Equals(extension, ".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.PLY;
+        }
+
+        if (string.Equals(extension, ".step", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.STEP;
+        }
+
+        return ModelFileFormat.STL;
+    }
+
+    private static string ToHexLower(byte[] bytes)
+    {
+        // Use Convert.ToHexString which returns uppercase; canonicalize to lowercase to match other services.
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     private static string GetFileTypeString(ModelFileFormat format)

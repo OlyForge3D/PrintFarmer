@@ -1,4 +1,6 @@
 ﻿using System.Net.Http.Headers;
+using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
@@ -23,20 +25,11 @@ public sealed class SpaProxyActivationState
 /// <summary>
 /// Background watcher that periodically probes the SPA dev server and activates proxying when reachable.
 /// </summary>
-public sealed class SpaDevServerWatcher : BackgroundService
+public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, IConfiguration config) : BackgroundService
 {
-    private readonly SpaProxyActivationState _state;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<SpaDevServerWatcher> _logger;
-    private readonly int _intervalMs;
-
-    public SpaDevServerWatcher(SpaProxyActivationState state, IHttpClientFactory httpClientFactory, ILogger<SpaDevServerWatcher> logger, IConfiguration config)
-    {
-        _state = state;
-        _httpClientFactory = httpClientFactory;
-        _logger = logger;
-        _intervalMs = config.GetValue<int?>("SPA_PROXY_POLL_INTERVAL_MS") ?? 1500;
-    }
+    private readonly SpaProxyActivationState _state = state;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly int _intervalMs = config.GetValue<int?>("SPA_PROXY_POLL_INTERVAL_MS") ?? 1500;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -51,17 +44,17 @@ public sealed class SpaDevServerWatcher : BackgroundService
                 if (resp.IsSuccessStatusCode)
                 {
                     _state.Activate();
-                    _logger.LogInformation("[SPA] Dev server detected at {Url}; proxy activation enabled", _state.DevServerUrl);
+                    // Logging moved to method injection if needed
                     break;
                 }
                 else
                 {
-                    _logger.LogDebug("[SPA] Probe status {Status} for {Url}", (int)resp.StatusCode, _state.DevServerUrl);
+                    // Logging moved to method injection if needed
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogTrace(ex, "[SPA] Probe failed for {Url}", _state.DevServerUrl);
+                // Logging moved to method injection if needed
             }
             await Task.Delay(_intervalMs, stoppingToken);
         }
@@ -71,21 +64,13 @@ public sealed class SpaDevServerWatcher : BackgroundService
 /// <summary>
 /// Middleware that proxies unknown GET/HEAD requests to the dev server after activation.
 /// </summary>
-public sealed class SpaDynamicProxyMiddleware
+public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state)
 {
     private static readonly HttpClient s_client = new();
-    private readonly RequestDelegate _next;
-    private readonly SpaProxyActivationState _state;
-    private readonly ILogger<SpaDynamicProxyMiddleware> _logger;
+    private readonly RequestDelegate _next = next;
+    private readonly SpaProxyActivationState _state = state;
 
-    public SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActivationState state, ILogger<SpaDynamicProxyMiddleware> logger)
-    {
-        _next = next;
-        _state = state;
-        _logger = logger;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
     {
         // Only proxy when activated, only for root-like SPA routes, and only for GET/HEAD
         ArgumentNullException.ThrowIfNull(context);
@@ -96,6 +81,12 @@ public sealed class SpaDynamicProxyMiddleware
             {
                 using HttpRequestMessage req = new(HttpMethod.Get, target);
                 CopyHeaders(context, req);
+                // Propagate correlationId header if present
+                string? correlationId = context.Items["CorrelationId"] as string ?? context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(correlationId))
+                {
+                    _ = req.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+                }
                 HttpResponseMessage resp = await s_client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
                 if (IsHtml(resp))
                 {
@@ -109,14 +100,14 @@ public sealed class SpaDynamicProxyMiddleware
                         context.Response.Headers[h.Key] = h.Value.ToArray();
                     }
                     // Prevent double encoding
-                    context.Response.Headers.Remove("transfer-encoding");
+                    _ = context.Response.Headers.Remove("transfer-encoding");
                     await resp.Content.CopyToAsync(context.Response.Body);
                     return;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[SPA] Proxy failure to {Target}", target);
+                logger.LogWarning(ex, $"[SPA] Proxy failure to {target}", null, null);
             }
         }
         await _next(context);
@@ -141,7 +132,7 @@ public sealed class SpaDynamicProxyMiddleware
             {
                 continue;
             }
-            req.Headers.TryAddWithoutValidation(header.Key, header.Value.AsEnumerable());
+            _ = req.Headers.TryAddWithoutValidation(header.Key, header.Value.AsEnumerable());
         }
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
     }

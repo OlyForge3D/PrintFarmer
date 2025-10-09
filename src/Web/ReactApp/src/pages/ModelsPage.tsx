@@ -1,6 +1,7 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
+import { PageTemplate } from '@/components/PageTemplate';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
 import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
@@ -149,8 +150,9 @@ export const ModelsPage: React.FC = () => {
       } catch (error) {
         console.error('Upload failed:', error);
         setUploadProgress(prev => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { [file.name]: _omit, ...rest } = prev; // remove failed file key
+          // Create a shallow copy and remove the failed file key to avoid unused var warnings
+          const rest = { ...prev };
+          delete rest[file.name];
           return rest;
         });
       }
@@ -173,22 +175,26 @@ export const ModelsPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
-      </div>
+      <PageTemplate
+        title="3D Models"
+        subtitle="Upload and manage your 3D models for slicing and printing"
+        icon={Box}
+        maxWidth="max-w-7xl"
+      >
+        <div className="flex items-center justify-center h-64">
+          <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
+        </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-pf-text-primary">3D Models</h1>
-        <p className="mt-1 text-pf-text-secondary">
-          Upload and manage your 3D models for slicing and printing
-        </p>
-      </div>
-
+    <PageTemplate
+      title="3D Models"
+      subtitle="Upload and manage your 3D models for slicing and printing"
+      icon={Box}
+      maxWidth="max-w-7xl"
+    >
       {/* Upload Area */}
       <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
         <div
@@ -417,12 +423,16 @@ export const ModelsPage: React.FC = () => {
             modelName={slicerModal.modelName}
             availablePrinters={availablePrinters}
             onSliceComplete={(result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => {
-              console.log('Slicing completed:', result);
+              if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.modelsPage) {
+                if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.modelsPage) {
+                  console.log('Slicing completed:', result);
+                }
+              }
               // Could navigate to G-code viewer or print queue
             }}
           />
         </Suspense>
       )}
-    </div>
+    </PageTemplate>
   );
 };

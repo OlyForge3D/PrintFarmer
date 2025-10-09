@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   PlayIcon,
@@ -11,7 +11,8 @@ import {
   GcodeHarvestOperation,
   GcodeHarvestStatus
 } from '@/types/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
+import { renderUnknown } from '@/utils/renderUnknown';
 import { useCancelHarvestOperation } from '@/hooks/useApi';
 import { toast } from 'sonner';
 import { parseApiDateTimeValue, formatDuration } from '@/utils/datetime';
@@ -55,6 +56,26 @@ export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
 
   const config = statusConfig[operation.status];
   const progress = operation.filesProcessed / Math.max(operation.filesFound, 1) * 100;
+  const progressRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (progressRef.current) {
+      progressRef.current.style.width = `${Math.min(progress, 100)}%`;
+    }
+  }, [progress]);
+
+  const PerFileProgressBar: React.FC<{ fp: FileProgress }> = ({ fp }) => {
+    const ref = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+      if (ref.current) ref.current.style.width = `${Math.min(fp.percent, 100)}%`;
+    }, [fp.percent]);
+    const colorClass = fp.status === 'completed' ? 'bg-green-500' : fp.status === 'errored' ? 'bg-red-500' : fp.status === 'skipped' ? 'bg-yellow-400' : 'bg-blue-500';
+    return (
+      <div className="w-full bg-gray-100 rounded-full h-1">
+        <div ref={ref} className={`h-1 rounded-full transition-all duration-300 ${colorClass}`} />
+      </div>
+    );
+  };
 
   const handleCancel = () => {
     if (!window.confirm('Are you sure you want to cancel this harvest operation? This action cannot be undone.')) {
@@ -125,10 +146,7 @@ export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
                 <span>{Math.round(progress)}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className={`bg-${config.color}-600 h-2 rounded-full transition-all duration-300`}
-                  style={{ width: `${Math.min(progress, 100)}%` }}
-                />
+                <div ref={progressRef} className={`h-2 rounded-full transition-all duration-300 bg-${config.color}-600`} />
               </div>
               {/* Per-file progress bars */}
               {perFileProgress && Object.keys(perFileProgress).length > 0 ? (
@@ -141,26 +159,16 @@ export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
                         <span className="ml-2">{Math.round(fp.percent)}%</span>
                         <span className="ml-2 text-gray-400">{fp.status}</span>
                       </div>
-                      <div className="w-full bg-gray-100 rounded-full h-1">
-                        <div
-                          className={`h-1 rounded-full transition-all duration-300 ${
-                            fp.status === 'completed' ? 'bg-green-500' :
-                            fp.status === 'errored' ? 'bg-red-500' :
-                            fp.status === 'skipped' ? 'bg-yellow-400' :
-                            'bg-blue-500'
-                          }`}
-                          style={{ width: `${Math.min(fp.percent, 100)}%` }}
-                        />
-                      </div>
+                      <PerFileProgressBar fp={fp} />
                     </div>
                   ))}
                 </div>
-              ) : (
+                ) : (
                 <div className="mt-4 text-xs text-red-500">
                   <strong>Debug:</strong> No per-file progress data.<br />
-                  <pre className="whitespace-pre-wrap break-all bg-gray-100 p-2 rounded">
-                    {JSON.stringify(perFileProgress, null, 2)}
-                  </pre>
+                  <div className="whitespace-pre-wrap break-all bg-gray-100 p-2 rounded text-sm">
+                    {renderUnknown(perFileProgress)}
+                  </div>
                 </div>
               )}
             </div>

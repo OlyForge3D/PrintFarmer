@@ -1,6 +1,7 @@
 ﻿using System.Security.Cryptography;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,9 +12,9 @@ namespace Farm.Web.Api.Controllers;
 /// Manages the G-code file library
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/gcode-library")]
 [Tags("G-code Library")]
-public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, ILogger<GcodeLibraryController> logger) : ControllerBase
+public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all G-code files in the library
@@ -38,9 +39,9 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             // Apply filters
             if (!string.IsNullOrEmpty(search))
             {
-                query = query.Where(g => g.OriginalFileName.Contains(search) ||
-                                        g.DisplayName.Contains(search) ||
-                                        (g.Description != null && g.Description.Contains(search)));
+                query = query.Where(g => g.OriginalFileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                        g.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                        (g.Description != null && g.Description.Contains(search, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (!string.IsNullOrEmpty(material))
@@ -118,13 +119,13 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
                 .Include(g => g.TargetModel)
                 .FirstOrDefaultAsync(g => g.Id == id);
 
-            if (file == null)
+            if (file is null)
             {
                 return NotFound($"G-code file with ID {id} not found");
             }
 
             return Ok(new GcodeFileDto(
-                Id: file.Id,
+                Id: file!.Id,
                 OriginalFileName: file.OriginalFileName,
                 DisplayName: file.DisplayName,
                 FileSizeBytes: file.FileSizeBytes,
@@ -156,7 +157,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error retrieving G-code file {FileId}", id);
+            logger.LogError(ex, $"Error retrieving G-code file {id}");
             return Problem("An error occurred while retrieving the file", statusCode: 500);
         }
     }
@@ -198,7 +199,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
 
             // Check for duplicate
             GcodeFile? existing = await db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash);
-            if (existing != null)
+            if (existing is not null)
             {
                 return Conflict($"File already exists in library: {existing.DisplayName}");
             }
@@ -206,7 +207,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             // Ensure directory exists
             string libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
             string libraryRootFull = Path.GetFullPath(libraryPath);
-            Directory.CreateDirectory(libraryRootFull);
+            _ = Directory.CreateDirectory(libraryRootFull);
 
             // Save file
             // Extension is validated above to be .gcode; avoid using tainted filename-derived values
@@ -251,8 +252,8 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
                 UpdatedAt = DateTime.UtcNow
             };
 
-            db.GcodeFiles.Add(gcodeFile);
-            await db.SaveChangesAsync();
+            _ = db.GcodeFiles.Add(gcodeFile);
+            _ = await db.SaveChangesAsync();
 
             // Load related entities for response
             await db.Entry(gcodeFile)
@@ -295,7 +296,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error uploading G-code file {FileName}", file?.FileName);
+            logger.LogError(ex, $"Error uploading G-code file {file?.FileName}");
             return Problem("An error occurred while uploading the file", statusCode: 500);
         }
     }
@@ -378,7 +379,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
 
             file.UpdatedAt = DateTime.UtcNow;
 
-            await db.SaveChangesAsync();
+            _ = await db.SaveChangesAsync();
 
             return Ok(new GcodeFileDto(
                 Id: file.Id,
@@ -413,7 +414,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error updating G-code file {FileId}", id);
+            logger.LogError(ex, $"Error updating G-code file {id}");
             return Problem("An error occurred while updating the file", statusCode: 500);
         }
     }
@@ -471,14 +472,14 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
             }
 #pragma warning restore CA3003
 
-            db.GcodeFiles.Remove(file);
-            await db.SaveChangesAsync();
+            _ = db.GcodeFiles.Remove(file);
+            _ = await db.SaveChangesAsync();
 
             return NoContent();
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error deleting G-code file {FileId}", id);
+            logger.LogError(ex, $"Error deleting G-code file {id}");
             return Problem("An error occurred while deleting the file", statusCode: 500);
         }
     }
@@ -515,7 +516,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IL
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error downloading G-code file {FileId}", id);
+            logger.LogError(ex, $"Error downloading G-code file {id}");
             return Problem("An error occurred while downloading the file", statusCode: 500);
         }
     }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
+import { PageTemplate } from '@/components/PageTemplate';
 import { 
   Users, 
   Plus, 
@@ -12,7 +13,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 
 interface User {
   id: string;
@@ -187,7 +188,7 @@ export function UserManagementPage() {
                 errorMessage = json.error || json.message || json.title || errorMessage;
               }
             } else {
-              errorMessage = await response.text() || errorMessage;
+              errorMessage = (await response.text()) || errorMessage;
             }
         } catch (e) {
           console.warn('Failed to parse error response:', e);
@@ -319,40 +320,24 @@ export function UserManagementPage() {
 
   if (loading) {
     return (
-      <div className="p-6" aria-busy="true" aria-live="polite" aria-label="Loading users">
-        <h1 className="text-2xl font-bold text-pf-text-primary mb-4 flex items-center">
-          <Users className="h-6 w-6 mr-2" aria-hidden="true" />
-          User Management
-        </h1>
+      <PageTemplate
+        title="User Management"
+        subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
+        icon={Users}
+        maxWidth="max-w-7xl"
+      >
         <TableSkeleton rows={6} cols={6} />
-      </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-pf-text-primary mb-2 flex items-center">
-          <Users className="h-6 w-6 mr-2" />
-          User Management
-        </h1>
-        <p className="text-pf-text-secondary">
-          Manage user accounts, roles, and permissions for PrintFarmer.
-        </p>
-      </div>
-
-      {/* Controls */}
-      <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
-          />
-        </div>
+    <PageTemplate
+      title="User Management"
+      subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
+      icon={Users}
+      maxWidth="max-w-7xl"
+      actions={
         <button
           onClick={() => {
             const farmUserRole = roles.find(r => r.name === 'farm_user');
@@ -366,8 +351,21 @@ export function UserManagementPage() {
           <Plus className="h-4 w-4 mr-2" />
           Add User
         </button>
+      }
+    >
+      {/* Controls */}
+      <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
+          <input
+            type="text"
+            placeholder="Search users..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-4 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+          />
+        </div>
       </div>
-
       {/* Users Table */}
       <div className="bg-pf-bg-1 border border-pf-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -444,9 +442,13 @@ export function UserManagementPage() {
                       </button>
                       <button
                         onClick={() => {
-                          if (confirm(`Are you sure you want to delete user "${user.username}"?`)) {
+                            if (confirm(`Are you sure you want to delete user "${user.username}"?`)) {
                             // TODO: Implement delete user
-                            console.log('Delete user:', user.id);
+                            if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.userManagementPage) {
+                              if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.userManagementPage) {
+                                console.log('Delete user:', user.id);
+                              }
+                            }
                           }
                         }}
                         className="p-2 text-pf-text-secondary hover:text-red-500 rounded-md hover:bg-pf-bg-2"
@@ -471,12 +473,10 @@ export function UserManagementPage() {
           </div>
         )}
       </div>
-
       {/* User count */}
       <div className="mt-4 text-sm text-pf-text-secondary">
         Showing {filteredUsers.length} of {users.length} users
       </div>
-
       {/* TODO: Modals for create/edit users */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
@@ -645,24 +645,146 @@ export function UserManagementPage() {
           </div>
         </div>
       )}
-
       {showEditModal && selectedUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-pf-bg-1 rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-pf-bg-1 rounded-lg p-6 max-w-lg w-full mx-4">
             <h3 className="text-lg font-semibold mb-4">Edit User: {selectedUser.username}</h3>
-            <p className="text-pf-text-secondary">User editing modal coming soon...</p>
-            <button
-              onClick={() => {
-                setShowEditModal(false);
-                setSelectedUser(null);
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const token = localStorage.getItem('auth-token');
+                  const response = await fetch(`/api/users/${selectedUser.id}`, {
+                    method: 'PUT',
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      firstName: selectedUser.firstName,
+                      lastName: selectedUser.lastName,
+                      email: selectedUser.email,
+                      isActive: selectedUser.isActive,
+                      roles: selectedUser.roles,
+                      permissions: selectedUser.permissions
+                    })
+                  });
+                  if (response.ok) {
+                    toast.success('User updated successfully');
+                    setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+                  } else {
+                    const err = await response.json().catch(() => ({}));
+                    toast.error(err.message || 'Failed to update user');
+                  }
+                } catch {
+                  toast.error('Error updating user');
+                } finally {
+                  setShowEditModal(false);
+                  setSelectedUser(null);
+                }
               }}
-              className="mt-4 px-4 py-2 bg-pf-accent text-white rounded-md"
+              className="space-y-4"
             >
-              Close
-            </button>
+              <div>
+                <label className="block text-sm font-medium mb-1">First Name</label>
+                <input
+                  type="text"
+                  value={selectedUser.firstName || ''}
+                  onChange={e => setSelectedUser(u => u ? { ...u, firstName: e.target.value } : u)}
+                  className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+            placeholder="First Name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Last Name</label>
+                <input
+                  type="text"
+                  value={selectedUser.lastName || ''}
+                  onChange={e => setSelectedUser(u => u ? { ...u, lastName: e.target.value } : u)}
+                  className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+            placeholder="Last Name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input
+                  type="email"
+                  value={selectedUser.email}
+                  onChange={e => setSelectedUser(u => u ? { ...u, email: e.target.value } : u)}
+                  className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
+            placeholder="Email"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Active</label>
+                <input
+                  type="checkbox"
+                  checked={selectedUser.isActive}
+                  onChange={e => setSelectedUser(u => u ? { ...u, isActive: e.target.checked } : u)}
+                  className="ml-2"
+            title="Active"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Roles</label>
+                <div className="flex flex-wrap gap-2">
+                  {roles.map(role => (
+                    <label key={role.id} className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedUser.roles.includes(role.name)}
+                        onChange={e => {
+                          setSelectedUser(u => {
+                            if (!u) return u;
+                            // removed unused hasRole variable
+                            return {
+                              ...u,
+                              roles: e.target.checked
+                                ? [...u.roles, role.name]
+                                : u.roles.filter(r => r !== role.name)
+                            };
+                          });
+                        }}
+                      />
+                      <span>{role.displayName}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Permissions</label>
+                <div className="flex flex-wrap gap-2">
+                  {selectedUser.permissions.length > 0 ? (
+                    selectedUser.permissions.map(p => (
+                      <span key={p} className="inline-block bg-pf-bg-2 px-2 py-1 rounded text-xs">{p}</span>
+                    ))
+                  ) : (
+                    <span className="text-pf-text-tertiary text-xs">No permissions</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setSelectedUser(null);
+                  }}
+                  className="px-4 py-2 bg-pf-border text-pf-text-primary rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-pf-accent text-white rounded-md"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-    </div>
+    </PageTemplate>
   );
 }

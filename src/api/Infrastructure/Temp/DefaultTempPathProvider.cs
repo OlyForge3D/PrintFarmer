@@ -23,7 +23,7 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
 
         try
         {
-            Directory.CreateDirectory(_tempRoot);
+            _ = Directory.CreateDirectory(_tempRoot);
         }
         catch
         {
@@ -31,7 +31,7 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
             string fallback = Path.GetTempPath();
             try
             {
-                Directory.CreateDirectory(fallback);
+                _ = Directory.CreateDirectory(fallback);
             }
             catch
             {

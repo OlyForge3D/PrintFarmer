@@ -1,6 +1,8 @@
 import React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FileBrowser } from '@/components/files/FileBrowser';
+import { PageTemplate } from '@/components/PageTemplate';
+import { FileCode } from 'lucide-react';
 
 export const FilesPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -8,18 +10,16 @@ export const FilesPage: React.FC = () => {
   const printerId = searchParams.get('printer') || undefined;
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-pf-text-primary">G-code Files</h1>
-        <p className="mt-1 text-sm text-pf-text-secondary">
-          Browse and manage your harvested G-code files
-        </p>
-      </div>
-
+    <PageTemplate
+      title="G-code Files"
+      subtitle="Browse and manage your harvested G-code files"
+      icon={FileCode}
+      maxWidth="max-w-7xl"
+    >
       <FileBrowser
         harvestId={harvestId}
         printerId={printerId}
       />
-    </div>
+    </PageTemplate>
   );
 };

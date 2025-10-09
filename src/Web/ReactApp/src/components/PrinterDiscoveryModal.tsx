@@ -1,15 +1,15 @@
 if (!window.PrintFarmerDebug) {
   window.PrintFarmerDebug = {};
 }
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
-import { useDiscoveryStream } from '@/hooks/useSignalR';
+import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-import { signalRService } from '@/services/harvest-signalr';
 import { X, Search } from 'lucide-react';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterDiscoveryModalProps {
   isOpen: boolean;
@@ -25,15 +25,25 @@ interface PrinterConfiguration {
 }
 
 export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDiscoveryModalProps) {
-  if (window.PrintFarmerDebug?.printerDiscoveryModal) {
-    console.log('[PrintFarmer] PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+  if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+    try {
+      const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+      if (pf?.printerDiscoveryModal === true) {
+        console.log('[PrintFarmer] PrinterDiscoveryModal rendered with isOpen:', isOpen, 'at', new Date().toISOString());
+      }
+    } catch {
+      // ignore
+    }
   }
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [printerConfigs, setPrinterConfigs] = useState<Record<string, PrinterConfiguration>>({});
+  const [selectedBackends, setSelectedBackends] = useState<Set<PrinterBackend>>(new Set([PrinterBackend.Moonraker, PrinterBackend.PrusaLink]));
 
   const startDiscoveryMutation = useStartDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
+  const { isConnected: isSignalRConnected } = useSignalRConnection('printer');
+  const [startError, setStartError] = useState<string | null>(null);
   
   // Load manufacturers and models
   const { data: manufacturers = [] } = useManufacturers();
@@ -41,13 +51,6 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   
   // Use the discovery stream hook to listen for real-time updates
   const { progress, foundPrinters, resetDiscovery, isActive } = useDiscoveryStream(sessionId || undefined);
-
-  // Ensure SignalR connection when modal opens so we can receive events immediately
-  useEffect(() => {
-    if (isOpen) {
-      signalRService.connect();
-    }
-  }, [isOpen]);
 
   // When modal is being closed, reset session so a new discovery can start fresh next open
   if (!isOpen) {
@@ -59,11 +62,20 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const handleStartDiscovery = async () => {
     try {
-      if (window.PrintFarmerDebug?.printerDiscoveryModal) {
-        console.log('[PrintFarmer] PrinterDiscoveryModal: handleStartDiscovery called - starting network scan');
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+        if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerDiscoveryModal) {
+          console.log('[PrintFarmer] PrinterDiscoveryModal: handleStartDiscovery called - starting network scan');
+        }
       }
       resetDiscovery(); // Clear previous results
-      const result = await startDiscoveryMutation.mutateAsync();
+      const backends = selectedBackends.size > 0 ? Array.from(selectedBackends) : undefined;
+      const result = await startDiscoveryMutation.mutateAsync({ backends });
+      if (!result || !('sessionId' in result) || !result.sessionId) {
+        console.error('[PrintFarmer] startDiscovery returned no sessionId', result);
+        setSessionId(null);
+        setStartError('Discovery API did not return a session id.');
+        return;
+      }
       if (window.PrintFarmerDebug?.printerDiscoveryModal) {
         console.log('[PrintFarmer] PrinterDiscoveryModal: Discovery stream started with sessionId:', result.sessionId);
       }
@@ -176,17 +188,60 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 
                 <div className="mb-6">
                   <p className="text-sm text-pf-text-secondary mb-4">
-                    Scan your network for compatible 3D printers (Moonraker, PrusaLink, and SDCP)
+                    Scan your network for compatible 3D printers
                   </p>
+                  
+                  {/* Backend selection */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-pf-text-primary mb-2">
+                      Select backends to scan:
+                    </label>
+                    <div className="flex flex-wrap gap-3">
+                      {[
+                        { value: PrinterBackend.Moonraker, label: 'Moonraker' },
+                        { value: PrinterBackend.PrusaLink, label: 'PrusaLink' },
+                        { value: PrinterBackend.SDCP, label: 'SDCP' },
+                        { value: PrinterBackend.OctoPrint, label: 'OctoPrint' }
+                      ].map(backend => (
+                        <label key={backend.value} className="inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedBackends.has(backend.value)}
+                            onChange={(e) => {
+                              const newBackends = new Set(selectedBackends);
+                              if (e.target.checked) {
+                                newBackends.add(backend.value);
+                              } else {
+                                newBackends.delete(backend.value);
+                              }
+                              setSelectedBackends(newBackends);
+                            }}
+                            disabled={!!isActive}
+                            className="rounded border-pf-border text-pf-accent focus:ring-pf-accent focus:ring-offset-pf-bg-1 disabled:opacity-50"
+                          />
+                          <span className="ml-2 text-sm text-pf-text-primary">{backend.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   
                   <button
                     onClick={handleStartDiscovery}
-                    disabled={startDiscoveryMutation.isPending || !!isActive}
+                    disabled={startDiscoveryMutation.isPending || !!isActive || selectedBackends.size === 0}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Search className="h-4 w-4 mr-2" />
                     {isActive ? 'Scanning...' : 'Start Network Scan'}
                   </button>
+                  {selectedBackends.size === 0 && (
+                    <p className="text-xs text-pf-error-text mt-2">Please select at least one backend to scan</p>
+                  )}
+                  {startError && (
+                    <div className="mt-2 p-2 bg-pf-error border border-pf-error-border rounded">
+                      <p className="text-xs text-pf-error-text">{startError}</p>
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs text-pf-text-tertiary">SignalR: {isSignalRConnected ? 'connected' : 'disconnected'}</div>
                 </div>
 
                 {isActive && progress && (() => {
@@ -243,6 +298,12 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
                 {foundPrinters.length > 0 && (
                   <div className="space-y-4">
+                    {/* Debug panel (gated) */}
+                    {window.PrintFarmerDebug?.printerDiscoveryDisplay && (
+                      <div className="mb-2 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                        {renderUnknown({ foundPrinters, progress })}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <h4 className="text-md font-medium text-pf-text-primary">
                         Found {foundPrinters.length} printer{foundPrinters.length !== 1 ? 's' : ''}
@@ -466,12 +527,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 }
 
 // Separate component to avoid inline style lint for CSS variable usage
-const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct, step }) => {
+// Updates progress synchronously during render instead of useEffect to prevent delays
+const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct }) => {
   const ref = React.useRef<HTMLDivElement | null>(null);
-  React.useEffect(() => {
+  
+  // Set CSS variable during render (before paint) for immediate updates
+  React.useLayoutEffect(() => {
     if (ref.current) {
       ref.current.style.setProperty('--pf-progress', pct + '%');
     }
   }, [pct]);
-  return <div ref={ref} className={`pf-progress-fill step-${step} bg-pf-accent h-2 rounded-full transition-all duration-300`} aria-hidden="true" />;
+  
+  return <div ref={ref} className="pf-progress-fill bg-pf-accent h-2 rounded-full" aria-hidden="true" />;
 };

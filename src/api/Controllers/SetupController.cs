@@ -1,5 +1,6 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -12,25 +13,17 @@ namespace Farm.Web.Api.Controllers;
 /// Used during first-run to create initial admin user and configure the system.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
-public class SetupController : ControllerBase
+[Route("api/setup")]
+public class SetupController(
+    AppDbContext db,
+    IAuthenticationService authService,
+    IPasswordHashingService passwordHashingService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly IAuthenticationService _authService;
-    private readonly IPasswordHashingService _passwordHashingService;
-    private readonly ILogger<SetupController> _logger;
-
-    public SetupController(
-        AppDbContext db,
-        IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        ILogger<SetupController> logger)
-    {
-        _db = db;
-        _authService = authService;
-        _passwordHashingService = passwordHashingService;
-        _logger = logger;
-    }
+    private readonly AppDbContext _db = db;
+    private readonly IAuthenticationService _authService = authService;
+    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Checks if the application needs initial setup.
@@ -160,7 +153,7 @@ public class SetupController : ControllerBase
         Role? adminRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin", ct);
         if (adminRole == null)
         {
-            return StatusCode(500, new AuthenticationResult(false, Error: "Admin role not found in database. Database may not be properly initialized."));
+            return StatusCode(StatusCodes.Status500InternalServerError, new AuthenticationResult(false, Error: "Admin role not found in database. Database may not be properly initialized."));
         }
 
         // Create the admin user
@@ -178,10 +171,10 @@ public class SetupController : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
 
-        _db.Users.Add(adminUser);
+        _ = _db.Users.Add(adminUser);
 
         // Assign admin role
-        _db.UserRoles.Add(new UserRole
+        _ = _db.UserRoles.Add(new UserRole
         {
             Id = Guid.NewGuid(),
             UserId = adminUser.Id,
@@ -190,9 +183,9 @@ public class SetupController : ControllerBase
             IsActive = true
         });
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Initial admin user created: {Username} ({Email})", adminUser.Username, adminUser.Email);
+        _logger.LogInformation($"Initial admin user created: {adminUser.Username} ({adminUser.Email})");
 
         // Generate JWT token for immediate login
         string token = await _authService.GenerateJwtTokenAsync(adminUser);

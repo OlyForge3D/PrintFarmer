@@ -16,15 +16,19 @@ import { PrintersPage } from '@/pages/PrintersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
+import LogsPage from './pages/logs/LogsPage';
 import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
 import { UserManagementPage } from '@/pages/UserManagementPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
-import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { Route, BrowserRouter as Router, Routes, Navigate, useLocation } from 'react-router-dom';
+import RegistrationPendingPage from '@/pages/RegistrationPendingPage';
 import { HarvestedFilesLibrary } from './pages/HarvestedFilesLibrary';
 import { Toaster } from 'sonner';
+import LoginPage from './pages/LoginPage';
+import { useAuth } from '@/contexts/AuthHooks';
 import './App.css';
 
 // Create a query client for React Query
@@ -50,10 +54,105 @@ const queryClient = new QueryClient({
   },
 });
 
+function AuthenticatedAppRoutes() {
+  // Custom global ProtectedRoute logic for redirecting guests and unapproved users
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const location = useLocation();
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    // Don't redirect if already on /login
+    if (location.pathname !== '/login') {
+      return <Navigate to="/login" state={{ from: location }} replace />;
+    }
+  }
+  // If user is logged in but not active, force to registration pending page
+  if (user && user.isActive === false && location.pathname !== '/registration-pending') {
+    return <Navigate to="/registration-pending" replace />;
+  }
+  // If user is on registration pending page but is now active, redirect to dashboard
+  if (user && user.isActive === true && location.pathname === '/registration-pending') {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/registration-pending" element={<RegistrationPendingPage />} />
+      <Route path="/*" element={<Layout />}>
+        <Route index element={<PrinterDashboard />} />
+        <Route path="dashboard" element={<PrinterDashboard />} />
+        <Route path="printers" element={<PrintersPage />} />
+        <Route path="models" element={<ModelsPage />} />
+        <Route path="harvest/*">
+          <Route index element={<HarvestPage />} />
+          <Route path="history" element={<HarvestHistoryPage />} />
+          <Route path="library" element={<HarvestedFilesLibrary />} />
+        </Route>
+        <Route path="files" element={<FilesPage />} />
+        <Route path="catalog" element={<CatalogPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="spools" element={<SpoolsPage />} />
+        <Route
+          path="admin/users"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <UserManagementPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/observability"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <ObservabilityDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/logs"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <LogsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/slicer"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <SlicerSettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/slicer/dry-run"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <SlicerDryRunPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/slicer/job-status"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <SlicerJobStatusPage />
+            </ProtectedRoute>
+          }
+        />
+      </Route>
+    </Routes>
+  );
+}
+
 function App() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
-  
   // Initialize unified logging for the main App component
   const { logger } = useUnifiedLogging({ 
     component: 'App', 
@@ -63,7 +162,6 @@ function App() {
   useEffect(() => {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
-      
       try {
         const response = await fetch('/api/setup/status');
         if (response.ok) {
@@ -74,7 +172,6 @@ function App() {
             setupComplete: !data.needsSetup 
           });
         } else {
-          // If we can't check setup status, assume setup is needed
           setSetupComplete(false);
           logger.warn('Setup status check failed - assuming setup needed', { 
             status: response.status 
@@ -84,23 +181,19 @@ function App() {
         logger.error('Error checking setup status', { 
           error: error instanceof Error ? error.message : String(error) 
         });
-        // If there's an error, assume setup is needed
         setSetupComplete(false);
       } finally {
         setCheckingSetup(false);
       }
     };
-
     checkSetupStatus();
   }, [logger]);
 
   const handleSetupComplete = () => {
     setSetupComplete(true);
-    // Force redirect to home page regardless of current URL
     window.location.href = '/';
   };
 
-  // Show loading while checking setup status
   if (checkingSetup) {
     return (
       <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center">
@@ -109,7 +202,6 @@ function App() {
     );
   }
 
-  // Show setup wizard if setup is not complete
   if (!setupComplete) {
     return (
       <ErrorBoundary>
@@ -125,70 +217,13 @@ function App() {
     );
   }
 
-  // Show main application if setup is complete
   return (
     <ErrorBoundary>
       <ThemeProvider>
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
             <Router>
-              <Routes>
-                <Route path="/*" element={<Layout />}>
-                  <Route index element={<PrinterDashboard />} />
-                  <Route path="dashboard" element={<PrinterDashboard />} />
-                  <Route path="printers" element={<PrintersPage />} />
-                  <Route path="models" element={<ModelsPage />} />
-                  <Route path="harvest">
-                    <Route index element={<HarvestPage />} />
-                    <Route path="history" element={<HarvestHistoryPage />} />
-                    <Route path="library" element={<HarvestedFilesLibrary />} />
-                  </Route>
-                  <Route path="files" element={<FilesPage />} />
-                  <Route path="catalog" element={<CatalogPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
-                  <Route path="spools" element={<SpoolsPage />} />
-                  <Route
-                    path="admin/users"
-                    element={
-                      <ProtectedRoute requiredRole="farm_admin">
-                        <UserManagementPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="admin/observability"
-                    element={
-                      <ProtectedRoute requiredRole="farm_admin">
-                        <ObservabilityDashboard />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="admin/slicer"
-                    element={
-                      <ProtectedRoute requiredRole="farm_admin">
-                        <SlicerSettingsPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="admin/slicer/dry-run"
-                    element={
-                      <ProtectedRoute requiredRole="farm_admin">
-                        <SlicerDryRunPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="admin/slicer/job-status"
-                    element={
-                      <ProtectedRoute requiredRole="farm_admin">
-                        <SlicerJobStatusPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                </Route>
-              </Routes>
+              <AuthenticatedAppRoutes />
             </Router>
             <ReactQueryDevtools initialIsOpen={false} />
             <Toaster position="top-right" richColors />

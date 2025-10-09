@@ -1,5 +1,6 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -11,13 +12,14 @@ namespace Farm.Web.Api.Controllers;
 /// Manages printer capabilities for job queue matching
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/printer-capabilities")]
 [Tags("Printer Capabilities")]
-public class PrinterCapabilitiesController(
-    AppDbContext db,
-    ILogger<PrinterCapabilitiesController> logger,
-    IPrinterCapabilityDiscoveryService discoveryService) : ControllerBase
+public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingService logger, IPrinterCapabilityDiscoveryService discoveryService) : ControllerBase
 {
+    private readonly AppDbContext _db = db;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IPrinterCapabilityDiscoveryService _discoveryService = discoveryService;
+
     /// <summary>
     /// Get capabilities for all printers
     /// </summary>
@@ -28,7 +30,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            List<PrinterCapabilities> capabilities = await db.PrinterCapabilities
+            List<PrinterCapabilities> capabilities = await _db.PrinterCapabilities
                 .Include(c => c.Printer)
                 .ThenInclude(p => p.Model)
                 .ToListAsync();
@@ -45,6 +47,7 @@ public class PrinterCapabilitiesController(
                 HasHeatedBed: cap.HasHeatedBed,
                 HasEnclosure: cap.HasEnclosure,
                 MultiMaterial: cap.MultiMaterial,
+                SupportsAutoLeveling: cap.SupportsAutoLeveling,
                 NumberOfExtruders: cap.NumberOfExtruders,
                 MinHotendTemp: cap.MinHotendTemp,
                 MaxHotendTemp: cap.MaxHotendTemp,
@@ -58,7 +61,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error retrieving printer capabilities");
+            _logger.LogError($"Error retrieving printer capabilities: {ex.Message}");
             return Problem("An error occurred while retrieving capabilities", statusCode: 500);
         }
     }
@@ -74,7 +77,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            PrinterCapabilities? capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await _db.PrinterCapabilities
                 .Include(c => c.Printer)
                 .ThenInclude(p => p.Model)
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
@@ -109,7 +112,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error retrieving capabilities for printer {PrinterId}", printerId);
+            _logger.LogError($"Error retrieving capabilities for printer {printerId}: {ex.Message}");
             return Problem("An error occurred while retrieving capabilities", statusCode: 500);
         }
     }
@@ -132,14 +135,14 @@ public class PrinterCapabilitiesController(
         try
         {
             // Check if printer exists
-            Printer? printer = await db.Printers.FindAsync(request.PrinterId);
+            Printer? printer = await _db.Printers.FindAsync(request.PrinterId);
             if (printer == null)
             {
                 return NotFound($"Printer with ID {request.PrinterId} not found");
             }
 
             // Check if capabilities already exist
-            PrinterCapabilities? existingCapabilities = await db.PrinterCapabilities
+            PrinterCapabilities? existingCapabilities = await _db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == request.PrinterId);
             if (existingCapabilities != null)
             {
@@ -173,7 +176,7 @@ public class PrinterCapabilitiesController(
             {
                 try
                 {
-                    PrinterCapabilities? defaults = await discoveryService.GetModelDefaultCapabilitiesAsync(printer);
+                    PrinterCapabilities? defaults = await _discoveryService.GetModelDefaultCapabilitiesAsync(printer);
                     if (defaults != null)
                     {
                         capabilities.MaxBuildVolumeX ??= defaults.MaxBuildVolumeX;
@@ -189,15 +192,15 @@ public class PrinterCapabilitiesController(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Failed to apply model defaults for printer {PrinterId}", request.PrinterId);
+                    _logger.LogWarning($"Failed to apply model defaults for printer {request.PrinterId}: {ex.Message}");
                 }
             }
 
-            db.PrinterCapabilities.Add(capabilities);
-            await db.SaveChangesAsync();
+            _ = _db.PrinterCapabilities.Add(capabilities);
+            _ = await _db.SaveChangesAsync();
 
             // Reload to get printer name
-            await db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
+            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
 
             PrinterCapabilitiesDto result = new(
                 Id: capabilities.Id,
@@ -211,6 +214,7 @@ public class PrinterCapabilitiesController(
                 HasHeatedBed: capabilities.HasHeatedBed,
                 HasEnclosure: capabilities.HasEnclosure,
                 MultiMaterial: capabilities.MultiMaterial,
+                SupportsAutoLeveling: capabilities.SupportsAutoLeveling,
                 NumberOfExtruders: capabilities.NumberOfExtruders,
                 MinHotendTemp: capabilities.MinHotendTemp,
                 MaxHotendTemp: capabilities.MaxHotendTemp,
@@ -226,7 +230,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error creating capabilities for printer {PrinterId}", request.PrinterId);
+            _logger.LogError($"Error creating capabilities for printer {request.PrinterId}: {ex.Message}");
             return Problem("An error occurred while creating capabilities", statusCode: 500);
         }
     }
@@ -248,13 +252,13 @@ public class PrinterCapabilitiesController(
         try
         {
             // Check if printer exists
-            Printer? printer = await db.Printers.FindAsync(printerId);
+            Printer? printer = await _db.Printers.FindAsync(printerId);
             if (printer == null)
             {
                 return NotFound($"Printer with ID {printerId} not found");
             }
 
-            PrinterCapabilities? capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await _db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
 
             if (capabilities == null)
@@ -281,7 +285,7 @@ public class PrinterCapabilitiesController(
                     LastUpdated = DateTime.UtcNow
                 };
 
-                db.PrinterCapabilities.Add(capabilities);
+                _ = _db.PrinterCapabilities.Add(capabilities);
             }
             else
             {
@@ -302,10 +306,10 @@ public class PrinterCapabilitiesController(
                 capabilities.LastUpdated = DateTime.UtcNow;
             }
 
-            await db.SaveChangesAsync();
+            _ = await _db.SaveChangesAsync();
 
             // Reload to get printer name
-            await db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
+            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
 
             PrinterCapabilitiesDto result = new(
                 Id: capabilities.Id,
@@ -319,6 +323,7 @@ public class PrinterCapabilitiesController(
                 HasHeatedBed: capabilities.HasHeatedBed,
                 HasEnclosure: capabilities.HasEnclosure,
                 MultiMaterial: capabilities.MultiMaterial,
+                SupportsAutoLeveling: capabilities.SupportsAutoLeveling,
                 NumberOfExtruders: capabilities.NumberOfExtruders,
                 MinHotendTemp: capabilities.MinHotendTemp,
                 MaxHotendTemp: capabilities.MaxHotendTemp,
@@ -334,7 +339,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error creating/updating capabilities for printer {PrinterId}", printerId);
+            _logger.LogError($"Error creating/updating capabilities for printer {printerId}: {ex.Message}");
             return Problem("An error occurred while creating/updating capabilities", statusCode: 500);
         }
     }
@@ -350,13 +355,13 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            GcodeFile? gcodeFile = await db.GcodeFiles.FindAsync(gcodeFileId);
+            GcodeFile? gcodeFile = await _db.GcodeFiles.FindAsync(gcodeFileId);
             if (gcodeFile == null)
             {
                 return NotFound($"G-code file with ID {gcodeFileId} not found");
             }
 
-            List<PrinterCapabilities> allPrinters = await db.PrinterCapabilities
+            List<PrinterCapabilities> allPrinters = await _db.PrinterCapabilities
                 .Include(c => c.Printer)
                 .Where(c => c.IsAvailable)
                 .ToListAsync();
@@ -437,7 +442,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error finding compatible printers for G-code file {FileId}", gcodeFileId);
+            _logger.LogError($"Error finding compatible printers for G-code file {gcodeFileId}: {ex.Message}");
             return Problem("An error occurred while finding compatible printers", statusCode: 500);
         }
     }
@@ -453,7 +458,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            PrinterCapabilities? capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await _db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
 
             if (capabilities == null)
@@ -461,14 +466,14 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Capabilities for printer {printerId} not found");
             }
 
-            db.PrinterCapabilities.Remove(capabilities);
-            await db.SaveChangesAsync();
+            _ = _db.PrinterCapabilities.Remove(capabilities);
+            _ = await _db.SaveChangesAsync();
 
             return NoContent();
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error deleting capabilities for printer {PrinterId}", printerId);
+            _logger.LogError($"Error deleting capabilities for printer {printerId}: {ex.Message}");
             return Problem("An error occurred while deleting capabilities", statusCode: 500);
         }
     }
@@ -485,7 +490,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            Printer? printer = await db.Printers
+            Printer? printer = await _db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printerId, cancellationToken);
@@ -496,7 +501,7 @@ public class PrinterCapabilitiesController(
             }
 
             // Check if capabilities already exist
-            PrinterCapabilities? existingCapabilities = await db.PrinterCapabilities
+            PrinterCapabilities? existingCapabilities = await _db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId, cancellationToken);
 
             PrinterCapabilities capabilities;
@@ -505,25 +510,25 @@ public class PrinterCapabilitiesController(
             if (existingCapabilities != null)
             {
                 // Refresh existing capabilities
-                capabilities = await discoveryService.RefreshCapabilitiesAsync(existingCapabilities, printer, cancellationToken);
+                capabilities = await _discoveryService.RefreshCapabilitiesAsync(existingCapabilities, printer, cancellationToken);
             }
             else
             {
                 // Discover new capabilities
-                PrinterCapabilities? discoveredCapabilities = await discoveryService.DiscoverCapabilitiesAsync(printer, cancellationToken);
+                PrinterCapabilities? discoveredCapabilities = await _discoveryService.DiscoverCapabilitiesAsync(printer, cancellationToken);
                 if (discoveredCapabilities == null)
                 {
                     return Problem("Failed to discover capabilities for the printer", statusCode: 500);
                 }
                 capabilities = discoveredCapabilities;
-                db.PrinterCapabilities.Add(capabilities);
+                _ = _db.PrinterCapabilities.Add(capabilities);
                 isNewCapabilities = true;
             }
 
-            await db.SaveChangesAsync(cancellationToken);
+            _ = await _db.SaveChangesAsync(cancellationToken);
 
             // Load printer name for response
-            await db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(cancellationToken);
+            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(cancellationToken);
 
             PrinterCapabilitiesDto result = new(
                 Id: capabilities.Id,
@@ -559,7 +564,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error discovering capabilities for printer {PrinterId}", printerId);
+            _logger.LogError($"Error discovering capabilities for printer {printerId}: {ex.Message}");
             return Problem("An error occurred while discovering capabilities", statusCode: 500);
         }
     }
@@ -575,7 +580,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            Printer? printer = await db.Printers
+            Printer? printer = await _db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printerId);
@@ -585,7 +590,7 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Printer with ID {printerId} not found");
             }
 
-            PrinterCapabilities? capabilities = await db.PrinterCapabilities
+            PrinterCapabilities? capabilities = await _db.PrinterCapabilities
                 .FirstOrDefaultAsync(c => c.PrinterId == printerId);
 
             if (capabilities == null)
@@ -593,12 +598,12 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Capabilities for printer {printerId} not found");
             }
 
-            CapabilityValidationResult validationResult = await discoveryService.ValidateCapabilitiesAsync(capabilities, printer);
+            CapabilityValidationResult validationResult = await _discoveryService.ValidateCapabilitiesAsync(capabilities, printer);
             return Ok(validationResult);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error validating capabilities for printer {PrinterId}", printerId);
+            _logger.LogError($"Error validating capabilities for printer {printerId}: {ex.Message}");
             return Problem("An error occurred while validating capabilities", statusCode: 500);
         }
     }
@@ -614,7 +619,7 @@ public class PrinterCapabilitiesController(
     {
         try
         {
-            Printer? printer = await db.Printers
+            Printer? printer = await _db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Manufacturer)
                 .FirstOrDefaultAsync(p => p.Id == printerId);
@@ -624,7 +629,7 @@ public class PrinterCapabilitiesController(
                 return NotFound($"Printer with ID {printerId} not found");
             }
 
-            PrinterCapabilities? defaults = await discoveryService.GetModelDefaultCapabilitiesAsync(printer);
+            PrinterCapabilities? defaults = await _discoveryService.GetModelDefaultCapabilitiesAsync(printer);
             if (defaults == null)
             {
                 return NotFound($"No model defaults available for printer {printerId}");
@@ -657,7 +662,7 @@ public class PrinterCapabilitiesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error getting model defaults for printer {PrinterId}", printerId);
+            _logger.LogError($"Error getting model defaults for printer {printerId}: {ex.Message}");
             return Problem("An error occurred while getting model defaults", statusCode: 500);
         }
     }

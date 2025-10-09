@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Runtime.InteropServices;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
@@ -7,16 +8,10 @@ namespace Farm.Web.Api.Services;
 /// Handles URL rewriting for external services based on the runtime environment.
 /// This allows the same configuration to work across Docker, native execution, and different platforms.
 /// </summary>
-public class NetworkUrlRewriteService
+public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration) : Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService
 {
-    private readonly ILogger<NetworkUrlRewriteService> _logger;
-    private readonly IConfiguration _configuration;
-
-    public NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, IConfiguration configuration)
-    {
-        _logger = logger;
-        _configuration = configuration;
-    }
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
 
     /// <summary>
     /// Rewrites a URL to make it accessible from the current runtime environment.
@@ -38,16 +33,14 @@ public class NetworkUrlRewriteService
 
             if (rewrittenUrl != originalUrl)
             {
-                _logger.LogDebug("URL rewritten for {ServiceName}: {OriginalUrl} -> {RewrittenUrl}",
-                    serviceName ?? "unknown service", originalUrl, rewrittenUrl);
+                _logger.LogDebug($"URL rewritten for {serviceName ?? "unknown service"}: {originalUrl} -> {rewrittenUrl}", null, null);
             }
 
             return rewrittenUrl;
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning("Invalid URL format, returning unchanged: {Url}. Error: {Error}",
-                originalUrl, ex.Message);
+            _logger.LogWarning(ex, $"Invalid URL format, returning unchanged: {originalUrl}. Error: {ex.Message}", null, null);
             return originalUrl;
         }
     }
@@ -60,8 +53,7 @@ public class NetworkUrlRewriteService
         string? envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
         if (!string.IsNullOrEmpty(envOverride))
         {
-            _logger.LogDebug("Using environment override for {Host}:{Port} -> {Override}",
-                uri.Host, uri.Port, envOverride);
+            _logger.LogDebug($"Using environment override for {uri.Host}:{uri.Port} -> {envOverride}", null, null);
             return ReplaceHostPort(uri, envOverride).ToString();
         }
 
@@ -85,8 +77,7 @@ public class NetworkUrlRewriteService
             if (IsDockerDesktop())
             {
                 Uri hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
-                _logger.LogDebug("Docker Desktop detected, rewriting to host.docker.internal: {Url}",
-                    hostDockerInternalUrl);
+                _logger.LogDebug($"Docker Desktop detected, rewriting to host.docker.internal: {hostDockerInternalUrl}", null, null);
                 return hostDockerInternalUrl.ToString();
             }
 
@@ -95,7 +86,7 @@ public class NetworkUrlRewriteService
             if (!string.IsNullOrEmpty(gatewayOverride))
             {
                 Uri gatewayUrl = ReplaceHostPort(uri, $"{gatewayOverride}:{uri.Port}");
-                _logger.LogDebug("Using Docker host gateway: {Url}", gatewayUrl);
+                _logger.LogDebug($"Using Docker host gateway: {gatewayUrl}", null, null);
                 return gatewayUrl.ToString();
             }
         }
@@ -156,7 +147,7 @@ public class NetworkUrlRewriteService
         {
             Environment.GetEnvironmentVariable("DOCKER_DESKTOP") == "true",
             // Docker Desktop typically uses these internal networks
-            Environment.GetEnvironmentVariable("DOCKER_HOST")?.Contains("docker.io") == true,
+            Environment.GetEnvironmentVariable("DOCKER_HOST")?.Contains("docker.io", StringComparison.OrdinalIgnoreCase) == true,
             // Check if we're on Windows/macOS (where Docker Desktop is common)
             !RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
         };
@@ -186,7 +177,7 @@ public class NetworkUrlRewriteService
 
         // Check for common local hostnames
         string[] localHostnames = new[] { "localhost", "host.docker.internal" };
-        return localHostnames.Contains(host.ToLowerInvariant());
+        return localHostnames.Contains(host, StringComparer.OrdinalIgnoreCase);
     }
 
     private static Uri ReplaceHostPort(Uri originalUri, string newHostPort)

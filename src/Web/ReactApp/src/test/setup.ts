@@ -36,6 +36,36 @@ vi.mock('@/services/signalr', () => ({
   }
 }));
 
+// Mock harvest SignalR service to avoid connection attempts and warnings in tests
+vi.mock('@/services/harvest-signalr', () => ({
+  SignalRService: vi.fn().mockImplementation(() => ({
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    joinHarvestGroup: vi.fn().mockResolvedValue(undefined),
+    leaveHarvestGroup: vi.fn().mockResolvedValue(undefined),
+    onHarvestFileDiscovered: vi.fn(() => () => {}),
+    onHarvestFileProgress: vi.fn(() => () => {}),
+    onHarvestUpdate: vi.fn(() => () => {}),
+    onJobQueueUpdate: vi.fn(() => () => {}),
+    onConnectionStateChange: vi.fn(() => () => {}),
+    dispose: vi.fn(),
+    loadSettings: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:5245', hubPath: '/hubs/harvest' }),
+  })),
+  signalRService: {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    joinHarvestGroup: vi.fn().mockResolvedValue(undefined),
+    leaveHarvestGroup: vi.fn().mockResolvedValue(undefined),
+    onHarvestFileDiscovered: vi.fn(() => () => {}),
+    onHarvestFileProgress: vi.fn(() => () => {}),
+    onHarvestUpdate: vi.fn(() => () => {}),
+    onJobQueueUpdate: vi.fn(() => () => {}),
+    onConnectionStateChange: vi.fn(() => () => {}),
+    dispose: vi.fn(),
+    loadSettings: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:5245', hubPath: '/hubs/harvest' }),
+  }
+}));
+
 // runs a cleanup after each test case (e.g. clearing jsdom)
 afterEach(() => {
   cleanup();

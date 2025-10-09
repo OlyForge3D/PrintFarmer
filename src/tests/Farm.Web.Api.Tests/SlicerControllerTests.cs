@@ -1,8 +1,8 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -14,13 +14,13 @@ namespace Farm.Web.Api.Tests;
 /// Integration tests for SlicerController (slicer integration and profile management)
 /// </summary>
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
+[Collection("SharedSqliteFixtureCollection")]
 [TestTiming]
 public class SlicerControllerTests : DbHeavyTestBase<Program>
 {
     private readonly HttpClient _client;
 
-    public SlicerControllerTests() : base(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>())
+    public SlicerControllerTests() : base(new CustomWebApplicationFactory())
     {
         _client = _factory.CreateClient();
     }

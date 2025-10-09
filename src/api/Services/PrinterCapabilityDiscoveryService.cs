@@ -1,6 +1,7 @@
 ﻿using System.Text.RegularExpressions;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -10,59 +11,44 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Service for automatically discovering printer capabilities from various sources
 /// </summary>
-public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryService
+public class PrinterCapabilityDiscoveryService(
+    AppDbContext context,
+    IMoonrakerClient moonrakerClient,
+    IPrusaLinkClient prusaClient,
+    IUnifiedLoggingService logger) : IPrinterCapabilityDiscoveryService
 {
-    private readonly AppDbContext _context;
-    private readonly IMoonrakerClient _moonrakerClient;
-    private readonly IPrusaLinkClient _prusaClient;
-    private readonly ISdcpClient _sdcpClient;
-    private readonly ILogger<PrinterCapabilityDiscoveryService> _logger;
-
-    public PrinterCapabilityDiscoveryService(
-        AppDbContext context,
-        IMoonrakerClient moonrakerClient,
-        IPrusaLinkClient prusaClient,
-        ISdcpClient sdcpClient,
-        ILogger<PrinterCapabilityDiscoveryService> logger)
-    {
-        _context = context;
-        _moonrakerClient = moonrakerClient;
-        _prusaClient = prusaClient;
-        _sdcpClient = sdcpClient;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly IPrusaLinkClient _prusaClient = prusaClient;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task<PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
     {
         try
         {
-            _logger.LogInformation("Starting capability discovery for printer {PrinterId} ({PrinterName})", printer.Id, printer.Name);
+            _logger.LogInformation($"Starting capability discovery for printer {printer.Id} ({printer.Name})");
 
             // Start with model defaults
-            PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer);
-            if (capabilities == null)
+            PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer) ?? new PrinterCapabilities
             {
-                capabilities = new PrinterCapabilities
-                {
-                    Id = Guid.NewGuid(),
-                    PrinterId = printer.Id,
-                    IsAvailable = true,
-                    LastUpdated = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-            }
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                IsAvailable = true,
+                LastUpdated = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
 
             // Try to discover from printer API
             DiscoveredCapabilities? discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
             if (discovered != null)
             {
                 ApplyDiscoveredCapabilities(capabilities, discovered);
-                _logger.LogInformation("Successfully discovered capabilities from printer API for {PrinterName}", printer.Name);
+                _logger.LogInformation($"Successfully discovered capabilities from printer API for {printer.Name}");
             }
             else
             {
-                _logger.LogWarning("Failed to discover capabilities from printer API for {PrinterName}, using model defaults only", printer.Name);
+                _logger.LogWarning($"Failed to discover capabilities from printer API for {printer.Name}, using model defaults only");
             }
 
             capabilities.LastUpdated = DateTime.UtcNow;
@@ -72,7 +58,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error discovering capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error discovering capabilities for printer {printer.Id}");
             return null;
         }
     }
@@ -81,7 +67,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
     {
         try
         {
-            _logger.LogInformation("Refreshing capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogInformation($"Refreshing capabilities for printer {printer.Id}");
 
             DiscoveredCapabilities? discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
             if (discovered != null)
@@ -98,14 +84,14 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                 capabilities.LastUpdated = DateTime.UtcNow;
                 capabilities.UpdatedAt = DateTime.UtcNow;
 
-                _logger.LogInformation("Successfully refreshed capabilities for printer {PrinterId}", printer.Id);
+                _logger.LogInformation($"Successfully refreshed capabilities for printer {printer.Id}");
             }
 
             return capabilities;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error refreshing capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error refreshing capabilities for printer {printer.Id}");
             return capabilities;
         }
     }
@@ -181,7 +167,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error validating capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error validating capabilities for printer {printer.Id}");
             result._errors.Add("Failed to validate capabilities due to internal error");
             result.IsValid = false;
         }
@@ -234,6 +220,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             // Get supported materials from the filament type relationships
             if (model.SupportedFilamentTypes?.Any() == true)
             {
+                // Preserve original casing for display names; comparisons elsewhere should use OrdinalIgnoreCase
                 capabilities.SupportedMaterials = model.SupportedFilamentTypes
                     .Where(sft => sft.FilamentType != null)
                     .Select(sft => sft.FilamentType!.Name)
@@ -252,7 +239,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting model default capabilities for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error getting model default capabilities for printer {printer.Id}");
             return null;
         }
     }
@@ -273,7 +260,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to discover capabilities from {Backend} API for printer {PrinterId}", backend, printer.Id);
+            _logger.LogError(ex, $"Failed to discover capabilities from {backend} API for printer {printer.Id}");
             return null;
         }
     }
@@ -283,13 +270,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         try
         {
             // Try to get printer.cfg file to determine stepper configurations and features
-            byte[]? printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken);
-
-            if (printerConfigBytes == null)
-            {
-                // Try alternative config file name
-                printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
-            }
+            byte[]? printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken) ?? await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
 
             if (printerConfigBytes == null)
             {
@@ -297,31 +278,32 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
             }
 
             string configContent = System.Text.Encoding.UTF8.GetString(printerConfigBytes);
-            DiscoveredCapabilities discovered = new();
+            DiscoveredCapabilities discovered = new()
+            {
+                // Parse Klipper configuration file (INI-style format)
+                MaxBuildVolumeX = ParseConfigValue(configContent, "stepper_x", "position_max", 200.0),
+                MaxBuildVolumeY = ParseConfigValue(configContent, "stepper_y", "position_max", 200.0),
+                MaxBuildVolumeZ = ParseConfigValue(configContent, "stepper_z", "position_max", 200.0),
 
-            // Parse Klipper configuration file (INI-style format)
-            discovered.MaxBuildVolumeX = ParseConfigValue(configContent, "stepper_x", "position_max", 200.0);
-            discovered.MaxBuildVolumeY = ParseConfigValue(configContent, "stepper_y", "position_max", 200.0);
-            discovered.MaxBuildVolumeZ = ParseConfigValue(configContent, "stepper_z", "position_max", 200.0);
+                // Check for heated bed
+                HasHeatedBed = configContent.Contains("[heater_bed]", StringComparison.OrdinalIgnoreCase),
 
-            // Check for heated bed
-            discovered.HasHeatedBed = configContent.Contains("[heater_bed]");
+                // Check for multiple extruders and temperature ranges
+                NumberOfExtruders = CountExtrudersFromConfig(configContent),
 
-            // Check for multiple extruders and temperature ranges
-            discovered.NumberOfExtruders = CountExtrudersFromConfig(configContent);
+                // Get temperature limits
+                MaxHotendTemp = (int)ParseConfigValue(configContent, "extruder", "max_temp", 250.0),
+                MaxBedTemp = (int)ParseConfigValue(configContent, "heater_bed", "max_temp", 100.0),
 
-            // Get temperature limits
-            discovered.MaxHotendTemp = (int)ParseConfigValue(configContent, "extruder", "max_temp", 250.0);
-            discovered.MaxBedTemp = (int)ParseConfigValue(configContent, "heater_bed", "max_temp", 100.0);
-
-            // Get nozzle diameter
-            discovered.NozzleDiameter = ParseConfigValue(configContent, "extruder", "nozzle_diameter", 0.4);
+                // Get nozzle diameter
+                NozzleDiameter = ParseConfigValue(configContent, "extruder", "nozzle_diameter", 0.4)
+            };
 
             return discovered;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Moonraker capability discovery failed (non-fatal) for printer {PrinterId}", printer.Id);
+            _logger.LogDebug(ex, $"Moonraker capability discovery failed (non-fatal) for printer {printer.Id}");
             return null;
         }
     }
@@ -343,7 +325,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                 sectionEnd = configContent.Length;
             }
 
-            string sectionContent = configContent.Substring(sectionStart, sectionEnd - sectionStart);
+            string sectionContent = configContent[sectionStart..sectionEnd];
             Match keyMatch = Regex.Match(sectionContent, $@"{Regex.Escape(key)}\s*[:=]\s*([^\r\n]+)", RegexOptions.IgnoreCase);
 
             if (keyMatch.Success && double.TryParse(keyMatch.Groups[1].Value.Trim(), out double value))
@@ -362,14 +344,14 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
     {
         int count = 0;
         // Count extruder sections: [extruder], [extruder1], [extruder2], etc.
-        if (configContent.Contains("[extruder]"))
+        if (configContent.Contains("[extruder]", StringComparison.OrdinalIgnoreCase))
         {
             count = 1;
         }
 
         for (int i = 1; i < 10; i++)
         {
-            if (configContent.Contains($"[extruder{i}]"))
+            if (configContent.Contains($"[extruder{i}]", StringComparison.OrdinalIgnoreCase))
             {
                 count = Math.Max(count, i + 1);
             }
@@ -402,7 +384,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error discovering capabilities from PrusaLink for printer {PrinterId}", printer.Id);
+            _logger.LogError(ex, $"Error discovering capabilities from PrusaLink for printer {printer.Id}");
             return null;
         }
     }
@@ -476,8 +458,9 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
     private static void SetDefaultsByManufacturerAndModel(PrinterCapabilities capabilities, Printer printer)
     {
-        string? manufacturerName = printer.Manufacturer?.Name?.ToLowerInvariant();
-        string? modelName = printer.Model?.Name?.ToLowerInvariant();
+        // Use OrdinalIgnoreCase when comparing manufacturer/model names elsewhere; avoid creating lowered copies here
+        string? manufacturerName = printer.Manufacturer?.Name;
+        string? modelName = printer.Model?.Name;
 
         // Only apply manufacturer defaults if model defaults aren't already set
         // This provides fallbacks for older model entries that may not have complete capability data
@@ -536,7 +519,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
                 if (!capabilities.HasEnclosure)
                 {
-                    capabilities.HasEnclosure = modelName?.Contains("v2.4") == true || modelName?.Contains("trident") == true;
+                    capabilities.HasEnclosure = modelName?.Contains("v2.4", StringComparison.OrdinalIgnoreCase) == true || modelName?.Contains("trident", StringComparison.OrdinalIgnoreCase) == true;
                 }
 
                 if (capabilities.NumberOfExtruders == 0)
@@ -589,7 +572,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
 
                 if (capabilities.NumberOfExtruders == 0)
                 {
-                    capabilities.NumberOfExtruders = modelName?.Contains("idex") == true ? 2 : 1;
+                    capabilities.NumberOfExtruders = modelName?.Contains("idex", StringComparison.OrdinalIgnoreCase) == true ? 2 : 1;
                 }
 
                 if (!capabilities.NozzleDiameter.HasValue)
@@ -625,7 +608,7 @@ public class PrinterCapabilityDiscoveryService : IPrinterCapabilityDiscoveryServ
                 break;
 
             case "elegoo":
-                if (modelName?.Contains("centauri") == true)
+                if (modelName?.Contains("centauri", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     // Delta printer specifics
                     if (!capabilities.HasHeatedBed)

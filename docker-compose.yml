@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.slicer-base
-    image: slicer-base
+    image: printfarmer-slicer-base
     profiles:
       - orca
       - prusa
@@ -34,6 +34,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+    image: printfarmer-api
     ports:
       - "5001:5001" # HTTP API / SignalR
     environment:
@@ -42,7 +43,7 @@ services:
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
       - Redis__ConnectionString=redis:6379
-      - CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080,http://localhost:5001
+      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5001}
       - DEPLOYMENT_MODE=monolithic
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - ALLOW_LOCAL_NETWORK=true
@@ -57,6 +58,10 @@ services:
       - SPOOLMAN_ENABLED=${SPOOLMAN_ENABLED:-}
       - SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
       - SPOOLMAN_PORT=${SPOOLMAN_PORT:-}
+      # Application Settings - Pre-populate Setup Wizard
+      - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
+      - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
+      - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
       # Required JWT signing key (32+ chars) for auth configuration
       - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
     volumes:
@@ -81,6 +86,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    image: printfarmer-frontend
     ports:
       - "3000:80"
     environment:
@@ -102,6 +108,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.orcaslicer
+    image: printfarmer-orcaslicer-worker
     profiles:
       - orca
     environment:
@@ -132,6 +139,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prusaslicer
+    image: printfarmer-prusaslicer-worker
     profiles:
       - prusa
     environment:

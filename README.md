@@ -342,20 +342,22 @@ All four providers have been integration-tested for the catalog subsystem (manuf
 Schema creation currently uses `EnsureCreated()` (no migrations yet) to keep iteration speed high during soft-freeze; shadow lowercase columns (`NameLowered`) and unique indexes are created for each provider automatically. Migrations will be introduced post-freeze.
 
 #### Selecting a Provider
-Set `DB_PROVIDER` and the matching connection string environment variable (examples):
+Set `DB_PROVIDER` and the unified `ConnectionStrings__Default` environment variable (examples):
 ```
 DB_PROVIDER=Sqlite
 ConnectionStrings__Default=Data Source=farm.db
 
 DB_PROVIDER=Postgres
-ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=...;Password=...
+ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=...;Password=...
 
 DB_PROVIDER=SqlServer
-ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=printfarmer;User Id=sa;Password=Your_password123;TrustServerCertificate=True
+ConnectionStrings__Default=Server=sqlserver,1433;Database=printfarmer;User Id=sa;Password=Your_password123;TrustServerCertificate=True
 
 DB_PROVIDER=MySql
-ConnectionStrings__MySql=Server=mysql;Port=3306;Database=printfarmer;User=...;Password=...;TreatTinyAsBoolean=false
+ConnectionStrings__Default=Server=mysql;Port=3306;Database=printfarmer;User=...;Password=...;TreatTinyAsBoolean=false
 ```
+**Note:** All providers now use the same `ConnectionStrings__Default` key. The connection string format varies based on the provider.
+
 If an unsupported value is supplied, the application falls back to SQLite.
 
 ### Catalog Normalization & Duplicate Handling
@@ -550,8 +552,17 @@ ConnectionStrings__Default=Data Source=farm.db
 
 # PostgreSQL  
 DB_PROVIDER=postgres
-ConnectionStrings__Postgres=Host=localhost;Database=printfarmer;...
+ConnectionStrings__Default=Host=localhost;Database=printfarmer;Username=postgres;Password=...
+
+# SQL Server
+DB_PROVIDER=sqlserver
+ConnectionStrings__Default=Server=localhost;Database=printfarmer;User Id=sa;Password=...;TrustServerCertificate=True
+
+# MySQL
+DB_PROVIDER=mysql
+ConnectionStrings__Default=Server=localhost;Database=printfarmer;User=root;Password=...
 ```
+**Note:** All providers use the unified `ConnectionStrings__Default` key.
 
 ### Network Discovery
 Configure IP ranges to scan for printers:

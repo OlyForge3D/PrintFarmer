@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useEffect, useState, ReactNode, useContext, useCallback } from 'react';
+import React, { createContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import type { AuthContextType } from './AuthContextValue';
@@ -7,6 +7,7 @@ import type { AuthContextType } from './AuthContextValue';
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -54,7 +55,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     try {
       const result = await apiClient.login(credentials);
-      
+
+      // If user is inactive (not approved), show a special error and do not store token
+      if (result.success && result.user && result.user.isActive === false) {
+        setError('Your account is pending admin approval. You cannot log in until approved.');
+        return false;
+      }
+
       if (result.success && result.token && result.user) {
         localStorage.setItem('auth-token', result.token);
         setUser(result.user);
@@ -72,13 +79,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const register = async (userData: RegisterRequest): Promise<boolean> => {
+  const register = async (userData: RegisterRequest): Promise<boolean | 'pending'> => {
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await apiClient.register(userData);
-      
+      // If registration is successful but user is inactive, redirect to pending page
+      if (result.success && result.user && result.user.isActive === false) {
+        // Do not store token or set user
+        return 'pending';
+      }
       if (result.success && result.token && result.user) {
         localStorage.setItem('auth-token', result.token);
         setUser(result.user);
@@ -132,7 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isAuthenticated,
     isLoading,
     login,
-    register,
+    register: register as (userData: RegisterRequest) => Promise<boolean>, // for compatibility, but actual type is boolean | 'pending'
     logout,
     hasRole,
     hasPermission,
@@ -142,14 +153,5 @@ export function AuthProvider({ children }: AuthProviderProps) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// Hook moved to separate file (AuthHooks.ts) to satisfy react-refresh rule
-export function useAuthInternal(): AuthContextType {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
-  return ctx;
-}
-
-// Public hook export (kept here to align with existing import paths and lint guidance)
-export function useAuth() {
-  return useAuthInternal();
-}
+// Hooks are implemented in `AuthHooks.ts` to keep this file component-only and
+// satisfy the `react-refresh/only-export-components` rule.

@@ -1,25 +1,9 @@
-if (!window.PrintFarmerDebug) {
-  window.PrintFarmerDebug = {};
-}
-import React, { useMemo, useState } from 'react';
-import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
+import React from 'react';
+import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { ExpandablePrinterCard } from './ExpandablePrinterCard';
-import { EditPrinterModal } from './EditPrinterModal';
-import { AddPrinterButton } from './AddPrinterButton';
-import { PrinterDiscoveryModal } from './PrinterDiscoveryModal';
-import { DeleteConfirmationModal } from './DeleteConfirmationModal';
-import { SystemHealth } from './SystemHealth';
-import { PrinterCardSkeleton } from './skeletons/PrinterCardSkeleton';
-import type { Printer } from '@/types/api';
-import { 
-  Printer as PrinterIcon, 
-  CheckCircle, 
-  Play, 
-  Pause,
-  Search,
-  Settings
-} from 'lucide-react';
+import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard } from 'lucide-react';
+import { DetailedSystemHealth } from '@/components/SystemHealth';
+import { PageTemplate } from '@/components/PageTemplate';
 
 interface StatsCardProps {
   title: string;
@@ -29,7 +13,7 @@ interface StatsCardProps {
 }
 
 function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
-  const colorClasses = {
+  const colorClasses: Record<string, string> = {
     blue: 'bg-pf-loading text-pf-text-primary',
     green: 'bg-pf-status-online-bg text-pf-status-online-text',
     yellow: 'bg-pf-warning text-pf-text-primary',
@@ -57,144 +41,31 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
   );
 }
 
-export function PrinterDashboard() {
-  // Conditional debug logging for PrinterDashboard
-  if (window.PrintFarmerDebug?.printerDashboard) {
-    console.log('[PrintFarmer] PrinterDashboard render');
-  }
-  const { 
-    data: printers, 
-    isLoading, 
-    error,
-    refetch: refetchPrinters
-  } = usePrintersWithCameraUrls();
-  const deletePrinterMutation = useDeletePrinter();
-  const [showDiscovery, setShowDiscovery] = useState(false);
-  const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{
-    isOpen: boolean;
-    printer?: Printer;
-  }>({ isOpen: false });
-  
+export const PrinterDashboard: React.FC = () => {
+  const { data: printers, isLoading, error } = usePrintersWithCameraUrls();
   const { getPrinterStatus } = usePrinterStatusUpdates();
 
-  // Filter printers for the current user (for now show all printers since userId isn't on Printer)
-  const userPrinters = useMemo(() => {
-    return printers || [];
-  }, [printers]);
-
-  // Statistics calculations
-  const stats = useMemo(() => {
+  const stats = React.useMemo(() => {
+    const userPrinters = printers ?? [];
     const total = userPrinters.length;
     const online = userPrinters.filter(p => {
-      const status = getPrinterStatus(p.id);
-      return status?.state?.toLowerCase().includes('operational') || 
-             status?.state?.toLowerCase().includes('ready') ||
-             status?.state?.toLowerCase().includes('idle') ||
-             p.isOnline;
+      const status = getPrinterStatus?.(p.id);
+      const s = (status?.state ?? p.state ?? '') as string;
+      return (s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'))) || !!p.isOnline;
     }).length;
-    const printing = userPrinters.filter(p => {
-      const status = getPrinterStatus(p.id);
-      return status?.state?.toLowerCase().includes('printing') ||
-             p.state?.toLowerCase().includes('printing');
-    }).length;
-    const paused = userPrinters.filter(p => {
-      const status = getPrinterStatus(p.id);
-      return status?.state?.toLowerCase().includes('paused') ||
-             p.state?.toLowerCase().includes('paused');
-    }).length;
-
-    return {
-      total,
-      online,
-      printing,
-      paused,
-      offline: total - online
-    };
-  }, [userPrinters, getPrinterStatus]);
-
-  const handleDeleteClick = (printer: Printer) => {
-    setDeleteConfirmation({ isOpen: true, printer });
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (deleteConfirmation.printer) {
-      await deletePrinterMutation.mutateAsync(deleteConfirmation.printer.id);
-      setDeleteConfirmation({ isOpen: false });
-    }
-  };
-
-  const handleDeleteCancel = () => {
-    setDeleteConfirmation({ isOpen: false });
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
-          <div className="h-8 w-48 bg-pf-bg-1 rounded mb-6 animate-pulse" />
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-24 bg-pf-bg-1 rounded-xl animate-pulse" />
-            ))}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <PrinterCardSkeleton key={i} />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-pf-text-primary mb-4">Error Loading Printers</h2>
-            <p className="text-pf-text-secondary mb-4">{error.message}</p>
-            <button
-              onClick={() => refetchPrinters()}
-              className="px-4 py-2 bg-pf-primary-500 text-white rounded-lg hover:bg-pf-primary-600 transition-colors"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+    const printing = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('printing')).length;
+    const paused = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('paused')).length;
+    return { total, online, printing, paused, offline: total - online };
+  }, [printers, getPrinterStatus]);
 
   return (
-    <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-pf-text-primary">Printer Dashboard</h1>
-            <p className="text-pf-text-secondary mt-1">Monitor and manage your 3D printers</p>
-          </div>
-          
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => {
-                console.log('Discover button clicked - setting showDiscovery to true');
-                setShowDiscovery(true);
-              }}
-              className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
-            >
-              <Search className="h-4 w-4" />
-              <span>Discover</span>
-            </button>
-            
-            <AddPrinterButton onSuccess={refetchPrinters} />
-          </div>
-        </div>
-
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+    <PageTemplate
+      title="Printer Dashboard"
+      subtitle="Overview of your 3D printer farm status"
+      icon={LayoutDashboard}
+      maxWidth="max-w-7xl"
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
           <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircle} />
           <StatsCard title="Printing" value={stats.printing} color="yellow" icon={Play} />
@@ -202,58 +73,42 @@ export function PrinterDashboard() {
           <StatsCard title="Offline" value={stats.offline} color="gray" icon={Settings} />
         </div>
 
-        <SystemHealth />
-
-        {/* Printer Cards Grid */}
-        <div className="space-y-6">
-          {userPrinters.length === 0 ? (
-            <div className="text-center py-12">
-              <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
-              <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer.</p>
-              <div className="flex justify-center space-x-4">
-                <AddPrinterButton onSuccess={refetchPrinters} />
-                <button
-                  onClick={() => setShowDiscovery(true)}
-                  className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
-                >
-                  <Search className="h-4 w-4" />
-                  <span>Discover Printers</span>
-                </button>
-              </div>
+        {isLoading ? (
+          <div role="status" aria-label="Printers loading">
+            <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-48" />
+            <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-56" />
+            <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-40" />
+          </div>
+        ) : error ? (
+          <div className="p-4 bg-pf-bg-1 rounded-lg shadow">
+            <h2 className="text-lg font-semibold">Error Loading Printers</h2>
+            {(() => {
+              const e: unknown = error;
+              if (e instanceof Error) return <p className="text-sm text-pf-error-text">{e.message}</p>;
+              if (typeof e === 'string') return <p className="text-sm text-pf-error-text">{e}</p>;
+              if (e && typeof e === 'object' && 'message' in (e as Record<string, unknown>)) {
+                const msg = (e as Record<string, unknown>).message;
+                if (typeof msg === 'string') return <p className="text-sm text-pf-error-text">{msg}</p>;
+              }
+              return <p className="text-sm text-pf-error-text">Unknown error</p>;
+            })()}
+          </div>
+        ) : printers && printers.length === 0 ? (
+          <div className="p-8 text-center">
+            <h2 className="text-xl font-semibold">No Printers Found</h2>
+            <p className="text-sm mt-2">Get started by adding your first 3D printer.</p>
+          </div>
+        ) : (
+          <div>
+            <div className="mt-8">
+              <DetailedSystemHealth />
             </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-              {userPrinters.map((printer) => (
-                <ExpandablePrinterCard
-                  key={printer.id}
-                  printer={printer}
-                  onDelete={() => handleDeleteClick(printer)}
-                  onEdit={() => { setEditPrinterId(printer.id); setShowEditModal(true); }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Modals */}
-        <PrinterDiscoveryModal
-          isOpen={showDiscovery}
-          onClose={() => setShowDiscovery(false)}
-          onSuccess={refetchPrinters}
-        />        <DeleteConfirmationModal
-          isOpen={deleteConfirmation.isOpen}
-          printers={deleteConfirmation.printer ? [deleteConfirmation.printer] : []}
-          onConfirm={handleDeleteConfirm}
-          onCancel={handleDeleteCancel}
-        />
-        <EditPrinterModal
-          printerId={editPrinterId}
-          isOpen={showEditModal}
-          onClose={() => setShowEditModal(false)}
-          onSuccess={() => { setShowEditModal(false); refetchPrinters(); }}
-        />
-      </div>
-    </div>
+
+          </div>
+        )}
+    </PageTemplate>
   );
-}
+};
+
+export default PrinterDashboard;

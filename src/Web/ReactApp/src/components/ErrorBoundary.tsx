@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ReactNode } from 'react';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 interface Props {
   children: ReactNode;
@@ -49,9 +50,9 @@ export class ErrorBoundary extends Component<Props, State> {
                   <summary className="cursor-pointer text-gray-700 font-medium">
                     Error Details
                   </summary>
-                  <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto">
-                    {this.state.error.message}
-                  </pre>
+                  <div className="mt-2">
+                    {renderUnknown({ message: this.state.error.message, stack: (this.state.error as Error).stack })}
+                  </div>
                 </details>
               )}
             </div>

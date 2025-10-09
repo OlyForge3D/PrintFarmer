@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Hubs;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
@@ -8,10 +9,10 @@ namespace Farm.Web.Api.Controllers;
 /// Controller for testing SignalR connectivity and functionality
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/signalr-test")]
 public class SignalRTestController(
     IHubContext<PrinterHub> hubContext,
-    ILogger<SignalRTestController> logger) : ControllerBase
+    IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Test endpoint to verify SignalR hub can send messages
@@ -34,14 +35,14 @@ public class SignalRTestController(
             if (!string.IsNullOrEmpty(request.ConnectionId))
             {
                 await hubContext.Clients.Client(request.ConnectionId).SendAsync("TestMessage", testMessage);
-                return Ok(new { Success = true, Target = "Connection", ConnectionId = request.ConnectionId, TestMessage = testMessage });
+                return Ok(new { Success = true, Target = "Connection", request.ConnectionId, TestMessage = testMessage });
             }
 
             // Send to specific group if provided
             if (!string.IsNullOrEmpty(request.GroupName))
             {
                 await hubContext.Clients.Group(request.GroupName).SendAsync("TestMessage", testMessage);
-                return Ok(new { Success = true, Target = "Group", GroupName = request.GroupName, TestMessage = testMessage });
+                return Ok(new { Success = true, Target = "Group", request.GroupName, TestMessage = testMessage });
             }
 
             // Send to all connected clients
@@ -51,7 +52,7 @@ public class SignalRTestController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to send SignalR test message");
-            return StatusCode(500, new { Success = false, Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Success = false, Error = ex.Message });
         }
     }
 
@@ -123,7 +124,7 @@ public class SignalRTestController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to test discovery group functionality");
-            return StatusCode(500, new { Success = false, Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Success = false, Error = ex.Message });
         }
     }
 
@@ -162,7 +163,7 @@ public class SignalRTestController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to get SignalR connection stats");
-            return StatusCode(500, new { Success = false, Error = ex.Message });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Success = false, Error = ex.Message });
         }
     }
 }

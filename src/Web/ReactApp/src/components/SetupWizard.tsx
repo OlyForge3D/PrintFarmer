@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info, Search, Wifi } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthHooks';
 import { useHealthStatus } from '@/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
@@ -46,10 +46,40 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [fieldErrors, setFieldErrors] = useState<{[K in keyof typeof formData]?: string}>({});
 
   // Step: Network
-  const [networkRanges, setNetworkRanges] = useState<string[]>([]);
-  const [discoveryTimeout, setDiscoveryTimeout] = useState(5000);
-  const [maxConcurrentScans, setMaxConcurrentScans] = useState(20);
-  const [scanPorts, setScanPorts] = useState<number[]>([80, 7125]); // Include both HTTP and Moonraker ports
+  // Network Discovery Settings state (migrated from DTO to settings class)
+  const [networkDiscoverySettings, setNetworkDiscoverySettings] = useState<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings | null>(null);
+  // Fetch network discovery settings from backend on mount
+  useEffect(() => {
+    // The unified settings API expects the AppSetting "key" (AppSettingAttribute.Key),
+    // which for NetworkDiscovery is "NetworkDiscovery" (not the class name).
+    apiClient.getSettings<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscovery')
+      .then(settings => setNetworkDiscoverySettings(settings))
+      .catch(() => {
+        // fallback to server canonical defaults if fetch fails
+        setNetworkDiscoverySettings({
+          enableDiscovery: true,
+          discoverySubnets: ["10.0.0.0/24","10.0.5.0/24"],
+          clientTimeoutMs: 200,
+          requestDelayMs: 100,
+          maxConcurrentRequests: 20,
+          maxRetries: 2,
+          ports: [80],
+        });
+      });
+  }, []);
+  // --- Material Types (for Filament step) ---
+  const materialTypes = [
+    'PLA', 'ABS', 'PETG', 'TPU', 'Nylon', 'PC', 'ASA', 'HIPS', 'PVA', 'Other'
+  ];
+  const [selectedMaterialTypes, setSelectedMaterialTypes] = useState<string[]>([...materialTypes]);
+  const handleMaterialTypeToggle = (type: string) => {
+    setSelectedMaterialTypes(prev => prev.includes(type)
+      ? prev.filter(t => t !== type)
+      : [...prev, type]
+    );
+  };
+  // Additional UI state for advanced fields (if needed)
+  // (Removed unused discoveryTimeout, maxConcurrentScans, scanPorts)
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
 
   // Step: Spoolman
@@ -62,6 +92,24 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [spoolmanEndpoint, setSpoolmanEndpoint] = useState<string | null>(null);
   const [spoolmanErrorCategory, setSpoolmanErrorCategory] = useState<string | null>(null);
   const { setEnabled: setSpoolmanEnabledCtx, setBaseUrl: setSpoolmanBaseUrlCtx, updateProbeSuccess: updateSpoolmanSuccessCtx, updateProbeFailure: updateSpoolmanFailureCtx } = useSpoolmanContext();
+
+  // Synchronize context from local state (prevents infinite re-render)
+  useEffect(() => { setSpoolmanEnabledCtx(spoolmanEnabled); }, [spoolmanEnabled, setSpoolmanEnabledCtx]);
+  useEffect(() => { setSpoolmanBaseUrlCtx(spoolmanUrl); }, [spoolmanUrl, setSpoolmanBaseUrlCtx]);
+
+  // Fetch Spoolman settings from backend on mount (pre-populate from deployment config)
+  useEffect(() => {
+    apiClient.getSettings<import("@/types/SpoolmanSettings").SpoolmanSettings>('Spoolman')
+      .then(settings => {
+        if (settings?.baseUrl) {
+          setSpoolmanUrl(settings.baseUrl);
+          setSpoolmanEnabled(true);
+        }
+      })
+      .catch(() => {
+        // Silently fail - user can configure manually
+      });
+  }, []);
 
   // Network scanning for Spoolman discovery
   const { isScanning, results: scanResults, error: scanError, scanNetwork, reset: resetScan, availableInstances } = useSpoolmanNetworkScan();
@@ -77,18 +125,49 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     unknown: { label: 'Unknown error', hint: 'An unexpected error occurred. Verify the URL and try again.' }
   };
 
-  const getSpoolmanFriendly = (cat: string | null) => {
-    if (!cat) return null;
-    return spoolmanErrorMeta[cat]?.label || cat;
-  };
-
   // Step: Filament Presets
   interface FilamentPresetEditable { id?: string; name: string; hotend: number; bed: number; enabled: boolean; }
   const [filamentPresets, setFilamentPresets] = useState<FilamentPresetEditable[]>([]);
   const [loadingPresets, setLoadingPresets] = useState(false);
   const [presetError, setPresetError] = useState<string | null>(null);
 
+  // Load filament types from API when entering Filament step for the first time
+  useEffect(() => {
+    if (step === 3 && filamentPresets.length === 0 && !loadingPresets) {
+      setLoadingPresets(true);
+      setPresetError(null);
+      apiClient.getFilamentTypes()
+        .then((types: FilamentType[]) => {
+          setFilamentPresets(
+            types.map(t => ({
+              id: t.id,
+              name: t.name,
+              hotend: t.hotend ?? 200,
+              bed: t.bed ?? 60,
+              enabled: true
+            }))
+          );
+        })
+        .catch(e => setPresetError(e?.message || 'Failed to load filament types'))
+        .finally(() => setLoadingPresets(false));
+
+  // Type for API result
+  interface FilamentType {
+    id?: string;
+    name: string;
+    hotend?: number;
+    bed?: number;
+  }
+    }
+  }, [step, filamentPresets.length, loadingPresets]);
+
   useEffect(() => { checkSetupStatus(); }, []);
+
+  // Returns a friendly label for a Spoolman error category
+  const getSpoolmanFriendly = (cat: string | null): string => {
+    if (!cat) return '';
+    return spoolmanErrorMeta[cat]?.label || cat;
+  };
 
   // Monitor initialization status
   useEffect(() => {
@@ -113,20 +192,28 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   }, [healthStatus, healthLoading, refetchHealth]);
 
   // Load filament types when entering presets step first time
-  useEffect(() => {
-    if (step === 3 && filamentPresets.length === 0) {
-      void loadFilamentTypes();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
-
-  // If setup not required, immediately signal completion (must be a hook, not conditional call inside render)
-  useEffect(() => {
-    if (!loading && !needsSetup) {
-      onComplete();
-    }
-  }, [loading, needsSetup, onComplete]);
-
+  const addNetworkRange = () => {
+    if (!networkDiscoverySettings) return;
+    setNetworkDiscoverySettings(prev => prev ? { ...prev, discoverySubnets: [...prev.discoverySubnets, ""] } : prev);
+  };
+  const updateNetworkRange = (idx: number, value: string) => {
+    if (!networkDiscoverySettings) return;
+    setNetworkDiscoverySettings(prev => {
+      if (!prev) return prev;
+      const arr = [...prev.discoverySubnets];
+      arr[idx] = value;
+      return { ...prev, discoverySubnets: arr };
+    });
+  };
+  const removeNetworkRange = (idx: number) => {
+    if (!networkDiscoverySettings) return;
+    setNetworkDiscoverySettings(prev => {
+      if (!prev) return prev;
+      const arr = [...prev.discoverySubnets];
+      arr.splice(idx, 1);
+      return { ...prev, discoverySubnets: arr };
+    });
+  };
   const checkSetupStatus = async () => {
     try {
       const response = await fetch('/api/setup/status');
@@ -160,13 +247,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setStep(1);
   };
 
-  // Network helpers
-  const addNetworkRange = () => setNetworkRanges(r => [...r, '']);
-  const updateNetworkRange = (i: number, cidr: string) => setNetworkRanges(r => r.map((x, idx) => idx === i ? cidr : x));
-  const removeNetworkRange = (i: number) => setNetworkRanges(r => r.filter((_, idx) => idx !== i));
+  // (all helpers now use networkDiscoverySettings)
 
   const validateNetwork = () => {
-    const filtered = networkRanges.filter(r => r.trim());
+    if (!networkDiscoverySettings) return false;
+    const filtered = networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim());
     for (const cidr of filtered) {
       if (!isValidCidr(cidr.trim())) {
         setNetworkErrors(`Invalid CIDR: ${cidr}`);
@@ -177,9 +262,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     return true;
   };
 
-  const nextFromNetwork = () => {
+  const nextFromNetwork = async () => {
     if (!validateNetwork()) return;
-    setStep(2);
+    setNetworkErrors(null);
+    try {
+      // Compose payload for API (settings class)
+      if (!networkDiscoverySettings) return;
+      const netPayload: import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings = {
+        ...networkDiscoverySettings,
+        discoverySubnets: networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim()).map((r: string) => r.trim()),
+      };
+      await apiClient.saveSettings('NetworkDiscovery', netPayload);
+      setStep(2);
+    } catch (e) {
+      setNetworkErrors(e instanceof Error ? e.message : 'Failed to save network settings');
+    }
   };
 
   // Spoolman
@@ -260,31 +357,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   // Filament presets
-  const loadFilamentTypes = async (retryCount = 0) => {
-    setLoadingPresets(true);
-    setPresetError(null);
-    try {
-      const list = await apiClient.getFilamentTypes();
-      // Merge with default canonical suggestions in case DB empty
-      const defaults = ['PLA','ABS','PETG','ASA','PC','PCTG','TPU','Wood'];
-      const existingNames = new Set(list.map(f => f.name));
-      const merged: FilamentPresetEditable[] = [
-        ...list.map<FilamentPresetEditable>(f => ({ id: f.id, name: f.name, hotend: f.defaultTemperatures.hotend, bed: f.defaultTemperatures.bed, enabled: true })),
-        ...defaults.filter(d => !existingNames.has(d)).map<FilamentPresetEditable>(d => ({ name: d, hotend: d === 'PLA' ? 205 : d === 'ABS' ? 230 : d === 'PETG' ? 240 : d === 'ASA' ? 245 : d === 'PC' ? 260 : d === 'PCTG' ? 235 : d === 'TPU' ? 220 : 210, bed: d === 'ABS' || d === 'ASA' ? 100 : d === 'PC' ? 110 : d === 'PETG' ? 85 : d === 'PCTG' ? 80 : d === 'Wood' ? 65 : 60, enabled: true }))
-      ].sort((a,b) => a.name.localeCompare(b.name));
-      setFilamentPresets(merged);
-    } catch (error) {
-      // Handle 503 Service Unavailable (system still initializing) with retry
-      if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 503 && retryCount < 3) {
-        setPresetError('System is initializing, retrying...');
-        setTimeout(() => loadFilamentTypes(retryCount + 1), 2000); // Retry after 2 seconds
-        return;
-      }
-      setPresetError('Failed to load filament presets');
-    } finally { 
-      if (retryCount === 0) setLoadingPresets(false); // Only stop loading indicator on final attempt
-    }
-  };
+  // (Removed unused loadFilamentTypes)
 
   const togglePreset = (name: string) => setFilamentPresets(p => p.map(f => f.name === name ? { ...f, enabled: !f.enabled } : f));
   const updatePresetTemp = (name: string, field: 'hotend' | 'bed', value: number) => setFilamentPresets(p => p.map(f => f.name === name ? { ...f, [field]: value } : f));
@@ -314,13 +387,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
 
       // 2. Save network settings
-      const netPayload = { networkRanges: networkRanges.filter(r => r.trim()).map(r => r.trim()), timeoutMs: discoveryTimeout, maxConcurrentScans, ports: scanPorts.filter(p => p > 0 && p < 65536) };
-      await apiClient.saveNetworkDiscoverySettings(netPayload);
+      if (!networkDiscoverySettings) return;
+      const netPayload: import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings = {
+        ...networkDiscoverySettings,
+        discoverySubnets: networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim()).map((r: string) => r.trim()),
+      };
+  await apiClient.saveSettings('NetworkDiscovery', netPayload);
 
       // 3. Spoolman config (optional)
-      if (spoolmanEnabled && spoolmanUrl) {
+        if (spoolmanEnabled && spoolmanUrl) {
         const normalized = normalizeSpoolmanBaseUrl(spoolmanUrl);
         const token = localStorage.getItem('auth-token');
+          const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+          if (win.PrintFarmerDebug?.setupWizard) {
+            console.log('[SetupWizard] JWT token before Spoolman config request:', token);
+          }
         const saveResp = await fetch('/api/spoolman/config', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ baseUrl: normalized }) });
         if (!saveResp.ok && saveResp.status !== 204) throw new Error('Failed to save Spoolman config');
         // Keep localStorage synchronized so Settings page reflects wizard-entered value immediately
@@ -332,10 +413,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         const enabled = filamentPresets.filter(f => f.enabled);
         const payload: Record<string, { hotend: number; bed: number }> = {};
         enabled.forEach(f => { payload[f.name] = { hotend: f.hotend, bed: f.bed }; });
-        await fetch('/api/filamenttype/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ presets: payload }) });
+  await fetch('/api/filament-types/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ presets: payload }) });
         const disabledIds = filamentPresets.filter(f => !f.enabled && f.id).map(f => f.id!);
         for (const id of disabledIds) {
-          try { await fetch(`/api/filamenttype/${id}`, { method: 'DELETE' }); } catch {/* ignore individual failures */}
+          try { await fetch(`/api/filament-types/${id}`, { method: 'DELETE' }); } catch {/* ignore individual failures */}
         }
       }
 
@@ -362,6 +443,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   if (!needsSetup) return null;
 
   // --- Step renderers ---
+  // ...existing code...
+  // Remove duplicate addNetworkRange, updateNetworkRange, removeNetworkRange below (keep only top-level)
+  // ...existing code...
   const renderAccountStep = () => (
     <div className="space-y-6">
       {/* Name Fields */}
@@ -413,6 +497,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     </div>
   );
 
+  // ...existing code...
   const renderNetworkStep = () => (
     <div className="space-y-6">
       <div>
@@ -420,7 +505,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <p className="text-sm text-pf-text-secondary">Provide CIDR ranges to scan for printers (e.g. 192.168.1.0/24). Leave empty to disable discovery.</p>
       </div>
       <div className="space-y-2">
-        {networkRanges.map((r,i) => (
+        {networkDiscoverySettings?.discoverySubnets.map((r: string, i: number) => (
           <div key={i} className="flex gap-2">
             <input value={r} onChange={e => updateNetworkRange(i, e.target.value)} placeholder="192.168.1.0/24" className="flex-1 px-3 py-2 bg-pf-bg-2 border border-pf-border rounded" />
             <button type="button" onClick={() => removeNetworkRange(i)} className="px-3 py-2 text-red-400" aria-label="Remove range">×</button>
@@ -429,19 +514,55 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <button type="button" onClick={addNetworkRange} className="px-3 py-2 bg-pf-bg-2 border border-pf-border rounded text-sm">Add Range</button>
         {networkErrors && <p className="text-xs text-red-500" role="alert">{networkErrors}</p>}
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      {/* Advanced network scan settings */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label htmlFor="nw-timeout" className="block text-xs mb-1">Timeout (ms)</label>
-          <input id="nw-timeout" name="nw-timeout" type="number" value={discoveryTimeout} placeholder="5000" onChange={e => setDiscoveryTimeout(Number(e.target.value))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="clientTimeoutMs">Client Timeout (ms)</label>
+          <input
+            id="clientTimeoutMs"
+            type="number"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            value={networkDiscoverySettings?.clientTimeoutMs ?? 0}
+            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, clientTimeoutMs: Number(e.target.value) } : s)}
+            min={100}
+            max={10000}
+          />
         </div>
         <div>
-          <label htmlFor="nw-concurrent" className="block text-xs mb-1">Max Concurrent</label>
-          <input id="nw-concurrent" name="nw-concurrent" type="number" value={maxConcurrentScans} placeholder="20" onChange={e => setMaxConcurrentScans(Number(e.target.value))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="requestDelayMs">Request Delay (ms)</label>
+          <input
+            id="requestDelayMs"
+            type="number"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            value={networkDiscoverySettings?.requestDelayMs ?? 0}
+            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, requestDelayMs: Number(e.target.value) } : s)}
+            min={0}
+            max={2000}
+          />
         </div>
         <div>
-          <label htmlFor="nw-ports" className="block text-xs mb-1">Ports (comma separated)</label>
-          <input id="nw-ports" name="nw-ports" type="text" value={scanPorts.join(',')} placeholder="80,7125" onChange={e => setScanPorts(e.target.value.split(',').map(p => Number(p.trim())).filter(n => !isNaN(n)))} className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded" />
-          <p className="text-xs text-pf-text-tertiary mt-1">80=HTTP, 7125=Moonraker</p>
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="maxConcurrentRequests">Max Concurrent Requests</label>
+          <input
+            id="maxConcurrentRequests"
+            type="number"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            value={networkDiscoverySettings?.maxConcurrentRequests ?? 0}
+            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxConcurrentRequests: Number(e.target.value) } : s)}
+            min={1}
+            max={64}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="maxRetries">Max Retries</label>
+          <input
+            id="maxRetries"
+            type="number"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            value={networkDiscoverySettings?.maxRetries ?? 0}
+            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxRetries: Number(e.target.value) } : s)}
+            min={0}
+            max={10}
+          />
         </div>
       </div>
       <div className="flex justify-between">
@@ -458,7 +579,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <p className="text-sm text-pf-text-secondary">Optionally connect to a Spoolman instance now or later in Settings.</p>
       </div>
       <div className="flex items-center gap-2">
-  <input id="useSpoolman" type="checkbox" checked={spoolmanEnabled} onChange={e => { setSpoolmanEnabled(e.target.checked); setSpoolmanEnabledCtx(e.target.checked); if (e.target.checked && spoolmanUrl) setSpoolmanBaseUrlCtx(spoolmanUrl); }} />
+        <input id="useSpoolman" type="checkbox" checked={spoolmanEnabled} onChange={e => { setSpoolmanEnabled(e.target.checked); setSpoolmanEnabledCtx(e.target.checked); if (e.target.checked && spoolmanUrl) setSpoolmanBaseUrlCtx(spoolmanUrl); }} />
         <label htmlFor="useSpoolman" className="text-sm">Enable Spoolman</label>
       </div>
   {spoolmanEnabled && (
@@ -526,7 +647,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input
               type="url"
               value={spoolmanUrl}
-              onChange={e => { setSpoolmanUrl(e.target.value); setSpoolmanBaseUrlCtx(e.target.value || null); }}
+              onChange={e => setSpoolmanUrl(e.target.value)}
               placeholder="http://spoolman:7912"
               className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded"
             />
@@ -578,6 +699,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <h2 className="text-lg font-semibold flex items-center gap-2"><Thermometer className="h-5 w-5"/>Filament Presets</h2>
         <p className="text-sm text-pf-text-secondary">Select which material presets to enable. You can edit temperatures or manage later.</p>
       </div>
+      {/* Material Types Selection */}
+      <div className="mb-4">
+        <h3 className="text-base font-semibold mb-1">Material Types</h3>
+        <div className="flex flex-wrap gap-2">
+          {materialTypes.map(type => (
+            <label key={type} className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={selectedMaterialTypes.includes(type)}
+                onChange={() => handleMaterialTypeToggle(type)}
+              />
+              <span>{type}</span>
+            </label>
+          ))}
+        </div>
+      </div>
       {loadingPresets && <div className="text-sm text-pf-text-secondary">Loading presets...</div>}
       {presetError && <div className="text-sm text-red-500" role="alert">{presetError}</div>}
       <div className="space-y-2 max-h-64 overflow-auto pr-1">
@@ -612,7 +749,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
         <div className="text-sm space-y-2">
           <div><strong>Admin:</strong> {formData.username} ({formData.email})</div>
-          <div><strong>Network Ranges:</strong> {networkRanges.filter(r=>r.trim()).length ? networkRanges.filter(r=>r.trim()).join(', ') : 'None (discovery disabled)'}</div>
+          <div><strong>Network Ranges:</strong> {networkDiscoverySettings?.discoverySubnets.filter((r: string) => r.trim()).length ? networkDiscoverySettings?.discoverySubnets.filter((r: string) => r.trim()).join(', ') : 'None (discovery disabled)'}</div>
           <div><strong>Spoolman:</strong> {spoolmanEnabled ? (
             <span>
               {normalizeSpoolmanBaseUrl(spoolmanUrl)} {spoolmanTestOk && spoolmanVersion && (
@@ -646,7 +783,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div className="w-full max-w-2xl bg-pf-bg-1 border border-pf-border shadow-xl rounded-xl p-8">
         {initializing ? (
           // Show initialization spinner
-          <div className="text-center py-16">
+          (<div className="text-center py-16">
             <div className="flex items-center justify-center gap-4 mb-6">
               <div className="flex items-center gap-3">
                 <img
@@ -673,10 +810,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className="text-sm text-red-600">{globalError}</div>
               </div>
             )}
-          </div>
+          </div>)
         ) : (
           // Show setup wizard once initialized
-          <>
+          (<>
             <div className="flex items-center gap-4 mb-6">
               <div className="flex items-center gap-3">
                 <img
@@ -702,7 +839,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             {step === 3 && renderFilamentStep()}
             {step === 4 && renderSummaryStep()}
             <div className="mt-6 text-center text-xs text-pf-text-tertiary">You can change these settings later in the Settings page.</div>
-          </>
+          </>)
         )}
       </div>
     </div>

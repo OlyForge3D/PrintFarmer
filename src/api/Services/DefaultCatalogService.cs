@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -14,16 +14,11 @@ public interface IDefaultCatalogService
     Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync();
 }
 
-public class DefaultCatalogService : IDefaultCatalogService
+public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogService
 {
-    private readonly AppDbContext _context;
+    private readonly AppDbContext _context = context;
     private Guid? _cachedUnknownManufacturerId;
     private Guid? _cachedUnknownModelId;
-
-    public DefaultCatalogService(AppDbContext context)
-    {
-        _context = context;
-    }
 
     public async Task<Guid> GetUnknownManufacturerIdAsync()
     {
@@ -32,11 +27,7 @@ public class DefaultCatalogService : IDefaultCatalogService
             return _cachedUnknownManufacturerId.Value;
         }
 
-        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
-        if (unknown == null)
-        {
-            throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
-        }
+        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown") ?? throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
 
         _cachedUnknownManufacturerId = unknown.Id;
         return unknown.Id;
@@ -51,12 +42,7 @@ public class DefaultCatalogService : IDefaultCatalogService
 
         Guid unknownMfgId = await GetUnknownManufacturerIdAsync();
         PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
-            m.ManufacturerId == unknownMfgId && m.Name == "Unknown Model");
-
-        if (unknownModel == null)
-        {
-            throw new InvalidOperationException("Unknown Model not found. Ensure database seeding has been completed.");
-        }
+            m.ManufacturerId == unknownMfgId && m.Name == "Unknown Model") ?? throw new InvalidOperationException("Unknown Model not found. Ensure database seeding has been completed.");
 
         _cachedUnknownModelId = unknownModel.Id;
         return unknownModel.Id;

@@ -23,11 +23,13 @@ import {
   MultiUploadResponse,
   Printer,
   PrinterCameraUrls,
+  PrinterCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
   PrinterModelDto,
   RegisterRequest,
   ResolveHostnameRequest,
+  StartDiscoveryRequest,
   ResolveHostnameResponse,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -43,15 +45,58 @@ import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';
 
 export class ApiClient {
-  // SystemLogSettings API
-  async getSystemLogSettings() {
-    const res = await this.client.get('/systemlogsettings');
+  // Utility to generate a correlation ID (UUID v4)
+  private static generateCorrelationId(): string {
+    // Use crypto API if available, fallback to random
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // Fallback: simple random string
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+  // ============ Generic Settings API methods ============
+  /**
+   * Get settings for any settings class by class name
+   */
+  async getSettings<T = Record<string, unknown>>(className: string): Promise<T> {
+    const res = await this.client.get(`/settings/${className}`);
     return res.data;
   }
 
-  async setSystemLogSettings(settings: { retentionDays: number; persistedLogTypes: string[] }) {
-    await this.client.post('/systemlogsettings', settings);
+  /**
+   * Save settings for any settings class by class name
+   */
+  async saveSettings<T = Record<string, unknown>>(className: string, settings: T): Promise<void> {
+    await this.client.post(`/settings/${className}`, settings);
   }
+
+  /**
+   * Get all settings metadata for dynamic UI generation
+   */
+  async getSettingsMetadata(): Promise<Array<Record<string, unknown>>> {
+    const res = await this.client.get('/settings/metadata');
+    return res.data;
+  }
+
+  /**
+   * Get all unified settings
+   */
+  async getAllSettings(): Promise<Record<string, unknown>> {
+    const res = await this.client.get('/settings');
+    return res.data;
+  }
+
+  /**
+   * Save all unified settings
+   */
+  async saveAllSettings(settings: Record<string, unknown>): Promise<void> {
+    await this.client.post('/settings', settings);
+  }
+
+
   private client: AxiosInstance;
 
   constructor() {
@@ -74,12 +119,14 @@ export class ApiClient {
       },
     });
 
-    // Request interceptor for authentication
+    // Request interceptor for authentication and correlationId
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem('auth-token');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      // Add correlationId header to every request
+      config.headers['X-Correlation-Id'] = ApiClient.generateCorrelationId();
       return config;
     });
 
@@ -106,7 +153,8 @@ export class ApiClient {
 
   // Import selected discovered G-code files
   async importSelectedGcodeFiles(dto: { harvestOperationId: string; fileIds: string[] }): Promise<GcodeHarvestResultDto> {
-    const resp = await this.client.post<GcodeHarvestResultDto>(`/harvest/import-selected`, dto);
+    // Backend exposes this endpoint under /api/gcode-harvest/import
+    const resp = await this.client.post<GcodeHarvestResultDto>(`/gcode-harvest/import`, dto);
     return resp.data;
   }
 
@@ -176,8 +224,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async startDiscoveryStream(): Promise<{ sessionId: string; message: string }> {
-    const response = await this.client.post<{ sessionId: string; message: string }>('/printers/discover/stream');
+    async startDiscoveryStream(request?: StartDiscoveryRequest): Promise<{ sessionId: string; message: string }> {
+    const response = await this.client.post<{ sessionId: string; message: string }>('/printers/discover/stream', request || {});
     return response.data;
   }
 
@@ -313,71 +361,54 @@ export class ApiClient {
     await this.client.delete(`/catalog/printer-models/${id}`);
   }
 
-  // ============ Settings API methods ============
-  // Network Discovery settings
-  async getNetworkDiscoverySettings(): Promise<{ networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] }> {
-    const resp = await this.client.get('/network-discovery/settings');
-    // Backend returns camelCase via JSON options; map to consistent shape
-    const data = resp.data as { networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] };
-    return data;
+  // Get default capabilities for a printer model
+  async getModelDefaultCapabilities(modelId: string): Promise<PrinterCapabilitiesDto | null> {
+    try {
+      const response = await this.client.get<PrinterCapabilitiesDto>(`/printers/model/${modelId}/default-capabilities`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 204) {
+        return null; // No default capabilities available
+      }
+      throw error;
+    }
   }
 
-  async saveNetworkDiscoverySettings(payload: { networkRanges: string[]; timeoutMs: number; maxConcurrentScans: number; ports: number[] }): Promise<void> {
-    await this.client.post('/network-discovery/settings', {
-      networkRanges: payload.networkRanges,
-      timeoutMs: payload.timeoutMs,
-      maxConcurrentScans: payload.maxConcurrentScans,
-      ports: payload.ports
-    });
-  }
+  // ============ File type API methods ============
 
-  // SignalR settings
-  async getSignalRSettings(): Promise<{ logLevel: string; consoleLoggingEnabled: boolean }> {
-    const resp = await this.client.get('/signalr/settings');
-    const data = resp.data as { logLevel: string; consoleLoggingEnabled: boolean };
-    return data;
-  }
 
-  async saveSignalRSettings(payload: { logLevel: string; consoleLoggingEnabled: boolean }): Promise<void> {
-    await this.client.post('/signalr/settings', {
-      logLevel: payload.logLevel,
-      consoleLoggingEnabled: payload.consoleLoggingEnabled
-    });
-  }
-
-  // autoDetectNetworkRanges removed (unreliable in containerized environments)
 
   // ============ Filament Type API methods ============
 
   async getFilamentTypes(): Promise<FilamentTypeDto[]> {
-    const response = await this.client.get<FilamentTypeDto[]>('/filamenttype');
+    const response = await this.client.get<FilamentTypeDto[]>('/filament-types');
     return response.data;
   }
 
   async createFilamentType(filamentType: CreateFilamentTypeRequest): Promise<FilamentTypeDto> {
-    const response = await this.client.post<FilamentTypeDto>('/filamenttype', filamentType);
+    const response = await this.client.post<FilamentTypeDto>('/filament-types', filamentType);
     return response.data;
   }
 
   async updateFilamentType(id: string, filamentType: UpdateFilamentTypeRequest): Promise<void> {
-    await this.client.put(`/filamenttype/${id}`, filamentType);
+    await this.client.put(`/filament-types/${id}`, filamentType);
   }
 
   async deleteFilamentType(id: string): Promise<void> {
-    await this.client.delete(`/filamenttype/${id}`);
+    await this.client.delete(`/filament-types/${id}`);
   }
 
   async getFilamentPresets(): Promise<FilamentPresets> {
-    const response = await this.client.get<{ presets: FilamentPresets }>('/filamenttype/presets');
+    const response = await this.client.get<{ presets: FilamentPresets }>('/filament-types/presets');
     return response.data.presets;
   }
 
   async saveFilamentPresets(presets: FilamentPresets): Promise<void> {
-    await this.client.post('/filamenttype/presets', { presets });
+    await this.client.post('/filament-types/presets', { presets });
   }
 
   async importFilamentTypesFromSpoolman(): Promise<SpoolmanFilamentImportResult> {
-    const response = await this.client.post<SpoolmanFilamentImportResult>('/filamenttype/import-from-spoolman');
+    const response = await this.client.post<SpoolmanFilamentImportResult>('/filament-types/import-from-spoolman');
     return response.data;
   }
 

@@ -1,6 +1,6 @@
-﻿using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Exceptions;
 using Farm.Web.Api.Infrastructure.Normalization;
@@ -14,20 +14,15 @@ namespace Farm.Web.Api.Controllers;
 /// Provides endpoints for managing printer manufacturer and model catalog data.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/catalog")]
 [Tags("Catalog")]
-public class CatalogController : ControllerBase
+public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache, Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly INormalizationEventLogger _normLogger;
-    private readonly ICatalogCache _catalogCache;
+    private readonly AppDbContext _db = db;
+    private readonly Farm.Infrastructure.Normalization.INormalizationEventLogger _normLogger = normLogger;
+    private readonly ICatalogCache _catalogCache = catalogCache;
+    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
 
-    public CatalogController(AppDbContext db, INormalizationEventLogger normLogger, ICatalogCache catalogCache)
-    {
-        _db = db;
-        _normLogger = normLogger;
-        _catalogCache = catalogCache;
-    }
     /// <summary>
     /// Gets all available printer manufacturers.
     /// </summary>
@@ -40,14 +35,24 @@ public class CatalogController : ControllerBase
     [ProducesResponseType(304)]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync([FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
     {
-        (IReadOnlyList<ManufacturerDto>? list, string? etag) = await _catalogCache.GetManufacturersAsync(ct);
-        if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Split(',').Select(s => s.Trim()).Contains(etag, StringComparer.Ordinal))
+        try
         {
+            (IReadOnlyList<ManufacturerDto>? list, string? etag) = await _catalogCache.GetManufacturersAsync(ct);
+            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Split(',').Select(s => s.Trim()).Contains(etag, StringComparer.Ordinal))
+            {
+                Response.Headers["ETag"] = etag;
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
             Response.Headers["ETag"] = etag;
-            return StatusCode(StatusCodes.Status304NotModified);
+            return Ok(list);
         }
-        Response.Headers["ETag"] = etag;
-        return Ok(list);
+        catch (Exception ex)
+        {
+            // Log the error with as much context as possible via injected unified logging service
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetManufacturersAsync failed: {ex.Message}");
+            // Optionally, include more context in the error response
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers", details = ex.ToString() });
+        }
     }
 
     [HttpGet("manufacturers/{id:guid}", Name = "GetManufacturerById")]
@@ -106,10 +111,10 @@ public class CatalogController : ControllerBase
 
         Manufacturer mfg = new()
         { Id = Guid.NewGuid(), Name = normalized };
-        _db.Manufacturers.Add(mfg);
+        _ = _db.Manufacturers.Add(mfg);
         try
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
@@ -270,7 +275,7 @@ public class CatalogController : ControllerBase
             MaxBedTemp = req.MaxBedTemp,
             MaxPrintSpeed = req.MaxPrintSpeed
         };
-        _db.Models.Add(model);
+        _ = _db.Models.Add(model);
 
         // Add supported filament types if provided
         if (req.SupportedFilamentTypeIds?.Length > 0)
@@ -282,7 +287,7 @@ public class CatalogController : ControllerBase
 
             foreach (Guid filamentTypeId in validFilamentTypeIds)
             {
-                _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                 {
                     PrinterModelId = model.Id,
                     FilamentTypeId = filamentTypeId
@@ -292,7 +297,7 @@ public class CatalogController : ControllerBase
 
         try
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
@@ -420,7 +425,7 @@ public class CatalogController : ControllerBase
 
                 foreach (Guid filamentTypeId in validFilamentTypeIds)
                 {
-                    _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                    _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                     {
                         PrinterModelId = model.Id,
                         FilamentTypeId = filamentTypeId
@@ -428,7 +433,7 @@ public class CatalogController : ControllerBase
                 }
             }
         }
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         _catalogCache.InvalidateModels(model.ManufacturerId);
         return NoContent();
     }

@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
@@ -7,19 +8,13 @@ namespace Farm.Web.Api.Services;
 /// Comprehensive PrusaLink API client based on the official OpenAPI specification
 /// https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
 /// </summary>
-public partial class PrusaLinkApiClient
+public class PrusaLinkApiClient
 {
-    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink API call failed for {Url}")]
-    private static partial void LogApiError(ILogger logger, Exception exception, string url);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "PrusaLink API deserialization failed for {Url}")]
-    private static partial void LogDeserializationError(ILogger logger, Exception exception, string url);
-
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
-    private readonly ILogger<PrusaLinkApiClient> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
-    public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
+    public PrusaLinkApiClient(HttpClient httpClient, IUnifiedLoggingService logger)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -61,7 +56,7 @@ public partial class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
         }
@@ -72,17 +67,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -97,7 +92,7 @@ public partial class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url.ToString(), apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
         }
@@ -108,17 +103,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url.ToString());
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url.ToString());
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url.ToString());
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -131,7 +126,7 @@ public partial class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<PrinterInfo>(json, _jsonOptions)!;
         }
@@ -142,17 +137,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -165,7 +160,7 @@ public partial class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<StatusInfo>(json, _jsonOptions)!;
         }
@@ -176,17 +171,17 @@ public partial class PrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            LogApiError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
             throw;
         }
         catch (JsonException ex)
         {
-            LogDeserializationError(_logger, ex, url);
+            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
             throw;
         }
     }
@@ -202,7 +197,7 @@ public partial class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Job>(json, _jsonOptions);
     }
@@ -245,7 +240,7 @@ public partial class PrusaLinkApiClient
         }
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<StorageListResponse>(json, _jsonOptions)!;
     }
@@ -261,7 +256,7 @@ public partial class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Transfer>(json, _jsonOptions);
     }
@@ -289,7 +284,7 @@ public partial class PrusaLinkApiClient
         }
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
 
         // Deserialize to appropriate type based on response content
@@ -368,7 +363,7 @@ public partial class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Camera[]>(json, _jsonOptions)!;
     }
@@ -386,7 +381,7 @@ public partial class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<CameraConfig>(json, _jsonOptions)!;
     }
@@ -417,7 +412,7 @@ public partial class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
@@ -431,7 +426,7 @@ public partial class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
@@ -492,7 +487,7 @@ public partial class PrusaLinkApiClient
             return new UpdateInfo { UpdateAvailable = updateAvailable };
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         UpdateInfo updateInfo = JsonSerializer.Deserialize<UpdateInfo>(json, _jsonOptions)!;
 
@@ -521,6 +516,4 @@ public partial class PrusaLinkApiClient
 
         return request;
     }
-
-
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useUnifiedLogging } from '../hooks/useUnifiedLogging';
 import { LogEntry } from '../services/unifiedLogging';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 export interface UnifiedLoggingDashboardProps {
   maxEntries?: number;
@@ -194,15 +195,11 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
                         <p className="text-sm text-pf-text-primary break-words">
                           {log.message}
                         </p>
-                        
-                        {log.context && (
+                        {log.context != null && (
                           <details className="mt-2">
-                            <summary className="cursor-pointer text-xs text-pf-text-secondary hover:text-pf-text-primary">
-                              View context
-                            </summary>
-                            <pre className="mt-1 text-xs text-pf-text-secondary bg-pf-bg-1 p-2 rounded border border-pf-border overflow-x-auto">
-                              {JSON.stringify(log.context, null, 2)}
-                            </pre>
+                            <summary className="cursor-pointer text-xs text-pf-text-secondary hover:text-pf-text-primary">View context</summary>
+                            {/** Use a central helper to safely render unknown payloads */}
+                            {renderUnknown(log.context)}
                           </details>
                         )}
                       </div>

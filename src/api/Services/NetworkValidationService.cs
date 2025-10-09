@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Net;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
@@ -14,11 +15,11 @@ public static class NetworkValidationService
     /// </summary>
     /// <param name="settings">Network discovery settings to validate</param>
     /// <returns>Validation result with any errors found</returns>
-    public static NetworkValidationResult ValidateSettings(NetworkDiscoverySettingsDto settings)
+    public static NetworkValidationResult ValidateSettings(NetworkDiscoverySettings settings)
     {
         NetworkValidationResult result = new();
 
-        if (settings.NetworkRanges.Count == 0)
+        if (settings.DiscoverySubnets == null || settings.DiscoverySubnets.Count == 0)
         {
             // No ranges is valid - discovery will be disabled
             return result;
@@ -27,7 +28,7 @@ public static class NetworkValidationService
         // Validate each CIDR range
         List<(string cidr, IPAddress network, int prefix)> validNetworks = new();
 
-        foreach (string cidr in settings.NetworkRanges)
+        foreach (string cidr in settings.DiscoverySubnets)
         {
             string trimmed = cidr.Trim();
             if (string.IsNullOrEmpty(trimmed))
@@ -52,32 +53,35 @@ public static class NetworkValidationService
 
         // Check for overlapping networks
         List<(string cidr1, string cidr2)> overlaps = FindOverlappingNetworks(validNetworks);
-        foreach ((string cidr1, string cidr2) overlap in overlaps)
+        foreach ((string cidr1, string cidr2) in overlaps)
         {
-            result._warnings.Add($"Network ranges overlap: {overlap.cidr1} and {overlap.cidr2}");
+            result._warnings.Add($"Network ranges overlap: {cidr1} and {cidr2}");
         }
 
         // Additional validation
-        if (settings.TimeoutMs < 100 || settings.TimeoutMs > 30000)
+        if (settings.ClientTimeoutMs < 100 || settings.ClientTimeoutMs > 30000)
         {
             result._errors.Add("Discovery timeout must be between 100ms and 30,000ms");
         }
 
-        if (settings.MaxConcurrentScans < 1 || settings.MaxConcurrentScans > 100)
+        if (settings.MaxConcurrentRequests < 1 || settings.MaxConcurrentRequests > 100)
         {
-            result._errors.Add("Max concurrent scans must be between 1 and 100");
+            result._errors.Add("Max concurrent requests must be between 1 and 100");
         }
 
-        if (settings.Ports.Count == 0 && validNetworks.Count > 0)
+        if (settings.Ports == null || (settings.Ports.Count == 0 && validNetworks.Count > 0))
         {
             result._errors.Add("At least one port is required when network ranges are configured");
         }
 
-        foreach (int port in settings.Ports)
+        if (settings.Ports != null)
         {
-            if (port < 1 || port > 65535)
+            foreach (int port in settings.Ports)
             {
-                result._errors.Add($"Invalid port number: {port} (must be 1-65535)");
+                if (port < 1 || port > 65535)
+                {
+                    result._errors.Add($"Invalid port number: {port} (must be 1-65535)");
+                }
             }
         }
 

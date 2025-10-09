@@ -1,5 +1,8 @@
-﻿using System.Net;
+﻿
+using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -7,7 +10,7 @@ namespace Farm.Web.Api.Middleware;
 /// Global exception handling middleware that provides consistent error responses
 /// and structured logging for all unhandled exceptions
 /// </summary>
-public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
+public class GlobalExceptionMiddleware(RequestDelegate next)
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -15,25 +18,24 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
         WriteIndented = false,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
-    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}")]
-    private static partial void LogUnhandledException(ILogger logger, Exception exception, string method, string path, string correlationId);
 
-    public async Task InvokeAsync(HttpContext context)
+    private readonly RequestDelegate _next = next ?? throw new ArgumentNullException(nameof(next));
+
+    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         try
         {
-            await next(context);
+            await _next(context);
         }
         // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application
         // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
         {
-            string correlationId = context.TraceIdentifier;
-
-            LogUnhandledException(logger, ex, context.Request.Method, context.Request.Path, correlationId);
-
+            // Use correlationId from HttpContext.Items if available (set by TelemetryMiddleware)
+            string correlationId = context.Items["CorrelationId"] as string ?? context.TraceIdentifier;
+            logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}", correlationId);
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }
@@ -82,11 +84,11 @@ public partial class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glo
             TimeoutException => (HttpStatusCode.RequestTimeout, "Request timeout", null),
 
             // Database errors
-            InvalidOperationException when ex.Message.Contains("database") =>
+            InvalidOperationException when ex.Message.Contains("database", StringComparison.OrdinalIgnoreCase) =>
                 (HttpStatusCode.ServiceUnavailable, "Database service unavailable", null),
 
             // Circuit breaker
-            Farm.Web.Api.Infrastructure.CircuitBreakerOpenException =>
+            Farm.Infrastructure.CircuitBreakerOpenException =>
                 (HttpStatusCode.ServiceUnavailable, "Service temporarily unavailable", ex.Message),
 
             // Default for all other exceptions

@@ -1,6 +1,5 @@
 ﻿using System.Net;
 using System.Text.Json;
-using Farm.Web.Api.Data;
 using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using FluentAssertions;

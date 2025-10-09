@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Options;
 
@@ -10,9 +11,9 @@ namespace Farm.Web.Api.Services.SlicerServices;
 public class LocalSlicerFileStorage : ISlicerFileStorage
 {
     private readonly LocalFileStorageOptions _options;
-    private readonly ILogger<LocalSlicerFileStorage> _logger;
+    private readonly IUnifiedLoggingService _logger;
 
-    public LocalSlicerFileStorage(IOptions<LocalFileStorageOptions> options, ILogger<LocalSlicerFileStorage> logger)
+    public LocalSlicerFileStorage(IOptions<LocalFileStorageOptions> options, IUnifiedLoggingService logger)
     {
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -20,7 +21,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         // Ensure base directory exists
         if (!Directory.Exists(_options.BasePath))
         {
-            Directory.CreateDirectory(_options.BasePath);
+            _ = Directory.CreateDirectory(_options.BasePath);
         }
     }
 
@@ -36,7 +37,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                Directory.CreateDirectory(directory);
+                _ = Directory.CreateDirectory(directory);
             }
 
             await using FileStream fileWriteStream = File.Create(filePath);
@@ -45,13 +46,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             // Persist minimal metadata (e.g., content type) alongside the file
             TryWriteSidecarMetadata(filePath, contentType);
 
-            _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
+            _logger.LogDebug($"Uploaded file {key} to {filePath}");
 
             return GetFileUrl(key);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to upload file {Key}", key);
+            _logger.LogError($"Failed to upload file {key}: {ex.Message}");
             throw;
         }
     }
@@ -68,7 +69,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                Directory.CreateDirectory(directory);
+                _ = Directory.CreateDirectory(directory);
             }
 
             await File.WriteAllBytesAsync(filePath, fileData, cancellationToken);
@@ -76,13 +77,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             // Persist minimal metadata (e.g., content type) alongside the file
             TryWriteSidecarMetadata(filePath, contentType);
 
-            _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
+            _logger.LogDebug($"Uploaded file {key} to {filePath}");
 
             return GetFileUrl(key);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to upload file {Key}", key);
+            _logger.LogError($"Failed to upload file {key}: {ex.Message}");
             throw;
         }
     }
@@ -100,12 +101,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             }
 
             Stream fileStream = (Stream)File.OpenRead(filePath);
-            _logger.LogDebug("Downloaded file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
+            _logger.LogDebug($"Downloaded file {keyOrUrl} from {filePath}");
             return Task.FromResult(fileStream);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download file {KeyOrUrl}", keyOrUrl);
+            _logger.LogError($"Failed to download file {keyOrUrl}: {ex.Message}");
             throw;
         }
     }
@@ -123,12 +124,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             }
 
             byte[] fileBytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
-            _logger.LogDebug("Downloaded file bytes {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
+            _logger.LogDebug($"Downloaded file bytes {keyOrUrl} from {filePath}");
             return fileBytes;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download file bytes {KeyOrUrl}", keyOrUrl);
+            _logger.LogError($"Failed to download file bytes {keyOrUrl}: {ex.Message}");
             throw;
         }
     }
@@ -143,7 +144,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to check if file exists {KeyOrUrl}", keyOrUrl);
+            _logger.LogError($"Failed to check if file exists {keyOrUrl}: {ex.Message}");
             return Task.FromResult(false);
         }
     }
@@ -158,13 +159,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             if (File.Exists(filePath))
             {
                 File.Delete(filePath);
-                _logger.LogDebug("Deleted file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
+                _logger.LogDebug($"Deleted file {keyOrUrl} from {filePath}");
             }
             return Task.CompletedTask;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete file {KeyOrUrl}", keyOrUrl);
+            _logger.LogError($"Failed to delete file {keyOrUrl}: {ex.Message}");
             throw;
         }
     }
@@ -195,12 +196,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 ETag = GenerateETag(fileInfo)
             };
             meta.CustomMetadata["FilePath"] = filePath;
+            // Store extension as-is; consumers should compare using OrdinalIgnoreCase when needed
             meta.CustomMetadata["Extension"] = fileInfo.Extension;
             return Task.FromResult<SlicerFileMetadata?>(meta);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get file metadata {KeyOrUrl}", keyOrUrl);
+            _logger.LogError($"Failed to get file metadata {keyOrUrl}: {ex.Message}");
             throw;
         }
     }
@@ -241,7 +243,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to delete temp file {File}", file);
+                    _logger.LogWarning($"Failed to delete temp file {file}: {ex.Message}");
                 }
             }
 
@@ -258,15 +260,15 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to delete empty temp directory {Directory}", dir);
+                    _logger.LogWarning($"Failed to delete empty temp directory {dir}: {ex.Message}");
                 }
             }
 
-            _logger.LogInformation("Cleaned up {DeletedCount} temp files older than {MaxAge}", deletedCount, maxAge);
+            _logger.LogInformation($"Cleaned up {deletedCount} temp files older than {maxAge}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cleanup temp files");
+            _logger.LogError($"Failed to cleanup temp files: {ex.Message}");
             throw;
         }
     }
@@ -340,18 +342,39 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private static string GetContentType(string extension)
     {
-        return extension.ToLowerInvariant() switch
+        if (extension.Equals(".stl", StringComparison.OrdinalIgnoreCase))
         {
-            ".stl" => "model/stl",
-            ".obj" => "model/obj",
-            ".3mf" => "application/vnd.ms-3mfdocument",
-            ".ply" => "model/ply",
-            ".gcode" => "text/plain",
-            ".json" => "application/json",
-            ".txt" => "text/plain",
-            ".log" => "text/plain",
-            _ => "application/octet-stream"
-        };
+            return "model/stl";
+        }
+        if (extension.Equals(".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/obj";
+        }
+        if (extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application/vnd.ms-3mfdocument";
+        }
+        if (extension.Equals(".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/ply";
+        }
+        if (extension.Equals(".gcode", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+        if (extension.Equals(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application/json";
+        }
+        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+        if (extension.Equals(".log", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+        return "application/octet-stream";
     }
 
     private static string GenerateETag(System.IO.FileInfo fileInfo)
@@ -374,7 +397,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to write sidecar metadata for {FilePath}", filePath);
+            _logger.LogWarning($"Failed to write sidecar metadata for {filePath}: {ex.Message}");
         }
     }
 
@@ -396,7 +419,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read sidecar metadata for {FilePath}", filePath);
+            _logger.LogWarning($"Failed to read sidecar metadata for {filePath}: {ex.Message}");
         }
         return null;
     }

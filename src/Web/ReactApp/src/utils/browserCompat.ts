@@ -4,9 +4,11 @@ const detectBrowser = () => {
   const isVSCodeSimpleBrowser = userAgent.includes('Code/') || userAgent.includes('Electron/');
   const isModuleSupported = 'noModule' in document.createElement('script');
   
-  console.log('User Agent:', userAgent);
-  console.log('Is VS Code Simple Browser:', isVSCodeSimpleBrowser);
-  console.log('ES Module Support:', isModuleSupported);
+  if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.browserCompat) {
+    console.log('User Agent:', userAgent);
+    console.log('Is VS Code Simple Browser:', isVSCodeSimpleBrowser);
+    console.log('ES Module Support:', isModuleSupported);
+  }
   
   if (isVSCodeSimpleBrowser && !isModuleSupported) {
     document.body.innerHTML = `

@@ -1,5 +1,8 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -10,10 +13,18 @@ namespace Farm.Web.Api.Controllers;
 /// Provides endpoints for integrating with Spoolman filament management system.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/spoolman")]
 [Tags("Spoolman Integration")]
-public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory httpClientFactory, NetworkUrlRewriteService urlRewriter) : ControllerBase
+public class SpoolmanController(
+    ISpoolmanService spoolman,
+    IHttpClientFactory httpClientFactory,
+    Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService urlRewriter,
+    ISettingsService settingsService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
+    private readonly ISettingsService _settingsService = settingsService;
+    private readonly IUnifiedLoggingService _logger = logger;
+
     /// <summary>
     /// Tests connectivity to an arbitrary Spoolman base URL without persisting configuration.
     /// Used by the setup wizard before saving settings. Always returns 200 with success flag.
@@ -48,54 +59,63 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
         string normalized = rewrittenUrl.TrimEnd('/');
 
         string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
-        foreach (string path in probePaths)
+        try
         {
-            try
+            foreach (string path in probePaths)
             {
-                HttpClient client = httpClientFactory.CreateClient("SpoolmanTestProbe");
-                client.Timeout = TimeSpan.FromSeconds(5);
-                using HttpResponseMessage resp = await client.GetAsync(normalized + path, ct);
-                if (resp.IsSuccessStatusCode)
+                try
                 {
-                    string? version = null;
-                    try
+                    HttpClient client = httpClientFactory.CreateClient("SpoolmanTestProbe");
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    using HttpResponseMessage resp = await client.GetAsync(normalized + path, ct);
+                    if (resp.IsSuccessStatusCode)
                     {
-                        using Stream stream = await resp.Content.ReadAsStreamAsync(ct);
-                        using JsonDocument doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
-                        JsonElement root = doc.RootElement;
-                        // Try common version property names
-                        if (root.TryGetProperty("version", out JsonElement vProp) && vProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        string? version = null;
+                        try
                         {
-                            version = vProp.GetString();
+                            using Stream stream = await resp.Content.ReadAsStreamAsync(ct);
+                            using JsonDocument doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                            JsonElement root = doc.RootElement;
+                            // Try common version property names
+                            if (root.TryGetProperty("version", out JsonElement vProp) && vProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                version = vProp.GetString();
+                            }
+                            else if (root.TryGetProperty("spoolman_version", out JsonElement svProp) && svProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                version = svProp.GetString();
+                            }
                         }
-                        else if (root.TryGetProperty("spoolman_version", out JsonElement svProp) && svProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        catch { /* ignore JSON parse failures */ }
+
+                        return Ok(new
                         {
-                            version = svProp.GetString();
-                        }
+                            success = true,
+                            normalizedUrl = normalized,
+                            endpointTried = path,
+                            statusCode = (int)resp.StatusCode,
+                            version
+                        });
                     }
-                    catch { /* ignore JSON parse failures */ }
-
-                    return Ok(new
-                    {
-                        success = true,
-                        normalizedUrl = normalized,
-                        endpointTried = path,
-                        statusCode = (int)resp.StatusCode,
-                        version
-                    });
                 }
-            }
-            catch (Exception ex)
-            {
-                if (path == probePaths[^1])
+                catch (Exception ex)
                 {
-                    (string? category, string? message) = CategorizeException(ex);
-                    return Ok(new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
+                    if (path == probePaths[^1])
+                    {
+                        // Log only the last failure
+                        _logger.LogError(ex, "Unhandled exception in /api/spoolman/test: {Message}", ex.Message);
+                        (string? category, string? message) = CategorizeException(ex);
+                        return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
+                    }
                 }
             }
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
         }
-
-        return Ok(new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception in /api/spoolman/test: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, normalizedUrl = normalized, message = $"Internal Server Error: {ex.Message}" });
+        }
     }
 
     private static (string category, string message) CategorizeException(Exception ex)
@@ -147,6 +167,17 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult SetConfig([FromBody] SpoolmanConfigDto? config)
     {
+        // Extra logging for 401 diagnostics
+        System.Security.Claims.ClaimsPrincipal user = HttpContext.User;
+        if (user.Identity == null || !user.Identity.IsAuthenticated)
+        {
+            _logger.LogWarning("[SpoolmanController] SetConfig: User is not authenticated. Claims: {Claims}", string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
+        }
+        else
+        {
+            string? name = user.Identity != null ? user.Identity.Name : "(null)";
+            _logger.LogInformation("[SpoolmanController] SetConfig: Authenticated user: {Name}. Claims: {Claims}", name, string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
+        }
         if (config is null)
         {
             return BadRequest("Config body is required.");
@@ -187,28 +218,36 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
         // Use a minimal endpoint (info or health). Try /api/v1/health first, fallback to /api/v1/info
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
         string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
-        foreach (string p in probePaths)
+        try
         {
-            try
+            foreach (string p in probePaths)
             {
-                HttpClient client = httpClientFactory.CreateClient("SpoolmanHealthProbe");
-                client.Timeout = TimeSpan.FromSeconds(5);
-                HttpResponseMessage resp = await client.GetAsync(baseUrl + p, ct);
-                if (resp.IsSuccessStatusCode)
+                try
                 {
-                    return Ok(new { configured = true, success = true, endpoint = p, statusCode = (int)resp.StatusCode });
+                    HttpClient client = httpClientFactory.CreateClient("SpoolmanHealthProbe");
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    HttpResponseMessage resp = await client.GetAsync(baseUrl + p, ct);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        return Ok(new { configured = true, success = true, endpoint = p, statusCode = (int)resp.StatusCode });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (p == probePaths[^1])
+                    {
+                        _logger.LogError(ex, "Unhandled exception in /api/spoolman/health: {Message}", ex.Message);
+                        return StatusCode(StatusCodes.Status500InternalServerError, new { configured = true, success = false, message = $"Internal Server Error: {ex.Message}" });
+                    }
                 }
             }
-            catch (Exception ex)
-            {
-                // try next
-                if (p == probePaths[^1])
-                {
-                    return Ok(new { configured = true, success = false, message = ex.Message });
-                }
-            }
+            return StatusCode(StatusCodes.Status500InternalServerError, new { configured = true, success = false, message = "Probe endpoints failed" });
         }
-        return Ok(new { configured = true, success = false, message = "Probe endpoints failed" });
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception in /api/spoolman/health: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { configured = true, success = false, message = $"Internal Server Error: {ex.Message}" });
+        }
     }
 
     /// <summary>
@@ -219,8 +258,16 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public IActionResult ClearConfig()
     {
-        spoolman.ClearConfig();
-        return NoContent();
+        try
+        {
+            spoolman.ClearConfig();
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception in /api/spoolman/config (DELETE): {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -237,12 +284,15 @@ public class SpoolmanController(SpoolmanService spoolman, IHttpClientFactory htt
     {
         try
         {
-            var results = await spoolman.ScanNetworkForSpoolmanAsync(ct);
+            NetworkDiscoverySettings settings = _settingsService.Get<NetworkDiscoverySettings>();
+            List<string> ranges = settings?.DiscoverySubnets?.ToList() ?? new List<string>();
+            IEnumerable<SpoolmanDiscoveryResult> results = await spoolman.ScanNetworkForSpoolmanAsync(ranges, ct);
             return Ok(results);
         }
         catch (Exception ex)
         {
-            return Ok(new[]
+            _logger.LogError(ex, "Unhandled exception in /api/spoolman/scan-network: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new[]
             {
                 new SpoolmanDiscoveryResult(
                     Url: "",

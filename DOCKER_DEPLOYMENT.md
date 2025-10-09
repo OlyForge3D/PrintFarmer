@@ -230,7 +230,7 @@ ConnectionStrings__Default=Data Source=/data/farm.db
 ### PostgreSQL (Recommended for Production)
 ```bash
 DB_PROVIDER=postgres
-ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=postgres;Password=your_password
+ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=postgres;Password=your_password
 ```
 - **Pros:** Robust, supports high concurrency, excellent performance
 - **Cons:** Requires separate container
@@ -238,7 +238,7 @@ ConnectionStrings__Postgres=Host=postgres;Database=printfarmer;Username=postgres
 ### SQL Server
 ```bash
 DB_PROVIDER=sqlserver
-ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Password=YourStrong!Password;TrustServerCertificate=True;
+ConnectionStrings__Default=Server=sqlserver;Database=printfarmer;User Id=sa;Password=YourStrong!Password;TrustServerCertificate=True;
 ```
 - **Pros:** Enterprise features, excellent tooling
 - **Cons:** Larger resource requirements, licensing considerations
@@ -246,10 +246,12 @@ ConnectionStrings__SqlServer=Server=sqlserver;Database=printfarmer;User Id=sa;Pa
 ### MySQL
 ```bash
 DB_PROVIDER=mysql
-ConnectionStrings__MySql=Server=mysql;Database=printfarmer;User=root;Password=your_password;
+ConnectionStrings__Default=Server=mysql;Database=printfarmer;User=root;Password=your_password;
 ```
 - **Pros:** Widely supported, good performance
 - **Cons:** Some compatibility considerations
+
+**Important:** All database providers use the unified `ConnectionStrings__Default` environment variable. The connection string format varies based on the selected provider.
 
 ## Network Configuration
 

@@ -1,6 +1,6 @@
 // This file contains unified logging hooks that need to handle various data types
-// TypeScript 'any' is acceptable here for logging flexible data structures
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// Prefer `unknown` for external inputs and narrow before reading properties.
+// No eslint disable needed; prefer narrow casts where necessary
 
 import { useEffect, useCallback, useMemo } from 'react';
 import { unifiedLogger, loggerExtensions, type LogEntry } from '../services/unifiedLogging';
@@ -34,38 +34,38 @@ export function useUnifiedLogging(options: UseUnifiedLoggingOptions = {}) {
 
   // Create component-specific logger methods
   const logger = {
-    debug: useCallback((message: string, context?: any) => {
+    debug: useCallback((message: string, context?: unknown) => {
       unifiedLogger.debug(message, context, component);
     }, [component]),
 
-    info: useCallback((message: string, context?: any) => {
+    info: useCallback((message: string, context?: unknown) => {
       unifiedLogger.info(message, context, component);
     }, [component]),
 
-    warn: useCallback((message: string, context?: any) => {
+    warn: useCallback((message: string, context?: unknown) => {
       unifiedLogger.warn(message, context, component);
     }, [component]),
 
-    error: useCallback((message: string, context?: any) => {
+    error: useCallback((message: string, context?: unknown) => {
       unifiedLogger.error(message, context, component);
     }, [component]),
 
-    logUpdate: useCallback((details?: any) => {
+    logUpdate: useCallback((details?: unknown) => {
       if (logLifecycle) {
         unifiedLogger.logComponentLifecycle(component, 'update', details);
       }
     }, [component, logLifecycle]),
 
-    logUserAction: useCallback((action: string, details?: any) => {
+    logUserAction: useCallback((action: string, details?: unknown) => {
       unifiedLogger.logUserAction(action, component, details);
     }, [component]),
 
-    logApiRequest: useCallback((method: string, url: string, statusCode: number, duration: number, details?: any) => {
-      unifiedLogger.logApiRequest(method, url, statusCode, duration, details);
+    logApiRequest: useCallback((method: string, url: string, statusCode: number, duration: number, details?: unknown) => {
+  unifiedLogger.logApiRequest(method, url, statusCode, duration, details as unknown as Record<string, unknown>);
     }, []),
 
-    logSignalREvent: useCallback((event: string, connectionState: string, details?: any) => {
-      unifiedLogger.logSignalREvent(event, connectionState, details);
+    logSignalREvent: useCallback((event: string, connectionState: string, details?: unknown) => {
+  unifiedLogger.logSignalREvent(event, connectionState, details as unknown as Record<string, unknown>);
     }, []),
 
     logPrinterOperation: loggerExtensions.logPrinterOperation,
@@ -114,7 +114,7 @@ export function useApiLogging() {
     promise: Promise<T>,
     method: string,
     url: string,
-    requestDetails?: any
+    requestDetails?: unknown
   ): Promise<T> => {
     return (async (): Promise<T> => {
       const startTime = Date.now();
@@ -124,22 +124,24 @@ export function useApiLogging() {
         const duration = Date.now() - startTime;
         
         unifiedLogger.logApiRequest(method, url, 200, duration, {
-          ...requestDetails,
+          ...(requestDetails as unknown as Record<string, unknown>),
           success: true,
         });
         
         return result;
-      } catch (error: any) {
+      } catch (error: unknown) {
         const duration = Date.now() - startTime;
-        const statusCode = error.response?.status || 500;
-        
+        // Narrow error to an object with optional response/status and message
+        const err = error as { response?: { status?: number }; message?: string; name?: string };
+        const statusCode = err.response?.status || 500;
+
         unifiedLogger.logApiRequest(method, url, statusCode, duration, {
-          ...requestDetails,
+          ...(requestDetails as unknown as Record<string, unknown>),
           success: false,
-          error: error.message,
-          errorType: error.name,
-        });
-        
+          error: err.message ?? String(error),
+          errorType: err.name ?? 'Error',
+  } as Record<string, unknown>);
+
         throw error;
       }
     })();
@@ -150,16 +152,16 @@ export function useApiLogging() {
 
 // Hook for SignalR connection logging
 export function useSignalRLogging() {
-  const logConnectionEvent = useCallback((event: string, connectionState: string, details?: any) => {
-    unifiedLogger.logSignalREvent(event, connectionState, details);
+  const logConnectionEvent = useCallback((event: string, connectionState: string, details?: unknown) => {
+  unifiedLogger.logSignalREvent(event, connectionState, details as unknown as Record<string, unknown>);
   }, []);
 
-  const logMessageReceived = useCallback((messageType: string, payload?: any) => {
-    unifiedLogger.info(`SignalR message received: ${messageType}`, payload, 'SignalR');
+  const logMessageReceived = useCallback((messageType: string, payload?: unknown) => {
+  unifiedLogger.info(`SignalR message received: ${messageType}`, payload as unknown as Record<string, unknown>, 'SignalR');
   }, []);
 
-  const logMessageSent = useCallback((messageType: string, payload?: any) => {
-    unifiedLogger.info(`SignalR message sent: ${messageType}`, payload, 'SignalR');
+  const logMessageSent = useCallback((messageType: string, payload?: unknown) => {
+  unifiedLogger.info(`SignalR message sent: ${messageType}`, payload as unknown as Record<string, unknown>, 'SignalR');
   }, []);
 
   return { logConnectionEvent, logMessageReceived, logMessageSent };
@@ -167,11 +169,11 @@ export function useSignalRLogging() {
 
 // Hook for form logging
 export function useFormLogging(formName: string) {
-  const logger = useCallback((success: boolean, validationErrors?: any, details?: any) => {
-    loggerExtensions.logFormSubmission(formName, success, validationErrors, details);
+  const logger = useCallback((success: boolean, validationErrors?: unknown, details?: unknown) => {
+  loggerExtensions.logFormSubmission(formName, success, validationErrors as unknown as Record<string, unknown>, details as unknown as Record<string, unknown>);
   }, [formName]);
 
-  const logFieldChange = useCallback((fieldName: string, newValue: any, oldValue?: any) => {
+  const logFieldChange = useCallback((fieldName: string, newValue: unknown, oldValue?: unknown) => {
     unifiedLogger.debug(`Form field changed: ${fieldName}`, {
       formName,
       fieldName,

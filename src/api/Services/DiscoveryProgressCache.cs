@@ -28,6 +28,6 @@ public class DiscoveryProgressCache : IDiscoveryProgressCache
 
     public void Remove(string sessionId)
     {
-        _cache.TryRemove(sessionId, out _);
+        _ = _cache.TryRemove(sessionId, out _);
     }
 }

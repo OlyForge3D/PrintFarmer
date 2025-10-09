@@ -1,6 +1,8 @@
 
-import { GcodeHarvestOperation } from '@/types/api';
+import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import { IndexedFilesList } from './IndexedFilesList';
+import { getHarvestErrorInfo, getPhaseDisplay } from '@/utils/harvestErrorHelper';
+import { ErrorIcon } from './ErrorIcon';
 
 interface HarvestOperationDetailsProps {
   operation: GcodeHarvestOperation;
@@ -22,6 +24,11 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
     const sec = Math.floor((ms % 60000) / 1000);
     duration = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
   }
+
+  // Status flags
+  const isFailed = operation.status === GcodeHarvestStatus.Failed;
+  const isCompleted = operation.status === GcodeHarvestStatus.Completed;
+  const isCancelled = operation.status === GcodeHarvestStatus.Cancelled;
 
   const summaryTable = (
     <table className="w-full text-sm mb-4 border border-pf-border rounded bg-pf-bg-0">
@@ -67,12 +74,6 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
             </div>
           </td>
         </tr>
-        {operation.error && (
-          <tr>
-            <th className="text-left font-medium px-4 py-2 text-red-600 dark:text-red-400">Error</th>
-            <td className="px-4 py-2 text-red-600 dark:text-red-400">{operation.error}</td>
-          </tr>
-        )}
       </tbody>
     </table>
   );
@@ -94,6 +95,84 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
       <div className="mb-4">
         {summaryTable}
       </div>
+
+      {/* Enhanced Error Banner */}
+      {(isFailed || operation.error) && (() => {
+        const errorInfo = getHarvestErrorInfo(operation);
+        if (!errorInfo) return null;
+
+        return (
+          <div className="bg-red-50 border border-red-300 rounded-lg p-3 mb-4">
+            <div className="flex items-start gap-3">
+              <ErrorIcon type={errorInfo.iconType} />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-red-800 text-sm">{errorInfo.title}</p>
+                <p className="text-red-700 text-sm mt-1 break-words">{errorInfo.message}</p>
+                
+                {errorInfo.phase && (
+                  <p className="text-red-600 text-xs mt-1 italic">
+                    Failed {getPhaseDisplay(errorInfo.phase)}
+                  </p>
+                )}
+                
+                {errorInfo.failedResource && (
+                  <p className="text-red-600 text-xs mt-1 font-mono break-all">
+                    Resource: {errorInfo.failedResource}
+                  </p>
+                )}
+                
+                {errorInfo.suggestion && (
+                  <div className="mt-2 p-2 bg-red-100 border border-red-200 rounded text-xs text-red-900">
+                    <p className="font-semibold">💡 Suggestion:</p>
+                    <p className="mt-0.5">{errorInfo.suggestion}</p>
+                  </div>
+                )}
+                
+                {errorInfo.canRetry && (
+                  <p className="text-green-700 text-xs mt-2 font-medium">
+                    🔄 This operation can be retried
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Cancelled Banner */}
+      {isCancelled && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-4">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-yellow-800 text-sm">Harvest Cancelled</p>
+              <p className="text-yellow-700 text-sm mt-1">
+                The harvest operation was cancelled by the user.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Banner */}
+      {isCompleted && !operation.error && (
+        <div className="bg-green-50 border border-green-300 rounded-lg p-3 mb-4">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-green-800 text-sm">Harvest Completed Successfully</p>
+              <p className="text-green-700 text-sm mt-1">
+                Successfully processed {operation.filesFound} files: {operation.filesAdded} added, {operation.filesSkipped} skipped, {operation.filesErrored} errors
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {Object.keys(perFileProgress).length > 0 && (
         <div className="mb-4">
           <div className="text-md font-semibold text-pf-primary mb-1">Per-File Progress</div>

@@ -8,14 +8,15 @@ This document describes the unified logging solution implemented for PrintFarmer
 
 ### Backend (.NET API)
 
-The backend unified logging system consists of three main components:
+The backend unified logging system now writes all logs directly to disk (file-based logging) using the standard .NET logging infrastructure. No logs are stored in the database. All log entries are also captured as OpenTelemetry spans for distributed tracing and observability.
 
 #### 1. UnifiedLoggingService (`/src/api/Services/Telemetry/UnifiedLoggingService.cs`)
 
-**Purpose**: Central logging service that integrates structured logging with OpenTelemetry tracing.
+**Purpose**: Central logging service that integrates structured file-based logging with OpenTelemetry tracing.
 
 **Key Features**:
 - Implements `IUnifiedLoggingService` interface with standard log levels (Debug, Info, Warning, Error, Critical)
+- Writes all logs to disk (file-based, e.g., `/logs/api.log`, `/logs/worker.log`)
 - Creates OpenTelemetry activities/spans for each log entry
 - Context-aware logging with custom categories
 - Extension methods for domain-specific logging (Printer operations, Slicer operations, File operations, API requests)
@@ -24,22 +25,20 @@ The backend unified logging system consists of three main components:
 ```csharp
 public class MyController : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
+  private readonly IUnifiedLoggingService _logger;
     
-    public MyController(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
+  public MyController(IUnifiedLoggingService logger)
+  {
+    _logger = logger;
+  }
     
-    public async Task<IActionResult> GetPrinters()
-    {
-        _logger.LogInformation("Fetching printers list");
-        
-        // Use extension methods for specific operations
-        _logger.LogPrinterOperation("fetch_list", "all", true, "Retrieved 5 printers");
-        
-        return Ok(printers);
-    }
+  public async Task<IActionResult> GetPrinters()
+  {
+    _logger.LogInformation("Fetching printers list");
+    // Use extension methods for specific operations
+    _logger.LogPrinterOperation("fetch_list", "all", true, "Retrieved 5 printers");
+    return Ok(printers);
+  }
 }
 ```
 
@@ -159,9 +158,10 @@ Every log entry creates an OpenTelemetry span with:
   - `log.session_id`: Frontend session identifier
   - `log.user_id`: Current user identifier (if available)
 
+
 ### 3. Storage and Export
 
-**Backend**: Logs are sent to configured OpenTelemetry backends (Jaeger, Grafana, etc.)
+**Backend**: Logs are written to disk (file-based, e.g., `/logs/api.log`, `/logs/worker.log`) and sent to configured OpenTelemetry backends (Jaeger, Grafana, etc.).
 
 **Frontend**: 
 - Logs stored in browser sessionStorage (last 1000 entries)
@@ -210,7 +210,7 @@ public async Task<IActionResult> CreatePrinter([FromBody] PrinterDto dto)
     catch (Exception ex)
     {
         _logger.LogError("Failed to create printer", new { Name = dto.Name, Error = ex.Message });
-        return StatusCode(500);
+        return StatusCode(StatusCodes.Status500InternalServerError);
     }
 }
 ```
@@ -381,6 +381,7 @@ function usePrinterSignalR() {
 3. **Log Retention Policies**: Configurable retention and cleanup policies
 4. **Performance Metrics**: Built-in performance impact monitoring
 5. **Alerting Integration**: Integration with monitoring and alerting systems
+6. **Log Harvester**: A future log harvester service will collect and stitch together logs from all services for unified debugging and analysis.
 
 ---
 

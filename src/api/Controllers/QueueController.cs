@@ -1,5 +1,6 @@
-﻿using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,18 +11,13 @@ namespace Farm.Web.Api.Controllers;
 /// Controller for managing print job queues and job assignment
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/queue")]
 [Tags("Job Queue Management")]
-public class QueueController : ControllerBase
-{
-    private readonly ILogger<QueueController> _logger;
-    private readonly AppDbContext _context;
 
-    public QueueController(ILogger<QueueController> logger, AppDbContext context)
-    {
-        _logger = logger;
-        _context = context;
-    }
+public class QueueController(IUnifiedLoggingService logger, AppDbContext context) : ControllerBase
+{
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly AppDbContext _context = context;
 
     /// <summary>
     /// Get all printer queues with current jobs
@@ -129,7 +125,7 @@ public class QueueController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get printer queue for printer {PrinterId}", printerId);
+            _logger.LogError(ex, $"Failed to get printer queue for printer {printerId}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get printer queue");
         }
     }
@@ -187,8 +183,8 @@ public class QueueController : ControllerBase
                 QueuedAt = DateTime.UtcNow
             };
 
-            _context.PrintJobs.Add(printJob);
-            await _context.SaveChangesAsync();
+            _ = _context.PrintJobs.Add(printJob);
+            _ = await _context.SaveChangesAsync();
 
             // Return job information
             JobQueuePrintJobDto result = new()
@@ -209,7 +205,7 @@ public class QueueController : ControllerBase
                 UpdatedAt = printJob.UpdatedAt
             };
 
-            _logger.LogInformation("Job added to queue: {JobId} for printer {PrinterId}", printJob.Id, assignedPrinterId);
+            _logger.LogInformation($"Job added to queue: {printJob.Id} for printer {assignedPrinterId}");
             return Created($"/api/queue/jobs/{printJob.Id}", result);
         }
         catch (Exception ex)
@@ -290,15 +286,15 @@ public class QueueController : ControllerBase
 
         try
         {
-            _context.PrintJobs.Remove(job);
-            await _context.SaveChangesAsync();
+            _ = _context.PrintJobs.Remove(job);
+            _ = await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Job removed from queue: {JobId}", id);
+            _logger.LogInformation($"Job removed from queue: {id}");
             return NoContent();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to remove job from queue: {JobId}", id);
+            _logger.LogError(ex, $"Failed to remove job from queue: {id}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to remove job from queue");
         }
     }
@@ -330,7 +326,7 @@ public class QueueController : ControllerBase
             job.Priority = request.Priority;
             job.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             JobQueuePrintJobDto result = new()
             {
@@ -350,12 +346,12 @@ public class QueueController : ControllerBase
                 UpdatedAt = job.UpdatedAt
             };
 
-            _logger.LogInformation("Job priority updated: {JobId} to {Priority}", id, request.Priority);
+            _logger.LogInformation($"Job priority updated: {id} to {request.Priority}");
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to update job priority: {JobId}", id);
+            _logger.LogError(ex, $"Failed to update job priority: {id}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to update job priority");
         }
     }

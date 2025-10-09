@@ -29,15 +29,15 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         fileIds,
       });
       toast.success(`Imported: ${result.importedCount}, Skipped: ${result.skippedCount}, Failed: ${result.failedCount}`);
-      setFiles(prev => prev.map(f =>
-        result.importedFileIds.includes(f.id)
-          ? { ...f, status: HarvestFileStatus.Complete, error: '' }
-          : result.skippedFileIds.includes(f.id)
-            ? { ...f, status: HarvestFileStatus.Skipped, error: '' }
-            : result.failedFileIds.includes(f.id)
-              ? { ...f, status: HarvestFileStatus.Failed, error: result.errors?.[f.id] || f.error }
-              : f
-      ));
+      setFiles(prev => prev.map(f => {
+        const imported = Array.isArray(result.importedFileIds) && result.importedFileIds.includes(f.id);
+        const skipped = Array.isArray(result.skippedFileIds) && result.skippedFileIds.includes(f.id);
+        const failed = Array.isArray(result.failedFileIds) && result.failedFileIds.includes(f.id);
+        if (imported) return { ...f, status: HarvestFileStatus.Complete, error: '' };
+        if (skipped) return { ...f, status: HarvestFileStatus.Skipped, error: '' };
+        if (failed) return { ...f, status: HarvestFileStatus.Failed, error: result.errors?.[f.id] || f.error };
+        return f;
+      }));
       setSelected(new Set());
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : 'Unknown error';
@@ -96,8 +96,9 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       const updated: Partial<DiscoveredGcodeFileDto> = {
         id: evt.fileId,
         filePath: evt.filePath,
+        printerPath: evt.filePath,
         fileName: evt.fileName,
-        size: evt.fileSize,
+        fileSizeBytes: evt.fileSize,
         status,
         error: evt.error
       };
@@ -192,10 +193,14 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
               <th className="p-2 border-b border-pf-border"><input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" /></th>
               <th className="p-2 border-b border-pf-border text-left">File</th>
               <th className="p-2 border-b border-pf-border text-right">Size</th>
+              <th className="p-2 border-b border-pf-border text-left">Slicer</th>
+              <th className="p-2 border-b border-pf-border text-left">Material</th>
+              <th className="p-2 border-b border-pf-border text-center">Nozzle</th>
+              <th className="p-2 border-b border-pf-border text-right">Print Time</th>
+              <th className="p-2 border-b border-pf-border text-right">Filament</th>
               <th className="p-2 border-b border-pf-border text-center">Status</th>
               <th className="p-2 border-b border-pf-border text-center">Error</th>
               <th className="p-2 border-b border-pf-border text-center">Modified</th>
-              <th className="p-2 border-b border-pf-border text-center">Meta</th>
             </tr>
           </thead>
           <tbody>
@@ -215,19 +220,48 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                   <td className="p-2 border-b border-pf-border text-center">
                     <input type="checkbox" checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
                   </td>
-                  <td className="p-2 border-b border-pf-border font-mono text-pf-primary flex items-center gap-2" title={file.filePath}>
-                    {file.thumbnailUrl && (
-                      <img
-                        src={file.thumbnailUrl}
-                        alt={file.fileName + ' thumbnail'}
-                        className="w-8 h-8 min-w-[32px] min-h-[32px] rounded shadow border border-pf-border bg-pf-surface object-cover"
-                        loading="lazy"
-                      />
-                    )}
-                    <span>{file.fileName}</span>
+                  <td className="p-2 border-b border-pf-border font-mono text-pf-primary" title={file.filePath}>
+                    <div className="flex items-center gap-2">
+                      {file.thumbnailUrl && (
+                        <img
+                          src={file.thumbnailUrl}
+                          alt={file.fileName + ' thumbnail'}
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded shadow border border-pf-border bg-pf-surface object-cover"
+                          loading="lazy"
+                        />
+                      )}
+                      <span>{file.fileName}</span>
+                    </div>
                   </td>
                   <td className="p-2 border-b border-pf-border text-right text-pf-muted">
-                    {(file.size / 1024).toFixed(1)} KB
+                    {(file.fileSizeBytes / 1024).toFixed(1)} KB
+                  </td>
+                  <td className="p-2 border-b border-pf-border text-left text-pf-muted">
+                    {file.extractedSlicerName && (
+                      <span className="text-xs" title={`Slicer: ${file.extractedSlicerName}${file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}`}>
+                        {file.extractedSlicerName}{file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-2 border-b border-pf-border text-left text-pf-muted">
+                    {file.extractedMaterial && (
+                      <span className="text-xs" title={`Material: ${file.extractedMaterial}`}>{file.extractedMaterial}</span>
+                    )}
+                  </td>
+                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">
+                    {file.extractedNozzleDiameter && (
+                      <span className="text-xs" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>{file.extractedNozzleDiameter}mm</span>
+                    )}
+                  </td>
+                  <td className="p-2 border-b border-pf-border text-right text-pf-muted">
+                    {file.extractedPrintTime && (
+                      <span className="text-xs" title={`Est. print time: ${file.extractedPrintTime} min`}>{file.extractedPrintTime} min</span>
+                    )}
+                  </td>
+                  <td className="p-2 border-b border-pf-border text-right text-pf-muted">
+                    {file.extractedFilamentLength && (
+                      <span className="text-xs" title={`Filament: ${file.extractedFilamentLength}m`}>{file.extractedFilamentLength}m</span>
+                    )}
                   </td>
                   <td className="p-2 border-b border-pf-border text-center">
                     {status !== undefined && (
@@ -276,25 +310,6 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                     )}
                   </td>
                   <td className="p-2 border-b border-pf-border text-center text-pf-muted">{file.modifiedAt ? new Date(file.modifiedAt).toLocaleString() : ''}</td>
-                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">
-                    <div className="flex flex-col items-center gap-1">
-                      {file.extractedSlicerName && (
-                        <span className="text-xs" title={`Slicer: ${file.extractedSlicerName}${file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}`}>🖨️ {file.extractedSlicerName}{file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}</span>
-                      )}
-                      {file.extractedMaterial && (
-                        <span className="text-xs" title={`Material: ${file.extractedMaterial}`}>🧵 {file.extractedMaterial}</span>
-                      )}
-                      {file.extractedNozzleDiameter && (
-                        <span className="text-xs" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>⌀ {file.extractedNozzleDiameter}mm</span>
-                      )}
-                      {file.extractedPrintTime && (
-                        <span className="text-xs" title={`Est. print time: ${file.extractedPrintTime} min`}>⏱️ {file.extractedPrintTime} min</span>
-                      )}
-                      {file.extractedFilamentLength && (
-                        <span className="text-xs" title={`Filament: ${file.extractedFilamentLength}m`}>📏 {file.extractedFilamentLength}m</span>
-                      )}
-                    </div>
-                  </td>
                 </tr>
               );
             })}

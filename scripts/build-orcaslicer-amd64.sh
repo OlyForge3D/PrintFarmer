@@ -19,5 +19,8 @@ DOCKER_BUILDKIT=1 docker buildx build \
   -f Dockerfile.orcaslicer \
   --load .
 
+# Tag for local development stack compatibility
+docker tag "${TAG}" printfarmer-orca-worker:latest
+
 echo "[buildx] Build complete. To verify with strict mode using the amd64 image run:"
 echo "  ORCA_IMAGE=${TAG} scripts/verify-orcaslicer-worker.sh require-real"

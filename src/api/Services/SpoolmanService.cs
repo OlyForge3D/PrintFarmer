@@ -1,79 +1,46 @@
 ﻿using System.Globalization;
 using System.Net;
 using System.Text.Json;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
-public class SpoolmanService : ISpoolmanService
+public class SpoolmanService(HttpClient http, ISettingsService settingsService, IUnifiedLoggingService logger) : ISpoolmanService
 {
-    private readonly HttpClient http;
-    private readonly AppDbContext db;
-    private readonly ILogger<SpoolmanService> logger;
-    private readonly INetworkDiscoverySettingsService networkSettings;
-
-    public SpoolmanService(HttpClient http, AppDbContext db, ILogger<SpoolmanService> logger, INetworkDiscoverySettingsService networkSettings)
-    {
-        this.http = http;
-        this.db = db;
-        this.logger = logger;
-        this.networkSettings = networkSettings;
-    }
+    private readonly HttpClient http = http;
+    private readonly ISettingsService settingsService = settingsService;
+    private readonly IUnifiedLoggingService logger = logger;
 
     public SpoolmanConfigDto? GetConfig()
     {
-        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-        if (row is null)
+        SpoolmanSettings? settings = settingsService.Get<SpoolmanSettings>();
+        if (settings is null || string.IsNullOrWhiteSpace(settings.BaseUrl))
         {
-            // One-time migration from legacy JSON file if present
-            try
-            {
-                string legacyPath = Path.Combine(AppContext.BaseDirectory, "spoolman.config.json");
-                if (File.Exists(legacyPath))
-                {
-                    string text = File.ReadAllText(legacyPath);
-                    SpoolmanConfigDto? cfg = JsonSerializer.Deserialize<SpoolmanConfigDto>(text);
-                    if (cfg is not null && !string.IsNullOrWhiteSpace(cfg.BaseUrl))
-                    {
-                        SetConfig(cfg);
-                        row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-                    }
-                }
-            }
-            catch { }
+            return null;
         }
-        return row is null ? null : new SpoolmanConfigDto(row.BaseUrl);
+        return new SpoolmanConfigDto(settings.BaseUrl);
     }
 
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
         string? baseUrl = NormalizeBaseUrl(config.BaseUrl);
-        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-        if (row is null)
-        {
-            row = new SpoolmanConfig { Id = 1, BaseUrl = baseUrl ?? string.Empty };
-            db.SpoolmanConfigs.Add(row);
-        }
-        else
-        {
-            row.BaseUrl = baseUrl ?? string.Empty;
-            db.SpoolmanConfigs.Update(row);
-        }
-        db.SaveChanges();
+
+        SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
+        settings.BaseUrl = baseUrl ?? string.Empty;
+        settingsService.Save(settings);
     }
 
     public void ClearConfig()
     {
-        SpoolmanConfig? row = db.SpoolmanConfigs.FirstOrDefault(c => c.Id == 1);
-        if (row is not null)
-        {
-            db.SpoolmanConfigs.Remove(row);
-            db.SaveChanges();
-        }
+        SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
+        settings.BaseUrl = string.Empty;
+        settingsService.Save(settings);
     }
 
     private static string? NormalizeBaseUrl(string? url)
@@ -97,7 +64,7 @@ public class SpoolmanService : ISpoolmanService
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug("Spoolman not configured – returning empty spool list");
+            logger.LogDebug($"Spoolman not configured – returning empty spool list", null, null);
             return [];
         }
 
@@ -122,11 +89,11 @@ public class SpoolmanService : ISpoolmanService
                 {
                     if (result.AttemptedPages > 1)
                     {
-                        logger.LogInformation("Retrieved {Count} spools across {Pages} pages via endpoint {Endpoint}", result.Items.Count, result.AttemptedPages, ep);
+                        logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages via endpoint {ep}", null, null);
                     }
                     else
                     {
-                        logger.LogDebug("Retrieved {Count} spools via endpoint {Endpoint}", result.Items.Count, ep);
+                        logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}", null, null);
                     }
                     return result.Items;
                 }
@@ -134,20 +101,20 @@ public class SpoolmanService : ISpoolmanService
                 // If zero AND status success we still try next candidate, but log once
                 if (result.Success && result.Items.Count == 0)
                 {
-                    logger.LogWarning("Spoolman endpoint {Endpoint} returned 0 spools (status {Status}). Trying next candidate…", ep, result.LastStatusCode);
+                    logger.LogWarning($"Spoolman endpoint {ep} returned 0 spools (status {result.LastStatusCode}). Trying next candidate…", null, null);
                 }
                 else if (!result.Success)
                 {
-                    logger.LogDebug("Spoolman endpoint {Endpoint} non-success status {Status}; trying next candidate", ep, result.LastStatusCode);
+                    logger.LogDebug($"Spoolman endpoint {ep} non-success status {result.LastStatusCode}; trying next candidate", null, null);
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Exception when querying Spoolman endpoint {Endpoint}; trying next candidate", ep);
+                logger.LogDebug(ex, $"Exception when querying Spoolman endpoint {ep}; trying next candidate", null, null);
             }
         }
 
-        logger.LogWarning("All candidate Spoolman endpoints returned 0 spools or failed – returning empty list");
+        logger.LogWarning($"All candidate Spoolman endpoints returned 0 spools or failed – returning empty list", null, null);
         return [];
     }
 
@@ -160,7 +127,7 @@ public class SpoolmanService : ISpoolmanService
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug("Spoolman not configured – returning empty material list");
+            logger.LogDebug($"Spoolman not configured – returning empty material list", null, null);
             return [];
         }
 
@@ -168,12 +135,12 @@ public class SpoolmanService : ISpoolmanService
 
         // Candidate endpoints for materials
         string[] candidates =
-        [
+        {
             "/api/v1/material",
             "/api/v1/material/",
             "/api/v1/materials",   // fallback (in case of alternative routing)
             "/api/v1/materials/"
-        ];
+        };
 
         foreach (string ep in candidates)
         {
@@ -185,27 +152,27 @@ public class SpoolmanService : ISpoolmanService
                 {
                     if (result.AttemptedPages > 1)
                     {
-                        logger.LogInformation("Retrieved {Count} materials across {Pages} pages via endpoint {Endpoint}", result.Items.Count, result.AttemptedPages, ep);
+                        logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages via endpoint {ep}", null, null);
                     }
                     else
                     {
-                        logger.LogDebug("Retrieved {Count} materials via endpoint {Endpoint}", result.Items.Count, ep);
+                        logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}", null, null);
                     }
                     return result.Items;
                 }
                 else if (result.Success)
                 {
-                    logger.LogInformation("Successfully queried Spoolman material endpoint {Endpoint} but got 0 results", ep);
+                    logger.LogInformation($"Successfully queried Spoolman material endpoint {ep} but got 0 results", null, null);
                     return [];
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Exception when querying Spoolman material endpoint {Endpoint}; trying next candidate", ep);
+                logger.LogDebug(ex, $"Exception when querying Spoolman material endpoint {ep}; trying next candidate", null, null);
             }
         }
 
-        logger.LogWarning("All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list");
+        logger.LogWarning($"All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list", null, null);
         return [];
     }
 
@@ -239,14 +206,14 @@ public class SpoolmanService : ISpoolmanService
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug("Spoolman page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
+                logger.LogDebug($"Spoolman page {page} content-type {mediaType} not JSON; aborting");
                 break;
             }
 
             using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
             if (doc is null)
             {
-                logger.LogDebug("Spoolman page {Page} invalid JSON; aborting", page);
+                logger.LogDebug($"Spoolman page {page} invalid JSON; aborting");
                 break;
             }
 
@@ -258,7 +225,7 @@ public class SpoolmanService : ISpoolmanService
             }
 
             int added = collected.Count - before;
-            logger.LogDebug("Spoolman page {Page} added {Added} spools (total {Total})", page, added, collected.Count);
+            logger.LogDebug($"Spoolman page {page} added {added} spools (total {collected.Count})");
 
             // Pagination detection: common DRF style { "next": "url or null" }
             string? next = null;
@@ -324,14 +291,14 @@ public class SpoolmanService : ISpoolmanService
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug("Spoolman material page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
+                logger.LogDebug($"Spoolman material page {page} content-type {mediaType} not JSON; aborting");
                 break;
             }
 
             string json = await resp.Content.ReadAsStringAsync(ct);
             if (string.IsNullOrWhiteSpace(json))
             {
-                logger.LogDebug("Spoolman material page {Page} returned empty response; aborting", page);
+                logger.LogDebug($"Spoolman material page {page} returned empty response; aborting");
                 break;
             }
 
@@ -953,147 +920,47 @@ public class SpoolmanService : ISpoolmanService
     /// Scans the configured network ranges for available Spoolman instances.
     /// Uses the discovery settings to determine which network ranges to scan.
     /// </summary>
-    public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(CancellationToken ct = default)
+    public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default)
     {
-        // Get network ranges from discovery settings
-        var discoverySettings = networkSettings.GetSettings();
-        if (discoverySettings.NetworkRanges.Count == 0)
+        List<SpoolmanDiscoveryResult> results = new();
+        if (networkRanges == null)
         {
-            return new[] { new SpoolmanDiscoveryResult("", false, "No network ranges configured in discovery settings") };
+            results.Add(new SpoolmanDiscoveryResult("", false, "No network subnets configured in discovery settings"));
+            return results;
         }
 
-        // Scan each network range for Spoolman instances
-        var tasks = discoverySettings.NetworkRanges
-            .SelectMany(ExpandNetworkRange)
-            .Select(ip => ScanIpForSpoolmanAsync(ip, ct))
-            .ToArray();
-
-        var scanResults = await Task.WhenAll(tasks);
-        return scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error));
+        List<string> ips = networkRanges
+            .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning(msg)))
+            .Distinct()
+            .ToList();
+        Task<SpoolmanDiscoveryResult>[] tasks = ips.Select(ip => ScanIpForSpoolmanAsync(ip, ct)).ToArray();
+        SpoolmanDiscoveryResult[] scanResults = await Task.WhenAll(tasks);
+        results.AddRange(scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error)));
+        return results;
     }
 
-    /// <summary>
-    /// Expands a network range specification into individual IP addresses.
-    /// Supports formats like "192.168.1.1-192.168.1.254" and "192.168.1.0/24"
-    /// </summary>
-    private IEnumerable<string> ExpandNetworkRange(string range)
-    {
-        try
-        {
-            // Handle CIDR notation (e.g., "192.168.1.0/24")
-            if (range.Contains('/'))
-            {
-                var parts = range.Split('/');
-                if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var network) && int.TryParse(parts[1], out var prefixLength))
-                {
-                    return ExpandCidrRange(network, prefixLength);
-                }
-            }
 
-            // Handle range notation (e.g., "192.168.1.1-192.168.1.254")
-            if (range.Contains('-'))
-            {
-                var parts = range.Split('-');
-                if (parts.Length == 2 && IPAddress.TryParse(parts[0].Trim(), out var startIp) && IPAddress.TryParse(parts[1].Trim(), out var endIp))
-                {
-                    return ExpandIpRange(startIp, endIp);
-                }
-            }
-
-            // Single IP address
-            if (IPAddress.TryParse(range, out _))
-            {
-                return new[] { range };
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning("Failed to expand network range '{Range}': {Error}", range, ex.Message);
-        }
-
-        return Enumerable.Empty<string>();
-    }
-
-    /// <summary>
-    /// Expands a CIDR range into individual IP addresses (limited to reasonable subnet sizes)
-    /// </summary>
-    private IEnumerable<string> ExpandCidrRange(IPAddress network, int prefixLength)
-    {
-        // Limit to /16 or smaller subnets to avoid excessive scanning
-        if (prefixLength < 16)
-        {
-            logger.LogWarning("CIDR range too large (/{PrefixLength}), limiting to /16", prefixLength);
-            prefixLength = 16;
-        }
-
-        var networkBytes = network.GetAddressBytes();
-        var hostBits = 32 - prefixLength;
-        var maxHosts = Math.Min(1 << hostBits, 1024); // Limit to 1024 IPs max
-
-        for (int i = 1; i < maxHosts - 1; i++) // Skip network and broadcast
-        {
-            var hostBytes = BitConverter.GetBytes(i);
-            if (BitConverter.IsLittleEndian)
-            {
-                Array.Reverse(hostBytes);
-            }
-
-            var ipBytes = new byte[4];
-            for (int j = 0; j < 4; j++)
-            {
-                ipBytes[j] = (byte)(networkBytes[j] | hostBytes[j]);
-            }
-
-            yield return new IPAddress(ipBytes).ToString();
-        }
-    }
-
-    /// <summary>
-    /// Expands an IP range into individual addresses
-    /// </summary>
-    private IEnumerable<string> ExpandIpRange(IPAddress startIp, IPAddress endIp)
-    {
-        var start = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
-        var end = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
-
-        // Limit range size to prevent excessive scanning
-        if (end - start > 1024)
-        {
-            logger.LogWarning("IP range too large ({Start}-{End}), limiting to 1024 addresses", startIp, endIp);
-            end = start + 1024;
-        }
-
-        for (uint ip = start; ip <= end; ip++)
-        {
-            var bytes = BitConverter.GetBytes(ip).Reverse().ToArray();
-            yield return new IPAddress(bytes).ToString();
-        }
-    }
-
-    /// <summary>
-    /// Scans a single IP address for a Spoolman instance on port 7912
-    /// </summary>
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
-        var url = $"http://{ip}:7912";
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        string url = $"http://{ip}:7912";
+        System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            using var combined = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(2));
+            using CancellationTokenSource combined = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
             // Try to get the Spoolman info endpoint
-            var response = await http.GetAsync($"{url}/api/v1/info", combined.Token);
+            HttpResponseMessage response = await http.GetAsync($"{url}/api/v1/info", combined.Token);
             stopwatch.Stop();
 
             if (response.IsSuccessStatusCode)
             {
                 try
                 {
-                    var content = await response.Content.ReadAsStringAsync(combined.Token);
-                    var json = JsonDocument.Parse(content);
-                    var version = json.RootElement.TryGetProperty("version", out var versionProp)
+                    string content = await response.Content.ReadAsStringAsync(combined.Token);
+                    JsonDocument json = JsonDocument.Parse(content);
+                    string? version = json.RootElement.TryGetProperty("version", out JsonElement versionProp)
                         ? versionProp.GetString()
                         : null;
 
@@ -1120,4 +987,5 @@ public class SpoolmanService : ISpoolmanService
             return new SpoolmanDiscoveryResult(url, false, ex.Message);
         }
     }
+
 }

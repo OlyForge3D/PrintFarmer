@@ -25,7 +25,9 @@ public class OctoPrintClientTests
                 recorded.Add(req);
                 return responder(req);
             });
+#pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
         var http = new HttpClient(handler.Object);
+#pragma warning restore CA2000
         var client = new OctoPrintClient(http);
         return (client, handler, recorded);
     }
@@ -97,7 +99,10 @@ public class OctoPrintClientTests
         request.Headers.Add("X-Api-Key", "key");
         // Use reflection to access internal HttpClient property
         var httpClientProp = typeof(OctoPrintClient).GetProperty("HttpClient", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var httpClient = (HttpClient)httpClientProp.GetValue(client);
+        Assert.NotNull(httpClientProp);
+        var httpClientObj = httpClientProp.GetValue(client);
+        Assert.NotNull(httpClientObj);
+        var httpClient = (HttpClient)httpClientObj!;
         var response = await httpClient.SendAsync(request);
         var pluginsJson = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(pluginsJson);

@@ -1,4 +1,5 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -6,20 +7,14 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// <summary>
 /// SignalR-based progress notifier for slicer operations
 /// </summary>
-public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
+public class SignalRSlicerProgressNotifier(
+    IHubContext<SlicerProgressHub> hubContext,
+    IUnifiedLoggingService logger) : ISlicerProgressNotifier
 {
-    private readonly IHubContext<SlicerProgressHub> _hubContext;
-    private readonly ILogger<SignalRSlicerProgressNotifier> _logger;
+    private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = [];
-    private readonly object _lockObject = new();
-
-    public SignalRSlicerProgressNotifier(
-        IHubContext<SlicerProgressHub> hubContext,
-        ILogger<SignalRSlicerProgressNotifier> logger)
-    {
-        _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly Lock _lockObject = new();
 
     public async Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
     {
@@ -33,8 +28,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingProgress", update, cancellationToken);
-                _logger.LogDebug("Sent progress update for job {JobId} to {SubscriberCount} subscribers: {Progress}%",
-                    update.JobId, connectionIds.Count, update.Progress);
+                _logger.LogDebug($"Sent progress update for job {update.JobId} to {connectionIds.Count} subscribers: {update.Progress}%");
             }
 
             // Also send to a general group for monitoring dashboards
@@ -42,7 +36,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to notify progress for job {JobId}", update.JobId);
+            _logger.LogError($"Failed to notify progress for job {update.JobId}: {ex.Message}");
             throw;
         }
     }
@@ -80,8 +74,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingCompleted", completionNotification, cancellationToken);
-                _logger.LogInformation("Sent completion notification for job {JobId} to {SubscriberCount} subscribers",
-                    job.Id, connectionIds.Count);
+                _logger.LogInformation($"Sent completion notification for job {job.Id} to {connectionIds.Count} subscribers");
             }
 
             // Send to user's personal group
@@ -95,7 +88,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to notify completion for job {JobId}", job.Id);
+            _logger.LogError($"Failed to notify completion for job {job.Id}: {ex.Message}");
             throw;
         }
     }
@@ -128,8 +121,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingFailed", failureNotification, cancellationToken);
-                _logger.LogInformation("Sent failure notification for job {JobId} to {SubscriberCount} subscribers",
-                    job.Id, connectionIds.Count);
+                _logger.LogInformation($"Sent failure notification for job {job.Id} to {connectionIds.Count} subscribers");
             }
 
             // Send to user's personal group
@@ -146,7 +138,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to notify failure for job {JobId}", job.Id);
+            _logger.LogError($"Failed to notify failure for job {job.Id}: {ex.Message}");
             throw;
         }
     }
@@ -161,10 +153,10 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
                 _jobSubscriptions[jobId] = set;
             }
 
-            set.Add(connectionId);
+            _ = set.Add(connectionId);
         }
 
-        _logger.LogDebug("Added subscription for job {JobId} from connection {ConnectionId}", jobId, connectionId);
+        _logger.LogDebug($"Added subscription for job {jobId} from connection {connectionId}");
         return Task.CompletedTask;
     }
 
@@ -174,15 +166,15 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
         {
             if (_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? set))
             {
-                set.Remove(connectionId);
+                _ = set.Remove(connectionId);
                 if (set.Count == 0)
                 {
-                    _jobSubscriptions.Remove(jobId);
+                    _ = _jobSubscriptions.Remove(jobId);
                 }
             }
         }
 
-        _logger.LogDebug("Removed subscription for job {JobId} from connection {ConnectionId}", jobId, connectionId);
+        _logger.LogDebug($"Removed subscription for job {jobId} from connection {connectionId}");
         return Task.CompletedTask;
     }
 
@@ -202,7 +194,7 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
     {
         lock (_lockObject)
         {
-            _jobSubscriptions.Remove(jobId);
+            _ = _jobSubscriptions.Remove(jobId);
         }
     }
 }
@@ -210,58 +202,53 @@ public class SignalRSlicerProgressNotifier : ISlicerProgressNotifier
 /// <summary>
 /// SignalR Hub for slicer progress updates
 /// </summary>
-public class SlicerProgressHub : Hub
-{
-    private readonly ILogger<SlicerProgressHub> _logger;
-    private readonly ISlicerProgressNotifier _progressNotifier;
 
-    public SlicerProgressHub(ILogger<SlicerProgressHub> logger, ISlicerProgressNotifier progressNotifier)
-    {
-        _logger = logger;
-        _progressNotifier = progressNotifier;
-    }
+public class SlicerProgressHub(IUnifiedLoggingService logger, ISlicerProgressNotifier progressNotifier) : Hub
+{
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ISlicerProgressNotifier _progressNotifier = progressNotifier;
 
     public async Task SubscribeToJobAsync(Guid jobId)
     {
         await _progressNotifier.SubscribeToJobAsync(jobId, Context.ConnectionId);
-        _logger.LogDebug("Connection {ConnectionId} subscribed to job {JobId}", Context.ConnectionId, jobId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} subscribed to job {jobId}");
     }
 
     public async Task UnsubscribeFromJobAsync(Guid jobId)
     {
         await _progressNotifier.UnsubscribeFromJobAsync(jobId, Context.ConnectionId);
-        _logger.LogDebug("Connection {ConnectionId} unsubscribed from job {JobId}", Context.ConnectionId, jobId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} unsubscribed from job {jobId}");
     }
 
     public async Task JoinUserGroupAsync(Guid userId)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, $"User-{userId}");
-        _logger.LogDebug("Connection {ConnectionId} joined user group {UserId}", Context.ConnectionId, userId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} joined user group {userId}");
     }
 
     public async Task LeaveUserGroupAsync(Guid userId)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"User-{userId}");
-        _logger.LogDebug("Connection {ConnectionId} left user group {UserId}", Context.ConnectionId, userId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} left user group {userId}");
     }
 
     public async Task JoinMonitoringGroupAsync()
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, "SlicingMonitors");
-        _logger.LogDebug("Connection {ConnectionId} joined monitoring group", Context.ConnectionId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} joined monitoring group");
     }
 
     public async Task LeaveMonitoringGroupAsync()
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, "SlicingMonitors");
-        _logger.LogDebug("Connection {ConnectionId} left monitoring group", Context.ConnectionId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} left monitoring group");
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         // Clean up any job subscriptions for this connection
         // This is a simplified cleanup - in production you might want to track subscriptions per connection
-        _logger.LogDebug("Connection {ConnectionId} disconnected", Context.ConnectionId);
+        _logger.LogDebug($"Connection {Context.ConnectionId} disconnected");
 
         await base.OnDisconnectedAsync(exception);
     }

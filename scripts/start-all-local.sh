@@ -116,7 +116,7 @@ fresh_cleanup() {
   if docker ps -q --filter "name=printfarmer-redis-distributed" | grep -q .; then
     warn "Stopping Redis container: printfarmer-redis-distributed"
     docker stop "printfarmer-redis-distributed" >/dev/null 2>&1 || true
-    docker rm "printfarmer-redis-distributed" >/dev/null 2>&1 || true
+    docker rm -f "printfarmer-redis-distributed" >/dev/null 2>&1 || true
   fi
   
   # Kill any processes on PrintFarmer ports
@@ -212,8 +212,49 @@ info "Checking prerequisites..."
 require_cmd dotnet
 require_cmd npm
 require_cmd node
+
 if [[ $WITH_REDIS -eq 1 ]]; then
   require_cmd docker
+
+  # --- Docker health check and restart logic ---
+  if command -v docker &> /dev/null; then
+    info "Checking Docker daemon status..."
+    if ! docker info > /dev/null 2>&1; then
+      warn "Docker is installed but not responding. Attempting to restart Docker..."
+      if [[ "$OSTYPE" == "darwin"* ]]; then
+        open --background -a Docker
+        info "Waiting for Docker Desktop to start..."
+        for i in {1..30}; do
+          if docker info > /dev/null 2>&1; then
+            success "Docker is now responsive."
+            break
+          fi
+          sleep 2
+        done
+      else
+        sudo systemctl restart docker
+        info "Waiting for Docker daemon to restart..."
+        for i in {1..30}; do
+          if docker info > /dev/null 2>&1; then
+            success "Docker is now responsive."
+            break
+          fi
+          sleep 2
+        done
+      fi
+      if ! docker info > /dev/null 2>&1; then
+        error "Docker could not be started. Please start Docker manually."
+      fi
+    else
+      success "Docker is running."
+    fi
+
+    # Remove stopped Redis container if it exists but is not running
+    if docker ps -a --filter "name=printfarmer-redis-local" --format '{{.Status}}' | grep -v Up | grep -q .; then
+      warn "Removing stopped container: printfarmer-redis-local"
+      docker rm -f "printfarmer-redis-local" >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 # Verify .NET version

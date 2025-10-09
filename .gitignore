@@ -31,6 +31,12 @@ node_modules/
 
 # Environment files
 .env
+.env.*
+.deploy-config
+
+# Docker generated files (created by deployment script)
+docker-compose.host-network.yml
+.env.microservices
 
 # SqlLite Database Files
 *.db
@@ -59,3 +65,7 @@ coverage-final.json
 
 # Prevent accidental duplicate copies of the dotnet installer script
 dotnet-install.sh.*
+
+# Deploy script generated compose files
+docker-compose.override.yml
+docker-compose.host-network.yml

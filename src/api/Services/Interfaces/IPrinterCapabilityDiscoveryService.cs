@@ -1,5 +1,5 @@
 ﻿using System.Collections.ObjectModel;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Interfaces;

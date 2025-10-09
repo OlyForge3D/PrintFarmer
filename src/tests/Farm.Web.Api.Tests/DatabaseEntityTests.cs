@@ -1,9 +1,9 @@
 ﻿using System;
-using Farm.Web.Shared;
 using System.Linq;
 using System.Threading.Tasks;
-using Farm.Web.Api.Data;
-using Farm.Web.Api.Domain;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

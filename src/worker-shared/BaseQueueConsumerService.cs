@@ -1,46 +1,37 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Farm.Slicer.Worker.Core;
 
-public abstract class BaseQueueConsumerService : BackgroundService
+public abstract class BaseQueueConsumerService(
+    IConnectionMultiplexer redis,
+    IProgressReporter progress,
+    IServiceProvider serviceProvider,
+    IUnifiedLoggingService logger,
+    IWorkerStateService workerState,
+    string queueKey,
+    string processingKey) : BackgroundService
 {
-    private readonly IConnectionMultiplexer _redis;
-    private readonly IProgressReporter _progress;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger _logger;
-    private readonly IWorkerStateService _workerState;
-    private readonly string _queueKey;
-    private readonly string _processingKey;
+#pragma warning disable CA2213 // _redis is injected and should not be disposed here
+    private readonly IConnectionMultiplexer _redis = redis;
+#pragma warning restore CA2213
+    private readonly IProgressReporter _progress = progress;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IWorkerStateService _workerState = workerState;
+    private readonly string _queueKey = queueKey;
+    private readonly string _processingKey = processingKey;
     private readonly string _workerId = WorkerIdentity.Create();
-
-    protected BaseQueueConsumerService(
-        IConnectionMultiplexer redis,
-        IProgressReporter progress,
-        IServiceProvider serviceProvider,
-        ILogger logger,
-        IWorkerStateService workerState,
-        string queueKey,
-        string processingKey)
-    {
-        _redis = redis;
-        _progress = progress;
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-        _workerState = workerState;
-        _queueKey = queueKey;
-        _processingKey = processingKey;
-    }
 
     protected abstract Task<SlicingResult> ExecutePipelineAsync(DistributedSlicingJob job, IServiceProvider scopeServices, CancellationToken ct);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Worker {WorkerId} queue consumer starting. Queue={Queue} Processing={Processing}", _workerId, _queueKey, _processingKey);
+        _logger.LogInformation($"Worker {_workerId} queue consumer starting. Queue={_queueKey} Processing={_processingKey}");
         var db = _redis.GetDatabase();
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -64,7 +55,7 @@ public abstract class BaseQueueConsumerService : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to deserialize job payload: {Payload}", json);
+                    _logger.LogError(ex, $"Failed to deserialize job payload: {json}");
                 }
                 if (job == null)
                 {
@@ -78,16 +69,16 @@ public abstract class BaseQueueConsumerService : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Queue consumer cancellation requested.");
+                _logger.LogInformation($"Queue consumer cancellation requested.");
                 break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled error in queue loop; backing off");
+                _logger.LogError(ex, $"Unhandled error in queue loop; backing off");
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
         }
-        _logger.LogInformation("Worker {WorkerId} queue consumer stopped", _workerId);
+        _logger.LogInformation($"Worker {_workerId} queue consumer stopped");
     }
 
     private async Task HandleJobAsync(DistributedSlicingJob job, IDatabase db, CancellationToken ct)
@@ -104,19 +95,19 @@ public abstract class BaseQueueConsumerService : BackgroundService
             job.EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds;
             job.EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams;
             job.OutputFileSizeBytes = result.OutputFileSizeBytes;
-            _logger.LogInformation("Job {JobId} completed in {Ms}ms", job.Id, (DateTime.UtcNow - start).TotalMilliseconds);
+            _logger.LogInformation($"Job {job.Id} completed in {(DateTime.UtcNow - start).TotalMilliseconds}ms");
             await _progress.ReportCompletionAsync(job, result, ct);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Job {JobId} cancelled", job.Id);
+            _logger.LogWarning($"Job {job.Id} cancelled");
             job.Status = SlicingJobStatus.Cancelled;
             job.CompletedAt = DateTime.UtcNow;
             await _progress.ReportFailureAsync(job.Id, "Job cancelled", ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Job {JobId} failed", job.Id);
+            _logger.LogError(ex, $"Job {job.Id} failed");
             job.Status = SlicingJobStatus.Error;
             job.CompletedAt = DateTime.UtcNow;
             job.ErrorMessage = ex.Message;

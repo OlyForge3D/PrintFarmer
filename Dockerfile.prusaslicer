@@ -17,19 +17,27 @@ ARG DEBUG_PRUSA_ASSETS=false
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
+# Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
+COPY src/Infrastructure/*.csproj ./infrastructure/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/prusaslicer-worker/*.csproj ./prusaslicer-worker/
 
 RUN dotnet restore ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj
 
 COPY src/shared/ ./shared/
+COPY src/Infrastructure/ ./infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/prusaslicer-worker/ ./prusaslicer-worker/
 
 RUN dotnet publish ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj \
-    -c Release -o /app/publish --no-restore --verbosity minimal
+    -c Release -o /app/publish --no-restore --verbosity minimal && \
+    # Verify critical runtime files exist and are non-empty
+    test -s /app/publish/Farm.PrusaSlicer.Worker.dll && \
+    test -s /app/publish/Farm.PrusaSlicer.Worker.runtimeconfig.json && \
+    echo "[build] Published files verified successfully" || \
+    (echo "[build] ERROR: Critical publish files missing or empty" && exit 1)
 
 ########################################
 # Runtime Stage (layer on slicer-base)
@@ -37,7 +45,7 @@ RUN dotnet publish ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj \
 ########################################
 # Assets Stage (download & extract Prusa AppImage)
 ########################################
-FROM slicer-base AS prusaassets
+FROM printfarmer-slicer-base AS prusaassets
 USER root
 WORKDIR /tmp
 ARG PRUSASLICER_VERSION
@@ -145,7 +153,7 @@ RUN set -e; echo "[prusaassets] Resolving PrusaSlicer version=${PRUSASLICER_VERS
 ########################################
 # Final Runtime Stage
 ########################################
-FROM slicer-base AS final
+FROM printfarmer-slicer-base AS final
 ARG PRUSASLICER_VERSION
 ARG ALLOW_STUB
 LABEL component="prusaslicer-worker" \

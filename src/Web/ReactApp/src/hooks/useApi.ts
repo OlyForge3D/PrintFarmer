@@ -13,11 +13,13 @@ import {
   HistoryTotals,
   JobQueuePrintJob,
   ManufacturerDto,
+  PrinterCapabilitiesDto,
   PrinterModelDto,
   Printer,
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  StartDiscoveryRequest,
   UpdatePrinterDto
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
@@ -291,7 +293,7 @@ export function useDiscoverPrinters() {
 
 export function useStartDiscoveryStream() {
   return useMutation({
-    mutationFn: () => apiClient.startDiscoveryStream(),
+    mutationFn: (request?: StartDiscoveryRequest) => apiClient.startDiscoveryStream(request),
   });
 }
 
@@ -344,6 +346,16 @@ export function useModels(manufacturerId?: string, options?: UseQueryOptions<Pri
     queryKey: queryKeys.models(manufacturerId),
     queryFn: () => apiClient.getModels(manufacturerId),
     staleTime: 300000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useModelDefaultCapabilities(modelId?: string, options?: UseQueryOptions<PrinterCapabilitiesDto | null, ApiError>) {
+  return useQuery({
+    queryKey: ['model-default-capabilities', modelId],
+    queryFn: () => modelId ? apiClient.getModelDefaultCapabilities(modelId) : Promise.resolve(null),
+    enabled: !!modelId,
+    staleTime: 300000, // 5 minutes - default capabilities are static
     ...options,
   });
 }

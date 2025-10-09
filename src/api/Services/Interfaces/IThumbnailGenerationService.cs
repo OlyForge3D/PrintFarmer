@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
