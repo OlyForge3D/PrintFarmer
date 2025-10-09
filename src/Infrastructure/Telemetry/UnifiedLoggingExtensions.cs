@@ -1,6 +1,6 @@
-using System;
-using Microsoft.Extensions.Logging;
+﻿using System;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Telemetry;
 

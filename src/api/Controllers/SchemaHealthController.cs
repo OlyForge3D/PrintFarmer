@@ -17,11 +17,11 @@ public class SchemaHealthController(AppDbContext dbContext) : ControllerBase
         try
         {
             // Check for a critical table (Printers) existence
-            var conn = _dbContext.Database.GetDbConnection();
+            System.Data.Common.DbConnection conn = _dbContext.Database.GetDbConnection();
             await conn.OpenAsync(ct);
-            using var cmd = conn.CreateCommand();
+            using System.Data.Common.DbCommand cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Printers';";
-            var result = await cmd.ExecuteScalarAsync(ct);
+            object? result = await cmd.ExecuteScalarAsync(ct);
             if (result != null && result.ToString() == "Printers")
             {
                 return Ok(new { ready = true });

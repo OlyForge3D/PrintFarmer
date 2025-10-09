@@ -1,12 +1,12 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -117,7 +117,7 @@ public class UsersController(
             UpdatedAt = DateTime.UtcNow
         };
 
-        _db.Users.Add(user);
+        _ = _db.Users.Add(user);
 
         // Assign roles if provided
         if (request.RoleIds is { Length: > 0 })
@@ -127,7 +127,7 @@ public class UsersController(
                 Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
-                    _db.UserRoles.Add(new UserRole
+                    _ = _db.UserRoles.Add(new UserRole
                     {
                         Id = Guid.NewGuid(),
                         UserId = user.Id,
@@ -139,7 +139,7 @@ public class UsersController(
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation($"User {currentUserId} created new user {user.Id} ({user.Username})");
@@ -197,7 +197,7 @@ public class UsersController(
                 Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
                 if (role != null)
                 {
-                    _db.UserRoles.Add(new UserRole
+                    _ = _db.UserRoles.Add(new UserRole
                     {
                         Id = Guid.NewGuid(),
                         UserId = id,
@@ -209,7 +209,7 @@ public class UsersController(
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation($"User {currentUserId} updated user {user.Id} ({user.Username})");
@@ -245,8 +245,8 @@ public class UsersController(
         _db.UserRoles.RemoveRange(userRoles);
 
         // Remove the user
-        _db.Users.Remove(user);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.Users.Remove(user);
+        _ = await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation($"User {currentUserId} deleted user {user.Id} ({user.Username})");
 

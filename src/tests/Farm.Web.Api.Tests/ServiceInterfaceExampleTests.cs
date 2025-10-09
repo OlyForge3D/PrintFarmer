@@ -37,7 +37,7 @@ public class ServiceInterfaceExampleTests
 
         // Verify the method was called
         mockMoonraker.Verify(m => m.GetStatusAsync("http://test-printer", It.IsAny<CancellationToken>()), Times.Once);
-}
+    }
 
     /// <summary>
     /// Example showing how to mock ISpoolmanService for testing filament spool functionality

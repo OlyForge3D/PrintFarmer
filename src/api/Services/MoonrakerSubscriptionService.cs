@@ -482,7 +482,7 @@ public sealed class MoonrakerSubscriptionService(
 
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
-            sb.Clear();
+            _ = sb.Clear();
             WebSocketReceiveResult result;
 
             try
@@ -496,7 +496,7 @@ public sealed class MoonrakerSubscriptionService(
                         await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
                         return;
                     }
-                    sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
+                    _ = sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                 } while (!result.EndOfMessage);
             }
             catch (WebSocketException wsEx)
@@ -517,7 +517,7 @@ public sealed class MoonrakerSubscriptionService(
             catch (JsonException jsonEx)
             {
                 _logger.LogWarning(jsonEx, "Failed to parse JSON message from printer {PrinterName}: {Message}",
-                    printer.Name, sb.ToString().Substring(0, Math.Min(200, sb.Length)));
+                    printer.Name, sb.ToString()[..Math.Min(200, sb.Length)]);
             }
             catch (Exception ex)
             {
@@ -534,7 +534,7 @@ public sealed class MoonrakerSubscriptionService(
             JsonElement root = doc.RootElement;
 
             // Reset parse error count on successful JSON parsing - this indicates WebSocket connection is healthy
-            _parseErrorCounts.TryRemove(printer.Id, out _);
+            _ = _parseErrorCounts.TryRemove(printer.Id, out _);
 
             // Check if this is a JSON-RPC response (has "id" field)
             if (root.TryGetProperty("id", out _))
@@ -550,7 +550,7 @@ public sealed class MoonrakerSubscriptionService(
                         // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
                         if (jsonRpcResponse.Error.Code == -32700)
                         {
-                            _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
+                            _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
                             int errorCount = _parseErrorCounts[printer.Id];
 
                             if (errorCount >= MaxParseErrorsBeforeFallback)
@@ -576,7 +576,7 @@ public sealed class MoonrakerSubscriptionService(
                     _logger.LogWarning($"Failed to parse JSON-RPC response from printer {printer.Name}: {ex.Message}");
 
                     // Track parse errors and trigger fallback if threshold exceeded
-                    _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
+                    _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
                     int errorCount = _parseErrorCounts[printer.Id];
 
                     if (errorCount >= MaxParseErrorsBeforeFallback)
@@ -659,7 +659,7 @@ public sealed class MoonrakerSubscriptionService(
             // Only log toolhead structure occasionally for debugging
             if (DateTime.UtcNow.Millisecond % 1000 < 100) // Log roughly 10% of the time
             {
-                _logger.LogInformation($"Sample toolhead object for printer {printerId}: {th.ToString()}");
+                _logger.LogInformation($"Sample toolhead object for printer {printerId}: {th}");
             }
 
             // Extract position
@@ -962,7 +962,7 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
-            _pollingModes.AddOrUpdate(printerId, mode, (key, oldValue) => mode);
+            _ = _pollingModes.AddOrUpdate(printerId, mode, (key, oldValue) => mode);
 
             _logger.LogInformation($"Set polling mode for printer {printerId} to {mode}: {reason}");
 
@@ -997,7 +997,7 @@ public sealed class MoonrakerSubscriptionService(
             }
 
             // Step 2: Get spool details directly from Spoolman using the ID
-            SpoolmanService spoolmanService = scope.ServiceProvider.GetRequiredService<SpoolmanService>();
+            ISpoolmanService spoolmanService = scope.ServiceProvider.GetRequiredService<ISpoolmanService>();
             SpoolmanSpoolDto? spoolDetails = await spoolmanService.GetSpoolByIdAsync(activeSpoolId.Value, ct);
             if (spoolDetails == null)
             {
@@ -1048,9 +1048,8 @@ public sealed class MoonrakerSubscriptionService(
             _logger.LogDebug("Starting HTTP polling fallback for printer {PrinterName}", printer.Name);
 
             // Use existing MoonrakerClient to fetch status via HTTP
-            using IServiceScope scope = scopeFactory.CreateScope();
-            IServiceProvider serviceProvider = scope.ServiceProvider;
-            IMoonrakerClient moonrakerClient = serviceProvider.GetRequiredService<IMoonrakerClient>();
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Get comprehensive status using existing HTTP endpoint
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.ServerUrl, ct);
@@ -1086,7 +1085,7 @@ public sealed class MoonrakerSubscriptionService(
 
                 // Update last poll time and reset parse error count since HTTP polling succeeded
                 _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;
-                _parseErrorCounts.TryRemove(printer.Id, out _);
+                _ = _parseErrorCounts.TryRemove(printer.Id, out _);
 
                 _logger.LogDebug("HTTP polling fallback successful for printer {PrinterName}", printer.Name);
             }

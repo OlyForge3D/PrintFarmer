@@ -10,6 +10,8 @@ using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services;
 
@@ -40,7 +42,7 @@ public partial class NetworkDiscoveryService(
         _logger.LogInformation("Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from results (fresh scope for safety)
-        HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
+        HashSet<string> existingServerUrls = await LoadExistingPrinterUrlsSafeAsync();
 
         // Load app settings (NetworkDiscoverySettings is an AppSetting) and map to the DTO used by discovery
         NetworkDiscoverySettingsDto settings = GetDiscoverySettings();
@@ -90,7 +92,7 @@ public partial class NetworkDiscoveryService(
         _logger.LogInformation($"Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
-        HashSet<string> existingServerUrls = LoadExistingPrinterUrlsSafe();
+        HashSet<string> existingServerUrls = await LoadExistingPrinterUrlsSafeAsync();
 
         // Load and map discovery settings from AppSetting class
         NetworkDiscoverySettingsDto settings = GetDiscoverySettings();
@@ -114,7 +116,7 @@ public partial class NetworkDiscoveryService(
             {
                 settings.NetworkRanges.AddRange(autoRanges);
                 autoDetectedNetworks = true;
-                _logger.LogInformation("Auto-detected network ranges for streaming discovery", null, new { Count = autoRanges.Count, Ranges = autoRanges });
+                _logger.LogInformation("Auto-detected network ranges for streaming discovery", null, new { autoRanges.Count, Ranges = autoRanges });
             }
             else
             {
@@ -292,7 +294,7 @@ public partial class NetworkDiscoveryService(
                     }
                     IPAddress networkAddress = GetNetworkAddress(address, mask);
                     string cidrString = $"{networkAddress}/{cidr}";
-                    results.Add(cidrString);
+                    _ = results.Add(cidrString);
                 }
             }
         }
@@ -360,13 +362,13 @@ public partial class NetworkDiscoveryService(
                     {
                         _logger.LogInformation($"Found printer at {result.IpAddress}:{result.Port} - {result.Name} ({result.Backend})", null, null);
                         // Exclude from future duplicates (within same run) in case multiple ports map
-                        existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
+                        _ = existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
                     }
                     return result;
                 }
                 finally
                 {
-                    semaphore.Release();
+                    _ = semaphore.Release();
                 }
             }).ToArray();
 
@@ -439,11 +441,11 @@ public partial class NetworkDiscoveryService(
                         _logger.LogInformation($"Found printer at {result.IpAddress}:{result.Port} - {result.Name} ({result.Backend})", null, null);
 
                         // Increment found printers count
-                        Interlocked.Increment(ref foundCount);
+                        _ = Interlocked.Increment(ref foundCount);
 
                         // Send printer found event
                         // Mark as seen to avoid duplicate notifications
-                        existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
+                        _ = existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
 
                         await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(sessionId, result), cancellationToken);
                     }
@@ -456,7 +458,7 @@ public partial class NetworkDiscoveryService(
                 }
                 finally
                 {
-                    semaphore.Release();
+                    _ = semaphore.Release();
                 }
             }).ToArray();
 
@@ -561,7 +563,7 @@ public partial class NetworkDiscoveryService(
     private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
         // Use discovery probes to attempt printer detection
-        foreach (var probe in _discoveryProbes)
+        foreach (DiscoveryProbes.INetworkDiscoveryProbe probe in _discoveryProbes)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -603,23 +605,26 @@ public partial class NetworkDiscoveryService(
         {
             url = url.TrimEnd('/');
         }
-        return url.ToLowerInvariant();
+        // Keep original casing but trimmed/normalized for comparison. Callers use
+        // case-insensitive collections (StringComparer.OrdinalIgnoreCase) when
+        // comparing normalized URLs, so lower-casing here is not required.
+        return url;
     }
 
-    private HashSet<string> LoadExistingPrinterUrlsSafe()
+    private async Task<HashSet<string>> LoadExistingPrinterUrlsSafeAsync()
     {
         HashSet<string> existingServerUrls = new(StringComparer.OrdinalIgnoreCase);
         try
         {
-            // Prefer a fresh scope so we don't depend on the lifetime of the injected scoped context (especially for background discovery)
-            using IServiceScope scope = _scopeFactory.CreateScope();
+            // Prefer a fresh async scope so we don't depend on the lifetime of the injected scoped context (especially for background discovery)
+            await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             AppDbContext ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            List<string> urls = ctx.Printers.Select(p => p.ServerUrl).ToList();
+            List<string> urls = await ctx.Printers.Select(p => p.ServerUrl).ToListAsync();
             foreach (string? p in urls)
             {
                 if (!string.IsNullOrWhiteSpace(p))
                 {
-                    existingServerUrls.Add(NormalizeUrl(p));
+                    _ = existingServerUrls.Add(NormalizeUrl(p));
                 }
             }
         }
@@ -639,9 +644,12 @@ public partial class NetworkDiscoveryService(
         {
             // NetworkDiscoverySettings is registered as an AppSetting and should be available
             NetworkDiscoverySettings app = _settingsService.Get<NetworkDiscoverySettings>();
-            var ranges = app.DiscoverySubnets ?? new List<string>();
-            var ports = app.Ports ?? new List<int> { 80 };
-            return new NetworkDiscoverySettingsDto(ranges, app.ClientTimeoutMs, app.MaxConcurrentRequests, ports, null);
+            IList<string> ranges = app.DiscoverySubnets ?? new List<string>();
+            IList<int> ports = app.Ports ?? new List<int> { 80 };
+            // NetworkDiscoverySettingsDto expects concrete List<T> types; convert if necessary.
+            List<string> rangesList = ranges is List<string> lr ? lr : ranges.ToList();
+            List<int> portsList = ports is List<int> lp ? lp : ports.ToList();
+            return new NetworkDiscoverySettingsDto(rangesList, app.ClientTimeoutMs, app.MaxConcurrentRequests, portsList, null);
         }
         catch (Exception ex)
         {

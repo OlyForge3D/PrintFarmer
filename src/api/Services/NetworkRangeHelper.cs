@@ -1,7 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Net;
 using System.Linq;
+using System.Net;
 
 namespace Farm.Web.Api.Services;
 
@@ -17,8 +17,8 @@ public static class NetworkRangeHelper
             // Handle CIDR notation (e.g., "192.168.1.0/24")
             if (range.Contains('/'))
             {
-                var parts = range.Split('/');
-                if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var network) && int.TryParse(parts[1], out var prefixLength))
+                string[] parts = range.Split('/');
+                if (parts.Length == 2 && IPAddress.TryParse(parts[0], out IPAddress? network) && int.TryParse(parts[1], out int prefixLength))
                 {
                     return ExpandCidrRange(network, prefixLength, logWarning);
                 }
@@ -27,8 +27,8 @@ public static class NetworkRangeHelper
             // Handle range notation (e.g., "192.168.1.1-192.168.1.254")
             if (range.Contains('-'))
             {
-                var parts = range.Split('-');
-                if (parts.Length == 2 && IPAddress.TryParse(parts[0].Trim(), out var startIp) && IPAddress.TryParse(parts[1].Trim(), out var endIp))
+                string[] parts = range.Split('-');
+                if (parts.Length == 2 && IPAddress.TryParse(parts[0].Trim(), out IPAddress? startIp) && IPAddress.TryParse(parts[1].Trim(), out IPAddress? endIp))
                 {
                     return ExpandIpRange(startIp, endIp, logWarning);
                 }
@@ -57,13 +57,13 @@ public static class NetworkRangeHelper
             prefixLength = 16;
         }
 
-        var networkBytes = network.GetAddressBytes();
-        var hostBits = 32 - prefixLength;
-        var maxHosts = Math.Min(1 << hostBits, 1024); // Limit to 1024 IPs max
+        byte[] networkBytes = network.GetAddressBytes();
+        int hostBits = 32 - prefixLength;
+        int maxHosts = Math.Min(1 << hostBits, 1024); // Limit to 1024 IPs max
 
         for (int i = 1; i < maxHosts - 1; i++) // Skip network and broadcast
         {
-            var ipBytes = (byte[])networkBytes.Clone();
+            byte[] ipBytes = (byte[])networkBytes.Clone();
             ipBytes[3] += (byte)i;
             yield return new IPAddress(ipBytes).ToString();
         }
@@ -71,8 +71,8 @@ public static class NetworkRangeHelper
 
     public static IEnumerable<string> ExpandIpRange(IPAddress startIp, IPAddress endIp, Action<string>? logWarning = null)
     {
-        var start = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
-        var end = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
+        uint start = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
+        uint end = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
 
         // Limit range size to prevent excessive scanning
         if (end - start > 1024)
@@ -83,7 +83,7 @@ public static class NetworkRangeHelper
 
         for (uint ip = start; ip <= end; ip++)
         {
-            var bytes = BitConverter.GetBytes(ip).Reverse().ToArray();
+            byte[] bytes = BitConverter.GetBytes(ip).Reverse().ToArray();
             yield return new IPAddress(bytes).ToString();
         }
     }

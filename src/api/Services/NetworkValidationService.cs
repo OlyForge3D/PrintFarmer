@@ -1,7 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Net;
-using Farm.Web.Shared;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -53,9 +53,9 @@ public static class NetworkValidationService
 
         // Check for overlapping networks
         List<(string cidr1, string cidr2)> overlaps = FindOverlappingNetworks(validNetworks);
-        foreach ((string cidr1, string cidr2) overlap in overlaps)
+        foreach ((string cidr1, string cidr2) in overlaps)
         {
-            result._warnings.Add($"Network ranges overlap: {overlap.cidr1} and {overlap.cidr2}");
+            result._warnings.Add($"Network ranges overlap: {cidr1} and {cidr2}");
         }
 
         // Additional validation

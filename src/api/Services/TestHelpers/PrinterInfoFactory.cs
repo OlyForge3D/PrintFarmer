@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace Farm.Web.Api.Services.TestHelpers
 {
@@ -9,45 +9,26 @@ namespace Farm.Web.Api.Services.TestHelpers
         public static object Create(string name, string? manufacturer = null, string? model = null, string? firmware = null, string? version = null)
         {
             // Try to instantiate the API's PrinterInfo type if present.
-            var apiAssembly = typeof(PrinterInfoFactory).Assembly;
-            var t = apiAssembly.GetType("Farm.Web.Api.Services.PrinterInfo");
-            if (t == null)
-            {
-                throw new InvalidOperationException("API PrinterInfo type not found");
-            }
+            System.Reflection.Assembly apiAssembly = typeof(PrinterInfoFactory).Assembly;
+            Type t = apiAssembly.GetType("Farm.Web.Api.Services.PrinterInfo") ?? throw new InvalidOperationException("API PrinterInfo type not found");
 
             // Instantiate and set properties permissively
-            var inst = Activator.CreateInstance(t)!;
+            object inst = Activator.CreateInstance(t)!;
 
-            var p = t.GetProperty("Name");
-            if (p != null)
-            {
-                p.SetValue(inst, name);
-            }
+            System.Reflection.PropertyInfo? p = t.GetProperty("Name");
+            p?.SetValue(inst, name);
 
             p = t.GetProperty("Manufacturer");
-            if (p != null)
-            {
-                p.SetValue(inst, manufacturer);
-            }
+            p?.SetValue(inst, manufacturer);
 
             p = t.GetProperty("Model");
-            if (p != null)
-            {
-                p.SetValue(inst, model);
-            }
+            p?.SetValue(inst, model);
 
             p = t.GetProperty("Firmware");
-            if (p != null)
-            {
-                p.SetValue(inst, firmware);
-            }
+            p?.SetValue(inst, firmware);
 
             p = t.GetProperty("Version");
-            if (p != null)
-            {
-                p.SetValue(inst, version);
-            }
+            p?.SetValue(inst, version);
 
             return inst;
         }

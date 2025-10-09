@@ -1,11 +1,12 @@
 ﻿using System.Diagnostics;
+using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Temp;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Api.Services.SlicerServices.Progress;
-using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services;
-using Farm.Infrastructure.Settings;
 using Farm.Web.Shared;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -57,23 +58,21 @@ public class SlicerWorkerHostedService : BackgroundService
                     continue;
                 }
 
-                using (IServiceScope scope = _scopeFactory.CreateScope())
+                await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+                ISlicerJobQueue jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
+
+                int pollingIntervalMs = 5000; // Default 5 seconds polling interval (no per-engine override)
+
+                DistributedSlicingJob? dequeuedJob = await jobQueue.DequeueAsync(_slicerSettings?.WorkerId ?? "unknown-worker", null, stoppingToken);
+
+                if (dequeuedJob != null)
                 {
-                    ISlicerJobQueue jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
-
-                    int pollingIntervalMs = 5000; // Default 5 seconds polling interval (no per-engine override)
-
-                    DistributedSlicingJob? dequeuedJob = await jobQueue.DequeueAsync(_slicerSettings?.WorkerId ?? "unknown-worker", null, stoppingToken);
-
-                    if (dequeuedJob != null)
-                    {
-                        _logger.LogInformation("Dequeued slicing job {JobId} for processing", dequeuedJob.Id);
-                        await ProcessJobAsync(dequeuedJob!, stoppingToken);
-                    }
-                    else
-                    {
-                        await Task.Delay(pollingIntervalMs, stoppingToken);
-                    }
+                    _logger.LogInformation("Dequeued slicing job {JobId} for processing", dequeuedJob.Id);
+                    await ProcessJobAsync(dequeuedJob!, stoppingToken);
+                }
+                else
+                {
+                    await Task.Delay(pollingIntervalMs, stoppingToken);
                 }
             }
             catch (OperationCanceledException)
@@ -94,7 +93,7 @@ public class SlicerWorkerHostedService : BackgroundService
     private async Task ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         // Create a scope for all scoped services used while processing this job
-        using IServiceScope scope = _scopeFactory.CreateScope();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         ISlicerJobQueue jobQueue = scope.ServiceProvider.GetRequiredService<ISlicerJobQueue>();
         ISlicerFileStorage fileStorage = scope.ServiceProvider.GetRequiredService<ISlicerFileStorage>();
         ISlicerProgressNotifier notifier = scope.ServiceProvider.GetRequiredService<ISlicerProgressNotifier>();
@@ -116,13 +115,13 @@ public class SlicerWorkerHostedService : BackgroundService
             // Download model file
             string tempRoot = Path.GetFullPath(_tempProvider.GetTempRoot());
             string jobDir = Path.Combine(tempRoot, "slicer", job.Id.ToString());
-            Directory.CreateDirectory(jobDir);
+            _ = Directory.CreateDirectory(jobDir);
 
             string inputPath = Path.Combine(jobDir, job.ModelFileName);
-            using (var inputStream = new FileStream(inputPath, FileMode.Create))
+            using (FileStream inputStream = new(inputPath, FileMode.Create))
             {
-                using var httpClient = new HttpClient();
-                var response = await httpClient.GetAsync(job.ModelFileUrl, cancellationToken);
+                using HttpClient httpClient = new();
+                HttpResponseMessage response = await httpClient.GetAsync(job.ModelFileUrl, cancellationToken);
                 await response.Content.CopyToAsync(inputStream, cancellationToken);
             }
 
@@ -156,7 +155,7 @@ public class SlicerWorkerHostedService : BackgroundService
 
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
 
-            using var gcodeStream = File.OpenRead(outputGcode);
+            using FileStream gcodeStream = File.OpenRead(outputGcode);
             string key = $"gcode/{job.Id}/{Path.GetFileName(outputGcode)}";
             string url = await fileStorage.UploadFileAsync(key, gcodeStream, "text/plain", cancellationToken);
 
@@ -188,7 +187,7 @@ public class SlicerWorkerHostedService : BackgroundService
                     ex is System.IO.IOException
                     || ex is TimeoutException
                     || ex is System.Net.Http.HttpRequestException
-                    || (ex is InvalidOperationException && !(ex.Message?.Contains("No gcode") ?? false));
+                    || (ex is InvalidOperationException && !(ex.Message?.Contains("No gcode", StringComparison.OrdinalIgnoreCase) ?? false));
 
                 if (isTransient && job.RetryCount < maxRetries)
                 {

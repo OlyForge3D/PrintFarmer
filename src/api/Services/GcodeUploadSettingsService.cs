@@ -20,7 +20,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
         foreach (string e in list)
         {
             string norm = e.StartsWith('.') ? e : "." + e;
-            _extensions.TryAdd(norm, 0);
+            _ = _extensions.TryAdd(norm, 0);
         }
     }
 
@@ -37,7 +37,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
         _extensions.Clear();
         foreach (string? e in cleaned)
         {
-            _extensions.TryAdd(e, 0);
+            _ = _extensions.TryAdd(e, 0);
         }
     }
 }

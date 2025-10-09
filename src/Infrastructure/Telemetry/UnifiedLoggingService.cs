@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,13 +24,13 @@ public interface IUnifiedLoggingService
 public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 {
     private readonly ILogger<UnifiedLoggingService> _logger;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IPrintFarmerTelemetryService _telemetry;
     private readonly ActivitySource _activitySource = new ActivitySource("PrintFarmer.Logging");
 
-    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, IServiceProvider serviceProvider)
+    public UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, IPrintFarmerTelemetryService telemetry)
     {
         _logger = logger;
-        _serviceProvider = serviceProvider;
+        _telemetry = telemetry;
     }
 
     public void LogDebug(string message, string? correlationId = null, object? metadata = null)
@@ -82,9 +82,6 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
     {
         using Activity? activity = _activitySource.StartActivity($"Log.{category}");
 
-        // Resolve telemetry service as needed
-        IPrintFarmerTelemetryService? telemetry = _serviceProvider.GetService(typeof(IPrintFarmerTelemetryService)) as IPrintFarmerTelemetryService;
-
         // Add context to telemetry
         if (activity != null)
         {
@@ -113,8 +110,6 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
                 activity.SetStatus(ActivityStatusCode.Error, exception.Message);
             }
         }
-        // Optionally use telemetry for additional reporting if needed
-        // (telemetry?.SomeMethod(...))
 
         // Log to structured logger
         if (exception != null)

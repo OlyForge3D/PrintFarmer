@@ -1,9 +1,10 @@
 ﻿using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.Interfaces;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services;
 
@@ -11,11 +12,11 @@ namespace Farm.Web.Api.Services;
 /// Background service that periodically updates dynamic printer capabilities
 /// </summary>
 public class PrinterCapabilityUpdateService(
-    IServiceProvider serviceProvider,
+    IServiceScopeFactory scopeFactory,
     IUnifiedLoggingService logger,
     IPrintFarmerTelemetryService telemetry) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly TimeSpan _updateInterval = TimeSpan.FromMinutes(15); // Update every 15 minutes
     private readonly IPrintFarmerTelemetryService _telemetry = telemetry;
@@ -75,7 +76,7 @@ public class PrinterCapabilityUpdateService(
 
     private async Task UpdateCapabilitiesAsync(CancellationToken cancellationToken)
     {
-        using IServiceScope scope = _serviceProvider.CreateScope();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         using Activity? activity = _telemetry.StartActivity("PrinterCapabilityUpdateService.UpdateCapabilitiesAsync");
 
         try
@@ -126,7 +127,7 @@ public class PrinterCapabilityUpdateService(
 
                 try
                 {
-                    await discoveryService.RefreshCapabilitiesAsync(capability, capability.Printer, cancellationToken);
+                    _ = await discoveryService.RefreshCapabilitiesAsync(capability, capability.Printer, cancellationToken);
                     _logger.LogDebug($"Updated capabilities for printer {capability.Printer.Name}", null, null);
                 }
                 catch (Exception ex)
@@ -137,7 +138,7 @@ public class PrinterCapabilityUpdateService(
                 }
             }
 
-            await context.SaveChangesAsync(cancellationToken);
+            _ = await context.SaveChangesAsync(cancellationToken);
             _logger.LogInformation($"Successfully updated capabilities for {capabilities.Count} printers", null, null);
         }
         catch (Exception ex)

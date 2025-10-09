@@ -1,6 +1,6 @@
+﻿using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace Farm.Infrastructure.Settings
 {
@@ -8,7 +8,7 @@ namespace Farm.Infrastructure.Settings
     /// Initializes IAppSetting instances from environment variables on first run.
     /// Supports the pattern: PFARM__{SettingKey}__{PropertyName}
     /// </summary>
-    public class SettingsInitializationService
+    public class SettingsInitializationService : ISettingsInitializationService
     {
         private readonly IConfiguration _configuration;
         private readonly ISettingsService _settingsService;

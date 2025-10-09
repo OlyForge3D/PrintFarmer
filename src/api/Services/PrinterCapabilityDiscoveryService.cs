@@ -1,7 +1,7 @@
-﻿using Farm.Infrastructure.Telemetry;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -29,19 +29,15 @@ public class PrinterCapabilityDiscoveryService(
             _logger.LogInformation($"Starting capability discovery for printer {printer.Id} ({printer.Name})");
 
             // Start with model defaults
-            PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer);
-            if (capabilities == null)
+            PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer) ?? new PrinterCapabilities
             {
-                capabilities = new PrinterCapabilities
-                {
-                    Id = Guid.NewGuid(),
-                    PrinterId = printer.Id,
-                    IsAvailable = true,
-                    LastUpdated = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-            }
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                IsAvailable = true,
+                LastUpdated = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
 
             // Try to discover from printer API
             DiscoveredCapabilities? discovered = await DiscoverFromPrinterApiAsync(printer, cancellationToken);
@@ -224,6 +220,7 @@ public class PrinterCapabilityDiscoveryService(
             // Get supported materials from the filament type relationships
             if (model.SupportedFilamentTypes?.Any() == true)
             {
+                // Preserve original casing for display names; comparisons elsewhere should use OrdinalIgnoreCase
                 capabilities.SupportedMaterials = model.SupportedFilamentTypes
                     .Where(sft => sft.FilamentType != null)
                     .Select(sft => sft.FilamentType!.Name)
@@ -273,13 +270,7 @@ public class PrinterCapabilityDiscoveryService(
         try
         {
             // Try to get printer.cfg file to determine stepper configurations and features
-            byte[]? printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken);
-
-            if (printerConfigBytes == null)
-            {
-                // Try alternative config file name
-                printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
-            }
+            byte[]? printerConfigBytes = await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken) ?? await _moonrakerClient.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
 
             if (printerConfigBytes == null)
             {
@@ -287,25 +278,26 @@ public class PrinterCapabilityDiscoveryService(
             }
 
             string configContent = System.Text.Encoding.UTF8.GetString(printerConfigBytes);
-            DiscoveredCapabilities discovered = new();
+            DiscoveredCapabilities discovered = new()
+            {
+                // Parse Klipper configuration file (INI-style format)
+                MaxBuildVolumeX = ParseConfigValue(configContent, "stepper_x", "position_max", 200.0),
+                MaxBuildVolumeY = ParseConfigValue(configContent, "stepper_y", "position_max", 200.0),
+                MaxBuildVolumeZ = ParseConfigValue(configContent, "stepper_z", "position_max", 200.0),
 
-            // Parse Klipper configuration file (INI-style format)
-            discovered.MaxBuildVolumeX = ParseConfigValue(configContent, "stepper_x", "position_max", 200.0);
-            discovered.MaxBuildVolumeY = ParseConfigValue(configContent, "stepper_y", "position_max", 200.0);
-            discovered.MaxBuildVolumeZ = ParseConfigValue(configContent, "stepper_z", "position_max", 200.0);
+                // Check for heated bed
+                HasHeatedBed = configContent.Contains("[heater_bed]", StringComparison.OrdinalIgnoreCase),
 
-            // Check for heated bed
-            discovered.HasHeatedBed = configContent.Contains("[heater_bed]");
+                // Check for multiple extruders and temperature ranges
+                NumberOfExtruders = CountExtrudersFromConfig(configContent),
 
-            // Check for multiple extruders and temperature ranges
-            discovered.NumberOfExtruders = CountExtrudersFromConfig(configContent);
+                // Get temperature limits
+                MaxHotendTemp = (int)ParseConfigValue(configContent, "extruder", "max_temp", 250.0),
+                MaxBedTemp = (int)ParseConfigValue(configContent, "heater_bed", "max_temp", 100.0),
 
-            // Get temperature limits
-            discovered.MaxHotendTemp = (int)ParseConfigValue(configContent, "extruder", "max_temp", 250.0);
-            discovered.MaxBedTemp = (int)ParseConfigValue(configContent, "heater_bed", "max_temp", 100.0);
-
-            // Get nozzle diameter
-            discovered.NozzleDiameter = ParseConfigValue(configContent, "extruder", "nozzle_diameter", 0.4);
+                // Get nozzle diameter
+                NozzleDiameter = ParseConfigValue(configContent, "extruder", "nozzle_diameter", 0.4)
+            };
 
             return discovered;
         }
@@ -333,7 +325,7 @@ public class PrinterCapabilityDiscoveryService(
                 sectionEnd = configContent.Length;
             }
 
-            string sectionContent = configContent.Substring(sectionStart, sectionEnd - sectionStart);
+            string sectionContent = configContent[sectionStart..sectionEnd];
             Match keyMatch = Regex.Match(sectionContent, $@"{Regex.Escape(key)}\s*[:=]\s*([^\r\n]+)", RegexOptions.IgnoreCase);
 
             if (keyMatch.Success && double.TryParse(keyMatch.Groups[1].Value.Trim(), out double value))
@@ -352,14 +344,14 @@ public class PrinterCapabilityDiscoveryService(
     {
         int count = 0;
         // Count extruder sections: [extruder], [extruder1], [extruder2], etc.
-        if (configContent.Contains("[extruder]"))
+        if (configContent.Contains("[extruder]", StringComparison.OrdinalIgnoreCase))
         {
             count = 1;
         }
 
         for (int i = 1; i < 10; i++)
         {
-            if (configContent.Contains($"[extruder{i}]"))
+            if (configContent.Contains($"[extruder{i}]", StringComparison.OrdinalIgnoreCase))
             {
                 count = Math.Max(count, i + 1);
             }
@@ -466,8 +458,9 @@ public class PrinterCapabilityDiscoveryService(
 
     private static void SetDefaultsByManufacturerAndModel(PrinterCapabilities capabilities, Printer printer)
     {
-        string? manufacturerName = printer.Manufacturer?.Name?.ToLowerInvariant();
-        string? modelName = printer.Model?.Name?.ToLowerInvariant();
+        // Use OrdinalIgnoreCase when comparing manufacturer/model names elsewhere; avoid creating lowered copies here
+        string? manufacturerName = printer.Manufacturer?.Name;
+        string? modelName = printer.Model?.Name;
 
         // Only apply manufacturer defaults if model defaults aren't already set
         // This provides fallbacks for older model entries that may not have complete capability data
@@ -526,7 +519,7 @@ public class PrinterCapabilityDiscoveryService(
 
                 if (!capabilities.HasEnclosure)
                 {
-                    capabilities.HasEnclosure = modelName?.Contains("v2.4") == true || modelName?.Contains("trident") == true;
+                    capabilities.HasEnclosure = modelName?.Contains("v2.4", StringComparison.OrdinalIgnoreCase) == true || modelName?.Contains("trident", StringComparison.OrdinalIgnoreCase) == true;
                 }
 
                 if (capabilities.NumberOfExtruders == 0)
@@ -579,7 +572,7 @@ public class PrinterCapabilityDiscoveryService(
 
                 if (capabilities.NumberOfExtruders == 0)
                 {
-                    capabilities.NumberOfExtruders = modelName?.Contains("idex") == true ? 2 : 1;
+                    capabilities.NumberOfExtruders = modelName?.Contains("idex", StringComparison.OrdinalIgnoreCase) == true ? 2 : 1;
                 }
 
                 if (!capabilities.NozzleDiameter.HasValue)
@@ -615,7 +608,7 @@ public class PrinterCapabilityDiscoveryService(
                 break;
 
             case "elegoo":
-                if (modelName?.Contains("centauri") == true)
+                if (modelName?.Contains("centauri", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     // Delta printer specifics
                     if (!capabilities.HasHeatedBed)

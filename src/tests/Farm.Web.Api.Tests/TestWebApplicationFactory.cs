@@ -3,14 +3,14 @@ using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication;
 
 // PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
 namespace Farm.Web.Api.Tests;
@@ -190,15 +190,24 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 {
                     // Remove any registration that may reference AppDbContext or its DbContextOptions
                     var descriptors = services.Where(d =>
-                        (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext") || d.ServiceType.FullName.Contains("DbContextOptions"))) ||
-                        (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext"))
+                        (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase) || d.ServiceType.FullName.Contains("DbContextOptions", StringComparison.OrdinalIgnoreCase))) ||
+                            (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase))
                     ).ToList();
                     foreach (var d in descriptors)
-                        services.Remove(d);
-                    services.AddDbContext<Farm.Infrastructure.Data.AppDbContext>(opts =>
                     {
-                        opts.UseInMemoryDatabase($"unittest_inmemory_{Guid.NewGuid():N}");
-                    });
+                        services.Remove(d);
+                    }
+
+                    {
+                        // Use a deterministic in-memory database name and register a DbContextFactory.
+                        var inmemoryName = $"unittest_inmemory_{Guid.NewGuid():N}";
+                        services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>(opts =>
+                        {
+                            opts.UseInMemoryDatabase(inmemoryName);
+                        });
+                        // Resolve AppDbContext from the factory per-scope so scoped consumers still work.
+                        services.AddScoped(sp => sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>().CreateDbContext());
+                    }
 
                     // Optionally replace DatabaseInitializer with a no-op implementation to avoid heavy seeding in InMemory tests.
                     var dbInitDesc = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Services.DatabaseInitializer));
@@ -247,8 +256,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // Remove any existing descriptors that reference AppDbContext or DbContextOptions so
                     // we can replace the registration reliably.
                     var descriptorsToRemove = services.Where(d =>
-                        (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext") || d.ServiceType.FullName.Contains("DbContextOptions"))) ||
-                        (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext"))
+                        (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase) || d.ServiceType.FullName.Contains("DbContextOptions", StringComparison.OrdinalIgnoreCase))) ||
+                            (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase))
                     ).ToList();
 
                     foreach (var d in descriptorsToRemove)
@@ -257,10 +266,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     }
 
                     // Register AppDbContext to use the opened SqliteConnection instance
-                    services.AddDbContext<Farm.Infrastructure.Data.AppDbContext>(opts =>
+                    // Register a DbContextFactory that targets the opened in-memory Sqlite connection
+                    services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>(opts =>
                     {
                         opts.UseSqlite(_inMemorySqliteConnection);
                     });
+                    // Provide AppDbContext per-scope resolved from the factory
+                    services.AddScoped(sp => sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>().CreateDbContext());
                 }
                 catch
                 {
@@ -323,19 +335,24 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
                     // Remove existing AppDbContext registrations so we can replace with the shared connection
                     var descriptors = services.Where(d =>
-                        (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext") || d.ServiceType.FullName.Contains("DbContextOptions"))) ||
-                        (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext"))
+                        (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase) || d.ServiceType.FullName.Contains("DbContextOptions", StringComparison.OrdinalIgnoreCase))) ||
+                            (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase))
                     ).ToList();
                     foreach (var d in descriptors)
+                    {
                         services.Remove(d);
+                    }
 
                     // Register AppDbContext to pick up the SqliteConnection from DI so every context uses the
                     // same open connection instance. Use factory overload so we can resolve the connection.
-                    services.AddDbContext<Farm.Infrastructure.Data.AppDbContext>((sp, options) =>
+                    // Register a DbContextFactory that resolves the shared connection from DI
+                    services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>((sp, options) =>
                     {
                         var conn = sp.GetRequiredService<Microsoft.Data.Sqlite.SqliteConnection>();
                         options.UseSqlite(conn);
                     });
+                    // Register the AppDbContext to be created from the factory per-scope
+                    services.AddScoped(sp => sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>().CreateDbContext());
 
                     // Best-effort: build a temporary provider now to ensure schema exists and run
                     // the real DatabaseInitializer (InitializeAsync + SeedAllAsync) before the
@@ -348,11 +365,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         var tempProvider = services.BuildServiceProvider();
                         using (var scope = tempProvider.CreateScope())
                         {
-                            var tempDb = scope.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
-                            if (tempDb != null)
-                            {
-                                tempDb.Database.EnsureCreated();
-                            }
+                            var tempDb = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+                            tempDb.Database.EnsureCreated();
 
                             var initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
                             if (initializer != null)

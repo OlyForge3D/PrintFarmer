@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Settings
@@ -15,8 +15,8 @@ namespace Farm.Infrastructure.Settings
 
         [SettingDisplay(Name = "Allowed Extensions", Description = "File extensions allowed for upload (e.g. .gcode)", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
         [JsonPropertyName("allowedExtensions")]
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Required for serialization")]
-        public List<string> AllowedExtensions { get; set; } = new(_defaultExtensions);
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
+        public IList<string> AllowedExtensions { get; set; } = new List<string>(_defaultExtensions);
 
         [SettingDisplay(Name = "Daily Upload Limit (Bytes)", Description = "Maximum total bytes allowed for upload per day.", InputType = SettingInputType.Number, Required = true)]
         [JsonPropertyName("dailyUploadLimitBytes")]

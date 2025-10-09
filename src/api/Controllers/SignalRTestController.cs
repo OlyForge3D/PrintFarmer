@@ -35,14 +35,14 @@ public class SignalRTestController(
             if (!string.IsNullOrEmpty(request.ConnectionId))
             {
                 await hubContext.Clients.Client(request.ConnectionId).SendAsync("TestMessage", testMessage);
-                return Ok(new { Success = true, Target = "Connection", ConnectionId = request.ConnectionId, TestMessage = testMessage });
+                return Ok(new { Success = true, Target = "Connection", request.ConnectionId, TestMessage = testMessage });
             }
 
             // Send to specific group if provided
             if (!string.IsNullOrEmpty(request.GroupName))
             {
                 await hubContext.Clients.Group(request.GroupName).SendAsync("TestMessage", testMessage);
-                return Ok(new { Success = true, Target = "Group", GroupName = request.GroupName, TestMessage = testMessage });
+                return Ok(new { Success = true, Target = "Group", request.GroupName, TestMessage = testMessage });
             }
 
             // Send to all connected clients

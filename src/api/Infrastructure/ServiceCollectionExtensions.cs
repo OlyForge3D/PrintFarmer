@@ -1,3 +1,5 @@
+﻿using System;
+using System.Diagnostics;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
@@ -10,7 +12,6 @@ using Farm.Web.Api.Services.DiscoveryProbes;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.EntityFrameworkCore;
-using System.Diagnostics;
 
 namespace Farm.Web.Api.Infrastructure;
 
@@ -18,7 +19,10 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddPrintFarmerDatabase(this IServiceCollection services, IConfiguration configuration)
     {
-        string provider = configuration.GetValue<string>("DB_PROVIDER")?.ToLower() ?? "sqlite";
+        // Read provider value without forcing culture-sensitive lowercasing.
+        // We'll trim and perform case-insensitive comparisons where needed.
+        string? providerRaw = configuration.GetValue<string>("DB_PROVIDER");
+        string provider = string.IsNullOrWhiteSpace(providerRaw) ? "sqlite" : providerRaw.Trim();
 
         // Always use "Default" connection string key for all providers
         string connectionString = configuration.GetConnectionString("Default")
@@ -27,21 +31,42 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddDbContext<AppDbContext>(options =>
         {
-            switch (provider)
+            if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
             {
-                case "sqlserver":
-                    _ = options.UseSqlServer(connectionString);
-                    break;
-                case "postgres":
-                case "postgresql":
-                    _ = options.UseNpgsql(connectionString);
-                    break;
-                case "mysql":
-                    _ = options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-                    break;
-                default:
-                    _ = options.UseSqlite(connectionString);
-                    break;
+                _ = options.UseSqlServer(connectionString);
+            }
+            else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = options.UseNpgsql(connectionString);
+            }
+            else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+            }
+            else
+            {
+                _ = options.UseSqlite(connectionString);
+            }
+        });
+
+        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons
+        _ = services.AddDbContextFactory<AppDbContext>(options =>
+        {
+            if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = options.UseSqlServer(connectionString);
+            }
+            else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = options.UseNpgsql(connectionString);
+            }
+            else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+            }
+            else
+            {
+                _ = options.UseSqlite(connectionString);
             }
         });
 
@@ -50,16 +75,12 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddPrintFarmerSettings(this IServiceCollection services)
     {
-        _ = services.AddScoped<SettingsService>(sp =>
-            new SettingsService(
-                sp.GetRequiredService<IConfiguration>(),
-                sp.GetRequiredService<AppDbContext>(),
-                sp.GetRequiredService<IUnifiedLoggingService>()));
-        _ = services.AddScoped<ISettingsService>(sp =>
-            sp.GetRequiredService<SettingsService>());
+        // Register SettingsService so DI constructs it with IConfiguration, AppDbContext and IUnifiedLoggingService
+        _ = services.AddScoped<ISettingsService, SettingsService>();
 
         // Settings initialization from environment variables (scoped to match ISettingsService)
-        _ = services.AddScoped<SettingsInitializationService>();
+        // Register settings initialization via its interface
+        _ = services.AddScoped<Farm.Infrastructure.Settings.ISettingsInitializationService, SettingsInitializationService>();
 
         return services;
     }
@@ -69,13 +90,12 @@ public static class ServiceCollectionExtensions
         // Caching
         _ = services.AddMemoryCache();
         _ = services.AddOptions<CatalogCacheOptions>();
-        _ = services.AddScoped<ICatalogCache, CatalogCache>();
+        // CatalogCache is implemented to resolve a scoped AppDbContext per-call, so it can be a Singleton
+        _ = services.AddSingleton<ICatalogCache, CatalogCache>();
 
         // API Clients
-        _ = services.AddScoped<MoonrakerClient>();
-        _ = services.AddScoped<PrusaLinkClient>();
-        _ = services.AddScoped<OctoPrintClient>();
-        _ = services.AddScoped<SdcpClient>();
+        // Use typed HttpClient registrations below (IMoonrakerClient, IPrusaLinkClient, IOctoPrintClient, ISdcpClient)
+        // Avoid duplicate raw scoped registrations for the concrete client types.
 
         // Discovery Services
         _ = services.AddAllNetworkDiscoveryProbes();
@@ -85,15 +105,20 @@ public static class ServiceCollectionExtensions
 
         // Business Services
         _ = services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
-        _ = services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
-        _ = services.AddScoped<SystemLogCleanupService>();
+        _ = services.AddSingleton<ICircuitBreakerService, CircuitBreakerService>();
+        // SystemLogCleanupService is a background worker; register as hosted service
+        _ = services.AddHostedService<SystemLogCleanupService>();
         _ = services.AddScoped<DatabaseInitializer>();
-        _ = services.AddScoped<NetworkUrlRewriteService>();
+        _ = services.AddScoped<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer, DatabaseInitializer>();
+        // NetworkUrlRewriteService is stateless and depends on IConfiguration and logging - safe as a Singleton
+        // Register NetworkUrlRewriteService as the implementation for INetworkUrlRewriteService
+        _ = services.AddSingleton<INetworkUrlRewriteService, NetworkUrlRewriteService>();
 
         // Telemetry and Logging
         ActivitySource activitySource = new("PrintFarmer.API");
         _ = services.AddSingleton(_ => activitySource);
-        _ = services.AddScoped<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
+        // Telemetry service is thread-safe and manages Meter/ActivitySource lifetimes – register as Singleton
+        _ = services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
         // IUnifiedLoggingService must be Singleton because it's used by Singleton services like IHarvestQueue
         // It only depends on ILogger (Singleton) and IServiceProvider (Singleton), so this is safe
         _ = services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
@@ -121,8 +146,8 @@ public static class ServiceCollectionExtensions
         });
 
         // Spoolman Integration
-        _ = services.AddScoped<ISpoolmanService, SpoolmanService>();
-        _ = services.AddHttpClient<SpoolmanService>("SpoolmanService", client =>
+        // Provide typed HttpClient for ISpoolmanService implementation
+        _ = services.AddHttpClient<ISpoolmanService, SpoolmanService>("SpoolmanService", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
@@ -132,7 +157,8 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IAuthenticationService, AuthenticationService>();
 
         // Startup tracking
-        _ = services.AddSingleton<StartupStatus>();
+        // Register StartupStatus as the implementation for IStartupStatus
+        _ = services.AddSingleton<IStartupStatus, StartupStatus>();
 
         // Harvest queue and gcode harvest service
         // IHarvestQueue must be Singleton because it's used by background tasks that outlive HTTP request scopes

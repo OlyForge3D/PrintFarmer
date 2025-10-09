@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
@@ -16,24 +16,34 @@ public static class CliCommandExtensions
     public static async Task<bool> HandleCliCommandsAsync(this WebApplication app, string[] args)
     {
         List<string> rawArgs = args.ToList();
-        bool headlessCreateAdmin = rawArgs.Contains("--create-admin");
-        bool headlessListUsers = rawArgs.Contains("--list-users");
+        bool headlessCreateAdmin = rawArgs.Contains("--create-admin", StringComparer.OrdinalIgnoreCase);
+        bool headlessListUsers = rawArgs.Contains("--list-users", StringComparer.OrdinalIgnoreCase);
 
         if (!headlessCreateAdmin && !headlessListUsers)
         {
             return false; // No CLI command, continue with normal startup
         }
 
-        using IServiceScope scope = app.Services.CreateScope();
-        IUnifiedLoggingService? logger = scope.ServiceProvider.GetService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        // Create an async scope to resolve scoped services without using the service locator pattern
+        await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
+        // Resolve logger explicitly; if not registered, keep null to preserve Console fallback
+        Farm.Infrastructure.Telemetry.IUnifiedLoggingService? logger = null;
+        try
+        {
+            logger = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        }
+        catch (InvalidOperationException)
+        {
+            // No logger registered - fall back to Console output as before
+        }
 
         // Ensure database is initialized for CLI operations
         try
         {
             AppDbContext cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await cliDb.Database.EnsureCreatedAsync();
+            _ = await cliDb.Database.EnsureCreatedAsync();
 
-            DatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
+            Farm.Web.Api.Services.Interfaces.IDatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer>();
             if (dbInitializer != null)
             {
                 await dbInitializer.SeedAllAsync();
@@ -149,7 +159,7 @@ public static class CliCommandExtensions
             Environment.Exit(1);
         }
 
-        PasswordHasher<User> passwordHasher = new Microsoft.AspNetCore.Identity.PasswordHasher<User>();
+        PasswordHasher<User> passwordHasher = new();
         User newAdmin = new()
         {
             Username = username,
@@ -161,20 +171,20 @@ public static class CliCommandExtensions
             UpdatedAt = DateTime.UtcNow
         };
         newAdmin.PasswordHash = passwordHasher.HashPassword(newAdmin, password);
-        db.Users.Add(newAdmin);
-        await db.SaveChangesAsync();
+        _ = db.Users.Add(newAdmin);
+        _ = await db.SaveChangesAsync();
 
         Role? adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole != null)
         {
-            db.UserRoles.Add(new UserRole
+            _ = db.UserRoles.Add(new UserRole
             {
                 UserId = newAdmin.Id,
                 RoleId = adminRole.Id,
                 IsActive = true,
                 AssignedAt = DateTime.UtcNow
             });
-            await db.SaveChangesAsync();
+            _ = await db.SaveChangesAsync();
             if (logger != null)
             {
                 logger.LogInformation($"Created admin user '{username}' with farm_admin role.");

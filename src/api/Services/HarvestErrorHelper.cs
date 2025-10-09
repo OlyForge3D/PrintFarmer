@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services;
@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Services;
 /// </summary>
 public static class HarvestErrorHelper
 {
-    public record ErrorDetails(
+    internal record ErrorDetails(
         string ExceptionType,
         string? StackTrace,
         string? InnerException,
@@ -28,10 +28,10 @@ public static class HarvestErrorHelper
             UnauthorizedAccessException => nameof(HarvestErrorType.AuthenticationError),
             IOException => nameof(HarvestErrorType.FileSystemError),
             ArgumentException => nameof(HarvestErrorType.ValidationError),
-            _ when ex.Message.Contains("401") || ex.Message.Contains("403") => nameof(HarvestErrorType.AuthenticationError),
-            _ when ex.Message.Contains("404") => nameof(HarvestErrorType.FileSystemError),
-            _ when ex.Message.Contains("timeout") || ex.Message.Contains("timed out") => nameof(HarvestErrorType.ConnectionError),
-            _ when ex.Message.Contains("connection") || ex.Message.Contains("network") => nameof(HarvestErrorType.ConnectionError),
+            _ when ex.Message.Contains("401", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("403", StringComparison.OrdinalIgnoreCase) => nameof(HarvestErrorType.AuthenticationError),
+            _ when ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) => nameof(HarvestErrorType.FileSystemError),
+            _ when ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) => nameof(HarvestErrorType.ConnectionError),
+            _ when ex.Message.Contains("connection", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("network", StringComparison.OrdinalIgnoreCase) => nameof(HarvestErrorType.ConnectionError),
             _ => nameof(HarvestErrorType.UnknownError)
         };
     }
@@ -54,14 +54,14 @@ public static class HarvestErrorHelper
     /// <summary>
     /// Create detailed error JSON for logging/debugging
     /// </summary>
-    private static readonly JsonSerializerOptions ErrorJsonOptions = new JsonSerializerOptions
+    private static readonly JsonSerializerOptions ErrorJsonOptions = new()
     {
         WriteIndented = false
     };
 
     public static string CreateErrorDetailsJson(Exception ex, string? failedResource = null)
     {
-        var details = new ErrorDetails(
+        ErrorDetails details = new(
             ExceptionType: ex.GetType().Name,
             StackTrace: ex.StackTrace,
             InnerException: ex.InnerException?.Message,
@@ -78,7 +78,7 @@ public static class HarvestErrorHelper
     /// </summary>
     public static string GetUserFriendlyMessage(string errorType, string originalMessage)
     {
-        var prefix = errorType switch
+        string prefix = errorType switch
         {
             nameof(HarvestErrorType.ConnectionError) => "Connection failed: ",
             nameof(HarvestErrorType.AuthenticationError) => "Authentication failed: ",

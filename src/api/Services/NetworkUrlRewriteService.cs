@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Services;
 /// Handles URL rewriting for external services based on the runtime environment.
 /// This allows the same configuration to work across Docker, native execution, and different platforms.
 /// </summary>
-public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration)
+public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration) : Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService
 {
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -147,7 +147,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
         {
             Environment.GetEnvironmentVariable("DOCKER_DESKTOP") == "true",
             // Docker Desktop typically uses these internal networks
-            Environment.GetEnvironmentVariable("DOCKER_HOST")?.Contains("docker.io") == true,
+            Environment.GetEnvironmentVariable("DOCKER_HOST")?.Contains("docker.io", StringComparison.OrdinalIgnoreCase) == true,
             // Check if we're on Windows/macOS (where Docker Desktop is common)
             !RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
         };
@@ -177,7 +177,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
 
         // Check for common local hostnames
         string[] localHostnames = new[] { "localhost", "host.docker.internal" };
-        return localHostnames.Contains(host.ToLowerInvariant());
+        return localHostnames.Contains(host, StringComparer.OrdinalIgnoreCase);
     }
 
     private static Uri ReplaceHostPort(Uri originalUri, string newHostPort)

@@ -3,6 +3,7 @@ using Farm.Web.Shared;
 using Farm.Web.Shared.Slicer.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Farm.Infrastructure.Telemetry;
 using Moq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -27,6 +28,10 @@ public class SlicerServicesIntegrationTests : IDisposable
         _mockProgressNotifier = new Mock<ISlicerProgressNotifier>();
 
         var services = new ServiceCollection();
+
+        // Add a simple mock for unified logging so LocalSlicerFileStorage can be activated in tests
+        var mockUnifiedLogger = new Mock<IUnifiedLoggingService>();
+        services.AddSingleton<IUnifiedLoggingService>(mockUnifiedLogger.Object);
 
         // Add logging
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));

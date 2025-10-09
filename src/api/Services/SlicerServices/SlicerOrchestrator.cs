@@ -338,7 +338,7 @@ public class SlicerOrchestrator(
         // Job queue broad connectivity test
         try
         {
-            await _jobQueue.GetQueueStatsAsync(null, cancellationToken);
+            _ = await _jobQueue.GetQueueStatsAsync(null, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -350,7 +350,7 @@ public class SlicerOrchestrator(
         // File storage test
         try
         {
-            await _fileStorage.FileExistsAsync("health-check-non-existent-file", cancellationToken);
+            _ = await _fileStorage.FileExistsAsync("health-check-non-existent-file", cancellationToken);
         }
         catch (Exception ex)
         {
@@ -399,8 +399,8 @@ public class SlicerOrchestrator(
         }
 
         // Check file extension
-        string extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl.ToString()).ToLowerInvariant();
-        if (!engineMeta.SupportedExtensions.Contains(extension))
+        string extension = Path.GetExtension(request.ModelFileName ?? request.ModelFileUrl.ToString()) ?? string.Empty;
+        if (!engineMeta.SupportedExtensions.Any(e => string.Equals(e, extension, StringComparison.OrdinalIgnoreCase)))
         {
             throw new ArgumentException($"File extension {extension} is not supported by {request.SlicerEngine}");
         }

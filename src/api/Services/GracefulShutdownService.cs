@@ -17,7 +17,7 @@ public class GracefulShutdownService(
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _appLifetime.ApplicationStopping.Register(() => _ = OnStoppingAsync());
+        _ = _appLifetime.ApplicationStopping.Register(() => _ = OnStoppingAsync());
         return Task.CompletedTask;
     }
 
@@ -27,7 +27,7 @@ public class GracefulShutdownService(
 
         try
         {
-            using IServiceScope scope = _serviceProvider.CreateScope();
+            await using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
             IGcodeHarvestService harvestService = scope.ServiceProvider.GetRequiredService<IGcodeHarvestService>();
 
             // Wait up to 30 seconds for tasks to complete

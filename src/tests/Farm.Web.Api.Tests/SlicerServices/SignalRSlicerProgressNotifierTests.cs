@@ -1,7 +1,7 @@
 ﻿using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Tests.TestUtils;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
-using Farm.Web.Api.Tests.TestUtils;
 using Moq;
 
 namespace Farm.Web.Api.Tests.SlicerServices;

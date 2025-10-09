@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;

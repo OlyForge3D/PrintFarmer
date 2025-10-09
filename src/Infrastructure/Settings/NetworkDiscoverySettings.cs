@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
@@ -22,13 +22,13 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
 
     [SettingDisplay(Name = "Discovery Subnets", Description = "List of subnets to scan (CIDR notation).", InputType = SettingInputType.Array, IsMulti = true)]
     [JsonPropertyName("discoverySubnets")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Required for serialization")]
-    public List<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
+    public IList<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);
 
     [SettingDisplay(Name = "Ports", Description = "List of ports to scan.", InputType = SettingInputType.Array, IsMulti = true)]
     [JsonPropertyName("ports")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Required for serialization")]
-    public List<int> Ports { get; set; } = new List<int> { 80 };
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
+    public IList<int> Ports { get; set; } = new List<int> { 80 };
 
     [SettingDisplay(Name = "Client Timeout (ms)", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
     [JsonPropertyName("clientTimeoutMs")]

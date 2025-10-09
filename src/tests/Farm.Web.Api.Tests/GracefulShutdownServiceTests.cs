@@ -1,6 +1,6 @@
 ﻿using Farm.Web.Api.Services;
-using Microsoft.Extensions.Hosting;
 using Farm.Web.Api.Tests.TestUtils;
+using Microsoft.Extensions.Hosting;
 using Moq;
 
 namespace Farm.Web.Api.Tests;

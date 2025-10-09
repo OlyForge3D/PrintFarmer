@@ -1,7 +1,8 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Infrastructure;
@@ -12,21 +13,21 @@ public static class DatabaseInitializationExtensions
     /// Initializes and seeds the database during application startup.
     /// Ensures schema exists before any services query the database.
     /// </summary>
-    public static async Task InitializeDatabaseAsync(this WebApplication app)
+    public static async Task InitializeDatabaseAsync(this WebApplication app,
+        IUnifiedLoggingService logger,
+        AppDbContext db,
+        ISettingsService dbSettingsService,
+        Farm.Web.Api.Services.Interfaces.IDatabaseInitializer dbInitializer,
+        IStartupStatus startupStatus)
     {
-        using var scope = app.Services.CreateScope();
-        var services = scope.ServiceProvider;
-        var logger = services.GetRequiredService<IUnifiedLoggingService>();
-
         try
         {
             // STEP 1: Ensure database schema exists FIRST (before any services query it)
-            var db = services.GetRequiredService<AppDbContext>();
             logger.LogInformation("[Startup] Ensuring database schema exists...");
 
             if (app.Environment.IsDevelopment())
             {
-                await db.Database.EnsureCreatedAsync();
+                _ = await db.Database.EnsureCreatedAsync();
                 logger.LogInformation("[Startup] Database schema created (EnsureCreated)");
             }
             else
@@ -40,17 +41,14 @@ public static class DatabaseInitializationExtensions
             // TEST_SKIP_STARTUP_DB_INIT=true is set we assume a test fixture has
             // already provisioned schema and seed data and skip this step to avoid
             // races with migrations or provider-specific locking.
-            var skipStartupInit = string.Equals(Environment.GetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT"), "true", StringComparison.OrdinalIgnoreCase);
+            bool skipStartupInit = string.Equals(Environment.GetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT"), "true", StringComparison.OrdinalIgnoreCase);
             if (skipStartupInit)
             {
                 logger.LogInformation("[Startup][TEST] Skipping database initializer/seed because TEST_SKIP_STARTUP_DB_INIT=true");
             }
             else
             {
-                // STEP 2: Now safe to resolve settings and initializers (they can query DB)
-                var dbSettingsService = services.GetRequiredService<SettingsService>();
-                var dbSettings = dbSettingsService.Get<DatabaseSettings>();
-                var dbInitializer = services.GetRequiredService<DatabaseInitializer>();
+                DatabaseSettings dbSettings = dbSettingsService.Get<DatabaseSettings>();
 
                 int retryCount = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_COUNT"), out int rc) ? rc : 3;
                 int retryDelay = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_DELAY"), out int rd) ? rd : 2;
@@ -66,7 +64,6 @@ public static class DatabaseInitializationExtensions
             }
 
             // STEP 4: Mark application as ready
-            var startupStatus = services.GetRequiredService<StartupStatus>();
             startupStatus.MarkReady();
 
             logger.LogInformation("[Startup] Application ready to serve requests");
@@ -74,7 +71,7 @@ public static class DatabaseInitializationExtensions
         catch (Exception ex)
         {
             logger.LogError(ex, "[Startup][FATAL] Database initialization failed: {Message}", ex.Message);
-            await Console.Error.WriteLineAsync($"[Startup][FATAL] Database initialization failed: {ex.Message}\n{ex.StackTrace}");
+            await Console.Error.WriteAsync($"[Startup][FATAL] Database initialization failed: {ex.Message}\n{ex.StackTrace}");
             throw; // Fail fast for container restart
         }
     }

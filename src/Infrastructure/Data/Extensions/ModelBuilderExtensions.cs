@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Data.Extensions;
@@ -77,23 +77,23 @@ public static class ModelBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
-        switch (providerName.ToLowerInvariant())
+        // Perform provider detection using case-insensitive comparisons to avoid culture-sensitive casing
+        string provider = providerName;
+        if (provider.Contains("sqlite", StringComparison.OrdinalIgnoreCase))
         {
-            case var provider when provider.Contains("sqlite"):
-                ConfigureSqliteOptimizations(modelBuilder);
-                break;
-
-            case var provider when provider.Contains("postgres") || provider.Contains("npgsql"):
-                ConfigurePostgreSqlOptimizations(modelBuilder);
-                break;
-
-            case var provider when provider.Contains("sqlserver"):
-                ConfigureSqlServerOptimizations(modelBuilder);
-                break;
-
-            case var provider when provider.Contains("mysql"):
-                ConfigureMySqlOptimizations(modelBuilder);
-                break;
+            ConfigureSqliteOptimizations(modelBuilder);
+        }
+        else if (provider.Contains("postgres", StringComparison.OrdinalIgnoreCase) || provider.Contains("npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            ConfigurePostgreSqlOptimizations(modelBuilder);
+        }
+        else if (provider.Contains("sqlserver", StringComparison.OrdinalIgnoreCase))
+        {
+            ConfigureSqlServerOptimizations(modelBuilder);
+        }
+        else if (provider.Contains("mysql", StringComparison.OrdinalIgnoreCase))
+        {
+            ConfigureMySqlOptimizations(modelBuilder);
         }
     }
 

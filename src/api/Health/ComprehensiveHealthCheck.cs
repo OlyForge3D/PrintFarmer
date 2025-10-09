@@ -1,10 +1,10 @@
 ﻿// Suppress hardcoded URI warning for this file
 #pragma warning disable CA1303 // Do not use hardcoded absolute paths or URIs
 #pragma warning disable S1075 // Do not use hardcoded absolute paths or URIs (Sonar)
+using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -54,7 +54,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 }
                 else
                 {
-                    using var client = httpClientFactory.CreateClient();
+                    using HttpClient client = httpClientFactory.CreateClient();
                     client.Timeout = TimeSpan.FromSeconds(3);
                     // Determine API base URL for internal health check
                     const string DefaultApiBaseUrl = "http://localhost:5245";
@@ -70,7 +70,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     try
                     {
                         // Catalog API health check
-                        var resp = await client.GetAsync($"{baseUrl}/api/catalog/manufacturers", cancellationToken);
+                        HttpResponseMessage resp = await client.GetAsync($"{baseUrl}/api/catalog/manufacturers", cancellationToken);
                         if (!resp.IsSuccessStatusCode)
                         {
                             checks["CatalogApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };
@@ -79,13 +79,13 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         }
                         else
                         {
-                            var json = await resp.Content.ReadAsStringAsync(cancellationToken);
+                            string json = await resp.Content.ReadAsStringAsync(cancellationToken);
                             // Try to parse as array
                             bool valid = false;
                             int count = 0;
                             try
                             {
-                                var doc = System.Text.Json.JsonDocument.Parse(json);
+                                System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
                                 if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                                 {
                                     count = doc.RootElement.GetArrayLength();
@@ -130,7 +130,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         }
 
                         // Check /api/filament-types endpoint
-                        var resp = await client.GetAsync($"{baseUrl}/api/filament-types", cancellationToken);
+                        HttpResponseMessage resp = await client.GetAsync($"{baseUrl}/api/filament-types", cancellationToken);
                         if (!resp.IsSuccessStatusCode)
                         {
                             checks["FilamentTypesApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };
@@ -139,12 +139,12 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         }
                         else
                         {
-                            var json = await resp.Content.ReadAsStringAsync(cancellationToken);
+                            string json = await resp.Content.ReadAsStringAsync(cancellationToken);
                             bool valid = false;
                             int count = 0;
                             try
                             {
-                                var doc = System.Text.Json.JsonDocument.Parse(json);
+                                System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
                                 if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                                 {
                                     count = doc.RootElement.GetArrayLength();
@@ -213,7 +213,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             int printersToCheck = 3; // default fallback
             try
             {
-                var s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
+                Farm.Infrastructure.Settings.ExternalServicesHealthSettings s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
                 if (s != null)
                 {
                     printersToCheck = s.PrintersToCheck;
@@ -225,17 +225,15 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             {
                 printers = new List<Printer>();
             }
-            else if (printersToCheck < 0)
-            {
-                printers = await dbContext.Printers.ToListAsync(cancellationToken);
-            }
             else
             {
-                printers = await dbContext.Printers.Take(printersToCheck).ToListAsync(cancellationToken);
+                printers = printersToCheck < 0
+                    ? await dbContext.Printers.ToListAsync(cancellationToken)
+                    : await dbContext.Printers.Take(printersToCheck).ToListAsync(cancellationToken);
             }
             int externalServiceCount = 0;
             int failedServices = 0;
-            var failedDetails = new List<object>();
+            List<object> failedDetails = new();
 
             foreach (Printer? printer in printers)
             {
@@ -247,7 +245,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         using HttpClient client = httpClientFactory.CreateClient();
                         client.Timeout = TimeSpan.FromSeconds(2);
                         string attemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info";
-                        var sw = Stopwatch.StartNew();
+                        Stopwatch sw = Stopwatch.StartNew();
                         HttpResponseMessage response = await client.GetAsync(attemptedUrl, cancellationToken);
                         sw.Stop();
                         if (!response.IsSuccessStatusCode)
@@ -256,17 +254,17 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                             string snippet = "";
                             try
                             {
-                                var body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
-                                snippet = body.Length > 200 ? body.Substring(0, 200) : body;
+                                string body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
+                                snippet = body.Length > 200 ? body[..200] : body;
                             }
                             catch { }
 
                             failedDetails.Add(new
                             {
-                                Id = printer.Id,
-                                Name = printer.Name,
-                                ServerUrl = printer.ServerUrl,
-                                Backend = printer.Backend,
+                                printer.Id,
+                                printer.Name,
+                                printer.ServerUrl,
+                                printer.Backend,
                                 AttemptedUrl = attemptedUrl,
                                 CheckedAtUtc = DateTime.UtcNow,
                                 ElapsedMs = sw.ElapsedMilliseconds,
@@ -281,10 +279,10 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         failedServices++;
                         failedDetails.Add(new
                         {
-                            Id = printer.Id,
-                            Name = printer.Name,
-                            ServerUrl = printer.ServerUrl,
-                            Backend = printer.Backend,
+                            printer.Id,
+                            printer.Name,
+                            printer.ServerUrl,
+                            printer.Backend,
                             AttemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info",
                             CheckedAtUtc = DateTime.UtcNow,
                             ElapsedMs = (long?)null,
@@ -297,7 +295,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             string serviceStatus = failedServices == 0 ? "Healthy"
                                   : failedServices < externalServiceCount ? "Degraded" : "Unhealthy";
 
-            var externalServicesObj = new Dictionary<string, object>
+            Dictionary<string, object> externalServicesObj = new()
             {
                 ["Status"] = serviceStatus,
                 ["CheckedCount"] = externalServiceCount,
@@ -318,7 +316,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             int threshold = 100; // default: only unhealthy when 100% fail
             try
             {
-                var s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
+                Farm.Infrastructure.Settings.ExternalServicesHealthSettings s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
                 if (s != null)
                 {
                     threshold = Math.Clamp(s.PercentFailedThreshold, 0, 100);

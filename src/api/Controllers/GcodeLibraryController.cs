@@ -39,9 +39,9 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             // Apply filters
             if (!string.IsNullOrEmpty(search))
             {
-                query = query.Where(g => g.OriginalFileName.Contains(search) ||
-                                        g.DisplayName.Contains(search) ||
-                                        (g.Description != null && g.Description.Contains(search)));
+                query = query.Where(g => g.OriginalFileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                        g.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                        (g.Description != null && g.Description.Contains(search, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (!string.IsNullOrEmpty(material))
@@ -207,7 +207,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             // Ensure directory exists
             string libraryPath = Path.Combine(env.WebRootPath, "gcode-library");
             string libraryRootFull = Path.GetFullPath(libraryPath);
-            Directory.CreateDirectory(libraryRootFull);
+            _ = Directory.CreateDirectory(libraryRootFull);
 
             // Save file
             // Extension is validated above to be .gcode; avoid using tainted filename-derived values
@@ -252,8 +252,8 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
                 UpdatedAt = DateTime.UtcNow
             };
 
-            db.GcodeFiles.Add(gcodeFile);
-            await db.SaveChangesAsync();
+            _ = db.GcodeFiles.Add(gcodeFile);
+            _ = await db.SaveChangesAsync();
 
             // Load related entities for response
             await db.Entry(gcodeFile)
@@ -379,7 +379,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
 
             file.UpdatedAt = DateTime.UtcNow;
 
-            await db.SaveChangesAsync();
+            _ = await db.SaveChangesAsync();
 
             return Ok(new GcodeFileDto(
                 Id: file.Id,
@@ -472,8 +472,8 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             }
 #pragma warning restore CA3003
 
-            db.GcodeFiles.Remove(file);
-            await db.SaveChangesAsync();
+            _ = db.GcodeFiles.Remove(file);
+            _ = await db.SaveChangesAsync();
 
             return NoContent();
         }

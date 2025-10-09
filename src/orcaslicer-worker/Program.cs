@@ -39,8 +39,8 @@ public static class Program
                 // Resolve ILoggerFactory from the factory-provided service provider to avoid
                 // creating a second service provider via BuildServiceProvider(). This
                 // eliminates the ASP0000 diagnostic and ensures singletons are not duplicated.
-                ILoggerFactory? loggerFactory = sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>();
-                ILogger? logger = loggerFactory?.CreateLogger("OrcaSlicer.Startup");
+                ILoggerFactory loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
+                ILogger? logger = loggerFactory.CreateLogger("OrcaSlicer.Startup");
                 if (logger != null)
                 {
                     logger.LogWarning(ex, "[startup][redis] Initial Redis connection failed: {Message}", ex.Message);

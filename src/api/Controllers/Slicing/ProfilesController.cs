@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -57,8 +57,8 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
                 IsPublic = request.IsPublic,
                 CreatedAt = DateTime.UtcNow
             };
-            _context.SlicerProfiles.Add(profile);
-            await _context.SaveChangesAsync();
+            _ = _context.SlicerProfiles.Add(profile);
+            _ = await _context.SaveChangesAsync();
             SlicerProfileResponseDto response = new()
             {
                 Id = profile.Id,
@@ -124,8 +124,8 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
         {
             return NotFound();
         }
-        _context.SlicerProfiles.Remove(profile);
-        await _context.SaveChangesAsync();
+        _ = _context.SlicerProfiles.Remove(profile);
+        _ = await _context.SaveChangesAsync();
         return NoContent();
     }
 
@@ -185,7 +185,7 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
                     p.BedTemperature,
                     supports = p.EnableSupports,
                     p.Material,
-                    quality = p.Quality.ToString().ToLowerInvariant()
+                    quality = p.Quality.ToString()
                 })
                 .ToListAsync();
 

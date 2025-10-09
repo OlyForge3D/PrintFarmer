@@ -1,7 +1,7 @@
 ﻿using System.Net.Http.Headers;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.Extensions.Primitives;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -85,7 +85,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
                 string? correlationId = context.Items["CorrelationId"] as string ?? context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(correlationId))
                 {
-                    req.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
+                    _ = req.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
                 }
                 HttpResponseMessage resp = await s_client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
                 if (IsHtml(resp))
@@ -100,7 +100,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
                         context.Response.Headers[h.Key] = h.Value.ToArray();
                     }
                     // Prevent double encoding
-                    context.Response.Headers.Remove("transfer-encoding");
+                    _ = context.Response.Headers.Remove("transfer-encoding");
                     await resp.Content.CopyToAsync(context.Response.Body);
                     return;
                 }
@@ -132,7 +132,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             {
                 continue;
             }
-            req.Headers.TryAddWithoutValidation(header.Key, header.Value.AsEnumerable());
+            _ = req.Headers.TryAddWithoutValidation(header.Key, header.Value.AsEnumerable());
         }
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
     }

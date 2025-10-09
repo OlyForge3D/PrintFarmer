@@ -84,7 +84,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
             TimeoutException => (HttpStatusCode.RequestTimeout, "Request timeout", null),
 
             // Database errors
-            InvalidOperationException when ex.Message.Contains("database") =>
+            InvalidOperationException when ex.Message.Contains("database", StringComparison.OrdinalIgnoreCase) =>
                 (HttpStatusCode.ServiceUnavailable, "Database service unavailable", null),
 
             // Circuit breaker

@@ -3,14 +3,10 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Middleware;
 
-public class TelemetryMiddleware
+public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryService telemetryService)
 {
-    private readonly RequestDelegate _next;
-
-    public TelemetryMiddleware(RequestDelegate next)
-    {
-        _next = next ?? throw new ArgumentNullException(nameof(next));
-    }
+    private readonly RequestDelegate _next = next ?? throw new ArgumentNullException(nameof(next));
+    private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService ?? throw new ArgumentNullException(nameof(telemetryService));
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -23,9 +19,14 @@ public class TelemetryMiddleware
         // Store in HttpContext.Items for downstream access
         context.Items["CorrelationId"] = correlationId;
 
-        // Skip telemetry for health checks and static files to reduce noise
-        string? path = context.Request.Path.Value?.ToLower();
-        if (path != null && (path.StartsWith("/health") || path.StartsWith("/swagger") || path.StartsWith("/openapi") || path.Contains(".")))
+        // Skip telemetry for health checks and static files to reduce noise.
+        // Use PathString.StartsWithSegments with OrdinalIgnoreCase to avoid allocating a lower-cased string.
+        string? pathValue = context.Request.Path.Value;
+        if (pathValue != null && (
+            context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
+            context.Request.Path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase) ||
+            context.Request.Path.StartsWithSegments("/openapi", StringComparison.OrdinalIgnoreCase) ||
+            pathValue.Contains('.')))
         {
             await _next(context);
             return;
@@ -35,14 +36,11 @@ public class TelemetryMiddleware
         string endpoint = context.Request.Path.Value ?? "unknown";
         string method = context.Request.Method;
 
-        // Resolve telemetry service from request services
-        var telemetryService = context.RequestServices.GetRequiredService<IPrintFarmerTelemetryService>();
-
-        using Activity? activity = telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
-        activity?.SetTag("http.method", method);
-        activity?.SetTag("http.route", endpoint);
-        activity?.SetTag("http.scheme", context.Request.Scheme);
-        activity?.SetTag("correlation.id", correlationId);
+        using Activity? activity = _telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
+        _ = (activity?.SetTag("http.method", method));
+        _ = (activity?.SetTag("http.route", endpoint));
+        _ = (activity?.SetTag("http.scheme", context.Request.Scheme));
+        _ = (activity?.SetTag("correlation.id", correlationId));
 
         try
         {
@@ -50,19 +48,19 @@ public class TelemetryMiddleware
 
             stopwatch.Stop();
             int statusCode = context.Response.StatusCode;
-            activity?.SetTag("http.status_code", statusCode);
+            _ = (activity?.SetTag("http.status_code", statusCode));
 
-            telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);
+            _telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            activity?.SetTag("http.status_code", 500);
-            activity?.SetTag("error", true);
-            activity?.SetTag("exception.type", ex.GetType().Name);
-            activity?.SetTag("exception.message", ex.Message);
+            _ = (activity?.SetTag("http.status_code", 500));
+            _ = (activity?.SetTag("error", true));
+            _ = (activity?.SetTag("exception.type", ex.GetType().Name));
+            _ = (activity?.SetTag("exception.message", ex.Message));
 
-            telemetryService.RecordApiCall(endpoint, method, 500, stopwatch.Elapsed);
+            _telemetryService.RecordApiCall(endpoint, method, 500, stopwatch.Elapsed);
             throw;
         }
     }

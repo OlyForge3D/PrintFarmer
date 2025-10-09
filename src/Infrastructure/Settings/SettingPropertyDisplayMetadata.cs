@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Settings
+﻿namespace Farm.Infrastructure.Settings
 {
     public class SettingPropertyDisplayMetadata
     {

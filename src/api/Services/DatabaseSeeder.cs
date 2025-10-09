@@ -53,8 +53,8 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                 if (existing == null)
                 {
                     existing = new Manufacturer { Id = Guid.NewGuid(), Name = normalized };
-                    _context.Manufacturers.Add(existing);
-                    await _context.SaveChangesAsync();
+                    _ = _context.Manufacturers.Add(existing);
+                    _ = await _context.SaveChangesAsync();
                 }
                 manufacturers[normalized] = existing;
             }
@@ -132,7 +132,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
 
             foreach ((string modelName, string mfg, double x, double y, double z, int? defaultBackend, MotionType? motionType,
                       double? nozzleDiameter, bool hasBed, bool hasEnclosure, bool multiMaterial, int extruders, bool autoLevel,
-                      int? minHotend, int? maxHotend, int? minBed, int? maxBed, string _, int? maxSpeed) in modelSeeds)
+                      int? minHotend, int? maxHotend, int? minBed, int? maxBed, _, int? maxSpeed) in modelSeeds)
             {
 
                 if (!manufacturers.TryGetValue(mfg, out Manufacturer? m))
@@ -144,7 +144,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                 bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
                 if (!exists)
                 {
-                    _context.Models.Add(new PrinterModel
+                    _ = _context.Models.Add(new PrinterModel
                     {
                         Id = Guid.NewGuid(),
                         Name = modelName,
@@ -168,7 +168,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                     });
                 }
             }
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             // Now create the filament type relationships
             await SeedModelFilamentTypesAsync(modelSeeds);
@@ -188,9 +188,9 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
     {
         try
         {
-            // Get all filament types once
-            var filamentTypes = await _context.FilamentTypes
-                .ToDictionaryAsync(ft => ft.Name.ToUpperInvariant(), ft => ft);
+            // Get all filament types once (case-insensitive keys)
+            Dictionary<string, FilamentType> filamentTypes = await _context.FilamentTypes
+                .ToDictionaryAsync(ft => ft.Name, ft => ft, StringComparer.OrdinalIgnoreCase);
 
             // Process each model's supported materials
 #pragma warning disable IDE0008 // Use explicit type
@@ -226,7 +226,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                 {
                     // Parse the comma-separated materials list
                     var materialNames = supportedMaterials.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(material => material.Trim().ToUpperInvariant());
+                        .Select(material => material.Trim());
 
                     foreach (var materialName in materialNames)
                     {
@@ -239,7 +239,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
 
                             if (!exists)
                             {
-                                _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                                _ = _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                                 {
                                     PrinterModelId = model.Id,
                                     FilamentTypeId = filamentType.Id
@@ -251,7 +251,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
             }
 #pragma warning restore IDE0008 // Use explicit type
 
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
         }
         catch (Exception ex)
         {
@@ -287,11 +287,11 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                     DefaultHotendTemp = hotendTemp,
                     DefaultBedTemp = bedTemp
                 };
-                _context.FilamentTypes.Add(filamentType);
+                _ = _context.FilamentTypes.Add(filamentType);
             }
         }
 
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
     }
 
 
@@ -322,7 +322,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         try
         {
             // Try to query the Actions table to see if it exists
-            await _context.Actions.AnyAsync();
+            _ = await _context.Actions.AnyAsync();
         }
         catch (Exception)
         {
@@ -343,7 +343,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         // Seed Role Permissions
         await SeedRolePermissionsAsync();
 
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
     }
 
     private async Task SeedActionsAsync()
@@ -362,7 +362,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         {
             if (!await _context.Actions.AnyAsync(a => a.Name == action.Name))
             {
-                _context.Actions.Add(new Farm.Infrastructure.Domain.Action
+                _ = _context.Actions.Add(new Farm.Infrastructure.Domain.Action
                 {
                     Id = Guid.NewGuid(),
                     Name = action.Name,
@@ -395,7 +395,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         {
             if (!await _context.Resources.AnyAsync(r => r.Name == resource.Name))
             {
-                _context.Resources.Add(new Resource
+                _ = _context.Resources.Add(new Resource
                 {
                     Id = Guid.NewGuid(),
                     Name = resource.Name,
@@ -422,7 +422,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
         {
             if (!await _context.Roles.AnyAsync(r => r.Name == role.Name))
             {
-                _context.Roles.Add(new Role
+                _ = _context.Roles.Add(new Role
                 {
                     Id = Guid.NewGuid(),
                     Name = role.Name,
@@ -440,7 +440,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
     private async Task SeedRolePermissionsAsync()
     {
         // Ensure all roles, resources, and actions are saved first
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
 
         // Get the admin role - admins get all permissions
         Role? adminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
@@ -456,7 +456,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                     if (!await _context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == adminRole.Id && rp.ResourceId == resource.Id && rp.ActionId == adminAction.Id))
                     {
-                        _context.RolePermissions.Add(new RolePermission
+                        _ = _context.RolePermissions.Add(new RolePermission
                         {
                             Id = Guid.NewGuid(),
                             RoleId = adminRole.Id,
@@ -495,7 +495,7 @@ public class DatabaseSeeder(AppDbContext context, IUnifiedLoggingService logger)
                     if (!await _context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == userRole.Id && rp.ResourceId == resource.Id && rp.ActionId == action.Id))
                     {
-                        _context.RolePermissions.Add(new RolePermission
+                        _ = _context.RolePermissions.Add(new RolePermission
                         {
                             Id = Guid.NewGuid(),
                             RoleId = userRole.Id,

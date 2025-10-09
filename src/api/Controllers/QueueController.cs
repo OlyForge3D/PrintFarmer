@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -183,8 +183,8 @@ public class QueueController(IUnifiedLoggingService logger, AppDbContext context
                 QueuedAt = DateTime.UtcNow
             };
 
-            _context.PrintJobs.Add(printJob);
-            await _context.SaveChangesAsync();
+            _ = _context.PrintJobs.Add(printJob);
+            _ = await _context.SaveChangesAsync();
 
             // Return job information
             JobQueuePrintJobDto result = new()
@@ -286,8 +286,8 @@ public class QueueController(IUnifiedLoggingService logger, AppDbContext context
 
         try
         {
-            _context.PrintJobs.Remove(job);
-            await _context.SaveChangesAsync();
+            _ = _context.PrintJobs.Remove(job);
+            _ = await _context.SaveChangesAsync();
 
             _logger.LogInformation($"Job removed from queue: {id}");
             return NoContent();
@@ -326,7 +326,7 @@ public class QueueController(IUnifiedLoggingService logger, AppDbContext context
             job.Priority = request.Priority;
             job.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             JobQueuePrintJobDto result = new()
             {

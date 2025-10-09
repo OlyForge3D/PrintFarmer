@@ -45,4 +45,12 @@ public interface ISpoolmanService
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the spool information, or null if the spool doesn't exist</returns>
     Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Scans the provided network ranges for Spoolman instances.
+    /// </summary>
+    /// <param name="networkRanges">Enumerable of CIDR or IP ranges to scan</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Enumerable of discovery results</returns>
+    Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default);
 }

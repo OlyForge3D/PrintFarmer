@@ -4,9 +4,9 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Infrastructure.Telemetry;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // added for IGcodeUploadSettings & quota services
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
@@ -72,8 +72,8 @@ public class GcodeFilesController(
         {
             return BadRequest("path is required");
         }
-        algorithm = (algorithm ?? "sha256").Trim().ToLowerInvariant();
-        if (algorithm is not ("sha256" or "sha1"))
+        algorithm = (algorithm ?? "sha256").Trim();
+        if (!algorithm.Equals("sha256", StringComparison.OrdinalIgnoreCase) && !algorithm.Equals("sha1", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Unsupported algorithm. Allowed: sha256, sha1");
         }
@@ -225,16 +225,29 @@ public class GcodeFilesController(
                 }
             }
 
-            // Sorting
-            entries = (sortBy?.ToLowerInvariant(), sortOrder?.ToLowerInvariant()) switch
+            // Sorting: normalize once to avoid repeated allocations. Use explicit OrdinalIgnoreCase comparisons.
+            string normalizedSortBy = string.IsNullOrWhiteSpace(sortBy) ? "name" : sortBy.Trim();
+            string normalizedSortOrder = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
+
+            bool orderDesc = normalizedSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase);
+            if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
             {
-                ("size", "desc") => entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-                ("size", _) => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-                ("date", "desc") => entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-                ("date", _) => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-                ("name", "desc") => entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-                _ => entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-            };
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            else // default: name
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
 
             int totalFiles = entries.Count(e => !e.IsDirectory);
             long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
@@ -278,10 +291,10 @@ public class GcodeFilesController(
         }
         try
         {
-            (string _, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(req.Path ?? "/");
+            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(req.Path ?? "/");
             if (!Directory.Exists(targetDirFullPath))
             {
-                Directory.CreateDirectory(targetDirFullPath);
+                _ = Directory.CreateDirectory(targetDirFullPath);
             }
             // Sanitize filename & collision resolution (reserve final name now so user sees stable name)
             string originalName = Path.GetFileName(req.FileName);
@@ -332,18 +345,14 @@ public class GcodeFilesController(
             string? expectedHash = null;
             if (!string.IsNullOrWhiteSpace(req.HashAlgorithm))
             {
-                string algo = req.HashAlgorithm.Trim().ToLowerInvariant();
-                if (algo is not ("sha256" or "sha1"))
+                string algo = req.HashAlgorithm.Trim();
+                if (!algo.Equals("sha256", StringComparison.OrdinalIgnoreCase) && !algo.Equals("sha1", StringComparison.OrdinalIgnoreCase))
                 {
                     return BadRequest("Unsupported hashAlgorithm. Allowed: sha256, sha1");
                 }
                 hashAlgo = algo;
-                expectedHash = string.IsNullOrWhiteSpace(req.ExpectedHash) ? null : req.ExpectedHash.Trim().ToLowerInvariant();
-                hasher = algo switch
-                {
-                    "sha1" => IncrementalHash.CreateHash(HashAlgorithmName.SHA1),
-                    _ => IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
-                };
+                expectedHash = string.IsNullOrWhiteSpace(req.ExpectedHash) ? null : req.ExpectedHash.Trim();
+                hasher = algo.Equals("sha1", StringComparison.OrdinalIgnoreCase) ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             }
             ChunkUploadState state = new()
             {
@@ -470,7 +479,7 @@ public class GcodeFilesController(
                             }
                         }
                         catch { }
-                        _chunkStates.TryRemove(uploadId, out _);
+                        _ = _chunkStates.TryRemove(uploadId, out _);
                         return UnprocessableEntity(new { error = "hash_mismatch", expected = state.ExpectedHash, actual = hex });
                     }
                 }
@@ -479,7 +488,7 @@ public class GcodeFilesController(
                 {
                     System.IO.File.Delete(state.MetaFilePath);
                 }
-                _chunkStates.TryRemove(uploadId, out _);
+                _ = _chunkStates.TryRemove(uploadId, out _);
             }
             else
             {
@@ -835,10 +844,10 @@ public class GcodeFilesController(
 
         try
         {
-            (string _, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
+            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
             if (!Directory.Exists(targetDirFullPath))
             {
-                Directory.CreateDirectory(targetDirFullPath);
+                _ = Directory.CreateDirectory(targetDirFullPath);
             }
 
             // Sanitize filename (basic) - strip path separators
@@ -929,10 +938,10 @@ public class GcodeFilesController(
         List<MultiUploadFailure> failed = new();
         try
         {
-            (string _, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
+            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
             if (!Directory.Exists(targetDirFullPath))
             {
-                Directory.CreateDirectory(targetDirFullPath);
+                _ = Directory.CreateDirectory(targetDirFullPath);
             }
             foreach (IFormFile? f in files)
             {
@@ -1006,7 +1015,7 @@ public class GcodeFilesController(
         }
         try
         {
-            (string _, string? parentDirFullPath, string? virtualParent) = ResolveAndValidatePath(path);
+            (_, string? parentDirFullPath, string? virtualParent) = ResolveAndValidatePath(path);
             if (!Directory.Exists(parentDirFullPath))
             {
                 return NotFound("Parent directory does not exist");
@@ -1020,7 +1029,7 @@ public class GcodeFilesController(
             {
                 return Conflict("Directory already exists");
             }
-            Directory.CreateDirectory(newDirFullPath);
+            _ = Directory.CreateDirectory(newDirFullPath);
             GcodeFileEntryDto dto = new(
                 Path: CombineVirtual(virtualParent, name),
                 Name: name,
@@ -1050,15 +1059,7 @@ public class GcodeFilesController(
     {
         // Allow explicit override via environment variable (useful for integration tests)
         string? envOverride = Environment.GetEnvironmentVariable("GCODE_LIBRARY_ROOT");
-        string baseRoot;
-        if (!string.IsNullOrWhiteSpace(envOverride))
-        {
-            baseRoot = Path.GetFullPath(envOverride);
-        }
-        else
-        {
-            baseRoot = env.WebRootPath;
-        }
+        string baseRoot = !string.IsNullOrWhiteSpace(envOverride) ? Path.GetFullPath(envOverride) : env.WebRootPath;
 
         // Fallback: if WebRootPath is null/empty (common in API-only container when no wwwroot copied)
         // use a local wwwroot under the content root (env.ContentRootPath) and ensure it exists so that
@@ -1068,9 +1069,9 @@ public class GcodeFilesController(
             baseRoot = Path.Combine(env.ContentRootPath, "wwwroot");
         }
         // Ensure the resolved base root exists (idempotent) so later code relying on its presence succeeds.
-        Directory.CreateDirectory(baseRoot);
+        _ = Directory.CreateDirectory(baseRoot);
         string root = rootFullPathOverride ?? Path.GetFullPath(Path.Combine(baseRoot, "gcode-library"));
-        Directory.CreateDirectory(root); // ensure exists
+        _ = Directory.CreateDirectory(root); // ensure exists
 
         // Normalize incoming virtual path
         string vPath = string.IsNullOrWhiteSpace(virtualPath) ? "/" : virtualPath.Trim();
@@ -1210,7 +1211,7 @@ public class GcodeFilesController(
     public ActionResult<GcodeUploadSettingsResponse> GetSettings()
     {
         string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-        quotaService.TryAddUsage(userId, 0, out long used, out long limit); // peek usage
+        _ = quotaService.TryAddUsage(userId, 0, out long used, out long limit); // peek usage
         return Ok(new GcodeUploadSettingsResponse(AllowedExtensions, limit, used));
     }
 
@@ -1241,8 +1242,8 @@ public class GcodeFilesController(
         }
         try
         {
-            (string? root, string? sourceFull, string _) = ResolveAndValidatePath(request.SourcePath, treatAsFile: true);
-            (string _, string? destFull, string? destVirtual) = ResolveAndValidatePath(request.DestinationPath, rootFullPathOverride: root, treatAsFile: true);
+            (string? root, string? sourceFull, _) = ResolveAndValidatePath(request.SourcePath, treatAsFile: true);
+            (_, string? destFull, string? destVirtual) = ResolveAndValidatePath(request.DestinationPath, rootFullPathOverride: root, treatAsFile: true);
             if (!System.IO.File.Exists(sourceFull) && !Directory.Exists(sourceFull))
             {
                 return NotFound("Source not found");
@@ -1273,7 +1274,7 @@ public class GcodeFilesController(
             }
             else
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
                 System.IO.File.Move(sourceFull, destFull, overwrite: request.Overwrite);
             }
             return Ok(new { path = destVirtual, isDirectory });

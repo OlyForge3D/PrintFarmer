@@ -91,7 +91,7 @@ public class GcodeHarvestTestController(
             return Ok(new
             {
                 success = true,
-                files = files,
+                files,
                 count = files.Length
             });
         }

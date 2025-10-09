@@ -1,17 +1,17 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Farm.Infrastructure.Telemetry;
-using Farm.Infrastructure.Data;
 
 namespace Farm.Web.Api.Services;
 
-public class SystemLogCleanupService(IServiceProvider serviceProvider, IUnifiedLoggingService logger) : BackgroundService
+public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnifiedLoggingService logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(6); // Run every 6 hours
     private readonly int _retentionDays = 30;
@@ -22,14 +22,14 @@ public class SystemLogCleanupService(IServiceProvider serviceProvider, IUnifiedL
         {
             try
             {
-                using var scope = _serviceProvider.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var cutoff = DateTime.UtcNow.AddDays(-_retentionDays);
-                var oldLogs = await db.SystemLogs.Where(l => l.Timestamp < cutoff).ToListAsync(stoppingToken);
+                await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                DateTime cutoff = DateTime.UtcNow.AddDays(-_retentionDays);
+                List<Farm.Infrastructure.Domain.SystemLog> oldLogs = await db.SystemLogs.Where(l => l.Timestamp < cutoff).ToListAsync(stoppingToken);
                 if (oldLogs.Count > 0)
                 {
                     db.SystemLogs.RemoveRange(oldLogs);
-                    await db.SaveChangesAsync(stoppingToken);
+                    _ = await db.SaveChangesAsync(stoppingToken);
                     _logger.LogInformation($"SystemLogCleanupService: Deleted {oldLogs.Count} logs older than {cutoff}");
                 }
             }

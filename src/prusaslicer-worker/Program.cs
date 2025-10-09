@@ -25,8 +25,8 @@ public static class Program
         // Add Redis connection
         _ = builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
         {
-            IConfiguration? configuration = provider.GetService<IConfiguration>();
-            string raw = configuration?.GetConnectionString("Redis") ?? "localhost:6379";
+            IConfiguration configuration = provider.GetRequiredService<IConfiguration>();
+            string raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
             if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
             {
                 raw = raw.TrimEnd(',') + ",abortConnect=false";

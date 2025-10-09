@@ -56,7 +56,7 @@ public class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
         }
@@ -92,7 +92,7 @@ public class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url.ToString(), apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
         }
@@ -126,7 +126,7 @@ public class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<PrinterInfo>(json, _jsonOptions)!;
         }
@@ -160,7 +160,7 @@ public class PrusaLinkApiClient
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<StatusInfo>(json, _jsonOptions)!;
         }
@@ -197,7 +197,7 @@ public class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Job>(json, _jsonOptions);
     }
@@ -240,7 +240,7 @@ public class PrusaLinkApiClient
         }
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<StorageListResponse>(json, _jsonOptions)!;
     }
@@ -256,7 +256,7 @@ public class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Transfer>(json, _jsonOptions);
     }
@@ -284,7 +284,7 @@ public class PrusaLinkApiClient
         }
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
 
         // Deserialize to appropriate type based on response content
@@ -363,7 +363,7 @@ public class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Camera[]>(json, _jsonOptions)!;
     }
@@ -381,7 +381,7 @@ public class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<CameraConfig>(json, _jsonOptions)!;
     }
@@ -412,7 +412,7 @@ public class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
@@ -426,7 +426,7 @@ public class PrusaLinkApiClient
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
@@ -487,7 +487,7 @@ public class PrusaLinkApiClient
             return new UpdateInfo { UpdateAvailable = updateAvailable };
         }
 
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         UpdateInfo updateInfo = JsonSerializer.Deserialize<UpdateInfo>(json, _jsonOptions)!;
 

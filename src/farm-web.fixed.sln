@@ -1,25 +1,25 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Api", "api\\Farm.Web.Api.csproj", "{D8B2725B-0351-49B0-A728-415AC2030F4B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Api", "api/Farm.Web.Api.csproj", "{D8B2725B-0351-49B0-A728-415AC2030F4B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Shared", "shared\\Farm.Web.Shared.csproj", "{EF9CD938-1748-4F9C-B894-B15815353B16}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Shared", "shared/Farm.Web.Shared.csproj", "{EF9CD938-1748-4F9C-B894-B15815353B16}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.OrcaSlicer.Worker", "orcaslicer-worker\\Farm.OrcaSlicer.Worker.csproj", "{A7A0E9F5-4D43-4B5E-B9B8-6D4C0E0C1234}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.OrcaSlicer.Worker", "orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj", "{A7A0E9F5-4D43-4B5E-B9B8-6D4C0E0C1234}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.PrusaSlicer.Worker", "prusaslicer-worker\\Farm.PrusaSlicer.Worker.csproj", "{2649AE5C-1F27-FB3C-524D-D0E2966117E7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.PrusaSlicer.Worker", "prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj", "{2649AE5C-1F27-FB3C-524D-D0E2966117E7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Worker.Core", "worker-shared\\Farm.Slicer.Worker.Core.csproj", "{12345678-90AB-CDEF-1234-567890ABCDEF}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Worker.Core", "worker-shared/Farm.Slicer.Worker.Core.csproj", "{12345678-90AB-CDEF-1234-567890ABCDEF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Infrastructure", "Infrastructure\\Farm.Infrastructure.csproj", "{36B25794-13E7-49D1-AC1E-4869490CBEFE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Infrastructure", "Infrastructure/Farm.Infrastructure.csproj", "{36B25794-13E7-49D1-AC1E-4869490CBEFE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdminCli", "tools\\AdminCli\\AdminCli.csproj", "{ABCDEF12-3456-7890-ABCD-EF1234567890}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdminCli", "tools/AdminCli/AdminCli.csproj", "{ABCDEF12-3456-7890-ABCD-EF1234567890}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IconGen", "tools\\IconGen\\IconGen.csproj", "{0A1B2C3D-4E5F-6789-0ABC-DEF123456789}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IconGen", "tools/IconGen/IconGen.csproj", "{0A1B2C3D-4E5F-6789-0ABC-DEF123456789}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Api.Tests", "tests\\Farm.Web.Api.Tests\\Farm.Web.Api.Tests.csproj", "{D83EEE3B-D3EC-4852-8DC1-7B7887BCF7FE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Web.Api.Tests", "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj", "{D83EEE3B-D3EC-4852-8DC1-7B7887BCF7FE}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
@@ -52,5 +52,4 @@ Global
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
-
 EndGlobal

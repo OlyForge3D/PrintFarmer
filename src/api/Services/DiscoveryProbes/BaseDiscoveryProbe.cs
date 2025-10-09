@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
@@ -21,14 +21,15 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
 
     public async Task<DiscoveredPrinterDto?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
-        foreach (var port in Ports)
+        using HttpClient client = new()
+        { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+        foreach (int port in Ports)
         {
-            var url = $"http://{ipAddress}:{port}{EndpointPath}";
+            string url = $"http://{ipAddress}:{port}{EndpointPath}";
             try
             {
-                var response = await client.GetAsync(url, cancellationToken);
-                var content = await response.Content.ReadAsStringAsync();
+                HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
+                string content = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (!await IsValidResponseAsync(response, content))
                 {
                     continue;

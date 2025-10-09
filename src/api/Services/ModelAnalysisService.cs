@@ -15,9 +15,11 @@ public class ModelAnalysisService : IModelAnalysisService
     {
         if (string.IsNullOrWhiteSpace(extension))
         {
-            extension = Path.GetExtension(filePath)?.ToLowerInvariant() ?? string.Empty;
+            extension = Path.GetExtension(filePath) ?? string.Empty;
         }
-        extension = extension.ToLowerInvariant();
+        // Normalize extension to lower-case once for comparison convenience
+        // Keep original extension casing and use explicit OrdinalIgnoreCase comparisons where needed
+        // extension = extension.ToLowerInvariant();
 
         if (extension == ".stl")
         {
@@ -55,9 +57,9 @@ public class ModelAnalysisService : IModelAnalysisService
         uint triangleCount = BitConverter.ToUInt32(countBytes, 0);
 
         // Simple heuristic: if header starts with "solid" then treat as ASCII for small files
-        string headerString = Encoding.ASCII.GetString(header).Trim().ToLowerInvariant();
-        fs.Seek(0, SeekOrigin.Begin);
-        if (headerString.StartsWith("solid") && fs.Length < 10_000_000) // small ASCII models are often ASCII
+        string headerString = Encoding.ASCII.GetString(header).Trim();
+        _ = fs.Seek(0, SeekOrigin.Begin);
+        if (headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase) && fs.Length < 10_000_000) // small ASCII models are often ASCII
         {
             // ASCII parser: scan for vertex lines and compute bounding box
             using StreamReader sr = new(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
@@ -65,7 +67,7 @@ public class ModelAnalysisService : IModelAnalysisService
             double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
             int vertexCount = 0;
             string? line;
-            while ((line = await sr.ReadLineAsync()) != null)
+            while ((line = await sr.ReadLineAsync(cancellationToken)) != null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string trimmed = line.Trim();
@@ -110,7 +112,7 @@ public class ModelAnalysisService : IModelAnalysisService
             // Binary STL: triangleCount available, read bounding box by scanning triangles
             try
             {
-                fs.Seek(84, SeekOrigin.Begin);
+                _ = fs.Seek(84, SeekOrigin.Begin);
                 double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
                 double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
                 byte[] buffer = new byte[50];

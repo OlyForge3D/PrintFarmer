@@ -1,9 +1,9 @@
-using Microsoft.Extensions.Hosting;
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Hosting;
 
 namespace Farm.Infrastructure;
 

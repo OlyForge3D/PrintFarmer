@@ -1,4 +1,4 @@
-using SkiaSharp;
+﻿using SkiaSharp;
 using Svg.Skia;
 
 // Icon generation tool with flexible arguments.
@@ -105,8 +105,15 @@ try
     var publicRoot = Path.Combine(repoRoot, "src", "Web", "ReactApp", "public");
     var favicon32 = Path.Combine(outDir, "favicon-32x32.png");
     var favicon16 = Path.Combine(outDir, "favicon-16x16.png");
-    if (File.Exists(favicon32)) File.Copy(favicon32, Path.Combine(publicRoot, "favicon.png"), overwrite: true);
-    if (File.Exists(favicon16)) File.Copy(favicon16, Path.Combine(publicRoot, "favicon-16x16.png"), overwrite: true);
+    if (File.Exists(favicon32))
+    {
+        File.Copy(favicon32, Path.Combine(publicRoot, "favicon.png"), overwrite: true);
+    }
+
+    if (File.Exists(favicon16))
+    {
+        File.Copy(favicon16, Path.Combine(publicRoot, "favicon-16x16.png"), overwrite: true);
+    }
 }
 catch (Exception ex)
 {
@@ -122,7 +129,10 @@ static string? FindRepoRoot()
     {
         var solution = Path.Combine(dir.FullName, "farm-web.sln");
         if (File.Exists(solution))
+        {
             return dir.FullName;
+        }
+
         dir = dir.Parent;
     }
     return null;

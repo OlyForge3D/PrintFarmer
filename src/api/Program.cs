@@ -8,7 +8,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
@@ -21,9 +23,9 @@ using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Services.DiscoveryProbes;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
-using Farm.Infrastructure.Settings;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Json;
 using FluentValidation;
@@ -31,15 +33,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using StackExchange.Redis;
-
 using Swashbuckle.AspNetCore.Swagger;
-using Farm.Web.Api.Services.DiscoveryProbes;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
@@ -68,7 +69,7 @@ catch { /* non-fatal */ }
 // Add API services
 builder.Services.AddControllers(options =>
     {
-        options.Filters.Add<DuplicateConflictExceptionFilter>();
+        _ = options.Filters.Add<DuplicateConflictExceptionFilter>();
     })
     .AddJsonOptions(options =>
     {
@@ -109,7 +110,7 @@ builder.Services.AddCors(options =>
             ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
             ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
         bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
-        policy.SetIsOriginAllowed(origin =>
+        _ = policy.SetIsOriginAllowed(origin =>
         {
             if (allowLocalNetwork)
             {
@@ -119,9 +120,9 @@ builder.Services.AddCors(options =>
                 .Select(o => o.Trim()).ToArray();
             return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
         });
-        policy.AllowCredentials();
-        policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
-        policy.WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+        _ = policy.AllowCredentials();
+        _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
+        _ = policy.WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
     });
 });
 
@@ -129,7 +130,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
     {
-        resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
+        _ = resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
                 .AddAttributes(new[]
                 {
                     new KeyValuePair<string, object>("farm.environment", builder.Environment.EnvironmentName),
@@ -138,21 +139,21 @@ builder.Services.AddOpenTelemetry()
     })
     .WithTracing(tracing =>
     {
-        tracing.AddAspNetCoreInstrumentation(options =>
+        _ = tracing.AddAspNetCoreInstrumentation(options =>
         {
             options.RecordException = true;
             options.EnrichWithHttpRequest = (activity, httpRequest) =>
             {
-                activity.SetTag("http.request.method", httpRequest.Method);
-                activity.SetTag("http.request.path", httpRequest.Path);
+                _ = activity.SetTag("http.request.method", httpRequest.Method);
+                _ = activity.SetTag("http.request.path", httpRequest.Path);
                 if (httpRequest.QueryString.HasValue)
                 {
-                    activity.SetTag("http.request.query", httpRequest.QueryString.Value);
+                    _ = activity.SetTag("http.request.query", httpRequest.QueryString.Value);
                 }
             };
             options.EnrichWithHttpResponse = (activity, httpResponse) =>
             {
-                activity.SetTag("http.response.status_code", httpResponse.StatusCode);
+                _ = activity.SetTag("http.response.status_code", httpResponse.StatusCode);
             };
         })
         .AddHttpClientInstrumentation()
@@ -162,7 +163,7 @@ builder.Services.AddOpenTelemetry()
             options.SetDbStatementForText = true;
             options.EnrichWithIDbCommand = (activity, command) =>
             {
-                activity.SetTag("db.operation", command.CommandText);
+                _ = activity.SetTag("db.operation", command.CommandText);
             };
         })
         .AddSource("PrintFarmer.*");
@@ -170,14 +171,14 @@ builder.Services.AddOpenTelemetry()
         // Add console exporter for development
         if (builder.Environment.IsDevelopment())
         {
-            tracing.AddConsoleExporter();
+            _ = tracing.AddConsoleExporter();
         }
 
         // Add OTLP exporter for production observability backends
         string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
         if (!string.IsNullOrEmpty(otlpEndpoint))
         {
-            tracing.AddOtlpExporter(options =>
+            _ = tracing.AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
                 string? headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
@@ -190,7 +191,7 @@ builder.Services.AddOpenTelemetry()
     })
     .WithMetrics(metrics =>
     {
-        metrics.AddAspNetCoreInstrumentation()
+        _ = metrics.AddAspNetCoreInstrumentation()
                .AddHttpClientInstrumentation()
                .AddRuntimeInstrumentation()
                .AddMeter("PrintFarmer.*");
@@ -198,14 +199,14 @@ builder.Services.AddOpenTelemetry()
         // Add console exporter for development
         if (builder.Environment.IsDevelopment())
         {
-            metrics.AddConsoleExporter();
+            _ = metrics.AddConsoleExporter();
         }
 
         // Add OTLP exporter for metrics
         string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
         if (!string.IsNullOrEmpty(otlpEndpoint))
         {
-            metrics.AddOtlpExporter(options =>
+            _ = metrics.AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
                 string? headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
@@ -272,9 +273,10 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
     {
         devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
     }
-    builder.Services.AddSingleton(_ => new SpaProxyActivationState(devUrl));
-    builder.Services.AddHttpClient("SpaProxy");
-    builder.Services.AddScoped<SpaDevServerWatcher>();
+    _ = builder.Services.AddSingleton(_ => new SpaProxyActivationState(devUrl));
+    _ = builder.Services.AddHttpClient("SpaProxy");
+    // SpaDevServerWatcher is implemented as a BackgroundService; register it as a hosted service
+    _ = builder.Services.AddHostedService<SpaDevServerWatcher>();
 }
 
 // Add JWT Authentication
@@ -284,101 +286,10 @@ builder.Services.AddAuthentication("Bearer")
         // Enable extra diagnostics in Development and Testing
         if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName == "Testing")
         {
-            options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
-            {
-                OnMessageReceived = context =>
-                {
-                    // Simple diagnostics: confirm Authorization header is seen
-                    string auth = context.Request.Headers["Authorization"].ToString();
-                    string snippet = "";
-                    if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string tok = auth.Substring("Bearer ".Length).Trim();
-                        snippet = tok.Length > 12 ? tok[..12] + "..." : tok;
-                        // Ensure token is provided to the handler when we override this event
-                        if (!string.IsNullOrEmpty(tok))
-                        {
-                            context.Token = tok;
-                        }
-                    }
-                    try
-                    {
-                        IUnifiedLoggingService? uls = context.HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Telemetry.IUnifiedLoggingService)) as Farm.Infrastructure.Telemetry.IUnifiedLoggingService;
-                        ILogger<Program>? l = context.HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<Program>)) as Microsoft.Extensions.Logging.ILogger<Program>;
-                        string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
-                        if (uls != null)
-                        {
-                            uls.LogDebug($"[JWT][OnMessageReceived] Authorization header: {presence} tokenSnippet={snippet}");
-                        }
-                        else if (l != null)
-                        {
-                            l.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet: {TokenSnippet}", presence, snippet);
-                        }
-                    }
-                    catch { }
-                    return Task.CompletedTask;
-                },
-                OnAuthenticationFailed = context =>
-                {
-                    try
-                    {
-                        IUnifiedLoggingService? uls = context.HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Telemetry.IUnifiedLoggingService)) as Farm.Infrastructure.Telemetry.IUnifiedLoggingService;
-                        ILogger<Program>? l = context.HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<Program>)) as Microsoft.Extensions.Logging.ILogger<Program>;
-                        string exType = context.Exception.GetType().Name;
-                        string exMessage = context.Exception.Message;
-                        if (uls != null)
-                        {
-                            uls.LogError(context.Exception, $"[JWT][OnAuthenticationFailed] {exType}: {exMessage}");
-                        }
-                        else if (l != null)
-                        {
-                            l.LogError(context.Exception, "[JWT][OnAuthenticationFailed] {ExceptionType}: {Message}", exType, exMessage);
-                        }
-                    }
-                    catch { }
-                    return Task.CompletedTask;
-                },
-                OnTokenValidated = context =>
-                {
-                    string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
-                    string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
-                    try
-                    {
-                        IUnifiedLoggingService? uls = context.HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Telemetry.IUnifiedLoggingService)) as Farm.Infrastructure.Telemetry.IUnifiedLoggingService;
-                        ILogger<Program>? l = context.HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<Program>)) as Microsoft.Extensions.Logging.ILogger<Program>;
-                        if (uls != null)
-                        {
-                            uls.LogInformation($"[JWT][OnTokenValidated] user: {sub}, roles: [{roles}]");
-                        }
-                        else if (l != null)
-                        {
-                            l.LogInformation("[JWT][OnTokenValidated] user: {User} roles: {Roles}", sub, roles);
-                        }
-                    }
-                    catch { }
-                    return Task.CompletedTask;
-                },
-                OnChallenge = context =>
-                {
-                    try
-                    {
-                        IUnifiedLoggingService? uls = context.HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Telemetry.IUnifiedLoggingService)) as Farm.Infrastructure.Telemetry.IUnifiedLoggingService;
-                        ILogger<Program>? l = context.HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<Program>)) as Microsoft.Extensions.Logging.ILogger<Program>;
-                        string error = context.Error ?? "<none>";
-                        string desc = context.ErrorDescription ?? "<none>";
-                        if (uls != null)
-                        {
-                            uls.LogWarning($"[JWT][OnChallenge] Error={error} Desc={desc}");
-                        }
-                        else if (l != null)
-                        {
-                            l.LogWarning("[JWT][OnChallenge] Error={Error} Desc={Desc}", error, desc);
-                        }
-                    }
-                    catch { }
-                    return Task.CompletedTask;
-                }
-            };
+            // Avoid building a temporary service provider here (BuildServiceProvider creates a second provider and may duplicate singletons).
+            // We intentionally pass nulls here; the ProgramHelpers events will fall back to resolving per-request if needed.
+            // The concrete startup logging references will be populated after the application is built.
+            options.Events = ProgramHelpers.CreateJwtEvents(null, null);
         }
         // Allow HTTP in test runs and relax validation for test environment
         if (builder.Environment.EnvironmentName == "Testing")
@@ -422,8 +333,8 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
     options.AddPolicy("RequireAdmin", policy =>
     {
-        policy.RequireAuthenticatedUser();
-        policy.RequireRole("farm_admin");
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.RequireRole("farm_admin");
     });
 });
 
@@ -434,13 +345,40 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 #pragma warning disable S1075 // URIs should not be hardcoded
 builder.WebHost.UseUrls("http://0.0.0.0:5245");
 #pragma warning restore S1075 // URIs should not be hardcoded
+// Capture a few startup/root services from the service collection before building the
+// final application service provider. This avoids sprinkling `app.Services.GetService`
+// callsites around `Program.cs` while still allowing top-level initialization to
+// use the services safely. We build a temporary provider (disposed immediately)
+// and stash references to services that are safe to keep for the lifetime of the
+// process (loggers, unified logging, temp path provider, startup status).
+Farm.Infrastructure.Telemetry.IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
+Microsoft.Extensions.Logging.ILogger<Program>? _capturedStartupLogger = null;
+ITempPathProvider? _capturedTempPathProvider = null;
+Farm.Web.Api.Services.Interfaces.IStartupStatus? _capturedStartupStatus = null;
+
 WebApplication app = builder.Build();
+
+// Populate previously-deferred startup captures using the built application service provider.
+// Use CreateAsyncScope to resolve scoped/singleton services safely without calling BuildServiceProvider on the service collection.
+try
+{
+    await using AsyncServiceScope _captureScope = app.Services.CreateAsyncScope();
+    IServiceProvider _captureSp = _captureScope.ServiceProvider;
+    _capturedStartupUnifiedLogging = _captureSp.GetService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+    _capturedStartupLogger = _captureSp.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    _capturedTempPathProvider = _captureSp.GetService<ITempPathProvider>();
+    _capturedStartupStatus = _captureSp.GetService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+}
+catch
+{
+    // If capture fails, leave captured variables null and fall back to app-level resolution later.
+}
 
 // Initialize settings from environment variables on first run
 try
 {
-    using var scope = app.Services.CreateScope();
-    var settingsInit = scope.ServiceProvider.GetRequiredService<SettingsInitializationService>();
+    await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
+    ISettingsInitializationService settingsInit = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Settings.ISettingsInitializationService>();
 
     // Initialize key settings from environment variables if not already in database
     settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
@@ -460,44 +398,13 @@ app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
 if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION"), "true", StringComparison.OrdinalIgnoreCase))
 {
     IHostApplicationLifetime lifetime = app.Lifetime; // IHostApplicationLifetime
-    lifetime.ApplicationStarted.Register(() =>
-    {
-        try
-        {
-            using IServiceScope scope = app.Services.CreateScope();
-            // Console redirection service removed; not present in Farm.Infrastructure
-            IUnifiedLoggingService logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
-            logger.LogInformation("[UnifiedLogging] Console redirection initialized (deferred) - Console output now captured in OpenTelemetry");
-        }
-        catch (Exception ex)
-        {
-            try
-            {
-                using IServiceScope innerScope = app.Services.CreateScope();
-                var sp = innerScope.ServiceProvider;
-                IUnifiedLoggingService? failLogger = sp.GetService<IUnifiedLoggingService>();
-                var lg = sp.GetService(typeof(Microsoft.Extensions.Logging.ILogger<Program>)) as Microsoft.Extensions.Logging.ILogger<Program>;
-                if (failLogger != null)
-                {
-                    failLogger.LogWarning($"[UnifiedLogging] Deferred console redirection failed: {ex.Message}");
-                }
-                else if (lg != null)
-                {
-                    lg.LogWarning("[UnifiedLogging] Deferred console redirection failed: {Message}", ex.Message);
-                }
-                else
-                {
-                    // Last-resort fallback when logging pipeline is unavailable
-                    Console.Error.WriteLine($"[UnifiedLogging][FALLBACK] Deferred console redirection failed: {ex.Message}");
-                }
-            }
-            catch
-            {
-                // Last resort fallback to stderr so failure is visible if logging pipeline itself is broken.
-                Console.Error.WriteLine($"[UnifiedLogging][FALLBACK] Deferred console redirection failed: {ex.Message}");
-            }
-        }
-    });
+    // Capture root-level logging services once to avoid per-call scope creation inside the callback
+    // Prefer startup-captured unified logging / logger when available to avoid creating
+    // a scope inside the ApplicationStarted callback.
+    IUnifiedLoggingService? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<IUnifiedLoggingService>();
+    Microsoft.Extensions.Logging.ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+
+    _ = lifetime.ApplicationStarted.Register(() => ProgramHelpers.HandleDeferredConsoleRedirection(_deferredUls, _deferredLg));
 }
 
 // Handle CLI commands (exits if command processed)
@@ -509,11 +416,18 @@ if (await app.HandleCliCommandsAsync(args))
 // Log effective temp root (non-production) for diagnostics
 try
 {
-    IHostEnvironment env = app.Services.GetRequiredService<IHostEnvironment>();
-    if (!env.IsProduction())
+    // Prefer app.Environment (already available) instead of resolving IHostEnvironment from service provider
+    if (!app.Environment.IsProduction())
     {
-        ITempPathProvider tempProvider = app.Services.GetRequiredService<ITempPathProvider>();
-        app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+        ITempPathProvider? tempProvider = _capturedTempPathProvider ?? app.Services.GetService<ITempPathProvider>();
+        if (tempProvider != null)
+        {
+            app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+        }
+        else
+        {
+            app.Logger.LogInformation("[Startup] Temp root: <no provider registered>");
+        }
     }
 }
 catch { /* ignore diagnostics failure */ }
@@ -528,15 +442,14 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    _ = app.UseSwagger();
+    _ = app.UseSwaggerUI();
 }
 
 // Always expose raw OpenAPI JSON at a stable path for tooling (even outside dev UI)
-app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider adp) =>
+app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider adp, ISwaggerProvider provider) =>
 {
-    // Delegate to internal swagger generator service
-    ISwaggerProvider provider = app.Services.GetRequiredService<ISwaggerProvider>();
+    // Delegate to internal swagger generator service (provider injected by DI)
     OpenApiDocument doc = provider.GetSwagger("v1");
     return Results.Json(doc);
 });
@@ -554,41 +467,16 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 
 // Health checks
+// Capture host environment and resolve startup status from the root service provider (app.Services)
+// Use app.Environment directly instead of resolving IHostEnvironment from the service provider
+IHostEnvironment _programHostEnvironment = app.Environment;
+// Resolve IStartupStatus once from the root provider (it's a singleton-like service used for diagnostics)
+Farm.Web.Api.Services.Interfaces.IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
     {
-        context.Response.ContentType = "application/json";
-        StartupStatus? startup = context.RequestServices.GetService<StartupStatus>();
-        string result = JsonSerializer.Serialize(
-            new
-            {
-                Status = report.Status.ToString(),
-                TotalChecksDuration = report.TotalDuration,
-                Startup = startup == null ? null : new
-                {
-                    phase = startup.Phase.ToString(),
-                    ready = startup.IsReady,
-                    failed = startup.IsFailed,
-                    failureMessage = startup.FailureException?.Message,
-                    failureStackTrace = (startup.FailureException != null && context.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment()) ? startup.FailureException.StackTrace : null,
-                    initStartedUtc = startup.InitializationStartedUtc,
-                    initCompletedUtc = startup.InitializationCompletedUtc,
-                    initDurationMs = startup.InitializationDuration?.TotalMilliseconds
-                },
-                Results = report.Entries.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => new
-                    {
-                        kvp.Value.Status,
-                        kvp.Value.Duration,
-                        kvp.Value.Description,
-                        kvp.Value.Data
-                    })
-            },
-            Program.HealthJsonOptions);
-
-        await context.Response.WriteAsync(result);
+        await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
 });
 
@@ -597,37 +485,7 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 {
     ResponseWriter = async (context, report) =>
     {
-        context.Response.ContentType = "application/json";
-        StartupStatus? startup = context.RequestServices.GetService<StartupStatus>();
-        string result = JsonSerializer.Serialize(
-            new
-            {
-                Status = report.Status.ToString(),
-                TotalChecksDuration = report.TotalDuration,
-                Startup = startup == null ? null : new
-                {
-                    phase = startup.Phase.ToString(),
-                    ready = startup.IsReady,
-                    failed = startup.IsFailed,
-                    failureMessage = startup.FailureException?.Message,
-                    failureStackTrace = (startup.FailureException != null && context.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment()) ? startup.FailureException.StackTrace : null,
-                    initStartedUtc = startup.InitializationStartedUtc,
-                    initCompletedUtc = startup.InitializationCompletedUtc,
-                    initDurationMs = startup.InitializationDuration?.TotalMilliseconds
-                },
-                Results = report.Entries.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => new
-                    {
-                        kvp.Value.Status,
-                        kvp.Value.Duration,
-                        kvp.Value.Description,
-                        kvp.Value.Data
-                    })
-            },
-            Program.HealthJsonOptions);
-
-        await context.Response.WriteAsync(result);
+        await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
 });
 
@@ -657,75 +515,7 @@ app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Au
 // GET /api/settings/signalr
 // POST /api/settings/signalr
 // (Legacy endpoints removed - use unified controller instead)
-app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () =>
-{
-    // Enumerate local IPv4 addresses and suggest /24 CIDR blocks.
-    HashSet<string> suggestions = new(StringComparer.OrdinalIgnoreCase);
-    try
-    {
-        foreach (System.Net.NetworkInformation.NetworkInterface ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up)
-            {
-                continue;
-            }
-            IPInterfaceProperties props = ni.GetIPProperties();
-            foreach (UnicastIPAddressInformation ua in props.UnicastAddresses)
-            {
-                if (ua.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                {
-                    // If subnet mask available, derive CIDR; fallback to /24.
-                    int prefix = 24;
-                    if (ua.IPv4Mask is not null)
-                    {
-                        byte[] maskBytes = ua.IPv4Mask.GetAddressBytes();
-                        int ones = 0;
-                        foreach (byte b in maskBytes)
-                        {
-                            byte v = b;
-                            while (v != 0)
-                            {
-                                ones += v & 1;
-                                v >>= 1;
-                            }
-                        }
-                        if (ones > 0)
-                        {
-                            prefix = ones;
-                        }
-                    }
-                    byte[] networkBytes = ua.Address.GetAddressBytes();
-                    if (prefix is >= 8 and <= 32)
-                    {
-                        // Zero remaining host bits for canonical network base
-                        int fullBytes = prefix / 8;
-                        int remBits = prefix % 8;
-                        if (remBits > 0 && fullBytes < networkBytes.Length)
-                        {
-                            byte mask = (byte)(0xFF << (8 - remBits));
-                            networkBytes[fullBytes] = (byte)(networkBytes[fullBytes] & mask);
-                            for (int i = fullBytes + 1; i < networkBytes.Length; i++)
-                            {
-                                networkBytes[i] = 0;
-                            }
-                        }
-                        else
-                        {
-                            for (int i = fullBytes; i < networkBytes.Length; i++)
-                            {
-                                networkBytes[i] = 0;
-                            }
-                        }
-                        IPAddress networkBase = new(networkBytes);
-                        suggestions.Add($"{networkBase}/{prefix}");
-                    }
-                }
-            }
-        }
-    }
-    catch { /* ignore */ }
-    return Results.Ok(new { ranges = suggestions.OrderBy(s => s).ToArray() });
-});
+app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
 app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
 {
     // Allows re-applying environment driven defaults from DISCOVERY_RANGES / DISCOVERY_PORTS
@@ -746,14 +536,14 @@ app.MapGet("/diagnostics/temp-root", ([FromServices] IWebHostEnvironment env, [F
         : Results.Ok(new { tempRoot = provider.GetTempRoot() })
 );
 // Combined diagnostics (non-sensitive) for UI consumption
-app.MapGet("/api/diagnostics/summary", ([FromServices] SpoolmanService spoolmanSvc, [FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
+app.MapGet("/api/diagnostics/summary", ([FromServices] Farm.Web.Api.Services.Interfaces.ISpoolmanService spoolmanSvc, [FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
 {
     SpoolmanConfigDto? spoolCfg = spoolmanSvc.GetConfig();
     NetworkDiscoverySettings discovery = settingsService.Get<Farm.Infrastructure.Settings.NetworkDiscoverySettings>() ?? new Farm.Infrastructure.Settings.NetworkDiscoverySettings();
     return Results.Ok(new
     {
         spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
-        discovery = discovery
+        discovery
     });
 });
 // Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
@@ -858,12 +648,12 @@ if (isMonolithicDeployment)
     string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        app.UseStaticFiles();
+        _ = app.UseStaticFiles();
 
         if (app.Environment.IsDevelopment())
         {
             // Dynamic proxy middleware will handle forwarding once dev server becomes available
-            app.UseMiddleware<SpaDynamicProxyMiddleware>();
+            _ = app.UseMiddleware<SpaDynamicProxyMiddleware>();
         }
         else
         {
@@ -890,7 +680,19 @@ if (isMonolithicDeployment)
 }
 
 // Initialize database (ensures schema exists before resolving SettingsService)
-await app.InitializeDatabaseAsync();
+// Resolve required services once from a scope and pass them into the initializer to avoid
+// resolving services multiple times inside the initializer itself.
+await using AsyncServiceScope _initScope = app.Services.CreateAsyncScope();
+{
+    IServiceProvider _sp = _initScope.ServiceProvider;
+    IUnifiedLoggingService _logger = _sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+    AppDbContext _db = _sp.GetRequiredService<AppDbContext>();
+    ISettingsService _dbSettingsSvc = _sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>();
+    IDatabaseInitializer _dbInitializer = _sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer>();
+    IStartupStatus _startupStatusResolved = _sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+
+    await app.InitializeDatabaseAsync(_logger, _db, _dbSettingsSvc, _dbInitializer, _startupStatusResolved);
+}
 
 await app.RunAsync();
 
@@ -906,6 +708,7 @@ public partial class Program
     };
     protected Program() { }
 }
+
 
 
 

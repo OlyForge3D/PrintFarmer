@@ -1,8 +1,8 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
+﻿using Farm.Infrastructure.Data;
 using Farm.Web.Api.Services;
-using Farm.Infrastructure.Data;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
 

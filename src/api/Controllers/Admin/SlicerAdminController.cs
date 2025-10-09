@@ -28,7 +28,7 @@ public partial class SlicerAdminController : ControllerBase
         {
             if (m.Success && m.Groups.Count > 1)
             {
-                placeholders.Add(m.Groups[1].Value);
+                _ = placeholders.Add(m.Groups[1].Value);
             }
         }
 
@@ -72,7 +72,7 @@ public partial class SlicerAdminController : ControllerBase
         });
 
         // Safety checks on rendered args
-        if (rendered.Contains("..") || rendered.Contains("~"))
+        if (rendered.Contains("..", StringComparison.Ordinal) || rendered.Contains("~", StringComparison.Ordinal))
         {
             result._warnings.Add("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
         }

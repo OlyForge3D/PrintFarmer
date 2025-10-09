@@ -1,4 +1,4 @@
-using Farm.Web.Shared;
+﻿using Farm.Web.Shared;
 using FluentAssertions;
 using Xunit;
 
@@ -14,7 +14,7 @@ public class BackendSelectionTests
     {
         // Arrange
         var backends = new List<PrinterBackend> { PrinterBackend.Moonraker, PrinterBackend.PrusaLink };
-        
+
         // Act
         var settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "192.168.1.0/24" },
@@ -23,7 +23,7 @@ public class BackendSelectionTests
             Ports: new List<int> { 80, 7125 },
             Backends: backends
         );
-        
+
         // Assert
         settings.Backends.Should().NotBeNull();
         settings.Backends.Should().HaveCount(2);
@@ -42,7 +42,7 @@ public class BackendSelectionTests
             Ports: new List<int> { 80 },
             Backends: null
         );
-        
+
         // Assert
         settings.Backends.Should().BeNull();
     }
@@ -52,7 +52,7 @@ public class BackendSelectionTests
     {
         // Arrange & Act
         var settings = new NetworkDiscoverySettingsDto();
-        
+
         // Assert
         settings.Backends.Should().BeNull();
         settings.NetworkRanges.Should().BeEmpty();
@@ -66,10 +66,10 @@ public class BackendSelectionTests
     {
         // Arrange
         var backends = new List<PrinterBackend> { PrinterBackend.SDCP };
-        
+
         // Act
         var request = new StartDiscoveryRequest(Backends: backends);
-        
+
         // Assert
         request.Backends.Should().NotBeNull();
         request.Backends.Should().HaveCount(1);
@@ -81,7 +81,7 @@ public class BackendSelectionTests
     {
         // Arrange & Act
         var request = new StartDiscoveryRequest(Backends: null);
-        
+
         // Assert
         request.Backends.Should().BeNull();
     }
@@ -91,7 +91,7 @@ public class BackendSelectionTests
     {
         // Arrange & Act
         var request = new StartDiscoveryRequest();
-        
+
         // Assert
         request.Backends.Should().BeNull();
     }
@@ -105,13 +105,13 @@ public class BackendSelectionTests
     {
         // Arrange
         var backends = new List<PrinterBackend> { backend };
-        
+
         // Act
         var settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "10.0.0.0/24" },
             Backends: backends
         );
-        
+
         // Assert
         settings.Backends.Should().NotBeNull();
         settings.Backends.Should().HaveCount(1);
@@ -122,20 +122,20 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_ShouldAcceptAllBackends()
     {
         // Arrange
-        var backends = new List<PrinterBackend> 
-        { 
+        var backends = new List<PrinterBackend>
+        {
             PrinterBackend.Moonraker,
             PrinterBackend.PrusaLink,
             PrinterBackend.SDCP,
             PrinterBackend.OctoPrint
         };
-        
+
         // Act
         var settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "172.16.0.0/16" },
             Backends: backends
         );
-        
+
         // Assert
         settings.Backends.Should().NotBeNull();
         settings.Backends.Should().HaveCount(4);
@@ -150,13 +150,13 @@ public class BackendSelectionTests
     {
         // Arrange
         var backends = new List<PrinterBackend>();
-        
+
         // Act
         var settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "192.168.0.0/16" },
             Backends: backends
         );
-        
+
         // Assert
         settings.Backends.Should().NotBeNull();
         settings.Backends.Should().BeEmpty();

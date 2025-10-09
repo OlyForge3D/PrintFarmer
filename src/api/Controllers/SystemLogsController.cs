@@ -1,22 +1,18 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/systemlogs")]
-public class SystemLogsController : ControllerBase
+public class SystemLogsController(AppDbContext db) : ControllerBase
 {
-    private readonly AppDbContext _db;
-    public SystemLogsController(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     // GET: api/systemlogs?correlationId=...&level=...&from=...&to=...&metadata=...
     [HttpGet]
@@ -27,7 +23,7 @@ public class SystemLogsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] string? metadata)
     {
-        var query = _db.SystemLogs.AsQueryable();
+        IQueryable<SystemLog> query = _db.SystemLogs.AsQueryable();
         if (!string.IsNullOrWhiteSpace(correlationId))
         {
             query = query.Where(l => l.CorrelationId == correlationId);
@@ -50,10 +46,10 @@ public class SystemLogsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(metadata))
         {
-            query = query.Where(l => l.Metadata != null && l.Metadata.Contains(metadata));
+            query = query.Where(l => l.Metadata != null && l.Metadata.Contains(metadata, StringComparison.OrdinalIgnoreCase));
         }
 
-        var logs = await query.OrderByDescending(l => l.Timestamp).Take(500).ToListAsync();
+        List<SystemLog> logs = await query.OrderByDescending(l => l.Timestamp).Take(500).ToListAsync();
         return Ok(logs);
     }
 
@@ -66,7 +62,7 @@ public class SystemLogsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] string? metadata)
     {
-        var query = _db.SystemLogs.AsQueryable();
+        IQueryable<SystemLog> query = _db.SystemLogs.AsQueryable();
         if (!string.IsNullOrWhiteSpace(correlationId))
         {
             query = query.Where(l => l.CorrelationId == correlationId);
@@ -89,11 +85,11 @@ public class SystemLogsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(metadata))
         {
-            query = query.Where(l => l.Metadata != null && l.Metadata.Contains(metadata));
+            query = query.Where(l => l.Metadata != null && l.Metadata.Contains(metadata, StringComparison.OrdinalIgnoreCase));
         }
 
-        var logs = await query.OrderByDescending(l => l.Timestamp).ToListAsync();
-        var json = System.Text.Json.JsonSerializer.Serialize(logs);
+        List<SystemLog> logs = await query.OrderByDescending(l => l.Timestamp).ToListAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize(logs);
         return File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", $"systemlogs_{DateTime.UtcNow:yyyyMMddHHmmss}.json");
     }
 }

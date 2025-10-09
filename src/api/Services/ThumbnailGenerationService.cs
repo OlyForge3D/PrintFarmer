@@ -36,14 +36,14 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         // Ensure thumbnails directory exists
         if (!Directory.Exists(_thumbnailsBasePath))
         {
-            Directory.CreateDirectory(_thumbnailsBasePath);
+            _ = Directory.CreateDirectory(_thumbnailsBasePath);
         }
 
         // Ensure scripts directory exists
         string? scriptsDir = Path.GetDirectoryName(_scriptPath);
         if (scriptsDir != null && !Directory.Exists(scriptsDir))
         {
-            Directory.CreateDirectory(scriptsDir);
+            _ = Directory.CreateDirectory(scriptsDir);
         }
 
         // Create the Python script if it doesn't exist
@@ -76,16 +76,16 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             string? outputDir = Path.GetDirectoryName(outputPath);
             if (outputDir != null && !Directory.Exists(outputDir))
             {
-                Directory.CreateDirectory(outputDir);
+                _ = Directory.CreateDirectory(outputDir);
             }
 
             // Build arguments for the Python script
             StringBuilder arguments = new();
-            arguments.Append($"\"{_scriptPath}\" ");
-            arguments.Append($"\"{modelFilePath}\" ");
-            arguments.Append($"\"{outputPath}\" ");
-            arguments.Append($"{width} ");
-            arguments.Append($"{height}");
+            _ = arguments.Append($"\"{_scriptPath}\" ");
+            _ = arguments.Append($"\"{modelFilePath}\" ");
+            _ = arguments.Append($"\"{outputPath}\" ");
+            _ = arguments.Append($"{width} ");
+            _ = arguments.Append($"{height}");
 
             // Configure process
             using Process process = new()
@@ -103,11 +103,11 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
 
             _logger.LogDebug($"Starting thumbnail generation: {_pythonPath} {arguments}");
 
-            process.Start();
+            _ = process.Start();
 
             // Read output and error streams
-            Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
-            Task<string> errorTask = process.StandardError.ReadToEndAsync();
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync(ct);
+            Task<string> errorTask = process.StandardError.ReadToEndAsync(ct);
 
             // Wait for process to complete with cancellation support
             using CancellationTokenRegistration registration = ct.Register(() =>

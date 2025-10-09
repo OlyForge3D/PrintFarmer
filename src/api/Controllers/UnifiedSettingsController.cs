@@ -1,9 +1,9 @@
+﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
-using System.ComponentModel.DataAnnotations;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -11,13 +11,13 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/settings")]
 public class UnifiedSettingsController : ControllerBase
 {
-    private readonly SettingsService _modularSettingsService;
+    private readonly Farm.Infrastructure.Settings.ISettingsService _modularSettingsService;
     private readonly IConfiguration _config;
     private readonly Dictionary<string, string> _keyNameToClassNameMap;
     private readonly ILogger<UnifiedSettingsController> _logger;
 
     public UnifiedSettingsController(
-        SettingsService modularSettingsService,
+        Farm.Infrastructure.Settings.ISettingsService modularSettingsService,
         IConfiguration config,
         ILogger<UnifiedSettingsController> logger)
     {
@@ -38,11 +38,11 @@ public class UnifiedSettingsController : ControllerBase
     public ActionResult<IDictionary<string, object>> Get()
     {
         // Return all settings as a dictionary with SectionName (Key) as top-level keys
-        var allMetadata = _modularSettingsService.GetAllMetadata();
-        var result = new Dictionary<string, object>();
-        foreach (var meta in allMetadata)
+        IEnumerable<SettingMetadata> allMetadata = _modularSettingsService.GetAllMetadata();
+        Dictionary<string, object> result = new();
+        foreach (SettingMetadata meta in allMetadata)
         {
-            var settings = _modularSettingsService.GetByKey(meta.Key);
+            object settings = _modularSettingsService.GetByKey(meta.Key);
             result[meta.Key] = settings ?? new { };
         }
         return Ok(result);
@@ -62,7 +62,7 @@ public class UnifiedSettingsController : ControllerBase
         try
         {
             _logger.LogDebug("Settings POST: Raw payload object: {@SettingsSections}", settingsSections);
-            var keyToType = AppDomain.CurrentDomain.GetAssemblies()
+            Dictionary<string, Type> keyToType = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
                 .Where(t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<Farm.Infrastructure.Settings.AppSettingAttribute>(t) != null)
                 .ToDictionary(
@@ -70,12 +70,12 @@ public class UnifiedSettingsController : ControllerBase
                     t => t
                 );
 
-            foreach (var kvp in settingsSections)
+            foreach (KeyValuePair<string, object> kvp in settingsSections)
             {
-                var key = kvp.Key;
-                var value = kvp.Value;
+                string key = kvp.Key;
+                object value = kvp.Value;
                 _logger.LogDebug("Settings POST: Processing section key '{Key}'", key);
-                if (!keyToType.TryGetValue(key, out var settingsType))
+                if (!keyToType.TryGetValue(key, out Type? settingsType))
                 {
                     _logger.LogWarning("Settings POST: Unknown section key '{Key}'", key);
                     continue;
@@ -86,7 +86,7 @@ public class UnifiedSettingsController : ControllerBase
                     _logger.LogDebug("Settings POST: Deserializing section '{Key}' with type {Type}", key, settingsType);
                     try
                     {
-                        var typedSettings = System.Text.Json.JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
+                        object? typedSettings = System.Text.Json.JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
                         _logger.LogDebug("Settings POST: Deserialized object for '{Key}': {@TypedSettings}", key, typedSettings);
                         if (typedSettings != null)
                         {
@@ -110,10 +110,10 @@ public class UnifiedSettingsController : ControllerBase
                                 {
                                     _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", key, vex.Message);
                                     // Return structured validation error for this section
-                                    var errors = new Dictionary<string, string>();
+                                    Dictionary<string, string> errors = new();
                                     if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
                                     {
-                                        foreach (var member in vex.ValidationResult.MemberNames)
+                                        foreach (string member in vex.ValidationResult.MemberNames)
                                         {
                                             errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
                                         }
@@ -125,20 +125,20 @@ public class UnifiedSettingsController : ControllerBase
                                     return BadRequest(new { message = $"Validation failed for section '{key}'", errors });
                                 }
                             }
-                            var saveMethod = typeof(SettingsService).GetMethod("Save");
+                            System.Reflection.MethodInfo? saveMethod = typeof(Farm.Infrastructure.Settings.ISettingsService).GetMethod("Save");
                             if (saveMethod != null)
                             {
                                 try
                                 {
-                                    var genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);
+                                    System.Reflection.MethodInfo genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);
                                     _logger.LogDebug("Settings POST: Invoking Save for section '{Key}'", key);
-                                    genericSaveMethod.Invoke(_modularSettingsService, new object[] { typedSettings });
+                                    _ = genericSaveMethod.Invoke(_modularSettingsService, new object[] { typedSettings });
                                     _logger.LogDebug("Settings POST: Save completed for section '{Key}'", key);
                                 }
                                 catch (System.Reflection.TargetInvocationException tie)
                                 {
                                     // Unwrap the actual exception from reflection invoke
-                                    var actualException = tie.InnerException ?? tie;
+                                    Exception actualException = tie.InnerException ?? tie;
                                     _logger.LogError(actualException, "Settings POST: Save failed for section '{Key}'", key);
                                     throw actualException;
                                 }
@@ -168,7 +168,7 @@ public class UnifiedSettingsController : ControllerBase
         catch (Exception ex)
         {
             // Unwrap TargetInvocationException if present
-            var actualException = ex is System.Reflection.TargetInvocationException tie && tie.InnerException != null
+            Exception actualException = ex is System.Reflection.TargetInvocationException tie && tie.InnerException != null
                 ? tie.InnerException
                 : ex;
 
@@ -176,10 +176,10 @@ public class UnifiedSettingsController : ControllerBase
             // If it's a ValidationException thrown from Save via reflection, return structured response
             if (actualException is ValidationException vex)
             {
-                var errors = new Dictionary<string, string>();
+                Dictionary<string, string> errors = new();
                 if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
                 {
-                    foreach (var member in vex.ValidationResult.MemberNames)
+                    foreach (string member in vex.ValidationResult.MemberNames)
                     {
                         errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
                     }
@@ -207,7 +207,7 @@ public class UnifiedSettingsController : ControllerBase
     {
         try
         {
-            var metadata = _modularSettingsService.GetAllMetadata();
+            IEnumerable<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata();
             return Ok(metadata);
         }
         catch (Exception ex)
@@ -226,13 +226,13 @@ public class UnifiedSettingsController : ControllerBase
     {
         try
         {
-            var className = MapKeyNameToClassName(keyName);
+            string? className = MapKeyNameToClassName(keyName);
             if (className == null)
             {
                 return NotFound($"Settings key '{keyName}' not found");
             }
 
-            var settings = _modularSettingsService.GetByKey(keyName);
+            object settings = _modularSettingsService.GetByKey(keyName);
             return Ok(settings);
         }
         catch (Exception ex)
@@ -258,10 +258,10 @@ public class UnifiedSettingsController : ControllerBase
         }
         catch (ValidationException vex)
         {
-            var errors = new Dictionary<string, string>();
+            Dictionary<string, string> errors = new();
             if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
             {
-                foreach (var member in vex.ValidationResult.MemberNames)
+                foreach (string member in vex.ValidationResult.MemberNames)
                 {
                     errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
                 }
@@ -280,12 +280,12 @@ public class UnifiedSettingsController : ControllerBase
 
     private Dictionary<string, string> BuildKeyNameToClassNameMap()
     {
-        var map = new Dictionary<string, string>();
+        Dictionary<string, string> map = new();
 
         // Get all settings metadata from the service
-        var allMetadata = _modularSettingsService.GetAllMetadata();
+        IEnumerable<SettingMetadata> allMetadata = _modularSettingsService.GetAllMetadata();
 
-        foreach (var metadata in allMetadata)
+        foreach (SettingMetadata metadata in allMetadata)
         {
             // Map key to class name
             map[metadata.Key] = metadata.ClassName;
@@ -296,7 +296,7 @@ public class UnifiedSettingsController : ControllerBase
 
     private string? MapKeyNameToClassName(string keyName)
     {
-        return _keyNameToClassNameMap.TryGetValue(keyName, out var className) ? className : null;
+        return _keyNameToClassNameMap.TryGetValue(keyName, out string? className) ? className : null;
     }
 
     private async Task UpdateAppSettingsPropertyAsync(string keyName, object settingsValues)
@@ -305,31 +305,27 @@ public class UnifiedSettingsController : ControllerBase
         // and then reload the unified AppSettings. This approach allows us to support
         // any settings class without hardcoding specific mappings.
 
-        var className = MapKeyNameToClassName(keyName);
-        if (className == null)
-        {
-            throw new ArgumentException($"Unknown settings key: {keyName}");
-        }
+        string className = MapKeyNameToClassName(keyName) ?? throw new ArgumentException($"Unknown settings key: {keyName}");
 
         // Save to modular settings service (this updates the underlying configuration)
         if (settingsValues is System.Text.Json.JsonElement jsonElement)
         {
             // Get the settings type from the modular service using the key
-            var currentSettings = _modularSettingsService.GetByKey(keyName);
-            var settingsType = currentSettings.GetType();
+            object currentSettings = _modularSettingsService.GetByKey(keyName);
+            Type settingsType = currentSettings.GetType();
 
             // Deserialize the JSON to the correct type
-            var typedSettings = System.Text.Json.JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
+            object? typedSettings = System.Text.Json.JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
             if (typedSettings != null)
             {
                 // Save using the modular service
                 await Task.Run(() =>
                 {
-                    var saveMethod = typeof(SettingsService).GetMethod("Save");
+                    System.Reflection.MethodInfo? saveMethod = typeof(Farm.Infrastructure.Settings.ISettingsService).GetMethod("Save");
                     if (saveMethod != null)
                     {
-                        var genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);
-                        genericSaveMethod.Invoke(_modularSettingsService, new[] { typedSettings });
+                        System.Reflection.MethodInfo genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);
+                        _ = genericSaveMethod.Invoke(_modularSettingsService, new[] { typedSettings });
                     }
                 });
 

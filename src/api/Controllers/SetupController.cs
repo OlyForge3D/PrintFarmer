@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -171,10 +171,10 @@ public class SetupController(
             UpdatedAt = DateTime.UtcNow
         };
 
-        _db.Users.Add(adminUser);
+        _ = _db.Users.Add(adminUser);
 
         // Assign admin role
-        _db.UserRoles.Add(new UserRole
+        _ = _db.UserRoles.Add(new UserRole
         {
             Id = Guid.NewGuid(),
             UserId = adminUser.Id,
@@ -183,7 +183,7 @@ public class SetupController(
             IsActive = true
         });
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation($"Initial admin user created: {adminUser.Username} ({adminUser.Email})");
 

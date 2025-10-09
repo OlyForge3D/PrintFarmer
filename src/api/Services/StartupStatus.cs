@@ -18,7 +18,7 @@ public enum StartupPhase
 /// starting, ready, and failed states while heavier database initialization &amp; seeding runs in the background.
 /// Thread-safe via volatile writes (single transitions) — no locking required.
 /// </summary>
-public class StartupStatus
+public class StartupStatus : Farm.Web.Api.Services.Interfaces.IStartupStatus
 {
     private volatile StartupPhase _phase = StartupPhase.Starting;
     private long _initStartTicks; // 0 until started
@@ -79,7 +79,7 @@ public class StartupStatus
             _phase = StartupPhase.Ready;
             if (_initEndTicks == 0)
             {
-                Interlocked.CompareExchange(ref _initEndTicks, DateTime.UtcNow.Ticks, 0);
+                _ = Interlocked.CompareExchange(ref _initEndTicks, DateTime.UtcNow.Ticks, 0);
             }
         }
     }
@@ -95,7 +95,7 @@ public class StartupStatus
             _failure = ex;
             if (_initEndTicks == 0)
             {
-                Interlocked.CompareExchange(ref _initEndTicks, DateTime.UtcNow.Ticks, 0);
+                _ = Interlocked.CompareExchange(ref _initEndTicks, DateTime.UtcNow.Ticks, 0);
             }
         }
     }

@@ -14,7 +14,7 @@ public class SignalRSlicerProgressNotifier(
     private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = [];
-    private readonly object _lockObject = new();
+    private readonly Lock _lockObject = new();
 
     public async Task NotifyProgressAsync(SlicingProgressUpdate update, CancellationToken cancellationToken = default)
     {
@@ -153,7 +153,7 @@ public class SignalRSlicerProgressNotifier(
                 _jobSubscriptions[jobId] = set;
             }
 
-            set.Add(connectionId);
+            _ = set.Add(connectionId);
         }
 
         _logger.LogDebug($"Added subscription for job {jobId} from connection {connectionId}");
@@ -166,10 +166,10 @@ public class SignalRSlicerProgressNotifier(
         {
             if (_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? set))
             {
-                set.Remove(connectionId);
+                _ = set.Remove(connectionId);
                 if (set.Count == 0)
                 {
-                    _jobSubscriptions.Remove(jobId);
+                    _ = _jobSubscriptions.Remove(jobId);
                 }
             }
         }
@@ -194,7 +194,7 @@ public class SignalRSlicerProgressNotifier(
     {
         lock (_lockObject)
         {
-            _jobSubscriptions.Remove(jobId);
+            _ = _jobSubscriptions.Remove(jobId);
         }
     }
 }

@@ -90,7 +90,7 @@ public class MoonrakerClientTestController(
             return Ok(new
             {
                 success = true,
-                files = files,
+                files,
                 count = files.Length
             });
         }
@@ -127,7 +127,7 @@ public class MoonrakerClientTestController(
             return Ok(new
             {
                 success = true,
-                roots = roots,
+                roots,
                 count = roots.Length
             });
         }

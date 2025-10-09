@@ -3,10 +3,10 @@ using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.Authentication;
 
@@ -47,7 +47,7 @@ public class AuthenticationService(
             // Update last login time
             user.LastLogin = DateTime.UtcNow;
             user.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
@@ -109,7 +109,7 @@ public class AuthenticationService(
                 UpdatedAt = DateTime.UtcNow
             };
 
-            _context.Users.Add(user);
+            _ = _context.Users.Add(user);
 
             // Assign default "farm_user" role
             Role? defaultRole = await _context.Roles
@@ -126,10 +126,10 @@ public class AuthenticationService(
                     IsActive = true
                 };
 
-                _context.UserRoles.Add(userRole);
+                _ = _context.UserRoles.Add(userRole);
             }
 
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
@@ -368,7 +368,7 @@ public class AuthenticationService(
 
         user.PasswordHash = _passwordHashing.HashPassword(newPassword);
         user.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
 
         return true;
     }

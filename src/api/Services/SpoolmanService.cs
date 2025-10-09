@@ -4,9 +4,9 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 
@@ -922,19 +922,19 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// </summary>
     public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default)
     {
-        var results = new List<SpoolmanDiscoveryResult>();
+        List<SpoolmanDiscoveryResult> results = new();
         if (networkRanges == null)
         {
             results.Add(new SpoolmanDiscoveryResult("", false, "No network subnets configured in discovery settings"));
             return results;
         }
 
-        var ips = networkRanges
+        List<string> ips = networkRanges
             .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning(msg)))
             .Distinct()
             .ToList();
-        var tasks = ips.Select(ip => ScanIpForSpoolmanAsync(ip, ct)).ToArray();
-        var scanResults = await Task.WhenAll(tasks);
+        Task<SpoolmanDiscoveryResult>[] tasks = ips.Select(ip => ScanIpForSpoolmanAsync(ip, ct)).ToArray();
+        SpoolmanDiscoveryResult[] scanResults = await Task.WhenAll(tasks);
         results.AddRange(scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error)));
         return results;
     }
@@ -942,25 +942,25 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
-        var url = $"http://{ip}:7912";
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        string url = $"http://{ip}:7912";
+        System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            using var combined = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(2));
+            using CancellationTokenSource combined = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
             // Try to get the Spoolman info endpoint
-            var response = await http.GetAsync($"{url}/api/v1/info", combined.Token);
+            HttpResponseMessage response = await http.GetAsync($"{url}/api/v1/info", combined.Token);
             stopwatch.Stop();
 
             if (response.IsSuccessStatusCode)
             {
                 try
                 {
-                    var content = await response.Content.ReadAsStringAsync(combined.Token);
-                    var json = JsonDocument.Parse(content);
-                    var version = json.RootElement.TryGetProperty("version", out var versionProp)
+                    string content = await response.Content.ReadAsStringAsync(combined.Token);
+                    JsonDocument json = JsonDocument.Parse(content);
+                    string? version = json.RootElement.TryGetProperty("version", out JsonElement versionProp)
                         ? versionProp.GetString()
                         : null;
 

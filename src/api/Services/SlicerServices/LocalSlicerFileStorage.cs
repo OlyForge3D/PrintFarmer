@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
-using Farm.Web.Shared;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -21,7 +21,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         // Ensure base directory exists
         if (!Directory.Exists(_options.BasePath))
         {
-            Directory.CreateDirectory(_options.BasePath);
+            _ = Directory.CreateDirectory(_options.BasePath);
         }
     }
 
@@ -37,7 +37,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                Directory.CreateDirectory(directory);
+                _ = Directory.CreateDirectory(directory);
             }
 
             await using FileStream fileWriteStream = File.Create(filePath);
@@ -69,7 +69,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                Directory.CreateDirectory(directory);
+                _ = Directory.CreateDirectory(directory);
             }
 
             await File.WriteAllBytesAsync(filePath, fileData, cancellationToken);
@@ -196,6 +196,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 ETag = GenerateETag(fileInfo)
             };
             meta.CustomMetadata["FilePath"] = filePath;
+            // Store extension as-is; consumers should compare using OrdinalIgnoreCase when needed
             meta.CustomMetadata["Extension"] = fileInfo.Extension;
             return Task.FromResult<SlicerFileMetadata?>(meta);
         }
@@ -341,18 +342,39 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private static string GetContentType(string extension)
     {
-        return extension.ToLowerInvariant() switch
+        if (extension.Equals(".stl", StringComparison.OrdinalIgnoreCase))
         {
-            ".stl" => "model/stl",
-            ".obj" => "model/obj",
-            ".3mf" => "application/vnd.ms-3mfdocument",
-            ".ply" => "model/ply",
-            ".gcode" => "text/plain",
-            ".json" => "application/json",
-            ".txt" => "text/plain",
-            ".log" => "text/plain",
-            _ => "application/octet-stream"
-        };
+            return "model/stl";
+        }
+        if (extension.Equals(".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/obj";
+        }
+        if (extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application/vnd.ms-3mfdocument";
+        }
+        if (extension.Equals(".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/ply";
+        }
+        if (extension.Equals(".gcode", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+        if (extension.Equals(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application/json";
+        }
+        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+        if (extension.Equals(".log", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+        return "application/octet-stream";
     }
 
     private static string GenerateETag(System.IO.FileInfo fileInfo)

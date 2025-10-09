@@ -1,6 +1,6 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers.Slicing;
 
@@ -20,7 +20,7 @@ public class SlicingJobsController : ControllerBase
         _tempPathProvider = tempPathProvider;
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
-        Directory.CreateDirectory(_tempRoot);
+        _ = Directory.CreateDirectory(_tempRoot);
     }
 
     [HttpGet("jobs/{jobId}/status")]
@@ -104,8 +104,8 @@ public class SlicingJobsController : ControllerBase
         // Add deprecation signalling headers (RFC 8594) before issuing redirect
         DateTime deprecationDate = new(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
         DateTime sunsetDate = new(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
-        Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
-        Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
+        _ = Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
+        _ = Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
         // Issue 302 redirect to canonical plural endpoint
         return Redirect($"/api/slicer/jobs/{jobId}");
     }

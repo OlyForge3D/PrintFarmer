@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -110,8 +110,8 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
                 .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
             job.QueuePosition = maxPosition + 1;
 
-            db.PrintJobs.Add(job);
-            await db.SaveChangesAsync();
+            _ = db.PrintJobs.Add(job);
+            _ = await db.SaveChangesAsync();
 
             // Load related entities for response
             await db.Entry(job)
@@ -266,7 +266,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
 
             job.UpdatedAt = DateTime.UtcNow;
 
-            await db.SaveChangesAsync();
+            _ = await db.SaveChangesAsync();
 
             // Reload printer if assignment changed
             if (request.AssignedPrinterId.HasValue)
@@ -330,8 +330,8 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
                 return BadRequest("Cannot delete a job that is currently printing");
             }
 
-            db.PrintJobs.Remove(job);
-            await db.SaveChangesAsync();
+            _ = db.PrintJobs.Remove(job);
+            _ = await db.SaveChangesAsync();
 
             return NoContent();
         }

@@ -1,10 +1,11 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -15,9 +16,9 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/spoolman")]
 [Tags("Spoolman Integration")]
 public class SpoolmanController(
-    SpoolmanService spoolman,
+    ISpoolmanService spoolman,
     IHttpClientFactory httpClientFactory,
-    NetworkUrlRewriteService urlRewriter,
+    Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService urlRewriter,
     ISettingsService settingsService,
     IUnifiedLoggingService logger) : ControllerBase
 {
@@ -167,14 +168,14 @@ public class SpoolmanController(
     public IActionResult SetConfig([FromBody] SpoolmanConfigDto? config)
     {
         // Extra logging for 401 diagnostics
-        var user = HttpContext.User;
+        System.Security.Claims.ClaimsPrincipal user = HttpContext.User;
         if (user.Identity == null || !user.Identity.IsAuthenticated)
         {
             _logger.LogWarning("[SpoolmanController] SetConfig: User is not authenticated. Claims: {Claims}", string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
         }
         else
         {
-            var name = user.Identity != null ? user.Identity.Name : "(null)";
+            string? name = user.Identity != null ? user.Identity.Name : "(null)";
             _logger.LogInformation("[SpoolmanController] SetConfig: Authenticated user: {Name}. Claims: {Claims}", name, string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
         }
         if (config is null)
@@ -283,9 +284,9 @@ public class SpoolmanController(
     {
         try
         {
-            var settings = _settingsService.Get<NetworkDiscoverySettings>();
-            var ranges = settings?.DiscoverySubnets?.ToList() ?? new List<string>();
-            var results = await spoolman.ScanNetworkForSpoolmanAsync(ranges, ct);
+            NetworkDiscoverySettings settings = _settingsService.Get<NetworkDiscoverySettings>();
+            List<string> ranges = settings?.DiscoverySubnets?.ToList() ?? new List<string>();
+            IEnumerable<SpoolmanDiscoveryResult> results = await spoolman.ScanNetworkForSpoolmanAsync(ranges, ct);
             return Ok(results);
         }
         catch (Exception ex)

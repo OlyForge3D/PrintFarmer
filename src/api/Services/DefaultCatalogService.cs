@@ -27,11 +27,7 @@ public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogServic
             return _cachedUnknownManufacturerId.Value;
         }
 
-        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
-        if (unknown == null)
-        {
-            throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
-        }
+        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown") ?? throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
 
         _cachedUnknownManufacturerId = unknown.Id;
         return unknown.Id;
@@ -46,12 +42,7 @@ public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogServic
 
         Guid unknownMfgId = await GetUnknownManufacturerIdAsync();
         PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
-            m.ManufacturerId == unknownMfgId && m.Name == "Unknown Model");
-
-        if (unknownModel == null)
-        {
-            throw new InvalidOperationException("Unknown Model not found. Ensure database seeding has been completed.");
-        }
+            m.ManufacturerId == unknownMfgId && m.Name == "Unknown Model") ?? throw new InvalidOperationException("Unknown Model not found. Ensure database seeding has been completed.");
 
         _cachedUnknownModelId = unknownModel.Id;
         return unknownModel.Id;

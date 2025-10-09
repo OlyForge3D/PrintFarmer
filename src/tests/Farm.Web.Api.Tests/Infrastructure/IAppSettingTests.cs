@@ -1,8 +1,8 @@
-using System;
-using System.Text.Json;
+﻿using System;
 using System.ComponentModel.DataAnnotations;
-using Xunit;
+using System.Text.Json;
 using Farm.Infrastructure.Settings;
+using Xunit;
 
 public class IAppSettingTests
 {

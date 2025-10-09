@@ -41,7 +41,7 @@ public class PasswordPolicyController(AppDbContext db) : ControllerBase
         if (entity == null)
         {
             entity = new PasswordPolicy();
-            db.PasswordPolicies.Add(entity);
+            _ = db.PasswordPolicies.Add(entity);
         }
 
         if (request.MinLength.HasValue)
@@ -69,7 +69,7 @@ public class PasswordPolicyController(AppDbContext db) : ControllerBase
             entity.RequireSymbol = request.RequireSymbol.Value;
         }
         entity.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
         return await GetAsync(ct);
     }
 }

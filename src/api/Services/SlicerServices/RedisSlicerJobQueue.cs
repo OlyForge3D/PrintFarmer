@@ -1,7 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Text.Json;
-using Farm.Web.Shared;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared;
 using StackExchange.Redis;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -61,7 +61,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
                 // Set job expiration (30 days)
                 _ = transaction.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
 
-                await transaction.ExecuteAsync();
+                _ = await transaction.ExecuteAsync();
             }
             else
             {
@@ -80,9 +80,9 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
                     CommandFlags.None);
 
                 string correlationKey = GetCorrelationKey(job.CorrelationId, job.Checksum ?? string.Empty);
-                await _database.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
-                await _database.SortedSetAddAsync(_queueKey, jobJson, score, CommandFlags.None);
-                await _database.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
+                _ = await _database.StringSetAsync(correlationKey, job.Id.ToString(), TimeSpan.FromDays(30));
+                _ = await _database.SortedSetAddAsync(_queueKey, jobJson, score, CommandFlags.None);
+                _ = await _database.KeyExpireAsync(jobKey, TimeSpan.FromDays(30));
             }
 
             _logger.LogInformation($"Enqueued slicing job {job.Id} with priority {job.Priority} for engine {job.SlicerEngine} (correlation {job.CorrelationId})");
@@ -111,14 +111,14 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
             if (job != null && job.ScheduledAt.HasValue && job.ScheduledAt.Value > DateTime.UtcNow)
             {
                 // Put back into the queue unchanged (EnqueueAsync will respect ScheduledAt)
-                await EnqueueAsync(job);
+                await EnqueueAsync(job, cancellationToken);
                 return null;
             }
 
             if (job != null && preferredEngine != null && job.EngineType != preferredEngine)
             {
                 // Re-queue if engine doesn't match preference
-                await RequeueJobAsync(job);
+                await RequeueJobAsync(job, cancellationToken: cancellationToken);
                 return null;
             }
 
@@ -129,7 +129,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
                 job.WorkerId = workerId;
 
                 // Move to processing queue
-                await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Value.Score, CommandFlags.None);
+                _ = await _database.SortedSetAddAsync(_processingKey, JsonSerializer.Serialize(job), jobData.Value.Score, CommandFlags.None);
 
                 await UpdateJobAsync(job);
 
@@ -164,8 +164,8 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
             string targetQueue = result.Success ? _completedKey : _failedKey;
 
             // Remove from processing and add to completed/failed
-            await _database.SortedSetRemoveAsync(_processingKey, jobJson, CommandFlags.None);
-            await _database.SortedSetAddAsync(targetQueue, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), CommandFlags.None);
+            _ = await _database.SortedSetRemoveAsync(_processingKey, jobJson, CommandFlags.None);
+            _ = await _database.SortedSetAddAsync(targetQueue, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), CommandFlags.None);
 
             await UpdateJobAsync(job);
 
@@ -271,9 +271,9 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
             string jobJson = JsonSerializer.Serialize(job);
 
             // Remove from queues and add to completed
-            await _database.SortedSetRemoveAsync(_queueKey, jobJson, CommandFlags.None);
-            await _database.SortedSetRemoveAsync(_processingKey, jobJson, CommandFlags.None);
-            await _database.SortedSetAddAsync(_completedKey, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), CommandFlags.None);
+            _ = await _database.SortedSetRemoveAsync(_queueKey, jobJson, CommandFlags.None);
+            _ = await _database.SortedSetRemoveAsync(_processingKey, jobJson, CommandFlags.None);
+            _ = await _database.SortedSetAddAsync(_completedKey, jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), CommandFlags.None);
 
             await UpdateJobAsync(job);
 
@@ -378,7 +378,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
                     TimeSpan delay = TimeSpan.FromSeconds(delaySeconds);
 
                     // Remove from failed queue and schedule requeue
-                    await _database.SortedSetRemoveAsync(_failedKey, jobJson);
+                    _ = await _database.SortedSetRemoveAsync(_failedKey, jobJson);
                     await RequeueJobAsync(job, delay, jitterPercent: 0.0, cancellationToken: cancellationToken);
                     requeuedCount++;
                 }
@@ -424,7 +424,7 @@ public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingSe
                 DistributedSlicingJob? pjob = RedisSlicerJobQueueHelpers.DeserializeJob(entry);
                 if (pjob != null && pjob.Id == job.Id)
                 {
-                    await _database.SortedSetRemoveAsync(_processingKey, entry, CommandFlags.None);
+                    _ = await _database.SortedSetRemoveAsync(_processingKey, entry, CommandFlags.None);
                     break;
                 }
             }

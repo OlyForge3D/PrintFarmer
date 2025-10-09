@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Shared;
 using Farm.Web.Api.Tests.TestUtils;
+using Farm.Web.Shared;
 using Moq;
 using StackExchange.Redis;
 

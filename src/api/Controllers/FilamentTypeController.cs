@@ -1,15 +1,15 @@
 ﻿
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Shared = Farm.Web.Shared;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -19,20 +19,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/filament-types")]
 [Tags("Filament Types")]
-public class FilamentTypeController : ControllerBase
+public class FilamentTypeController(AppDbContext db, Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus, ISpoolmanService spoolmanService, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext db;
-    private readonly StartupStatus startupStatus;
-    private readonly ISpoolmanService spoolmanService;
-    private readonly IUnifiedLoggingService logger;
-
-    public FilamentTypeController(AppDbContext db, StartupStatus startupStatus, ISpoolmanService spoolmanService, IUnifiedLoggingService logger)
-    {
-        this.db = db;
-        this.startupStatus = startupStatus;
-        this.spoolmanService = spoolmanService;
-        this.logger = logger;
-    }
+    private readonly AppDbContext db = db;
+    private readonly Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus = startupStatus;
+    private readonly ISpoolmanService spoolmanService = spoolmanService;
+    private readonly IUnifiedLoggingService logger = logger;
 
     /// <summary>
     /// Gets all available filament types.
@@ -57,7 +49,7 @@ public class FilamentTypeController : ControllerBase
             // Uncomment the next line to force a test exception for log verification
             //throw new InvalidOperationException("[FilamentTypeController] Forced test exception for error logging verification.");
 
-            var list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
+            List<Shared.FilamentTypeDto> list = await db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
                 .Select(f => new Shared.FilamentTypeDto(f.Id, f.Name, new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
                 .ToListAsync(ct);
             return Ok(list);
@@ -87,7 +79,7 @@ public class FilamentTypeController : ControllerBase
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
-            var presets = await db.FilamentTypes
+            Dictionary<string, Shared.TempTargets> presets = await db.FilamentTypes
                 .AsNoTracking()
                 .OrderBy(f => f.Name)
                 .ToDictionaryAsync(
@@ -138,8 +130,8 @@ public class FilamentTypeController : ControllerBase
             CreatedAt = DateTime.UtcNow
         };
 
-        db.FilamentTypes.Add(filamentType);
-        await db.SaveChangesAsync(ct);
+        _ = db.FilamentTypes.Add(filamentType);
+        _ = await db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(GetFilamentTypesAsync), new { id = filamentType.Id },
             new Shared.FilamentTypeDto(filamentType.Id, filamentType.Name, new Shared.TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp)));
@@ -180,7 +172,7 @@ public class FilamentTypeController : ControllerBase
         filamentType.DefaultHotendTemp = request.DefaultTemperatures.Hotend;
         filamentType.DefaultBedTemp = request.DefaultTemperatures.Bed;
 
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -203,8 +195,8 @@ public class FilamentTypeController : ControllerBase
             return NotFound();
         }
 
-        db.FilamentTypes.Remove(filamentType);
-        await db.SaveChangesAsync(ct);
+        _ = db.FilamentTypes.Remove(filamentType);
+        _ = await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -225,11 +217,11 @@ public class FilamentTypeController : ControllerBase
         {
             return BadRequest("Presets are required");
         }
-        foreach (var kvp in presets.Presets)
+        foreach (KeyValuePair<string, Shared.TempTargets> kvp in presets.Presets)
         {
-            var name = kvp.Key.Trim();
-            var tempTargets = kvp.Value;
-            var filamentType = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
+            string name = kvp.Key.Trim();
+            Shared.TempTargets tempTargets = kvp.Value;
+            FilamentType? filamentType = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
             if (filamentType == null)
             {
                 filamentType = new FilamentType
@@ -240,7 +232,7 @@ public class FilamentTypeController : ControllerBase
                     DefaultBedTemp = tempTargets.Bed,
                     CreatedAt = DateTime.UtcNow
                 };
-                db.FilamentTypes.Add(filamentType);
+                _ = db.FilamentTypes.Add(filamentType);
             }
             else
             {
@@ -248,7 +240,7 @@ public class FilamentTypeController : ControllerBase
                 filamentType.DefaultBedTemp = tempTargets.Bed;
             }
         }
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -273,8 +265,7 @@ public class FilamentTypeController : ControllerBase
         }
 
         // Check if Spoolman is configured
-        var config = spoolmanService.GetConfig() as Shared.SpoolmanConfigDto;
-        if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
+        if (spoolmanService.GetConfig() is not Shared.SpoolmanConfigDto config || string.IsNullOrWhiteSpace(config.BaseUrl))
         {
             return BadRequest(new { message = "Spoolman is not configured. Please configure Spoolman integration first." });
         }
@@ -290,7 +281,7 @@ public class FilamentTypeController : ControllerBase
             {
                 if (!string.IsNullOrWhiteSpace(material.Name))
                 {
-                    uniqueMaterials.Add(material.Name.Trim());
+                    _ = uniqueMaterials.Add(material.Name.Trim());
                 }
             }
 
@@ -325,12 +316,12 @@ public class FilamentTypeController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
 
-                db.FilamentTypes.Add(newFilamentType);
+                _ = db.FilamentTypes.Add(newFilamentType);
                 importedNames.Add(materialName);
                 importedCount++;
             }
 
-            await db.SaveChangesAsync(ct);
+            _ = await db.SaveChangesAsync(ct);
 
             return Ok(new Shared.SpoolmanFilamentImportResult(
                 ImportedCount: importedCount,
@@ -350,26 +341,26 @@ public class FilamentTypeController : ControllerBase
     /// </summary>
     private static int GetDefaultHotendTemp(string material)
     {
-        string upperMaterial = material.ToUpperInvariant();
-        if (upperMaterial.Contains("PLA"))
+        // Use OrdinalIgnoreCase comparisons directly without allocating an upper-case copy
+        if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
         { return 205; }
-        if (upperMaterial.Contains("ABS"))
+        if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
         { return 230; }
-        if (upperMaterial.Contains("PETG"))
+        if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase))
         { return 240; }
-        if (upperMaterial.Contains("ASA"))
+        if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
         { return 245; }
-        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE"))
+        if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
         { return 260; }
-        if (upperMaterial.Contains("PCTG"))
+        if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
         { return 235; }
-        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX"))
+        if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
         { return 220; }
-        if (upperMaterial.Contains("WOOD"))
+        if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
         { return 210; }
-        if (upperMaterial.Contains("NYLON"))
+        if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase))
         { return 250; }
-        if (upperMaterial.Contains("CARBON"))
+        if (material.Contains("CARBON", StringComparison.OrdinalIgnoreCase))
         { return 260; }
         return 210; // Default for unknown materials
     }
@@ -379,26 +370,26 @@ public class FilamentTypeController : ControllerBase
     /// </summary>
     private static int GetDefaultBedTemp(string material)
     {
-        string upperMaterial = material.ToUpperInvariant();
-        if (upperMaterial.Contains("PLA"))
+        // Prefer direct OrdinalIgnoreCase checks instead of material.ToUpperInvariant()
+        if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
         { return 60; }
-        if (upperMaterial.Contains("ABS"))
+        if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
         { return 100; }
-        if (upperMaterial.Contains("PETG"))
+        if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase))
         { return 85; }
-        if (upperMaterial.Contains("ASA"))
+        if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
         { return 100; }
-        if (upperMaterial.Contains("PC") || upperMaterial.Contains("POLYCARBONATE"))
+        if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
         { return 110; }
-        if (upperMaterial.Contains("PCTG"))
+        if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
         { return 80; }
-        if (upperMaterial.Contains("TPU") || upperMaterial.Contains("FLEX"))
+        if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
         { return 60; }
-        if (upperMaterial.Contains("WOOD"))
+        if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
         { return 65; }
-        if (upperMaterial.Contains("NYLON"))
+        if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase))
         { return 80; }
-        if (upperMaterial.Contains("CARBON"))
+        if (material.Contains("CARBON", StringComparison.OrdinalIgnoreCase))
         { return 100; }
         return 70; // Default for unknown materials
     }

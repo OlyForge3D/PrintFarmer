@@ -2,9 +2,9 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -29,7 +29,7 @@ public class SlicingSubmissionController : ControllerBase
         _logger = logger;
         // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
         string tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
-        Directory.CreateDirectory(tempRoot);
+        _ = Directory.CreateDirectory(tempRoot);
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -132,8 +132,7 @@ public class SlicingSubmissionController : ControllerBase
 
             // Determine authenticated user. In test environment allow a deterministic fallback user id
             Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
-            Guid userId;
-            if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
+            if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
             {
                 if (_env.IsEnvironment("Testing"))
                 {
@@ -197,7 +196,7 @@ public class SlicingSubmissionController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
 
-                SlicingJobStore.Add(storeJob);
+                _ = SlicingJobStore.Add(storeJob);
             }
 
             return Accepted(sliceResult);
@@ -282,8 +281,7 @@ public class SlicingSubmissionController : ControllerBase
 
             // Determine authenticated user
             Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
-            Guid userId;
-            if (subClaim == null || !Guid.TryParse(subClaim.Value, out userId) || userId == Guid.Empty)
+            if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
             {
                 if (_env.IsEnvironment("Testing"))
                 {
@@ -345,7 +343,7 @@ public class SlicingSubmissionController : ControllerBase
                     CreatedAt = DateTime.UtcNow
                 };
 
-                SlicingJobStore.Add(storeJob);
+                _ = SlicingJobStore.Add(storeJob);
             }
 
             _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.OriginalFileName})");

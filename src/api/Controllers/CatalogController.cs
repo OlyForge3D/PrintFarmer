@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Exceptions;
@@ -16,11 +16,12 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/catalog")]
 [Tags("Catalog")]
-public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache) : ControllerBase
+public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalization.INormalizationEventLogger normLogger, ICatalogCache catalogCache, Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService) : ControllerBase
 {
     private readonly AppDbContext _db = db;
     private readonly Farm.Infrastructure.Normalization.INormalizationEventLogger _normLogger = normLogger;
     private readonly ICatalogCache _catalogCache = catalogCache;
+    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
 
     /// <summary>
     /// Gets all available printer manufacturers.
@@ -47,9 +48,8 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
         }
         catch (Exception ex)
         {
-            // Log the error with as much context as possible
-            var logger = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Telemetry.IUnifiedLoggingService)) as Farm.Infrastructure.Telemetry.IUnifiedLoggingService;
-            logger?.LogError(ex, $"[CatalogController] GetManufacturersAsync failed: {ex.Message}");
+            // Log the error with as much context as possible via injected unified logging service
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetManufacturersAsync failed: {ex.Message}");
             // Optionally, include more context in the error response
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers", details = ex.ToString() });
         }
@@ -111,10 +111,10 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
 
         Manufacturer mfg = new()
         { Id = Guid.NewGuid(), Name = normalized };
-        _db.Manufacturers.Add(mfg);
+        _ = _db.Manufacturers.Add(mfg);
         try
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
@@ -275,7 +275,7 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
             MaxBedTemp = req.MaxBedTemp,
             MaxPrintSpeed = req.MaxPrintSpeed
         };
-        _db.Models.Add(model);
+        _ = _db.Models.Add(model);
 
         // Add supported filament types if provided
         if (req.SupportedFilamentTypeIds?.Length > 0)
@@ -287,7 +287,7 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
 
             foreach (Guid filamentTypeId in validFilamentTypeIds)
             {
-                _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                 {
                     PrinterModelId = model.Id,
                     FilamentTypeId = filamentTypeId
@@ -297,7 +297,7 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
 
         try
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
@@ -425,7 +425,7 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
 
                 foreach (Guid filamentTypeId in validFilamentTypeIds)
                 {
-                    _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                    _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                     {
                         PrinterModelId = model.Id,
                         FilamentTypeId = filamentTypeId
@@ -433,7 +433,7 @@ public class CatalogController(AppDbContext db, Farm.Infrastructure.Normalizatio
                 }
             }
         }
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         _catalogCache.InvalidateModels(model.ManufacturerId);
         return NoContent();
     }

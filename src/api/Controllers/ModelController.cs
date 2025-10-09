@@ -1,13 +1,13 @@
-﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text; // Needed for Encoding when deriving secondary hash
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -38,7 +38,7 @@ public class ModelController : ControllerBase
         // Ensure models directory exists
         if (!Directory.Exists(_modelsPath))
         {
-            Directory.CreateDirectory(_modelsPath);
+            _ = Directory.CreateDirectory(_modelsPath);
         }
     }
 
@@ -61,9 +61,10 @@ public class ModelController : ControllerBase
         // Validate file extension
         string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
         string originalName = modelFile.FileName ?? string.Empty;
-        string fileExtension = Path.GetExtension(originalName).ToLowerInvariant();
+        string fileExtension = Path.GetExtension(originalName);
 
-        if (!allowedExtensions.Contains(fileExtension))
+        // Use an OrdinalIgnoreCase comparison for extension membership checks
+        if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
         }
@@ -90,7 +91,7 @@ public class ModelController : ControllerBase
                 // Calculate hash
                 // Use static HashData API (CA1850)
                 byte[] hashBytes = await SHA256.HashDataAsync(memoryStream);
-                fileHash = Convert.ToHexString(hashBytes);
+                fileHash = ToHexLower(hashBytes);
 
                 // Write to file
                 memoryStream.Position = 0;
@@ -142,8 +143,8 @@ public class ModelController : ControllerBase
             if (existingModel != null)
             {
                 string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.OriginalFileName);
-                string existingExt = Path.GetExtension(existingModel.OriginalFileName).ToLowerInvariant();
-                bool isSameExtension = existingExt == fileExtension;
+                string existingExt = Path.GetExtension(existingModel.OriginalFileName);
+                bool isSameExtension = string.Equals(existingExt, fileExtension, StringComparison.OrdinalIgnoreCase);
                 bool bothDuplicatePrefix = existingBaseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase)
                     && baseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase);
                 bool baseNamesMatch = string.Equals(existingBaseName, baseName, StringComparison.OrdinalIgnoreCase);
@@ -171,9 +172,10 @@ public class ModelController : ControllerBase
                 }
 
                 // Force uniqueness: derive a new hash incorporating original name + extension
-                byte[] composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName.ToLowerInvariant());
+                // Use originalName as provided when deriving secondary hash to avoid unnecessary culture-sensitive allocations
+                byte[] composite = Encoding.UTF8.GetBytes(fileHash + "|" + originalName);
                 byte[] newHashBytes = SHA256.HashData(composite);
-                fileHash = Convert.ToHexString(newHashBytes);
+                fileHash = ToHexLower(newHashBytes);
             }
 
             // Create database entity
@@ -197,8 +199,8 @@ public class ModelController : ControllerBase
                 VolumeM3 = analysis?.VolumeMm3
             };
 
-            _context.Models3D.Add(model);
-            await _context.SaveChangesAsync();
+            _ = _context.Models3D.Add(model);
+            _ = await _context.SaveChangesAsync();
 
             // Generate thumbnail if supported
             if (_thumbnailService.IsFormatSupported(model.FileFormat))
@@ -212,7 +214,7 @@ public class ModelController : ControllerBase
                     string? thumbnailDir = Path.GetDirectoryName(thumbnailPath);
                     if (thumbnailDir != null && !Directory.Exists(thumbnailDir))
                     {
-                        Directory.CreateDirectory(thumbnailDir);
+                        _ = Directory.CreateDirectory(thumbnailDir);
                     }
 
                     bool thumbnailGenerated = await _thumbnailService.GenerateThumbnailAsync(
@@ -226,7 +228,7 @@ public class ModelController : ControllerBase
                     if (thumbnailGenerated)
                     {
                         model.ThumbnailPath = thumbnailPath;
-                        await _context.SaveChangesAsync();
+                        _ = await _context.SaveChangesAsync();
                         _logger.LogDebug($"Thumbnail generated for model {modelId}");
                     }
                     else
@@ -364,14 +366,27 @@ public class ModelController : ControllerBase
         }
 
         string fileExtension = Path.GetExtension(model.FilePath);
-        string contentType = fileExtension.ToLowerInvariant() switch
+        string contentType;
+        if (string.Equals(fileExtension, ".stl", StringComparison.OrdinalIgnoreCase))
         {
-            ".stl" => "application/vnd.ms-pki.stl",
-            ".3mf" => "model/3mf",
-            ".obj" => "text/plain",
-            ".ply" => "application/octet-stream",
-            _ => "application/octet-stream"
-        };
+            contentType = "application/vnd.ms-pki.stl";
+        }
+        else if (string.Equals(fileExtension, ".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "model/3mf";
+        }
+        else if (string.Equals(fileExtension, ".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "text/plain";
+        }
+        else if (string.Equals(fileExtension, ".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "application/octet-stream";
+        }
+        else
+        {
+            contentType = "application/octet-stream";
+        }
 
         return PhysicalFile(model.FilePath, contentType, model.OriginalFileName);
     }
@@ -441,8 +456,8 @@ public class ModelController : ControllerBase
             }
 
             // Remove from database
-            _context.Models3D.Remove(model);
-            await _context.SaveChangesAsync();
+            _ = _context.Models3D.Remove(model);
+            _ = await _context.SaveChangesAsync();
             _logger.LogInformation($"Model deleted: {id}");
             _logger.LogInformation($"Model deleted: {id}");
             return NoContent();
@@ -470,11 +485,11 @@ public class ModelController : ControllerBase
         }
 
         List<string> issues = new();
-        string fileExtension = Path.GetExtension(modelFile.FileName).ToLowerInvariant();
+        string fileExtension = Path.GetExtension(modelFile.FileName);
 
         // Check file extension
         string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
-        if (!allowedExtensions.Contains(fileExtension))
+        if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
         {
             issues.Add($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
         }
@@ -513,15 +528,38 @@ public class ModelController : ControllerBase
 
     private static ModelFileFormat GetFileFormat(string extension)
     {
-        return extension.ToLowerInvariant() switch
+        if (string.Equals(extension, ".stl", StringComparison.OrdinalIgnoreCase))
         {
-            ".stl" => ModelFileFormat.STL,
-            ".3mf" => ModelFileFormat.TMF,
-            ".obj" => ModelFileFormat.OBJ,
-            ".ply" => ModelFileFormat.PLY,
-            ".step" => ModelFileFormat.STEP,
-            _ => ModelFileFormat.STL
-        };
+            return ModelFileFormat.STL;
+        }
+
+        if (string.Equals(extension, ".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.TMF;
+        }
+
+        if (string.Equals(extension, ".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.OBJ;
+        }
+
+        if (string.Equals(extension, ".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.PLY;
+        }
+
+        if (string.Equals(extension, ".step", StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelFileFormat.STEP;
+        }
+
+        return ModelFileFormat.STL;
+    }
+
+    private static string ToHexLower(byte[] bytes)
+    {
+        // Use Convert.ToHexString which returns uppercase; canonicalize to lowercase to match other services.
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     private static string GetFileTypeString(ModelFileFormat format)

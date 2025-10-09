@@ -43,7 +43,8 @@ public class HarvestCompletionService(
 
     private async Task CheckForCompletedOperationsAsync(CancellationToken ct)
     {
-        using IServiceScope scope = _serviceProvider.CreateScope();
+        // Use an async scope when awaiting EF Core calls to ensure proper async disposal
+        await using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Find running operations that might be completed
@@ -75,7 +76,7 @@ public class HarvestCompletionService(
 
                 _logger.LogInformation($"Marking operation {operation.Id} as completed. Processed {processedFiles}/{operation.FilesFound} files", null, null);
 
-                await db.SaveChangesAsync(ct);
+                _ = await db.SaveChangesAsync(ct);
             }
         }
     }

@@ -1,7 +1,8 @@
-using Microsoft.Extensions.DependencyInjection;
-using System;
+﻿using System;
 using System.Linq;
+using System.Reflection;
 using Farm.Web.Api.Services.DiscoveryProbes;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.DiscoveryProbes;
 
@@ -12,16 +13,35 @@ public static class DiscoveryProbeServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAllNetworkDiscoveryProbes(this IServiceCollection services)
     {
-        var probeType = typeof(INetworkDiscoveryProbe);
-        var attrType = typeof(DiscoveryProbeAttribute);
-        var probeImplementations = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(a => a.GetTypes())
-            .Where(t => probeType.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-            .Where(t => t.GetCustomAttributes(attrType, false).Length > 0);
+        Type probeType = typeof(INetworkDiscoveryProbe);
+        Type attrType = typeof(DiscoveryProbeAttribute);
+        IEnumerable<Type?> probeImplementations = AppDomain.CurrentDomain.GetAssemblies()
+            .SelectMany(a =>
+            {
+                try
+                {
+                    return a.GetTypes();
+                }
+                catch (ReflectionTypeLoadException rex)
+                {
+                    // Some dynamically generated proxy assemblies may throw when enumerating types.
+                    // Use the types that successfully loaded and skip the rest.
+                    return rex.Types.Where(t => t != null)!;
+                }
+                catch
+                {
+                    // Ignore any assembly we can't reflect over (native, dynamic, etc.)
+                    return Array.Empty<Type>();
+                }
+            })
+            .Where(t => t != null)
+            .Where(t => probeType.IsAssignableFrom(t!) && !t!.IsInterface && !t!.IsAbstract)
+            .Where(t => t!.GetCustomAttributes(attrType, false).Length > 0);
 
-        foreach (var impl in probeImplementations)
+        foreach (Type? impl in probeImplementations)
         {
-            services.AddSingleton(typeof(INetworkDiscoveryProbe), impl);
+            Type implType = impl!; // we filtered nulls above
+            _ = services.AddSingleton(typeof(INetworkDiscoveryProbe), implType);
         }
         return services;
     }

@@ -1,8 +1,8 @@
-using System.Net.Http;
+﻿using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
 using Farm.Web.Api.Services.DiscoveryProbes;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.DiscoveryProbes;
 

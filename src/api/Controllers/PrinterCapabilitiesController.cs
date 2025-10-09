@@ -196,8 +196,8 @@ public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingServi
                 }
             }
 
-            _db.PrinterCapabilities.Add(capabilities);
-            await _db.SaveChangesAsync();
+            _ = _db.PrinterCapabilities.Add(capabilities);
+            _ = await _db.SaveChangesAsync();
 
             // Reload to get printer name
             await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
@@ -285,7 +285,7 @@ public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingServi
                     LastUpdated = DateTime.UtcNow
                 };
 
-                _db.PrinterCapabilities.Add(capabilities);
+                _ = _db.PrinterCapabilities.Add(capabilities);
             }
             else
             {
@@ -306,7 +306,7 @@ public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingServi
                 capabilities.LastUpdated = DateTime.UtcNow;
             }
 
-            await _db.SaveChangesAsync();
+            _ = await _db.SaveChangesAsync();
 
             // Reload to get printer name
             await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync();
@@ -466,8 +466,8 @@ public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingServi
                 return NotFound($"Capabilities for printer {printerId} not found");
             }
 
-            _db.PrinterCapabilities.Remove(capabilities);
-            await _db.SaveChangesAsync();
+            _ = _db.PrinterCapabilities.Remove(capabilities);
+            _ = await _db.SaveChangesAsync();
 
             return NoContent();
         }
@@ -521,11 +521,11 @@ public class PrinterCapabilitiesController(AppDbContext db, IUnifiedLoggingServi
                     return Problem("Failed to discover capabilities for the printer", statusCode: 500);
                 }
                 capabilities = discoveredCapabilities;
-                _db.PrinterCapabilities.Add(capabilities);
+                _ = _db.PrinterCapabilities.Add(capabilities);
                 isNewCapabilities = true;
             }
 
-            await _db.SaveChangesAsync(cancellationToken);
+            _ = await _db.SaveChangesAsync(cancellationToken);
 
             // Load printer name for response
             await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(cancellationToken);

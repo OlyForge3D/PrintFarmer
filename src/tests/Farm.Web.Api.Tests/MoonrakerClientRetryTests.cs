@@ -24,7 +24,9 @@ public class MoonrakerClientRetryTests
                 attempt++;
                 return responder(attempt);
             });
+#pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
         var http = new HttpClient(handler.Object);
+#pragma warning restore CA2000
         return (new MoonrakerClient(http, new TestLoggingService()), handler, attempt);
     }
 

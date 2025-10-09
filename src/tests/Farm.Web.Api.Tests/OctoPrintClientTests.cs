@@ -25,7 +25,9 @@ public class OctoPrintClientTests
                 recorded.Add(req);
                 return responder(req);
             });
+#pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
         var http = new HttpClient(handler.Object);
+#pragma warning restore CA2000
         var client = new OctoPrintClient(http);
         return (client, handler, recorded);
     }

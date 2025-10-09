@@ -1,10 +1,10 @@
 ﻿using System.Data.Common;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Shared;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -13,16 +13,10 @@ namespace Farm.Web.Api.Services;
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
 
-public class DatabaseInitializer
+public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : Farm.Web.Api.Services.Interfaces.IDatabaseInitializer
 {
-    private readonly AppDbContext _context;
-    private readonly IUnifiedLoggingService _logger;
-
-    public DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger)
-    {
-        _context = context;
-        _logger = logger;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Initialize database with retry logic for container startup scenarios
@@ -38,14 +32,14 @@ public class DatabaseInitializer
             try
             {
                 // Test database connectivity first
-                await _context.Database.CanConnectAsync();
+                _ = await _context.Database.CanConnectAsync();
                 _logger.LogInformation("[DB] Database connection established successfully");
 
                 // For MVP development, use EnsureCreated instead of migrations.
                 // This approach automatically handles schema changes during development.
                 try
                 {
-                    await _context.Database.EnsureCreatedAsync();
+                    _ = await _context.Database.EnsureCreatedAsync();
                     _logger.LogInformation("[DB] Database schema ensured successfully (EnsureCreated)");
 
                     // Lightweight self-healing for SQLite when schema was created before introducing shadow columns
@@ -72,10 +66,10 @@ public class DatabaseInitializer
                         if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
                         {
                             // Issue a pragma to force open / create file, then check a sentinel table.
-                            await _context.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+                            _ = await _context.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
                             // If no tables exist, this query will fail; wrap & create a tiny bootstrap table then re-run seed later.
                             // We won't create full schema manually (that belongs to EF model); just let a second EnsureCreated attempt run.
-                            await _context.Database.EnsureCreatedAsync();
+                            _ = await _context.Database.EnsureCreatedAsync();
                             _logger.LogInformation("[DB] Fallback EnsureCreated second attempt succeeded");
 
                             if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
@@ -163,8 +157,8 @@ public class DatabaseInitializer
                 if (existing == null)
                 {
                     existing = new Manufacturer { Id = Guid.NewGuid(), Name = normalized };
-                    _context.Manufacturers.Add(existing);
-                    await _context.SaveChangesAsync();
+                    _ = _context.Manufacturers.Add(existing);
+                    _ = await _context.SaveChangesAsync();
                 }
                 manufacturers[normalized] = existing;
             }
@@ -223,7 +217,7 @@ public class DatabaseInitializer
 
             foreach ((string modelName, string mfg, double x, double y, double z, int? defaultBackend, MotionType? motionType,
                       double? nozzleDiameter, bool hasBed, bool hasEnclosure, bool multiMaterial, int extruders, bool autoLevel,
-                      int? minHotend, int? maxHotend, int? minBed, int? maxBed, string _, int? maxSpeed) in modelSeeds)
+                      int? minHotend, int? maxHotend, int? minBed, int? maxBed, _, int? maxSpeed) in modelSeeds)
             {
                 if (!manufacturers.TryGetValue(mfg, out Manufacturer? m))
                 {
@@ -232,7 +226,7 @@ public class DatabaseInitializer
                 bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
                 if (!exists)
                 {
-                    _context.Models.Add(new PrinterModel
+                    _ = _context.Models.Add(new PrinterModel
                     {
                         Id = Guid.NewGuid(),
                         Name = modelName,
@@ -256,7 +250,7 @@ public class DatabaseInitializer
                     });
                 }
             }
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
             await SeedModelFilamentTypesAsync(modelSeeds);
         }
         catch (Exception ex)
@@ -273,32 +267,32 @@ public class DatabaseInitializer
     {
         try
         {
-            var filamentTypes = await _context.FilamentTypes
-                .ToDictionaryAsync(ft => ft.Name.ToUpperInvariant(), ft => ft);
-            foreach (var (
-                modelName,
-                manufacturerName,
-                _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, supportedMaterials, _
-            ) in modelSeeds)
+            // Build a case-insensitive dictionary for filament lookups to avoid culture-sensitive ToUpperInvariant allocations
+            Dictionary<string, FilamentType> filamentTypes = (await _context.FilamentTypes.ToListAsync())
+                .ToDictionary(ft => ft.Name, ft => ft, StringComparer.OrdinalIgnoreCase);
+            foreach ((
+                string modelName,
+                string manufacturerName,
+                _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, string supportedMaterials, _) in modelSeeds)
             {
-                var model = await _context.Models
+                PrinterModel? model = await _context.Models
                     .FirstOrDefaultAsync(m => m.Name == modelName &&
                                            m.Manufacturer != null &&
                                            m.Manufacturer.Name == manufacturerName);
                 if (model != null && !string.IsNullOrEmpty(supportedMaterials))
                 {
-                    var materialNames = supportedMaterials.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(material => material.Trim().ToUpperInvariant());
-                    foreach (var materialName in materialNames)
+                    IEnumerable<string> materialNames = supportedMaterials.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(material => material.Trim());
+                    foreach (string? materialName in materialNames)
                     {
-                        if (filamentTypes.TryGetValue(materialName, out var filamentType))
+                        if (filamentTypes.TryGetValue(materialName, out FilamentType? filamentType))
                         {
                             bool exists = await _context.PrinterModelFilamentTypes
                                 .AnyAsync(pmft => pmft.PrinterModelId == model.Id &&
                                                 pmft.FilamentTypeId == filamentType.Id);
                             if (!exists)
                             {
-                                _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                                _ = _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
                                 {
                                     PrinterModelId = model.Id,
                                     FilamentTypeId = filamentType.Id
@@ -308,7 +302,14 @@ public class DatabaseInitializer
                     }
                 }
             }
-            await _context.SaveChangesAsync();
+            try
+            {
+                _ = await _context.SaveChangesAsync();
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                _logger.LogWarning(ex, "Ignored unique constraint violation while seeding model-filament relationships; another process probably inserted the same records.");
+            }
         }
         catch (Exception ex)
         {
@@ -341,10 +342,17 @@ public class DatabaseInitializer
                     DefaultHotendTemp = hotendTemp,
                     DefaultBedTemp = bedTemp
                 };
-                _context.FilamentTypes.Add(filamentType);
+                _ = _context.FilamentTypes.Add(filamentType);
             }
         }
-        await _context.SaveChangesAsync();
+        try
+        {
+            _ = await _context.SaveChangesAsync();
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            _logger.LogWarning(ex, "Ignored unique constraint violation while seeding filament types; another process probably inserted the same records.");
+        }
     }
 
     public async Task<Manufacturer> GetUnknownManufacturerAsync()
@@ -366,7 +374,7 @@ public class DatabaseInitializer
         ArgumentNullException.ThrowIfNull(_context);
         try
         {
-            await _context.Actions.AnyAsync();
+            _ = await _context.Actions.AnyAsync();
         }
         catch (Exception)
         {
@@ -376,7 +384,7 @@ public class DatabaseInitializer
         await SeedResourcesAsync();
         await SeedRolesAsync();
         await SeedRolePermissionsAsync();
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
     }
 
     private async Task SeedActionsAsync()
@@ -394,7 +402,7 @@ public class DatabaseInitializer
         {
             if (!await _context.Actions.AnyAsync(a => a.Name == action.Name))
             {
-                _context.Actions.Add(new Farm.Infrastructure.Domain.Action
+                _ = _context.Actions.Add(new Farm.Infrastructure.Domain.Action
                 {
                     Id = Guid.NewGuid(),
                     Name = action.Name,
@@ -405,6 +413,38 @@ public class DatabaseInitializer
                 });
             }
         }
+    }
+
+    private static bool IsUniqueConstraintViolation(Exception ex)
+    {
+        if (ex == null)
+        {
+            return false;
+        }
+        // Walk inner exceptions to find DB-specific messages
+        Exception? e = ex;
+        while (e != null)
+        {
+            string msg = e.Message ?? string.Empty;
+            // SQLite
+            if (msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase) || msg.Contains("constraint failed", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique index", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            // Postgres
+            if (msg.Contains("duplicate key value", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique_violation", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            // SQL Server
+            if (msg.Contains("violation of unique", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            e = e.InnerException;
+        }
+        return false;
     }
 
     private async Task SeedResourcesAsync()
@@ -426,7 +466,7 @@ public class DatabaseInitializer
         {
             if (!await _context.Resources.AnyAsync(r => r.Name == resource.Name))
             {
-                _context.Resources.Add(new Resource
+                _ = _context.Resources.Add(new Resource
                 {
                     Id = Guid.NewGuid(),
                     Name = resource.Name,
@@ -452,7 +492,7 @@ public class DatabaseInitializer
         {
             if (!await _context.Roles.AnyAsync(r => r.Name == role.Name))
             {
-                _context.Roles.Add(new Role
+                _ = _context.Roles.Add(new Role
                 {
                     Id = Guid.NewGuid(),
                     Name = role.Name,
@@ -469,7 +509,7 @@ public class DatabaseInitializer
 
     private async Task SeedRolePermissionsAsync()
     {
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
         Role? adminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole != null)
         {
@@ -482,7 +522,7 @@ public class DatabaseInitializer
                     if (!await _context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == adminRole.Id && rp.ResourceId == resource.Id && rp.ActionId == adminAction.Id))
                     {
-                        _context.RolePermissions.Add(new RolePermission
+                        _ = _context.RolePermissions.Add(new RolePermission
                         {
                             Id = Guid.NewGuid(),
                             RoleId = adminRole.Id,
@@ -517,7 +557,7 @@ public class DatabaseInitializer
                     if (!await _context.RolePermissions.AnyAsync(rp =>
                         rp.RoleId == userRole.Id && rp.ResourceId == resource.Id && rp.ActionId == action.Id))
                     {
-                        _context.RolePermissions.Add(new RolePermission
+                        _ = _context.RolePermissions.Add(new RolePermission
                         {
                             Id = Guid.NewGuid(),
                             RoleId = userRole.Id,
@@ -575,7 +615,7 @@ public class DatabaseInitializer
                 DbParameter p = cmd.CreateParameter();
                 p.ParameterName = "@col";
                 p.Value = column;
-                cmd.Parameters.Add(p);
+                _ = cmd.Parameters.Add(p);
                 object? result = await cmd.ExecuteScalarAsync();
                 return result != null;
             }
@@ -587,7 +627,7 @@ public class DatabaseInitializer
                     using DbCommand alter = conn.CreateCommand();
                     alter.Transaction = tx;
                     alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''";
-                    await alter.ExecuteNonQueryAsync();
+                    _ = await alter.ExecuteNonQueryAsync();
                     _logger.LogInformation($"[DB] Added missing column {table}.{column}");
                 }
             }
@@ -596,14 +636,9 @@ public class DatabaseInitializer
             {
                 using DbCommand cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
-                if (table == "Manufacturers")
-                {
-                    cmd.CommandText = "SELECT 1 FROM (SELECT lower(Name) AS L, COUNT(*) c FROM Manufacturers GROUP BY lower(Name) HAVING c>1) LIMIT 1";
-                }
-                else // PrinterModels uniqueness is per ManufacturerId + lower(Name)
-                {
-                    cmd.CommandText = "SELECT 1 FROM (SELECT ManufacturerId, lower(Name) AS L, COUNT(*) c FROM PrinterModels GROUP BY ManufacturerId, lower(Name) HAVING c>1) LIMIT 1";
-                }
+                cmd.CommandText = table == "Manufacturers"
+                    ? "SELECT 1 FROM (SELECT lower(Name) AS L, COUNT(*) c FROM Manufacturers GROUP BY lower(Name) HAVING c>1) LIMIT 1"
+                    : "SELECT 1 FROM (SELECT ManufacturerId, lower(Name) AS L, COUNT(*) c FROM PrinterModels GROUP BY ManufacturerId, lower(Name) HAVING c>1) LIMIT 1";
                 object? r = await cmd.ExecuteScalarAsync();
                 return r != null;
             }
@@ -627,7 +662,7 @@ public class DatabaseInitializer
                 cmd.CommandText = sql;
                 try
                 {
-                    await cmd.ExecuteNonQueryAsync();
+                    _ = await cmd.ExecuteNonQueryAsync();
                     _logger.LogInformation($"[DB] Ensured index: {description}");
                 }
                 catch (Exception ex)

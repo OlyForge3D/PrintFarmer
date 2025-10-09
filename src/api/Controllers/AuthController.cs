@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
-using System.Security.Claims;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;

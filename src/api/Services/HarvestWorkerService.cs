@@ -1,15 +1,16 @@
-﻿using Farm.Infrastructure.Telemetry;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services;
 
@@ -18,14 +19,14 @@ namespace Farm.Web.Api.Services;
 /// </summary>
 public partial class HarvestWorkerService(
     IHarvestQueue queue,
-    IServiceProvider serviceProvider,
+    IServiceScopeFactory scopeFactory,
     IUnifiedLoggingService logger,
     IHubContext<HarvestHub> harvestHub) : BackgroundService
 {
     private readonly IHarvestQueue _queue = queue;
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IUnifiedLoggingService _logger = logger;
-    private readonly SemaphoreSlim _workerSemaphore = new SemaphoreSlim(MaxConcurrentWorkers, MaxConcurrentWorkers);
+    private readonly SemaphoreSlim _workerSemaphore = new(MaxConcurrentWorkers, MaxConcurrentWorkers);
     private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
     private const int MaxConcurrentWorkers = 3; // Configurable
 
@@ -56,7 +57,7 @@ public partial class HarvestWorkerService(
                     }
                     finally
                     {
-                        _workerSemaphore.Release();
+                        _ = _workerSemaphore.Release();
                     }
                 }, stoppingToken);
 
@@ -64,7 +65,7 @@ public partial class HarvestWorkerService(
                 runningTasks.Add(processTask);
 
                 // Clean up completed tasks periodically
-                runningTasks.RemoveAll(t => t.IsCompleted);
+                _ = runningTasks.RemoveAll(t => t.IsCompleted);
 
                 if (runningTasks.Count % 10 == 0)
                 {
@@ -89,7 +90,7 @@ public partial class HarvestWorkerService(
 
     private async Task ProcessFileJobAsync(HarvestFileJob job, CancellationToken ct)
     {
-        using IServiceScope scope = _serviceProvider.CreateScope();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IMoonrakerClient moonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
         IPrusaLinkClient prusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
@@ -172,7 +173,7 @@ public partial class HarvestWorkerService(
             // We ONLY download if:
             // 1. Duplicate handling is enabled and we need to calculate hash, OR
             // 2. No metadata was provided by the API (fallback to extraction)
-            bool needsDownload = operation.DuplicateHandling?.ToLowerInvariant() != "skip" ||
+            bool needsDownload = !string.Equals(operation.DuplicateHandling, "skip", StringComparison.OrdinalIgnoreCase) ||
                                  string.IsNullOrEmpty(job.SlicerName);
 
             if (needsDownload)
@@ -195,41 +196,42 @@ public partial class HarvestWorkerService(
 
                     if (existingFile != null)
                     {
-                        string handling = operation.DuplicateHandling?.ToLowerInvariant() ?? "skip";
-                        switch (handling)
+                        string handling = operation.DuplicateHandling ?? "skip";
+                        if (string.Equals(handling, "overwrite", StringComparison.OrdinalIgnoreCase))
                         {
-                            case "overwrite":
-                                _logger.LogInformation($"Overwriting duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
-                                // Treat as added (new metadata snapshot) but reference existing file id
-                                fileContent.Position = 0;
-                                GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
-                                ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
-                                discoveredFile.AlreadyInLibrary = false;
-                                // FilesAdded will be incremented during import phase, not discovery
-                                break;
-                            case "rename":
-                                _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy", null, null);
-                                // Generate a new unique name with -copy suffix (in discovered scope)
-                                string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
-                                string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
-                                int copyIndex = 1;
-                                string candidate;
-                                do
-                                {
-                                    candidate = $"{baseName}-copy{copyIndex}{ext}";
-                                    copyIndex++;
-                                } while (await db.HarvestDiscoveredFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
-                                discoveredFile.FileName = candidate;
-                                fileContent.Position = 0;
-                                GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
-                                ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
-                                // FilesAdded will be incremented during import phase, not discovery
-                                break;
-                            default: // skip
-                                _logger.LogInformation($"Skipping duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
-                                discoveredFile.AlreadyInLibrary = true;
-                                await IncrementSkippedCountAsync(db, operation);
-                                break;
+                            _logger.LogInformation($"Overwriting duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
+                            // Treat as added (new metadata snapshot) but reference existing file id
+                            fileContent.Position = 0;
+                            GcodeMetadataDto overwriteMeta = await ExtractMetadataAsync(fileContent);
+                            ApplyMetadataToDiscoveredFile(discoveredFile, overwriteMeta);
+                            discoveredFile.AlreadyInLibrary = false;
+                            // FilesAdded will be incremented during import phase, not discovery
+                        }
+                        else if (string.Equals(handling, "rename", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy", null, null);
+                            // Generate a new unique name with -copy suffix (in discovered scope)
+                            string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
+                            string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
+                            int copyIndex = 1;
+                            string candidate;
+                            do
+                            {
+                                candidate = $"{baseName}-copy{copyIndex}{ext}";
+                                copyIndex++;
+                            } while (await db.HarvestDiscoveredFiles.AnyAsync(d => d.HarvestOperationId == operation.Id && d.FileName == candidate, ct));
+                            discoveredFile.FileName = candidate;
+                            fileContent.Position = 0;
+                            GcodeMetadataDto renameMeta = await ExtractMetadataAsync(fileContent);
+                            ApplyMetadataToDiscoveredFile(discoveredFile, renameMeta);
+                            // FilesAdded will be incremented during import phase, not discovery
+                        }
+                        else
+                        {
+                            // skip
+                            _logger.LogInformation($"Skipping duplicate file {job.FileName} (Existing ID {existingFile.Id}) per policy", null, null);
+                            discoveredFile.AlreadyInLibrary = true;
+                            await IncrementSkippedCountAsync(db, operation);
                         }
                     }
                     else
@@ -263,8 +265,8 @@ public partial class HarvestWorkerService(
 
             // Save discovered file
             _logger.LogInformation($"Saving discovered file {job.FileName} to database", null, null);
-            db.HarvestDiscoveredFiles.Add(discoveredFile);
-            await db.SaveChangesAsync(ct);
+            _ = db.HarvestDiscoveredFiles.Add(discoveredFile);
+            _ = await db.SaveChangesAsync(ct);
 
             // Emit per-file progress event with discovered file info
             await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestFileDiscovered", new
@@ -435,8 +437,11 @@ public partial class HarvestWorkerService(
     {
         using SHA256 sha256 = SHA256.Create();
         byte[] hashBytes = await sha256.ComputeHashAsync(stream);
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+        return ToHexLower(hashBytes);
     }
+
+    private static string ToHexLower(byte[] hash)
+        => Convert.ToHexString(hash).ToLowerInvariant();
 
     private static async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream stream)
     {
@@ -470,7 +475,7 @@ public partial class HarvestWorkerService(
             return metadata;
         }
 
-        string content = line.Substring(1).Trim();
+        string content = line[1..].Trim();
 
         // PrusaSlicer patterns
         if (content.StartsWith("Generated by PrusaSlicer"))
@@ -485,7 +490,7 @@ public partial class HarvestWorkerService(
         // Cura patterns
         if (content.StartsWith("Generated with Cura"))
         {
-            Match versionMatch = System.Text.RegularExpressions.Regex.Match(content, @"Cura_SteamEngine (\S+)");
+            Match versionMatch = MyRegex1().Match(content);
             if (versionMatch.Success)
             {
                 metadata = metadata with { SlicerName = "Cura", SlicerVersion = versionMatch.Groups[1].Value };
@@ -493,7 +498,7 @@ public partial class HarvestWorkerService(
         }
 
         // Extract common parameters (simplified for now)
-        if (content.Contains("printing time") && content.Contains('h') && content.Contains('m'))
+        if (content.Contains("printing time", StringComparison.OrdinalIgnoreCase) && content.Contains('h') && content.Contains('m'))
         {
             Match timeMatch = System.Text.RegularExpressions.Regex.Match(content, @"(\d+)h (\d+)m");
             if (timeMatch.Success)
@@ -521,7 +526,7 @@ public partial class HarvestWorkerService(
     private static async Task IncrementSkippedCountAsync(AppDbContext db, GcodeHarvestOperation operation)
     {
         operation.FilesSkipped++;
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 
     // Note: FilesAdded is now incremented during import phase in GcodeHarvestService.ImportSelectedFilesAsync
@@ -530,7 +535,7 @@ public partial class HarvestWorkerService(
     private static async Task IncrementErrorCountAsync(AppDbContext db, GcodeHarvestOperation operation)
     {
         operation.FilesErrored++;
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 
     private static async Task RecordFileErrorAsync(AppDbContext db, Guid operationId, string fileName, string errorMessage)
@@ -541,7 +546,7 @@ public partial class HarvestWorkerService(
         if (operation != null)
         {
             operation.FilesErrored++;
-            await db.SaveChangesAsync();
+            _ = await db.SaveChangesAsync();
         }
     }
 
@@ -572,14 +577,14 @@ public partial class HarvestWorkerService(
             // All files have been processed, mark operation as complete
             operation.Status = GcodeHarvestStatus.Completed;
             operation.CompletedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(ct);
+            _ = await db.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Operation {operationId} completed: {operation.FilesAdded} added, {operation.FilesSkipped} skipped, {operation.FilesErrored} errors", null, null);
 
             // Emit completion event via SignalR
             await _harvestHub.Clients.Group($"harvest-{operationId}").SendAsync("HarvestOperationCompleted", new
             {
-                operationId = operationId,
+                operationId,
                 status = "Completed",
                 filesAdded = operation.FilesAdded,
                 filesSkipped = operation.FilesSkipped,
@@ -599,4 +604,6 @@ public partial class HarvestWorkerService(
 
     [System.Text.RegularExpressions.GeneratedRegex(@"PrusaSlicer (\S+)")]
     private static partial System.Text.RegularExpressions.Regex MyRegex();
+    [GeneratedRegex(@"Cura_SteamEngine (\S+)")]
+    private static partial Regex MyRegex1();
 }

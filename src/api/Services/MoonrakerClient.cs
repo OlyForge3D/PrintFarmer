@@ -1,7 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
-using Farm.Web.Api.Services.Interfaces;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
@@ -25,16 +25,10 @@ public record PrinterCompositeStatus(
     double? BedTarget = null);
 #pragma warning restore CA1056 // URI-like properties should not be strings
 
-public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
+public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : PrinterClientBase, IMoonrakerClient
 {
-    private readonly HttpClient _http;
-    private readonly IUnifiedLoggingService _logger;
-
-    public MoonrakerClient(HttpClient http, IUnifiedLoggingService logger)
-    {
-        _http = http;
-        _logger = logger;
-    }
+    private readonly HttpClient _http = http;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     private static string NormalizeBaseUrl(string url) => NormalizeBaseUrl(url, 7125);
 
@@ -282,8 +276,7 @@ public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
             await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
             using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
             JsonElement root = doc.RootElement;
-            JsonElement cams;
-            if ((root.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array) ||
+            if ((root.TryGetProperty("webcams", out JsonElement cams) && cams.ValueKind == JsonValueKind.Array) ||
                 (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array))
             {
                 foreach (JsonElement cam in cams.EnumerateArray())
@@ -612,8 +605,7 @@ public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
             await using Stream streamContent = await resp.Content.ReadAsStreamAsync(cts.Token);
             using JsonDocument doc = await JsonDocument.ParseAsync(streamContent, cancellationToken: cts.Token);
             JsonElement root = doc.RootElement;
-            JsonElement cams;
-            if (!((root.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array) ||
+            if (!((root.TryGetProperty("webcams", out JsonElement cams) && cams.ValueKind == JsonValueKind.Array) ||
                   (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array)))
             {
                 return (null, null);
@@ -881,7 +873,7 @@ public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
             // First try using REST API
             string encodedPath = Uri.EscapeDataString(path);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
-            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&extended={extended.ToString().ToLowerInvariant()}");
+            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&extended={(extended ? "true" : "false")}");
 
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (resp.IsSuccessStatusCode)
@@ -934,7 +926,7 @@ public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
                     _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
 
                     // Special handling for URL parameter error
-                    if (jsonRpcResponse.Error.Message.Contains("No data for argument: url") ||
+                    if (jsonRpcResponse.Error.Message.Contains("No data for argument: url", StringComparison.OrdinalIgnoreCase) ||
                         jsonRpcResponse.Error.Code == 400)
                     {
                         // Try again with URL parameter included
@@ -1048,7 +1040,7 @@ public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
 
             string encodedPath = Uri.EscapeDataString(path);
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
-            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&force={force.ToString().ToLowerInvariant()}");
+            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&force={(force ? "true" : "false")}");
             using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
             return resp.IsSuccessStatusCode;
         }
@@ -1823,7 +1815,7 @@ public partial class MoonrakerClient : PrinterClientBase, IMoonrakerClient
 
         if (allowArchived.HasValue)
         {
-            queryParams.Add($"allow_archived={allowArchived.Value.ToString().ToLowerInvariant()}");
+            queryParams.Add($"allow_archived={(allowArchived.Value ? "true" : "false")}");
         }
 
         if (limit.HasValue)
