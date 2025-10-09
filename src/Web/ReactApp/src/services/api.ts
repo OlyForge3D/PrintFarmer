@@ -40,6 +40,8 @@ import {
   UserDto,
   DiscoveredGcodeFileDto,
   GcodeHarvestResultDto
+  ,
+  BulkImportResponse
 } from '@/types/api';
 import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';
@@ -208,6 +210,11 @@ export class ApiClient {
   async createPrinter(printer: CreatePrinterDto): Promise<Printer> {
     const response = await this.client.post<Printer>('/printers', printer);
     return response.data;
+  }
+
+  async bulkCreatePrinters(printers: CreatePrinterDto[]): Promise<BulkImportResponse> {
+    const resp = await this.client.post<BulkImportResponse>('/printers/bulk', printers);
+    return resp.data;
   }
 
   async updatePrinter(id: string, printer: UpdatePrinterDto): Promise<Printer> {

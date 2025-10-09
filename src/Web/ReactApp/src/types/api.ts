@@ -238,6 +238,21 @@ export interface CreatePrinterDto {
   frontendPort?: number;
 }
 
+// Bulk import result item returned by /printers/bulk
+export interface BulkImportResultItem {
+  index: number;
+  name: string;
+  status: 'Imported' | 'Skipped' | 'Failed';
+  id?: string;
+  reason?: string;
+}
+
+export interface BulkImportResponse {
+  importedCount: number;
+  skippedCount: number;
+  results: BulkImportResultItem[];
+}
+
 export interface UpdatePrinterDto {
   name: string;
   serverUrl: string;

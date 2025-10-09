@@ -2595,6 +2595,65 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         });
     }
 
+    /// <summary>
+    /// Bulk create printers from a JSON array of CreatePrinterDto objects.
+    /// Returns per-item import results including success/failure and reasons.
+    /// </summary>
+    [HttpPost("bulk")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> BulkCreateAsync([FromBody] CreatePrinterDto[] dtos, CancellationToken ct)
+    {
+        if (dtos == null || dtos.Length == 0)
+        {
+            return BadRequest("No printers provided");
+        }
+
+        List<BulkImportResultItem> results = new();
+
+        foreach (var (dto, idx) in dtos.Select((d, i) => (d, i)))
+        {
+            try
+            {
+                // Validate using the existing validator
+                ValidationResult validationResult = await validator.ValidateAsync(dto, ct);
+                if (!validationResult.IsValid)
+                {
+                    string reason = string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage));
+                    results.Add(new BulkImportResultItem(idx, dto.Name, "Failed", null, reason));
+                    continue;
+                }
+
+                // Simple existence check by name or server URL to avoid duplicates
+                bool exists = await db.Printers.AnyAsync(p => p.Name == dto.Name || p.ServerUrl == dto.ServerUrl, ct);
+                if (exists)
+                {
+                    results.Add(new BulkImportResultItem(idx, dto.Name, "Skipped", null, "Printer already exists"));
+                    continue;
+                }
+
+                PrinterDto created = await CreatePrinterFromDtoAsync(dto, ct);
+                results.Add(new BulkImportResultItem(idx, dto.Name, "Imported", created.Id, null));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug($"Bulk import item failed at index {idx}: {ex.Message}");
+                results.Add(new BulkImportResultItem(idx, dto?.Name ?? string.Empty, "Failed", null, ex.Message));
+            }
+        }
+
+        return Ok(new
+        {
+            ImportedCount = results.Count(r => r.Status == "Imported"),
+            SkippedCount = results.Count(r => r.Status == "Skipped"),
+            Results = results
+        });
+    }
+
+    // Simple result shape for bulk import responses
+    private sealed record BulkImportResultItem(int Index, string Name, string Status, Guid? Id = null, string? Reason = null);
+
     private static string EscapeCsvValue(string? value)
     {
         if (string.IsNullOrEmpty(value))
