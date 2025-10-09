@@ -563,7 +563,7 @@ public record DiscoveryCompletedDto(
 /// Request to start a network discovery session with optional backend filtering.
 /// </summary>
 public record StartDiscoveryRequest(
-    List<PrinterBackend>? Backends = null
+    IReadOnlyList<PrinterBackend>? Backends = null
 );
 
 /// <summary>
