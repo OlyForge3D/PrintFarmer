@@ -24,7 +24,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateModelRequest }) => {
-      const response = await fetch(`/api/catalog/models/${id}`, {
+      const response = await fetch(`/api/catalog/printer-models/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -35,7 +35,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
       return response;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models'] });
+      queryClient.invalidateQueries({ queryKey: ['printer-models'] });
       toast.success(`Model "${formData?.name}" updated successfully`);
       onSuccess?.();
       onClose();

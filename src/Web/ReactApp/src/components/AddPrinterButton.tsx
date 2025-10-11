@@ -25,6 +25,7 @@ export function AddPrinterButton({ onSuccess }: AddPrinterButtonProps) {
   return (
     <>
       <button
+        type="button"
         onClick={handleAddPrinter}
         className="inline-flex items-center px-4 py-2 bg-pf-success hover:bg-pf-success-hover text-white font-medium rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md"
       >

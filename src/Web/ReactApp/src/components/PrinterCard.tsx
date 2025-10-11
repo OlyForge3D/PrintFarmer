@@ -269,25 +269,25 @@ export function PrinterCard({
             {hasPermission('printers', 'execute') && currentStatus.isOnline && (
               <>
                 {currentStatus.state === 'printing' && (
-                  <button aria-label="Pause print" title="Pause print" className="p-2 text-pf-text-secondary hover:text-pf-warning bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <button type="button" aria-label="Pause print" title="Pause print" className="p-2 text-pf-text-secondary hover:text-pf-warning bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                     <Pause className="h-4 w-4" />
                   </button>
                 )}
                 {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                  <button aria-label="Resume print" title="Resume print" className="p-2 text-pf-text-secondary hover:text-pf-success bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <button type="button" aria-label="Resume print" title="Resume print" className="p-2 text-pf-text-secondary hover:text-pf-success bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                     <Play className="h-4 w-4" />
                   </button>
                 )}
-                <button aria-label="Stop print" title="Stop print" className="p-2 text-pf-text-secondary hover:text-pf-error bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                <button type="button" aria-label="Stop print" title="Stop print" className="p-2 text-pf-text-secondary hover:text-pf-error bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
                   <StopIcon className="h-4 w-4" />
                 </button>
               </>
             )}
             
             {hasPermission('printers', 'update') && (
-              <button aria-label="Manage printer" title="Manage printer" className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
-                <Cog className="h-4 w-4" />
-              </button>
+              <button type="button" aria-label="Manage printer" title="Manage printer" className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <Cog className="h-4 w-4" />
+                </button>
             )}
           </div>
         </div>
@@ -430,6 +430,7 @@ export function PrinterCard({
         {/* Action buttons */}
         <div className="flex space-x-2">
           <button 
+            type="button"
             onClick={() => onManage(printer)}
             className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-pf-border-light shadow-sm text-sm leading-4 font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors"
           >
@@ -441,14 +442,14 @@ export function PrinterCard({
             <>
               {/* Only show Pause if printer is printing and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && currentStatus.state === 'printing' && (
-                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-warning hover:bg-pf-warning focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-warning transition-colors">
+                <button type="button" className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-warning hover:bg-pf-warning focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-warning transition-colors">
                   <Pause className="h-4 w-4 mr-1.5" />
                   Pause
                 </button>
               )}
               {/* Only show Resume/Start if printer is paused or ready and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                <button className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-success hover:bg-pf-success-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-success transition-colors">
+                <button type="button" className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-success hover:bg-pf-success-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-success transition-colors">
                   <Play className="h-4 w-4 mr-1.5" />
                   {currentStatus.state === 'paused' ? 'Resume' : 'Start'}
                 </button>

@@ -10,18 +10,19 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.TestHost;
 
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
+[Collection("DbHeavySerialWithSharedFixture")]
 [TestTiming]
 public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
 {
     public DiscoverySignalRIntegrationTests(WebApplicationFactory<Program> factory)
         : base(factory.WithWebHostBuilder(builder =>
         {
-            builder.ConfigureServices(services =>
+            builder.ConfigureTestServices(services =>
             {
                 // Replace network discovery settings with a tiny pretend network (/30 gives 2 usable hosts)
                 // Use SettingsService or direct configuration for network discovery settings
@@ -89,10 +90,24 @@ public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
         // Create a new factory instance that returns no configured networks so auto-detection path executes
         var autoFactory = _factory.WithWebHostBuilder(builder =>
         {
-            builder.ConfigureServices(services =>
+            builder.ConfigureTestServices(services =>
             {
                 // Use SettingsService or direct configuration for network discovery settings
                 services.AddLogging(lb => lb.SetMinimumLevel(LogLevel.Warning));
+
+                // Replace ISettingsService with a test implementation that returns
+                // an empty NetworkDiscoverySettings so the auto-detection path runs.
+                try
+                {
+                    var existing = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Infrastructure.Settings.ISettingsService));
+                    if (existing != null)
+                    {
+                        services.Remove(existing);
+                    }
+                }
+                catch { }
+
+                services.AddSingleton<Farm.Infrastructure.Settings.ISettingsService>(new TestOnlySettingsService());
             });
         });
 
@@ -136,6 +151,39 @@ public class DiscoverySignalRIntegrationTests : DbHeavyTestBase<Program>
 
         await hubConnection.DisposeAsync();
     }
+}
+
+internal class TestOnlySettingsService : Farm.Infrastructure.Settings.ISettingsService
+{
+    public IEnumerable<object> All => Enumerable.Empty<object>();
+
+    public T Get<T>() where T : class
+    {
+        if (typeof(T) == typeof(Farm.Infrastructure.Settings.NetworkDiscoverySettings))
+        {
+            var ns = new Farm.Infrastructure.Settings.NetworkDiscoverySettings();
+            // Ensure no configured subnets so auto-detection triggers
+            ns.DiscoverySubnets = new List<string>();
+            return (T)(object)ns;
+        }
+
+        // Provide a default instance for other settings types if possible.
+        // If we can't instantiate the requested settings type, throw a clear exception
+        // so tests fail fast instead of returning null.
+        try
+        {
+            return Activator.CreateInstance<T>();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"TestOnlySettingsService cannot create an instance of settings type {typeof(T).FullName}. Add handling to TestOnlySettingsService for this type.", ex);
+        }
+    }
+
+    public object GetByKey(string key) => throw new NotSupportedException();
+    public IEnumerable<Farm.Infrastructure.Settings.SettingMetadata> GetAllMetadata() => Enumerable.Empty<Farm.Infrastructure.Settings.SettingMetadata>();
+    public void Reload(Microsoft.Extensions.Configuration.IConfiguration config) { }
+    public void Save<T>(T settings) where T : class, Farm.Infrastructure.Settings.IAppSetting => throw new NotSupportedException();
 }
 
 

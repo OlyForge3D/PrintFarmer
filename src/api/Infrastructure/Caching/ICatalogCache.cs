@@ -26,11 +26,12 @@ public sealed class CatalogCacheOptions
     public TimeSpan ListTtl { get; set; } = TimeSpan.FromMinutes(2);
 }
 
-internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Options.IOptions<CatalogCacheOptions> options, Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext> dbFactory) : ICatalogCache
+internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Options.IOptions<CatalogCacheOptions> options, IServiceProvider services) : ICatalogCache
 {
     private readonly IMemoryCache _cache = cache;
     private readonly CatalogCacheOptions _options = options.Value;
-    private readonly Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext> _dbFactory = dbFactory;
+    private readonly IServiceProvider _services = services;
+    private Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>? _dbFactory;
 
     private const string ManufacturersKey = "catalog:mfglst";
     private const string ModelsAllKey = "catalog:models:all";
@@ -43,8 +44,12 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
             return cached;
         }
 
-        // Use the registered IDbContextFactory to create a short-lived AppDbContext for the DB access (safe for singleton cache)
-        await using AppDbContext db = _dbFactory.CreateDbContext();
+        // Resolve the IDbContextFactory lazily from the service provider. Some test
+        // scenarios register or mutate DbContextFactory registration at test-host
+        // build time; resolving lazily avoids forcing the factory to exist during
+        // singleton validation/build-time checks.
+        var dbFactory = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+        await using AppDbContext db = dbFactory.CreateDbContext();
         List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
             .Select(m => new ManufacturerDto(m.Id, m.Name)).ToListAsync(ct);
         string etag = ComputeWeakEtag(list.Select(m => m.Id.ToString("N") + ":" + m.Name));
@@ -59,8 +64,9 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         {
             return cached;
         }
-        // Use the registered IDbContextFactory to create a short-lived AppDbContext for the DB access (safe for singleton cache)
-        await using AppDbContext db = _dbFactory.CreateDbContext();
+
+        var dbFactory2 = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+        await using AppDbContext db = dbFactory2.CreateDbContext();
 
         IQueryable<PrinterModel> q = db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
         if (manufacturerId is Guid mid2)

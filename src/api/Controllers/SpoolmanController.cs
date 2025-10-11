@@ -102,14 +102,15 @@ public class SpoolmanController(
                 {
                     if (path == probePaths[^1])
                     {
-                        // Log only the last failure
+                        // Log only the last failure but return a 200 payload so the UI can
+                        // display the probe result without treating it as an internal server error.
                         _logger.LogError(ex, "Unhandled exception in /api/spoolman/test: {Message}", ex.Message);
                         (string? category, string? message) = CategorizeException(ex);
-                        return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
+                        return Ok(new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
                     }
                 }
             }
-            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
+            return Ok(new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
         }
         catch (Exception ex)
         {

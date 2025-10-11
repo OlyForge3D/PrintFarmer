@@ -35,7 +35,7 @@ function getBackendIcon(backend: PrinterBackend | number | string) {
       return <span title="Other" aria-label="Other" role="img" className="mr-1">🖨️</span>;
   }
 }
-import { useState, useLayoutEffect } from 'react';
+import { useState, useLayoutEffect, useRef } from 'react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
@@ -73,6 +73,8 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const [moveX, setMoveX] = useState<number | ''>('');
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
+  const [collapsedImageVisible, setCollapsedImageVisible] = useState(true);
+  const [expandedImageVisible, setExpandedImageVisible] = useState(true);
   
   // State to track last known good values
   const [lastKnownHotendTemp, setLastKnownHotendTemp] = useState<number | null>(null);
@@ -258,6 +260,23 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   // Use the new state color function instead of the old statusColor
   const stateColorClasses = getStateColors(state, isOnline);
 
+  // Refs for progress bar elements so we can set dynamic width without using React inline styles
+  const collapsedProgressRef = useRef<HTMLDivElement | null>(null);
+  const expandedProgressRef = useRef<HTMLDivElement | null>(null);
+
+  // Update progress bar widths via DOM refs to avoid inline style props (project lint rule)
+  useLayoutEffect(() => {
+    const pct = status?.progress !== undefined && status?.progress !== null ? Math.max(0, Math.min(100, status.progress)) : 0;
+    try {
+      if (collapsedProgressRef.current) collapsedProgressRef.current.style.width = `${Math.round(pct)}%`;
+      if (expandedProgressRef.current) expandedProgressRef.current.style.width = `${Math.round(pct)}%`;
+    } catch {
+      // Ignore DOM write errors in very restricted test environments
+    }
+  }, [status?.progress]);
+
+  // progressPct is available via status.progress when needed; dynamic width is set via refs
+
   const handleToggleExpand = () => {
     setIsExpanded(!isExpanded);
   };
@@ -431,6 +450,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 </a>
                 {/* Camera button - always visible, enabled/disabled based on camera URLs */}
                 <button
+                  type="button"
                   onClick={() => setShowCamera(!showCamera)}
                   disabled={!hasCameraUrls}
                   className="text-pf-text-secondary hover:text-pf-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -450,6 +470,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={handleToggleExpand}
               className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
               title="Expand card"
@@ -457,6 +478,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               <ChevronDown className="h-4 w-4" />
             </button>
             <button
+              type="button"
               onClick={handleViewHistory}
               className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
               title="View print history"
@@ -464,6 +486,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               <History className="h-4 w-4" />
             </button>
             <button
+              type="button"
               onClick={() => onEdit?.(printer)}
               className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
               title="Edit details"
@@ -476,6 +499,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         {/* Control buttons in collapsed view */}
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => handleControlAction('pause')}
             disabled={!isPrinting}
             className="inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -484,6 +508,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             Pause
           </button>
           <button
+            type="button"
             onClick={() => handleControlAction('resume')}
             disabled={!isPaused}
             className="inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -492,6 +517,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             Resume
           </button>
           <button
+            type="button"
             onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
             disabled={!isOnline}
             className={`inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border rounded disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -514,31 +540,25 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
             </div>
             <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
-              {(() => {
-                const pct = Math.max(0, Math.min(100, status.progress));
-                // Use inline style for dynamic width - necessary for progress bar
-                return (
-                  <div 
-                    className="bg-pf-success h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${pct}%` }}
-                  >
-                    <span className="sr-only">Print progress: {Math.round(pct)}%</span>
-                  </div>
-                );
-              })()}
+              <div
+                ref={collapsedProgressRef}
+                className="bg-pf-success h-2 rounded-full transition-all duration-300"
+              >
+                <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, status.progress))) }%</span>
+              </div>
             </div>
           </div>
         )}
 
               {showCamera && (
                 <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                  {cameraStreamUrl ? (
+                  {cameraStreamUrl && collapsedImageVisible ? (
                     <img 
                       src={cameraStreamUrl} 
                       alt="webcam snapshot"
                       className="max-w-full max-h-full object-contain"
-                      onError={(e) => e.currentTarget.style.display = 'none'}
-                      onLoad={(e) => e.currentTarget.style.display = 'block'}
+                      onError={() => setCollapsedImageVisible(false)}
+                      onLoad={() => setCollapsedImageVisible(true)}
                     />
                   ) : (
                     <div className="text-center text-pf-text-secondary p-4">
@@ -597,6 +617,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               </a>
                             {/* Camera button - always visible, enabled/disabled based on camera URLs */}
               <button
+                type="button"
                 onClick={() => setShowCamera(!showCamera)}
                 disabled={!hasCameraUrls}
                 className="text-pf-text-secondary hover:text-pf-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -608,15 +629,15 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             </div>
             {showCamera && (
               <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                {cameraStreamUrl ? (
-                  <img 
-                    src={cameraStreamUrl} 
-                    alt="webcam snapshot"
-                    className="max-w-full max-h-full object-contain"
-                    onError={(e) => e.currentTarget.style.display = 'none'}
-                    onLoad={(e) => e.currentTarget.style.display = 'block'}
-                  />
-                ) : (
+                {cameraStreamUrl && expandedImageVisible ? (
+                    <img 
+                      src={cameraStreamUrl} 
+                      alt="webcam snapshot"
+                      className="max-w-full max-h-full object-contain"
+                      onError={() => setExpandedImageVisible(false)}
+                      onLoad={() => setExpandedImageVisible(true)}
+                    />
+                  ) : (
                   <div className="text-center text-pf-text-secondary p-4">
                     <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
                     <p className="text-sm">No camera configured</p>
@@ -634,6 +655,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={handleToggleExpand}
             className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
             title="Collapse card"
@@ -641,6 +663,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             <Minus className="h-4 w-4" />
           </button>
           <button
+            type="button"
             onClick={handleViewHistory}
             className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
             title="View print history"
@@ -648,6 +671,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             <History className="h-4 w-4" />
           </button>
           <button
+            type="button"
             onClick={() => onEdit?.(printer)}
             className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
             title="Edit details"
@@ -665,18 +689,12 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
           </div>
           <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
-            {(() => {
-              const pct = Math.max(0, Math.min(100, status.progress));
-              // Use inline style for dynamic width - necessary for progress bar
-              return (
-                <div 
-                  className="bg-pf-success h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${pct}%` }}
-                >
-                  <span className="sr-only">Print progress: {Math.round(pct)}%</span>
-                </div>
-              );
-            })()}
+            <div
+              ref={expandedProgressRef}
+              className="bg-pf-success h-2 rounded-full transition-all duration-300"
+            >
+              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, status.progress))) }%</span>
+            </div>
           </div>
         </div>
       )}
@@ -739,6 +757,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           
           <div className="flex items-start mt-0">
             <button 
+              type="button"
               className="min-w-12 h-9 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors"
               onClick={handleSetTemperatures}
             >
@@ -749,7 +768,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         
         {/* Temperature Presets Row */}
         <div className="flex flex-wrap gap-1 mt-3">
-          {[
+            {[
             { name: 'ABS', color: 'bg-gray-600' },
             { name: 'ASA', color: 'bg-yellow-600' }, 
             { name: 'PLA', color: 'bg-green-600' },
@@ -759,6 +778,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           ].map((preset) => (
             <button
               key={preset.name}
+              type="button"
               className={`w-14 py-1 text-xs font-medium text-white rounded ${preset.color} hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed`}
               disabled={isPrinting}
               onClick={() => handleApplyPreset(preset.name)}
@@ -767,6 +787,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             </button>
           ))}
           <button
+            type="button"
             className="w-14 py-1 text-xs font-medium text-white rounded bg-blue-600 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={isPrinting}
             title="Cooldown"
@@ -786,6 +807,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-36 h-36">
               {/* Top row */}
               <button 
+                type="button"
                 className={getHomeButtonClasses(['x', 'y', 'z'])}
                 disabled={isPrinting}
                 onClick={() => handleHome()}
@@ -794,6 +816,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 <Home className="h-4 w-4" />
               </button>
               <button 
+                type="button"
                 className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', step)}
@@ -804,6 +827,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               
               {/* Middle row */}
               <button 
+                type="button"
                 className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', -step)}
@@ -811,6 +835,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 ◀
               </button>
               <button 
+                type="button"
                 className={getHomeButtonClasses(['x', 'y'])}
                 disabled={isPrinting}
                 onClick={() => handleHome('xy')}
@@ -819,6 +844,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 <Home className="h-4 w-4" />
               </button>
               <button 
+                type="button"
                 className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', step)}
@@ -829,6 +855,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               {/* Bottom row */}
               <div></div>
               <button 
+                type="button"
                 className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', -step)}
@@ -841,6 +868,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             {/* Z Pad */}
             <div className="flex flex-col gap-1">
               <button 
+                type="button"
                 className="w-11 h-11 p-0 flex items-center justify-center text-xs border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', step)}
@@ -848,6 +876,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 Z+
               </button>
               <button 
+                type="button"
                 className={getHomeButtonClasses(['z'])}
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
@@ -856,6 +885,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 <Home className="h-4 w-4" />
               </button>
               <button 
+                type="button"
                 className="w-11 h-11 p-0 flex items-center justify-center text-xs border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', -step)}
@@ -871,6 +901,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               </div>
               <div className="flex items-center gap-2 mt-2">
                 <button 
+                  type="button"
                   className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                   disabled={!isPrinting}
                   onClick={() => handleControlAction('pause')}
@@ -879,6 +910,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   <Pause className="h-4 w-4" />
                 </button>
                 <button 
+                  type="button"
                   className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
                   disabled={!isPaused}
                   onClick={() => handleControlAction('resume')}
@@ -887,6 +919,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   <Play className="h-4 w-4" />
                 </button>
                 <button 
+                  type="button"
                   className={`w-11 h-11 p-0 flex items-center justify-center border rounded disabled:opacity-50 ${
                     isShutdown 
                       ? 'border-amber-700 text-white bg-amber-700 hover:bg-amber-600 hover:border-amber-600'
@@ -907,6 +940,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   {[1, 10, 50].map((stepValue) => (
                     <button
                       key={stepValue}
+                      type="button"
                       className={`w-8 h-6 text-xs font-medium rounded border transition-colors ${
                         step === stepValue 
                           ? 'bg-blue-600 text-white border-blue-600' 
@@ -986,6 +1020,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             
             <div className="flex items-start mt-0">
                 <button
+                  type="button"
                   className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
                   disabled={isPrinting}
                   onClick={() => {

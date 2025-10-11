@@ -548,6 +548,7 @@ export function SpoolsPage() {
             </button>
           </div>
           <button
+            type="button"
             onClick={loadSpools}
             disabled={loading || !spoolmanBaseUrl}
             aria-label="Refresh spools"

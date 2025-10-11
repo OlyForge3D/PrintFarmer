@@ -39,13 +39,13 @@ public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicat
     [Fact]
     public async Task Models_Get_ReturnsEtag_And_Conditional304()
     {
-        var resp1 = await _client.GetAsync("/api/catalog/models");
+        var resp1 = await _client.GetAsync("/api/catalog/printer-models");
         resp1.StatusCode.Should().Be(HttpStatusCode.OK);
         resp1.Headers.ETag.Should().NotBeNull();
         var etag = resp1.Headers.ETag!.ToString();
         etag.Should().NotBeNullOrEmpty();
 
-        var req2 = new HttpRequestMessage(HttpMethod.Get, "/api/catalog/models");
+        var req2 = new HttpRequestMessage(HttpMethod.Get, "/api/catalog/printer-models");
         req2.Headers.TryAddWithoutValidation("If-None-Match", etag);
         var resp2 = await _client.SendAsync(req2);
         resp2.StatusCode.Should().Be(HttpStatusCode.NotModified);
@@ -107,10 +107,10 @@ public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicat
         mfgDto.Should().NotBeNull();
 
         var modelName = "Model" + Guid.NewGuid().ToString("N").Substring(0, 6);
-        var createModelResp = await _client.PostAsJsonAsync("/api/catalog/models", new { name = modelName, manufacturerId = mfgDto!.Id, maxX = 100, maxY = 100, maxZ = 100 });
+        var createModelResp = await _client.PostAsJsonAsync("/api/catalog/printer-models", new { name = modelName, manufacturerId = mfgDto!.Id, maxX = 100, maxY = 100, maxZ = 100 });
         createModelResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var dupModelResp = await _client.PostAsJsonAsync("/api/catalog/models", new { name = modelName.ToUpperInvariant(), manufacturerId = mfgDto!.Id, maxX = 100, maxY = 100, maxZ = 100 });
+        var dupModelResp = await _client.PostAsJsonAsync("/api/catalog/printer-models", new { name = modelName.ToUpperInvariant(), manufacturerId = mfgDto!.Id, maxX = 100, maxY = 100, maxZ = 100 });
         dupModelResp.StatusCode.Should().Be(HttpStatusCode.Conflict);
         dupModelResp.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
     }
@@ -136,7 +136,7 @@ public class CatalogControllerIntegrationTests : IClassFixture<CustomWebApplicat
     [Fact]
     public async Task GetModelById_NotFoundForRandomId()
     {
-        var resp = await _client.GetAsync($"/api/catalog/models/{Guid.NewGuid():D}");
+        var resp = await _client.GetAsync($"/api/catalog/printer-models/{Guid.NewGuid():D}");
         resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 }

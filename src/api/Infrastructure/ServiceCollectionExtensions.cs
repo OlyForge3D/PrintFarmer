@@ -75,6 +75,18 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddPrintFarmerSettings(this IServiceCollection services)
     {
+        // Register configuration-bound system settings (no DB access required)
+        // Bind DatabaseSettings from configuration section name defined on the type
+        try
+        {
+            // Use the SectionName constant if present
+            _ = services.Configure<Farm.Infrastructure.Settings.DatabaseSettings>(s => { });
+        }
+        catch { }
+
+        // Register a lightweight provider for system settings that reads from IConfiguration
+        _ = services.AddSingleton<Farm.Infrastructure.Settings.ISystemSettingsProvider, Farm.Infrastructure.Settings.ConfigurationSystemSettingsProvider>();
+
         // Register SettingsService so DI constructs it with IConfiguration, AppDbContext and IUnifiedLoggingService
         _ = services.AddScoped<ISettingsService, SettingsService>();
 

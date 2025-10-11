@@ -118,6 +118,7 @@ export function HarvestHistoryPage() {
               </div>
               <div className="mt-4">
                 <button
+                  type="button"
                   onClick={() => refetch()}
                   className="bg-red-100 hover:bg-red-200 dark:bg-red-800 dark:hover:bg-red-700 text-red-800 dark:text-red-200 px-3 py-2 rounded-md text-sm font-medium"
                 >

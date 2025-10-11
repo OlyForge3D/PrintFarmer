@@ -61,12 +61,14 @@ export function DeleteConfirmationModal({
 
           <div className="flex justify-end space-x-3">
             <button
+              type="button"
               onClick={onCancel}
               className="px-4 py-2 border border-pf-border rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent-2 transition-colors"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={onConfirm}
               className="px-4 py-2 border border-transparent rounded-md text-white bg-pf-error-bg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
             >

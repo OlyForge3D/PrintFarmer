@@ -340,10 +340,11 @@ export function Layout() {
                   <div className="py-1">
                     {isAuthenticated && user ? (
                       <>
-                        <div className="px-4 py-2 text-sm text-pf-text-secondary border-b border-pf-border">
+                          <div className="px-4 py-2 text-sm text-pf-text-secondary border-b border-pf-border">
                           Signed in as <strong>{user.username}</strong>
                         </div>
                         <button
+                          type="button"
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
                         >
@@ -351,6 +352,7 @@ export function Layout() {
                           Profile
                         </button>
                         <button
+                          type="button"
                           onClick={handleLogout}
                           className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
                         >
@@ -361,6 +363,7 @@ export function Layout() {
                     ) : (
                       <>
                         <button
+                          type="button"
                           onClick={() => {
                             setShowLoginModal(true);
                             setUserMenuOpen(false);
@@ -371,6 +374,7 @@ export function Layout() {
                           Sign In
                         </button>
                         <button
+                          type="button"
                           onClick={() => {
                             setShowRegisterModal(true);
                             setUserMenuOpen(false);
@@ -411,6 +415,7 @@ export function Layout() {
                 {filteredNavigation.map(item => {
                   const Icon = item.icon;
                   const isExpanded = !!expanded[item.name];
+                  
                   const hasChildren = !!item.children?.length;
                   return (
                     <div key={item.name} className="flex flex-col">
@@ -422,7 +427,7 @@ export function Layout() {
                               e.preventDefault(); // Prevent native toggle
                               toggleExpand(item.name);
                             }}
-                            aria-expanded={isExpanded}
+                            aria-expanded={isExpanded ? 'true' : 'false'}
                             tabIndex={0}
                             role="button"
                           >
@@ -483,6 +488,7 @@ export function Layout() {
               {filteredNavigation.map(item => {
                 const Icon = item.icon;
                 const isExpanded = !!expanded[item.name];
+                
                 const hasChildren = !!item.children?.length;
                 return (
                   <div key={item.name} className="flex flex-col">
@@ -494,7 +500,7 @@ export function Layout() {
                             e.preventDefault(); // Prevent native toggle
                             toggleExpand(item.name);
                           }}
-                          aria-expanded={isExpanded}
+                          aria-expanded={isExpanded ? 'true' : 'false'}
                           tabIndex={0}
                           role="button"
                         >

@@ -226,6 +226,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   </div>
                   
                   <button
+                    type="button"
                     onClick={handleStartDiscovery}
                     disabled={startDiscoveryMutation.isPending || !!isActive || selectedBackends.size === 0}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
@@ -309,6 +310,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                         Found {foundPrinters.length} printer{foundPrinters.length !== 1 ? 's' : ''}
                       </h4>
                       <button
+                        type="button"
                         onClick={handleSelectAll}
                         className="text-sm text-pf-accent hover:text-pf-accent-hover"
                       >
@@ -492,12 +494,14 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
                     <div className="flex items-center justify-end space-x-3 pt-4 border-t border-pf-border">
                       <button
+                        type="button"
                         onClick={onClose}
                         className="px-4 py-2 border border-pf-border rounded-md text-sm font-medium text-pf-text-primary bg-pf-bg-1 hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
                       >
                         Cancel
                       </button>
                       <button
+                        type="button"
                         onClick={handleAddSelected}
                         disabled={selectedPrinters.size === 0 || createPrinterMutation.isPending}
                         className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"

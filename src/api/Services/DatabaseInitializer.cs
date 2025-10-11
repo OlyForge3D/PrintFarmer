@@ -97,7 +97,25 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 }
 
                 // Seed all data (authentication, catalog, filament types)
-                await SeedAllAsync();
+                // Some providers (or test SQLite setups) may require a brief moment after EnsureCreated
+                // before all connections observe the new schema. Retry a few times for core table existence
+                // before attempting the full seed to avoid "no such table" errors.
+                const int seedMaxAttempts = 3;
+                int seedAttempt = 0;
+                while (true)
+                {
+                    try
+                    {
+                        await SeedAllAsync();
+                        break;
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException sqlEx) when (sqlEx.Message?.Contains("no such table", StringComparison.OrdinalIgnoreCase) == true && seedAttempt < seedMaxAttempts)
+                    {
+                        seedAttempt++;
+                        _logger.LogWarning(sqlEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing table; retrying in 1s...");
+                        await Task.Delay(TimeSpan.FromSeconds(1));
+                    }
+                }
                 _logger.LogInformation("[DB] Database initialization completed successfully");
                 return; // Success - exit retry loop
             }
@@ -620,6 +638,19 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 return result != null;
             }
 
+            async Task<bool> TableExistsAsync(string table)
+            {
+                using DbCommand cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name = @tbl LIMIT 1";
+                DbParameter p = cmd.CreateParameter();
+                p.ParameterName = "@tbl";
+                p.Value = table;
+                _ = cmd.Parameters.Add(p);
+                object? r = await cmd.ExecuteScalarAsync();
+                return r != null;
+            }
+
             async Task EnsureColumnAsync(string table, string column)
             {
                 if (!await ColumnExistsAsync(table, column))
@@ -672,27 +703,41 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             }
 
             // Manufacturers
-            await EnsureColumnAsync("Manufacturers", "NameLowered");
-            await BackfillAsync("Manufacturers");
-            if (await HasDuplicatesAsync("Manufacturers"))
+            if (await TableExistsAsync("Manufacturers"))
             {
-                _logger.LogWarning("[DB] Duplicate manufacturer names (case-insensitive) detected; skipping unique index creation on Manufacturers.NameLowered. Resolve duplicates and restart to enforce uniqueness.");
+                await EnsureColumnAsync("Manufacturers", "NameLowered");
+                await BackfillAsync("Manufacturers");
+                if (await HasDuplicatesAsync("Manufacturers"))
+                {
+                    _logger.LogWarning("[DB] Duplicate manufacturer names (case-insensitive) detected; skipping unique index creation on Manufacturers.NameLowered. Resolve duplicates and restart to enforce uniqueness.");
+                }
+                else
+                {
+                    await EnsureIndexAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Manufacturers_NameLowered ON Manufacturers (NameLowered)", "IX_Manufacturers_NameLowered");
+                }
             }
             else
             {
-                await EnsureIndexAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Manufacturers_NameLowered ON Manufacturers (NameLowered)", "IX_Manufacturers_NameLowered");
+                _logger.LogInformation("[DB] Skipping Manufacturers shadow column/index creation because Manufacturers table does not exist yet.");
             }
 
             // PrinterModels
-            await EnsureColumnAsync("PrinterModels", "NameLowered");
-            await BackfillAsync("PrinterModels");
-            if (await HasDuplicatesAsync("PrinterModels"))
+            if (await TableExistsAsync("PrinterModels"))
             {
-                _logger.LogWarning("[DB] Duplicate printer model names (case-insensitive within manufacturer) detected; skipping unique composite index creation. Resolve duplicates and restart to enforce uniqueness.");
+                await EnsureColumnAsync("PrinterModels", "NameLowered");
+                await BackfillAsync("PrinterModels");
+                if (await HasDuplicatesAsync("PrinterModels"))
+                {
+                    _logger.LogWarning("[DB] Duplicate printer model names (case-insensitive within manufacturer) detected; skipping unique composite index creation. Resolve duplicates and restart to enforce uniqueness.");
+                }
+                else
+                {
+                    await EnsureIndexAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PrinterModels_ManufacturerId_NameLowered ON PrinterModels (ManufacturerId, NameLowered)", "IX_PrinterModels_ManufacturerId_NameLowered");
+                }
             }
             else
             {
-                await EnsureIndexAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PrinterModels_ManufacturerId_NameLowered ON PrinterModels (ManufacturerId, NameLowered)", "IX_PrinterModels_ManufacturerId_NameLowered");
+                _logger.LogInformation("[DB] Skipping PrinterModels shadow column/index creation because PrinterModels table does not exist yet.");
             }
 
             await tx.CommitAsync();

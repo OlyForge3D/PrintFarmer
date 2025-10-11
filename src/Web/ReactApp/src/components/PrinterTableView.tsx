@@ -142,6 +142,7 @@ export function PrinterTableView({
           
           <div className="flex items-center space-x-2">
             <button
+              type="button"
               onClick={handleBulkAction}
               disabled={bulkAction === 'none'}
               className="px-3 py-1 bg-pf-success text-white text-sm rounded hover:bg-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed flex items-center transition-colors"
@@ -151,6 +152,7 @@ export function PrinterTableView({
             </button>
             
             <button
+              type="button"
               onClick={() => setSelectedPrinters(new Set())}
               className="px-3 py-1 bg-pf-text-tertiary text-white text-sm rounded hover:bg-pf-text-secondary flex items-center transition-colors"
             >
@@ -168,6 +170,7 @@ export function PrinterTableView({
             <tr>
               <th className="w-12 px-4 py-3">
                 <button
+                  type="button"
                   onClick={toggleSelectAll}
                   className="text-pf-text-primary hover:text-pf-accent transition-colors"
                 >
@@ -237,6 +240,7 @@ export function PrinterTableView({
                   {/* Selection Checkbox */}
                   <td className="px-4 py-4">
                     <button
+                      type="button"
                       onClick={() => toggleSelectPrinter(printer.id)}
                       className="text-pf-text-primary hover:text-pf-accent transition-colors"
                     >
@@ -318,6 +322,7 @@ export function PrinterTableView({
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
                       <button
+                        type="button"
                         onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
                         className={`p-2 transition-colors rounded-md ${printer.inMaintenance ? 'text-pf-warning hover:text-pf-success hover:bg-pf-bg-2' : 'text-pf-text-tertiary hover:text-pf-warning hover:bg-pf-bg-2'}`}
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
@@ -331,6 +336,7 @@ export function PrinterTableView({
                       
                       {hasPermission('printers', 'update') && (
                         <button
+                          type="button"
                           onClick={() => onEdit(printer)}
                           className="p-2 text-pf-text-tertiary hover:text-pf-accent transition-colors rounded-md hover:bg-pf-bg-2"
                           title="Edit printer"
@@ -341,6 +347,7 @@ export function PrinterTableView({
                       
                       {hasPermission('printers', 'delete') && (
                         <button
+                          type="button"
                           onClick={() => onDelete([printer])}
                           className="p-2 text-pf-text-tertiary hover:text-pf-error-text transition-colors rounded-md hover:bg-pf-error-bg"
                           title="Delete printer"

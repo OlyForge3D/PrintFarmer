@@ -46,6 +46,29 @@ using Swashbuckle.AspNetCore.Swagger;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+// When running tests that use the shared in-memory SQLite fixture we may need
+// to register test-only services (pre-seed, fallback DbContextFactory, etc.)
+// before host build-time DI validation runs. Disable ValidateOnBuild in that
+// specific test scenario so the test factory can configure the required
+// services and pre-seed the database. This only applies when the
+// TEST_USE_SHARED_SQLITE environment variable is set and does not change
+// normal production behavior.
+try
+{
+    if (string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase))
+    {
+        builder.Host.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateOnBuild = false;
+            options.ValidateScopes = false;
+        });
+    }
+}
+catch
+{
+    // Best-effort; do not fail startup if environment or hosting APIs unavailable
+}
+
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices();
 
@@ -53,6 +76,9 @@ builder.Services.AddPrintFarmerServices();
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 
 // Register settings service
+// Bind system-level settings from IConfiguration so they are available before any DB access during startup.
+// This ensures POCOs like DatabaseSettings are configured from env/config without needing AppDbContext.
+builder.Services.Configure<Farm.Infrastructure.Settings.DatabaseSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.DatabaseSettings.SectionName));
 builder.Services.AddPrintFarmerSettings();
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
@@ -374,22 +400,9 @@ catch
     // If capture fails, leave captured variables null and fall back to app-level resolution later.
 }
 
-// Initialize settings from environment variables on first run
-try
-{
-    await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
-    ISettingsInitializationService settingsInit = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Settings.ISettingsInitializationService>();
-
-    // Initialize key settings from environment variables if not already in database
-    settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
-    settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
-
-    app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "[Startup] Settings initialization from environment variables failed (non-fatal)");
-}
+// NOTE: Settings initialization from environment variables is performed
+// during database initialization in ProgramHelpers.InitializeDatabaseAsync
+// to ensure the database schema exists before any SettingsService queries run.
 
 // Early liveness endpoint (process up) + readiness separate
 app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));

@@ -190,6 +190,7 @@ export const HarvestPage: React.FC = () => {
           <div className="flex flex-wrap gap-2 items-center mb-6">
             {activeOperations.length > 0 && (
               <button
+                type="button"
                 onClick={async () => {
                   let successCount = 0;
                   let errorCount = 0;

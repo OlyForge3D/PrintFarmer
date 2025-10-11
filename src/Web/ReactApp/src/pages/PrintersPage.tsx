@@ -153,6 +153,7 @@ export function PrintersPage() {
             <h2 className="text-2xl font-bold text-pf-text-primary mb-4">Error Loading Printers</h2>
             <p className="text-pf-text-secondary mb-4">{error.message}</p>
             <button
+              type="button"
               onClick={() => refetchPrinters()}
               className="px-4 py-2 bg-pf-primary-500 text-white rounded-lg hover:bg-pf-primary-600 transition-colors"
             >
@@ -203,6 +204,7 @@ export function PrintersPage() {
           {/* View Mode Toggle */}
           <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
             <button
+              type="button"
               onClick={() => setViewMode('cards')}
               className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 viewMode === 'cards'
@@ -215,6 +217,7 @@ export function PrintersPage() {
               <span className="hidden sm:inline">Cards</span>
             </button>
             <button
+              type="button"
               onClick={() => setViewMode('table')}
               className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 viewMode === 'table'
@@ -230,6 +233,7 @@ export function PrintersPage() {
           {hasPermission('printers', 'create') && (
             <>
               <button
+                type="button"
                 onClick={() => {
                   setShowDiscovery(true);
                 }}
@@ -258,6 +262,7 @@ export function PrintersPage() {
                   <>
                     <AddPrinterButton onSuccess={refetchPrinters} />
                     <button
+                      type="button"
                       onClick={() => setShowDiscovery(true)}
                       className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
                     >

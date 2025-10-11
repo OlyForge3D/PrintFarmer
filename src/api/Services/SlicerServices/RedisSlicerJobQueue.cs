@@ -9,10 +9,18 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// <summary>
 /// Redis-based implementation of the slicer job queue
 /// </summary>
-public class RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingService logger) : ISlicerJobQueue
+public class RedisSlicerJobQueue : ISlicerJobQueue
 {
-    private readonly IDatabase _database = redis.GetDatabase();
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    // Validate constructor arguments explicitly to provide clear exceptions in unit tests
+    private readonly IDatabase _database;
+    private readonly IUnifiedLoggingService _logger;
+
+    public RedisSlicerJobQueue(IConnectionMultiplexer redis, IUnifiedLoggingService logger)
+    {
+        ArgumentNullException.ThrowIfNull(redis);
+        _database = redis.GetDatabase();
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     // Redis keys
     // Keys retained for future expansion (currently used in stats operations)

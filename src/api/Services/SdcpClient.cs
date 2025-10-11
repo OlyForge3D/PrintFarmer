@@ -111,10 +111,34 @@ public class SdcpAckResult
 }
 
 
-public sealed class SdcpClient(IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger) : PrinterClientBase(), ISdcpClient
+public sealed class SdcpClient : PrinterClientBase, ISdcpClient
 {
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IUnifiedLoggingService _logger;
+
+    // Adapter to allow construction with a single HttpClient instance when the
+    // typed HttpClient activator attempts to construct SdcpClient(HttpClient, ...)
+    private sealed class SingleClientFactory : IHttpClientFactory
+    {
+        private readonly HttpClient _client;
+        public SingleClientFactory(HttpClient client) => _client = client ?? throw new ArgumentNullException(nameof(client));
+        public HttpClient CreateClient(string name) => _client;
+    }
+
+    // Primary constructor used by DI when an IHttpClientFactory is available
+    public SdcpClient(IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger)
+    {
+        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // Constructor used by AddHttpClient's typed client factory which provides HttpClient
+    public SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        _httpClientFactory = new SingleClientFactory(httpClient);
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP

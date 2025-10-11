@@ -5,7 +5,7 @@ using Moq;
 namespace Farm.Web.Api.Tests;
 
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
+[Collection("DbHeavySerialWithSharedFixture")]
 [TestTiming]
 public class PrintersIntegrationTests : CustomDbHeavyTestBase
 {

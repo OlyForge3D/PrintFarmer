@@ -262,28 +262,35 @@ namespace Farm.Web.Api
             {
                 await using AsyncServiceScope initScope = app.Services.CreateAsyncScope();
                 IServiceProvider sp = initScope.ServiceProvider;
-                ISettingsInitializationService settingsInit = sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsInitializationService>();
-
-                // Initialize key settings from environment variables if not already in database
-                settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
-                settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
-
-                app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
 
                 // Resolve required services for DB initialization and call into the existing initializer
                 IUnifiedLoggingService logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
                 AppDbContext db = sp.GetRequiredService<AppDbContext>();
-                ISettingsService dbSettingsSvc = sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>();
                 IDatabaseInitializer dbInitializer = sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer>();
                 IStartupStatus startupStatusResolved = sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
 
-                await app.InitializeDatabaseAsync(logger, db, dbSettingsSvc, dbInitializer, startupStatusResolved);
+                // This call ensures the database schema exists and runs seeding. Do this before any
+                // SettingsService or SettingsInitializationService read/write operations that depend on DB tables.
+                await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
+
+                // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
+                try
+                {
+                    ISettingsInitializationService settingsInit = sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsInitializationService>();
+                    settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
+                    settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+                    app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
+                }
+                catch (Exception innerEx)
+                {
+                    app.Logger.LogWarning(innerEx, "[Startup] Settings initialization from environment variables failed (non-fatal)");
+                }
             }
             catch (Exception ex)
             {
                 try
                 {
-                    app.Logger.LogWarning(ex, "[Startup] Settings initialization from environment variables failed (non-fatal)");
+                    app.Logger.LogWarning(ex, "[Startup] Settings/database initialization failed (non-fatal)");
                 }
                 catch { }
             }

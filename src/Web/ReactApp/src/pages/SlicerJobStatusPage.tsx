@@ -59,6 +59,7 @@ export const SlicerJobStatusPage: React.FC = () => {
                         className="border border-pf-border rounded px-2 py-1 flex-1 bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent" 
                     />
                     <button 
+                        type="button"
                         onClick={fetchStatus} 
                         disabled={loading || !jobId} 
                         className="px-3 py-1 bg-pf-accent text-white rounded hover:bg-pf-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
