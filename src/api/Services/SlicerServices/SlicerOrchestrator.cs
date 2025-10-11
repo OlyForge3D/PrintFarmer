@@ -391,6 +391,19 @@ public class SlicerOrchestrator(
             throw new ArgumentException($"Slicer engine {request.SlicerEngine} is not available", nameof(request));
         }
 
+        // Treat obviously-placeholder or invalid model URLs as bad input (argument error) rather than missing files.
+        // Tests may pass placeholders like "about:blank" to indicate an empty/invalid model; handle that explicitly.
+        var modelUrl = request.ModelFileUrl;
+        if (modelUrl?.IsAbsoluteUri == true)
+        {
+            string scheme = modelUrl.Scheme ?? string.Empty;
+            if (string.Equals(scheme, "about", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(scheme, "data", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException($"ModelFileUrl is not a valid model reference: {modelUrl}", nameof(request));
+            }
+        }
+
         // Validate file exists and is supported
         bool fileExists = await _fileStorage.FileExistsAsync(request.ModelFileUrl.ToString(), cancellationToken);
         if (!fileExists)
