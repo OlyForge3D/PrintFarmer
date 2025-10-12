@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, within } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
-import { BrowserRouter } from 'react-router-dom';
+import { TestRouter } from '@/test/utils/TestRouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 import type { Printer } from '@/types/api';
@@ -58,9 +58,7 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        {children}
-      </BrowserRouter>
+      <TestRouter>{children}</TestRouter>
     </QueryClientProvider>
   );
 }

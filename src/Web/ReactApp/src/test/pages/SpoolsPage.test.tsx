@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { screen, waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
 import { SpoolsPage } from '@/pages/SpoolsPage';
-import { BrowserRouter } from 'react-router-dom';
+import { TestRouter } from '@/test/utils/TestRouter';
 
 // Simple fetch mock helper
 interface MockResp {
@@ -27,7 +27,7 @@ function mockFetchSequence(responses: MockResp[]) {
 }
 
 function wrapper(children: React.ReactNode) {
-  return <BrowserRouter>{children}</BrowserRouter>;
+  return <TestRouter>{children}</TestRouter>;
 }
 
 describe('SpoolsPage', () => {

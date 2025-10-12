@@ -43,7 +43,7 @@ public class ExportPrintersIntegrationTests : CustomDbHeavyTestBase
         // Call the export endpoint by IDs
         var resp = await client.PostAsJsonAsync("/api/printers/export", new Guid[] { printerId });
         resp.EnsureSuccessStatusCode();
-    var arr = await resp.Content.ReadFromJsonAsync<PrinterWithCapabilitiesDto[]>() ?? Array.Empty<PrinterWithCapabilitiesDto>();
+    var arr = await resp.Content.ReadFromJsonAsync<PrinterWithCapabilitiesDto[]?>() ?? Array.Empty<PrinterWithCapabilitiesDto>();
     arr.Length.Should().BeGreaterThan(0);
     var item = arr.FirstOrDefault(a => a.PrinterId == printerId);
     item.Should().NotBeNull();
@@ -99,7 +99,7 @@ public class ExportPrintersIntegrationTests : CustomDbHeavyTestBase
         var register = new RegisterRequest("regularuser", "regular@example.com", "TestPassword123!", "Reg", "User");
         var regResp = await client.PostAsJsonAsync("/api/auth/register", register);
         regResp.EnsureSuccessStatusCode();
-    var auth = await regResp.Content.ReadFromJsonAsync<AuthenticationResult>() ?? new AuthenticationResult(false, null, null, null, "NoAuth");
+    var auth = await regResp.Content.ReadFromJsonAsync<AuthenticationResult?>() ?? new AuthenticationResult(false, null, null, null, "NoAuth");
     auth.Should().NotBeNull();
 
     // Use JWT token (non-admin) for request

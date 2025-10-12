@@ -22,6 +22,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
         public DateTimeOffset UtcNow => _tp.GetUtcNow();
     }
 #pragma warning restore CS0618
+        #pragma warning disable CS0618 // using adapter for ISystemClock for current ASP.NET ref
         public TestAuthHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
             ILoggerFactory logger,
@@ -29,6 +30,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
             : base(options, logger, encoder, new TimeProviderSystemClock(options.CurrentValue.TimeProvider ?? TimeProvider.System))
         {
         }
+        #pragma warning restore CS0618
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
