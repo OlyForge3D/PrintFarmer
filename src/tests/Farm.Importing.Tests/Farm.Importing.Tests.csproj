@@ -20,6 +20,6 @@
   <ItemGroup>
     <ProjectReference Include="../../import/Farm.Importing.csproj" />
     <ProjectReference Include="../../shared/Farm.Web.Shared.csproj" />
-    <ProjectReference Include="../../Infrastructure/Farm.Infrastructure.csproj" />
+  <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

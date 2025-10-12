@@ -33,7 +33,7 @@ WORKDIR /src
 # Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
-COPY src/Infrastructure/*.csproj ./infrastructure/
+COPY src/infra/*.csproj ./Infrastructure/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
 
@@ -41,16 +41,18 @@ RUN dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj
 
 # Copy sources
 COPY src/shared/ ./shared/
-COPY src/Infrastructure/ ./infrastructure/
+COPY src/infra/ ./Infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/orcaslicer-worker/ ./orcaslicer-worker/
 
-RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish --no-restore --verbosity minimal && \
+RUN set -e; \
+    echo "[build] Starting dotnet publish"; \
+    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish --verbosity minimal > /tmp/publish.log 2>&1 || (echo "[build] dotnet publish FAILED - dumping /tmp/publish.log" && cat /tmp/publish.log && exit 1); \
     # Verify critical runtime files exist and are non-empty
     test -s /app/publish/Farm.OrcaSlicer.Worker.dll && \
     test -s /app/publish/Farm.OrcaSlicer.Worker.runtimeconfig.json && \
     echo "[build] Published files verified successfully" || \
-    (echo "[build] ERROR: Critical publish files missing or empty" && exit 1)
+    (echo "[build] ERROR: Critical publish files missing or empty" && ls -la /app/publish || true && cat /tmp/publish.log || true && exit 1)
 
 ########################################
 # Runtime Stage
