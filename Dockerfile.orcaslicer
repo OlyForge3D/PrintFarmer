@@ -33,7 +33,7 @@ WORKDIR /src
 # Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
-COPY src/infra/*.csproj ./Infrastructure/
+COPY src/infra/*.csproj ./infra/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
 
@@ -41,7 +41,7 @@ RUN dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj
 
 # Copy sources
 COPY src/shared/ ./shared/
-COPY src/infra/ ./Infrastructure/
+COPY src/infra/ ./infra/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/orcaslicer-worker/ ./orcaslicer-worker/
 

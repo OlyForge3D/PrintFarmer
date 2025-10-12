@@ -36,7 +36,7 @@ Run a NuGet package restore to generate this file.
 # Added Infrastructure project to COPY step
 COPY src/shared/*.csproj ./shared/
 COPY src/api/*.csproj ./api/
-COPY src/Infrastructure/*.csproj ./Infrastructure/  # ← Added this line
+COPY src/infra/*.csproj ./infra/  # ← Added this line (updated after repo rename to 'infra')
 ```
 
 ### 3. Fixed ARM64 protoc Issue with Platform Flag

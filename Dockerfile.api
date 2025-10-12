@@ -15,7 +15,7 @@ WORKDIR /src
 # Copy project files
 COPY src/shared/*.csproj ./shared/
 COPY src/api/*.csproj ./api/
-COPY src/Infrastructure/*.csproj ./Infrastructure/
+COPY src/infra/*.csproj ./infra/
 # Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto
 COPY Directory.Build.props ./
