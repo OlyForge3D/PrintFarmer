@@ -272,7 +272,6 @@ export class ApiClient {
     let loaded = 0;
     try {
       // Read the stream
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -283,7 +282,7 @@ export class ApiClient {
         }
       }
     } finally {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch (err) { console.debug('reader cancel failed', err); }
     }
 
     // Combine chunks into a single Uint8Array (backed by an ArrayBuffer we control)
