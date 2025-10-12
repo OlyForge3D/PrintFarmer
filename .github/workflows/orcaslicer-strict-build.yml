@@ -42,7 +42,7 @@ jobs:
       - name: Build slicer-base (amd64)
         run: |
           echo "Building slicer-base (platform linux/amd64) for downstream stages"
-          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t slicer-base:latest .
+          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .
 
       - name: Build OrcaSlicer Worker (strict real binary)
         id: build

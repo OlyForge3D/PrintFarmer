@@ -41,7 +41,7 @@ jobs:
 
       - name: Build slicer-base (amd64)
         run: |
-          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t slicer-base:latest .
+          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .
 
       - name: Build PrusaSlicer Worker (strict real binary)
         id: build
