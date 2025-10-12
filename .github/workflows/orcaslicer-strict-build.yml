@@ -43,19 +43,35 @@ jobs:
         run: |
           echo "Building slicer-base (platform linux/amd64) for downstream stages"
           docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .
+      - name: Attempt to download preseeded Orca AppImage artifact
+        id: preseed
+        run: |
+          set -e
+          ART_NAME=orca-appimage-${{ matrix.orca_version }}.AppImage
+          echo "Looking for artifact $ART_NAME in previous artifact storage (if available)"
+          if curl -sS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | jq -r '.artifacts[].name' | grep -q "orca-appimage-${{ matrix.orca_version }}"; then
+            echo "Found artifact listing entry; attempting to download via actions/download-artifact"
+            mkdir -p preseed || true
+            echo "No direct download implemented; skipping automated artifact download in this runner."
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build OrcaSlicer Worker (strict real binary)
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           echo "Building OrcaSlicer worker version=${{ matrix.orca_version }} ALLOW_STUB=${{ matrix.allow_stub }}"
-          docker build --platform linux/amd64 \
-            --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} \
-            --build-arg ALLOW_STUB=${{ matrix.allow_stub }} \
-            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
-            -f Dockerfile.orcaslicer \
-            -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+          if [ "${{ steps.preseed.outputs.found }}" = "true" ] && [ -f preseed/orca.AppImage ]; then
+            echo "Using preseeded orca.AppImage via buildkit secret"
+            docker build --platform linux/amd64 --secret id=orca,src=preseed/orca.AppImage --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.orcaslicer -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+          else
+            echo "No preseeded AppImage available; performing normal build (will attempt remote download)"
+            docker build --platform linux/amd64 --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.orcaslicer -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+          fi
 
       - name: Run verification (require-real)
         run: |

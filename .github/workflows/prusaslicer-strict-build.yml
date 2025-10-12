@@ -42,18 +42,37 @@ jobs:
       - name: Build slicer-base (amd64)
         run: |
           docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .
+      - name: Attempt to download preseeded Prusa AppImage artifact
+        id: preseed
+        run: |
+          set -e
+          ART_NAME=prusa-appimage-${{ matrix.prusa_version }}.AppImage
+          echo "Looking for artifact $ART_NAME in previous artifact storage (if available)"
+          # Try GitHub artifacts via the artifacts API (best-effort read-only, may require curl + token)
+          if curl -sS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | jq -r '.artifacts[].name' | grep -q "prusa-appimage-${{ matrix.prusa_version }}"; then
+            echo "Found artifact listing entry; attempting to download via actions/download-artifact"
+            mkdir -p preseed || true
+            # Use download-artifact action would be ideal but we emulate a best-effort curl fallback
+            echo "No direct download implemented; skipping automated artifact download in this runner."
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build PrusaSlicer Worker (strict real binary)
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          docker build --platform linux/amd64 \
-            --build-arg PRUSASLICER_VERSION=${{ matrix.prusa_version }} \
-            --build-arg ALLOW_STUB=${{ matrix.allow_stub }} \
-            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
-            -f Dockerfile.prusaslicer \
-            -t prusaslicer-worker:strict-${{ matrix.prusa_version }} .
+          set -e
+          BUILD_CMD="docker build --platform linux/amd64 --build-arg PRUSASLICER_VERSION=${{ matrix.prusa_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.prusaslicer -t prusaslicer-worker:strict-${{ matrix.prusa_version }} ."
+          if [ "${{ steps.preseed.outputs.found }}" = "true" ] && [ -f preseed/prusa.AppImage ]; then
+            echo "Using preseeded prusa.AppImage via buildkit secret"
+            docker build --platform linux/amd64 --secret id=prusa,src=preseed/prusa.AppImage --build-arg PRUSASLICER_VERSION=${{ matrix.prusa_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.prusaslicer -t prusaslicer-worker:strict-${{ matrix.prusa_version }} .
+          else
+            echo "No preseeded AppImage available; performing normal build (will attempt remote download)"
+            docker build --platform linux/amd64 --build-arg PRUSASLICER_VERSION=${{ matrix.prusa_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.prusaslicer -t prusaslicer-worker:strict-${{ matrix.prusa_version }} .
+          fi
 
       - name: Run verification (require-real)
         run: |

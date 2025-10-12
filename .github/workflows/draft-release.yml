@@ -1,0 +1,57 @@
+name: Draft Release Helper
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Draft version (vX.Y.Z)'
+        required: true
+      prerelease:
+        description: 'Create as prerelease? (true/false)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  create-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version
+        run: |
+          if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be vX.Y.Z"; exit 1; fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create tag and push (draft)
+        run: |
+          set -e
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@github.com'
+          TAG=${GITHUB_EVENT_INPUTS_VERSION:-${{ github.event.inputs.version }}}
+          # Create an annotated tag for visibility
+          git tag -a "$TAG" -m "Draft release $TAG"
+          # Push the tag to origin
+          git push origin "$TAG"
+
+      - name: Create Draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: ${{ github.event.inputs.version }}
+          body: |
+            Draft release created by workflow for review.
+            Please review the tag and release notes before promoting.
+          draft: true
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+
+      - name: Output
+        run: |
+          echo "Draft release ${{ github.event.inputs.version }} created. Check Releases tab on GitHub for the draft." 

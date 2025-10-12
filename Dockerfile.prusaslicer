@@ -20,14 +20,14 @@ WORKDIR /src
 # Copy shared, infrastructure, and worker project files first (restore layer caching)
 COPY Directory.Build.props ./
 COPY src/shared/*.csproj ./shared/
-COPY src/Infrastructure/*.csproj ./infrastructure/
+COPY src/Infrastructure/*.csproj ./Infrastructure/
 COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/prusaslicer-worker/*.csproj ./prusaslicer-worker/
 
 RUN dotnet restore ./prusaslicer-worker/Farm.PrusaSlicer.Worker.csproj
 
 COPY src/shared/ ./shared/
-COPY src/Infrastructure/ ./infrastructure/
+COPY src/Infrastructure/ ./Infrastructure/
 COPY src/worker-shared/ ./worker-shared/
 COPY src/prusaslicer-worker/ ./prusaslicer-worker/
 
@@ -52,22 +52,39 @@ ARG PRUSASLICER_VERSION
 ARG PRUSASLICER_URL
 ARG ALLOW_STUB
 ARG GITHUB_TOKEN
+ARG PRESEED_SECRET_ID=prusa
+ARG PRESEED_TARBALL_ID=prusa-tar
+# If a buildkit secret with id matching PRESEED_SECRET_ID is provided, it will be mounted at /run/secrets/${PRESEED_SECRET_ID}
 RUN set -e; echo "[prusaassets] Resolving PrusaSlicer version=${PRUSASLICER_VERSION}"; \
+    # If a preseeded AppImage was provided via buildkit secret, copy it and skip remote download
+    if [ -f "/run/secrets/${PRESEED_SECRET_ID}" ]; then echo "[prusaassets] Using preseeded AppImage from /run/secrets/${PRESEED_SECRET_ID}"; cp "/run/secrets/${PRESEED_SECRET_ID}" prusaslicer.AppImage || true; fi; \
+    # If a preseeded Flatpak-extracted tarball (from CI) was provided via buildkit secret, extract it and skip network installs
+    if [ -f "/run/secrets/${PRESEED_TARBALL_ID}" ]; then echo "[prusaassets] Found preseeded Flatpak tarball at /run/secrets/${PRESEED_TARBALL_ID}; extracting to /prusaslicer-dist"; mkdir -p /prusaslicer-dist; tar xzf "/run/secrets/${PRESEED_TARBALL_ID}" -C /prusaslicer-dist || (echo "[prusaassets] Failed to extract preseed tarball" && exit 1); fi; \
+    # Also support a build-context tarball placed at /prusa.tar.gz (convenient for local testing)
+    if [ -f "/prusa.tar.gz" ]; then echo "[prusaassets] Found build-context prusa.tar.gz at /prusa.tar.gz; extracting to /prusaslicer-dist"; mkdir -p /prusaslicer-dist; tar xzf /prusa.tar.gz -C /prusaslicer-dist || (echo "[prusaassets] Failed to extract /prusa.tar.gz" && exit 1); \
+        # Normalize common tar layouts: some preseeds include a top-level 'prusa-dist' directory
+        if [ -d /prusaslicer-dist/prusa-dist ]; then echo "[prusaassets] Normalizing tar layout: moving /prusaslicer-dist/prusa-dist/* -> /prusaslicer-dist/"; mv /prusaslicer-dist/prusa-dist/* /prusaslicer-dist/ || true; rmdir /prusaslicer-dist/prusa-dist || true; fi; \
+    fi; \
     # Install tooling (prefer apt since base is Debian). apk branch retained for future alpine variants.
     apk add --no-cache curl ca-certificates jq 2>/dev/null || ( \
     apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates jq fuse libfuse2 squashfs-tools libarchive-tools p7zip-full file \
     && rm -rf /var/lib/apt/lists/* ); \
-    API_URL="https://api.github.com/repos/prusa3d/PrusaSlicer/releases"; \
-    AUTH=""; [ -n "${GITHUB_TOKEN}" ] && AUTH="-H Authorization: Bearer ${GITHUB_TOKEN}"; \
-    echo "[prusaassets] Querying GitHub Releases API"; \
-    dynamic_url=$(curl -H "Accept: application/vnd.github+json" -H "User-Agent: PrusaSlicerWorker/1.0" $AUTH -fsSL "$API_URL" | jq -r --arg tag "version_${PRUSASLICER_VERSION}" --arg raw "${PRUSASLICER_VERSION}" 'map(select(.tag_name==$tag)) | .[0].assets[] | select(.name | test("^PrusaSlicer-" + $raw + "\\+linux-(x64|x86_64)-GTK3(-[0-9]+)?\\.AppImage$"; "i")) | .browser_download_url' | head -n1 || true); \
-    if [ -z "$dynamic_url" ]; then \
-    dynamic_url=$(curl -H "Accept: application/vnd.github+json" -H "User-Agent: PrusaSlicerWorker/1.0" $AUTH -fsSL "$API_URL" | jq -r --arg tag "version_${PRUSASLICER_VERSION}" --arg raw "${PRUSASLICER_VERSION}" 'map(select(.tag_name==$tag)) | .[0].assets[] | select(.name | (contains($raw) and contains("AppImage") and (contains("x64") or contains("x86_64")))) | .browser_download_url' | head -n1 || true); \
-    if [ -n "$dynamic_url" ]; then echo "[prusaassets] Fallback asset discovered: $dynamic_url"; fi; \
-    else \
-    echo "[prusaassets] Discovered asset: $dynamic_url"; \
-    fi; \
+        # Detect releases that no longer publish AppImage artifacts (PrusaSlicer >= 2.9.0)
+        # Short-circuit: for any PrusaSlicer version greater than 2.8.0
+        # do NOT attempt GitHub/AppImage downloads. These releases are
+        # distributed via Flatpak (Flathub). Skip querying GitHub and go
+        # directly to Flatpak (or zip fallback if Flatpak unavailable).
+        maj=$(echo "${PRUSASLICER_VERSION}" | cut -d. -f1 || echo 0); \
+        min=$(echo "${PRUSASLICER_VERSION}" | cut -d. -f2 || echo 0); \
+        if [ "${maj}" -gt 2 ] || { [ "${maj}" -eq 2 ] && [ "${min}" -ge 9 ]; }; then \
+            echo "[prusaassets] Detected PrusaSlicer version > 2.8.0; skipping GitHub/AppImage logic and using Flatpak/ZIP fallback."; \
+            # set a flag so subsequent AppImage-specific code is skipped
+            SKIP_APPIMAGE=true; \
+        else \
+            SKIP_APPIMAGE=false; \
+        fi; \
+    if [ "${SKIP_APPIMAGE}" = "false" ]; then \
     if [ -z "$dynamic_url" ] && [ "${DEBUG_PRUSA_ASSETS}" = "true" ]; then \
     echo "[prusaassets][debug] Listing asset names for tag version_${PRUSASLICER_VERSION}"; \
     curl -H "Accept: application/vnd.github+json" -H "User-Agent: PrusaSlicerWorker/1.0" $AUTH -fsSL "$API_URL" | jq -r --arg tag "version_${PRUSASLICER_VERSION}" 'map(select(.tag_name==$tag)) | .[0].assets[]?.name'; \
@@ -82,6 +99,7 @@ RUN set -e; echo "[prusaassets] Resolving PrusaSlicer version=${PRUSASLICER_VERS
     try_download "${PRUSASLICER_URL}" \
     || try_download "https://github.com/prusa3d/PrusaSlicer/releases/download/version_${PRUSASLICER_VERSION}/PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-GTK3.AppImage" \
     || echo "[prusaassets] WARNING: Download attempts failed."; \
+    fi; \
     mkdir -p /prusaslicer-dist/opt/prusaslicer; \
     if [ -f prusaslicer.AppImage ]; then chmod +x prusaslicer.AppImage; arch=$(uname -m); \
     echo "[prusaassets] File magic: $( (command -v file >/dev/null 2>&1 && file prusaslicer.AppImage) || echo 'file N/A')"; \
@@ -137,10 +155,64 @@ RUN set -e; echo "[prusaassets] Resolving PrusaSlicer version=${PRUSASLICER_VERS
     fi; \
     fi; \
     fi; \
-    else echo "[prusaassets] Skipping extraction (arch mismatch)"; fi; \
+        else echo "[prusaassets] Skipping extraction (arch mismatch)"; fi; \
     rm -f prusaslicer.AppImage; \
     fi; \
-    if [ ! -f /prusaslicer-dist/prusa-slicer ]; then \
+        # If AppImage extraction failed, enforce Flatpak-only installation for versions >2.8.0
+        if [ ! -d /prusaslicer-dist/opt/prusaslicer ]; then \
+            echo "[prusaassets] Flatpak-only release detected for version ${PRUSASLICER_VERSION}; attempting Flatpak install (no AppImage/ZIP fallback)"; \
+            # Install flatpak tooling (keep output visible for debugging)
+            apt-get update && apt-get install -y --no-install-recommends flatpak ostree dbus-user-session ca-certificates gnupg2 || true; \
+            flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true; \
+            # Try user install first then system install (verbose)
+            echo "[prusaassets] Trying 'flatpak --user install'"; \
+            if flatpak --user install -y flathub com.prusa3d.PrusaSlicer; then \
+                echo "[prusaassets] Flatpak --user install succeeded"; \
+            else \
+                echo "[prusaassets] flatpak --user install failed, trying system install"; \
+                if flatpak install --system -y flathub com.prusa3d.PrusaSlicer; then \
+                    echo "[prusaassets] Flatpak system install succeeded"; \
+                else \
+                    echo "[prusaassets] Flatpak install (user+system) failed"; \
+                fi; \
+            fi; \
+            # Locate installed files and copy into prusaslicer-dist
+            FOUND=false; \
+            if [ -d /root/.local/share/flatpak/app/com.prusa3d.PrusaSlicer ]; then \
+                PLAT_DIR=/root/.local/share/flatpak/app/com.prusa3d.PrusaSlicer; \
+                echo "[prusaassets] Found user flatpak install at $PLAT_DIR"; \
+                mkdir -p /prusaslicer-dist/opt/prusaslicer; \
+                cp -a "$PLAT_DIR"/current/exports/* /prusaslicer-dist/opt/prusaslicer/ 2>/dev/null || true; \
+                cp -a "$PLAT_DIR"/current/files/* /prusaslicer-dist/opt/prusaslicer/ 2>/dev/null || true; \
+                FOUND=true; \
+            fi; \
+            if [ -d /var/lib/flatpak/app/com.prusa3d.PrusaSlicer ]; then \
+                PLAT_DIR=$(find /var/lib/flatpak/app/com.prusa3d.PrusaSlicer -maxdepth 2 -type d | head -n1 || true); \
+                if [ -n "$PLAT_DIR" ]; then \
+                    echo "[prusaassets] Found system flatpak install at $PLAT_DIR"; \
+                    mkdir -p /prusaslicer-dist/opt/prusaslicer; \
+                    cp -a "$PLAT_DIR"/files/* /prusaslicer-dist/opt/prusaslicer/ 2>/dev/null || true; \
+                    FOUND=true; \
+                fi; \
+            fi; \
+            if [ -d /var/lib/flatpak/app ]; then \
+                cand=$(find /var/lib/flatpak/app -path '*/com.prusa3d.PrusaSlicer*' -prune -print -maxdepth 4 | head -n1 || true); \
+                if [ -n "$cand" ]; then \
+                    echo "[prusaassets] Found candidate flatpak path: $cand"; \
+                    mkdir -p /prusaslicer-dist/opt/prusaslicer; \
+                    cp -a "$cand"/files/* /prusaslicer-dist/opt/prusaslicer/ 2>/dev/null || true; \
+                    FOUND=true; \
+                fi; \
+            fi; \
+            if [ "$FOUND" = "true" ]; then \
+                cand=$(find /prusaslicer-dist/opt/prusaslicer -type f -executable -name 'prusa*' -o -name 'PrusaSlicer*' | head -n1 || true); \
+                if [ -n "$cand" ]; then cp "$cand" /prusaslicer-dist/prusa-slicer || true; fi; \
+            else \
+                echo "[prusaassets] ERROR: Flatpak install did not produce expected files; failing build as requested (no fallback)"; \
+                exit 1; \
+            fi; \
+        fi; \
+        if [ ! -f /prusaslicer-dist/prusa-slicer ]; then \
     if [ "${ALLOW_STUB}" = "true" ]; then \
     echo "[prusaassets] Creating stub binary"; \
     printf '#!/bin/sh\n>&2 echo "[WARN] PrusaSlicer binary not present (version %s)"\nexit 2\n' "${PRUSASLICER_VERSION}" > /prusaslicer-dist/prusa-slicer; \

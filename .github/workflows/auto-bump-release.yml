@@ -1,0 +1,46 @@
+name: Auto Bump Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Which component to bump: major, minor or patch'
+        required: true
+        default: 'patch'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git
+        run: |
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@github.com'
+
+      - name: Run bump script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          chmod +x ./scripts/bump-version.sh
+          ./scripts/bump-version.sh ${{ github.event.inputs.bump }}
+
+      - name: Create Draft Release (optional)
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: $(cat VERSION)
+          name: $(cat VERSION)
+          body: "Auto-generated draft release for $(cat VERSION)"
+          draft: true
+          prerelease: false
