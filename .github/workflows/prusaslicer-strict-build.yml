@@ -2,6 +2,7 @@ name: PrusaSlicer Strict Build
 
 on:
   push:
+    branches: [main]
     paths:
       - "Dockerfile.prusaslicer"
       - "Dockerfile.slicer-base"
@@ -25,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        prusa_version: ["2.8.0"]
+        prusa_version: ["2.9.3"]
         allow_stub: [false]
     steps:
       - name: Checkout

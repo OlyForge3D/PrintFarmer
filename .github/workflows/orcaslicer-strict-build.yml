@@ -2,6 +2,7 @@ name: OrcaSlicer Strict Build
 
 on:
   push:
+    branches: [main]
     paths:
       - "Dockerfile.orcaslicer"
       - "Dockerfile.slicer-base"
@@ -25,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        orca_version: ["1.8.1", "2.3.0"]
+        orca_version: ["2.3.1"]
         allow_stub: [false] # Can extend later with true for a soft-mode build
     steps:
       - name: Checkout
