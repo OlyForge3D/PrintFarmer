@@ -1,5 +1,6 @@
 ﻿using Farm.PrusaSlicer.Worker.Health;
 using Farm.PrusaSlicer.Worker.Services;
+using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -60,6 +61,8 @@ public static class Program
         _ = builder.Services.AddSingleton<IPrusaBinaryDetector, PrusaBinaryDetector>(); // engine specific
         _ = builder.Services.AddScoped<ISlicingPipelineService, PrusaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+        // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
+        _ = builder.Services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
         _ = builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Infrastructure.Telemetry.UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer)

@@ -34,15 +34,131 @@ export function PrintersAdminPage() {
   const [importing, setImporting] = React.useState<boolean>(false);
   const [importResults, setImportResults] = React.useState<import('@/types/api').BulkImportResultItem[] | null>(null);
   const [retryingIndex, setRetryingIndex] = React.useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [showExportOptions, setShowExportOptions] = React.useState(false);
+  const [exportProgress, setExportProgress] = React.useState<number | null>(null);
+  const [exporting, setExporting] = React.useState<boolean>(false);
 
   const handleExport = () => {
     if (!printers || !printers.length) {
       toast('No printers to export');
       return;
     }
+    // Show export option buttons (JSON/CSV)
+    setShowExportOptions(true);
+  };
+
+  const exportSelectedAsJson = async () => {
+    if (!printers || printers.length === 0) return toast('No printers to export');
+    const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
     const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.json`;
-    downloadJson(filename, printers);
-    toast.success('Printers exported');
+    try {
+      setExporting(true);
+      const exported = await apiClient.exportPrintersByIds(ids);
+      downloadJson(filename, exported);
+      toast.success('Printers exported (JSON)');
+    } catch (err) {
+      console.error('Export JSON failed', err);
+      toast.error('Export failed');
+    } finally {
+      setShowExportOptions(false);
+      setExporting(false);
+    }
+  };
+
+  const exportSelectedServerJson = async () => {
+    if (!printers || printers.length === 0) return toast('No printers to export');
+    const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
+    const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.json`;
+    try {
+      setExporting(true);
+      setExportProgress(0);
+      await apiClient.streamExportFile(ids, 'json', filename, (loaded, total) => {
+        if (total && total > 0) setExportProgress(Math.round((loaded / total) * 100));
+        else setExportProgress(null);
+      });
+      toast.success('Printers exported (server JSON)');
+    } catch (err) {
+      console.error('Server export failed', err);
+      toast.error('Server export failed');
+    } finally {
+      setShowExportOptions(false);
+      setExportProgress(null);
+      setExporting(false);
+    }
+  };
+
+  const exportSelectedServerCsv = async () => {
+    if (!printers || printers.length === 0) return toast('No printers to export');
+    const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
+    const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.csv`;
+    try {
+      setExporting(true);
+      setExportProgress(0);
+      await apiClient.streamExportFile(ids, 'csv', filename, (loaded, total) => {
+        if (total && total > 0) setExportProgress(Math.round((loaded / total) * 100));
+        else setExportProgress(null);
+      });
+      toast.success('Printers exported (server CSV)');
+    } catch (err) {
+      console.error('Server CSV export failed', err);
+      toast.error('Server CSV export failed');
+    } finally {
+      setShowExportOptions(false);
+      setExportProgress(null);
+      setExporting(false);
+    }
+  };
+
+  const toCsv = (rows: Record<string, unknown>[], headers: string[]) => {
+    const escape = (v: unknown) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      if (s.includes('"')) return `"${s.replace(/"/g, '""')}"`;
+      if (s.includes(',') || s.includes('\n') || s.includes('\r')) return `"${s}"`;
+      return s;
+    };
+    const sb: string[] = [];
+    sb.push(headers.join(','));
+    for (const r of rows) {
+      const line = headers.map(h => escape((r as Record<string, unknown>)[h] ?? '')).join(',');
+      sb.push(line);
+    }
+    return sb.join('\n');
+  };
+
+  const exportSelectedAsCsv = async () => {
+    if (!printers || printers.length === 0) return toast('No printers to export');
+    const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
+    try {
+      const exported = await apiClient.exportPrintersByIds(ids);
+      // Normalize and pick columns per requirement
+      type MinimalExport = { name?: string; manufacturerName?: string; modelName?: string; backend?: number | string; ipAddress?: string };
+      const rows = (exported as MinimalExport[]).map((p) => ({
+        Name: p.name ?? '',
+        ManufacturerName: p.manufacturerName ?? '',
+        ModelName: p.modelName ?? '',
+        Backend: p.backend !== undefined ? String(p.backend) : '',
+        IpAddress: p.ipAddress ?? ''
+      }));
+      const csv = toCsv(rows, ['Name', 'ManufacturerName', 'ModelName', 'Backend', 'IpAddress']);
+      const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.csv`;
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Printers exported (CSV)');
+    } catch (err) {
+      console.error('Export CSV failed', err);
+      toast.error('Export failed');
+    } finally {
+      setShowExportOptions(false);
+    }
   };
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -203,7 +319,14 @@ export function PrintersAdminPage() {
       <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <button type="button" aria-label="Export printers as JSON" onClick={handleExport} className="px-4 py-2 bg-pf-accent text-white rounded">Export printers</button>
+            <button type="button" aria-label="Export printers as JSON" onClick={handleExport} className="px-4 py-2 bg-pf-accent text-white rounded" disabled={exporting}>
+              {exporting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Exporting...
+                </span>
+              ) : 'Export printers'}
+            </button>
             <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="px-4 py-2 border rounded">Import printers</button>
             <input aria-label="Import printers JSON file" ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
@@ -217,17 +340,56 @@ export function PrintersAdminPage() {
             ) : (!printers || printers.length === 0) ? (
               <div className="text-sm text-pf-text-secondary">No printers found</div>
             ) : (
-              <ul className="mt-2 space-y-2 text-sm text-pf-text-secondary">
-                {printers.map(p => (
-                  <li key={p.id} className="flex justify-between items-center">
-                    <div>
-                      <div className="font-medium text-pf-text-primary">{p.name}</div>
-                      <div className="text-xs">{p.manufacturerName ?? ''} {p.modelName ?? ''}</div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <div className="text-sm">{printers.length} printers</div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} className="px-2 py-1 border rounded text-sm">Select all</button>
+                    <button type="button" onClick={() => { setSelectedIds([]); }} className="px-2 py-1 border rounded text-sm">Select none</button>
+                    <button type="button" onClick={handleExport} className="px-2 py-1 bg-pf-accent text-white rounded text-sm">Export</button>
+                  </div>
+                </div>
+                {showExportOptions && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button type="button" onClick={exportSelectedAsJson} className="px-3 py-1 border rounded" disabled={exporting}>Export JSON</button>
+                      <button type="button" onClick={exportSelectedServerJson} className="px-3 py-1 border rounded" disabled={exporting}>Export (server JSON)</button>
+                      <button type="button" onClick={exportSelectedServerCsv} className="px-3 py-1 border rounded" disabled={exporting}>Export (server CSV)</button>
+                      <button type="button" onClick={exportSelectedAsCsv} className="px-3 py-1 border rounded" disabled={exporting}>Export CSV</button>
+                      <button type="button" onClick={() => setShowExportOptions(false)} className="px-3 py-1 border rounded" disabled={exporting}>Cancel</button>
                     </div>
-                    <div className="text-xs text-pf-text-tertiary">{p.serverUrl ?? p.ipAddress ?? ''}</div>
-                  </li>
-                ))}
-              </ul>
+                    {exportProgress !== null && (
+                      <div className="w-full bg-pf-bg-1 rounded overflow-hidden h-3">
+                        {(() => {
+                          const pct = Math.max(0, Math.min(100, exportProgress ?? 0));
+                          const nearest = Math.round(pct / 5) * 5; // nearest 5%
+                          const cls = `bg-pf-accent h-3 pf-export-progress-bar pf-export-progress-var-${nearest}`;
+                          return <div className={cls} />;
+                        })()}
+                        <div className="text-xs text-pf-text-tertiary mt-1">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <ul className="mt-2 divide-y divide-pf-border">
+                  {printers.map(p => (
+                    <li key={p.id} className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-3">
+                        <input aria-label={`Select printer ${p.name}`} type="checkbox" checked={selectedIds.includes(p.id)} onChange={(e) => {
+                          if (e.target.checked) setSelectedIds(prev => Array.from(new Set([...prev, p.id])));
+                          else setSelectedIds(prev => prev.filter(id => id !== p.id));
+                        }} />
+                        <div>
+                          <div className="font-medium text-pf-text-primary">{p.name}</div>
+                          <div className="text-xs">{p.manufacturerName ?? ''} {p.modelName ?? ''}</div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-pf-text-tertiary">{p.ipAddress ?? p.serverUrl ?? ''} <span className="ml-3">{p.backend}</span></div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
 

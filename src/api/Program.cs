@@ -28,6 +28,7 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Json;
+using AutoMapper;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -71,6 +72,19 @@ catch
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices();
+
+// Register AutoMapper mapping profiles (POC)
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+
+// Register import parser & processor services (parser implementation moved to Farm.Importing)
+builder.Services.AddScoped<Farm.Importing.Services.Import.IImportParserService, Farm.Importing.Services.Import.ImportParserService>();
+
+// Adapters bridging API services to the importing project's adapter interfaces
+builder.Services.AddScoped<Farm.Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Farm.Web.Api.Services.Adapters.PrinterCapabilityDiscoveryAdapter>();
+builder.Services.AddScoped<Farm.Importing.Services.Adapters.IDefaultCatalogAdapter, Farm.Web.Api.Services.Adapters.DefaultCatalogAdapter>();
+
+// Register the importing project's processor implementation now that it uses adapter abstractions
+builder.Services.AddScoped<Farm.Importing.Services.Import.IImportProcessorService, Farm.Importing.Services.Import.ImportProcessorService>();
 
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
@@ -358,6 +372,13 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
     options.AddPolicy("RequireAdmin", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.RequireRole("farm_admin");
+    });
+    // Historical policy name used across controllers. Keep an alias so existing
+    // controllers using [Authorize(Policy = "farm_admin")] continue to work.
+    options.AddPolicy("farm_admin", policy =>
     {
         _ = policy.RequireAuthenticatedUser();
         _ = policy.RequireRole("farm_admin");

@@ -2,6 +2,7 @@
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Annotations;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -78,6 +79,7 @@ public class PrinterModel
     public bool SupportsAutoLeveling { get; set; }
     public int? MinHotendTemp { get; set; } = 0;
     public int? MaxHotendTemp { get; set; } = 300;
+    [ImportExport(ImportExportTargets.Import)]
     public int? MinBedTemp { get; set; } = 0;
     public int? MaxBedTemp { get; set; } = 120;
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
@@ -377,10 +379,14 @@ public class PrinterCapabilities
     public int NumberOfExtruders { get; set; } = 1;
     public int? MinHotendTemp { get; set; }
     public int? MaxHotendTemp { get; set; }
+    [ImportExport(ImportExportTargets.Import)]
     public int? MinBedTemp { get; set; }
     public int? MaxBedTemp { get; set; }
+    [ImportExport(ImportExportTargets.Import)]
     public string? CurrentMaterial { get; set; } // From Spoolman integration
+    [ImportExport(ImportExportTargets.Import)]
     public int? CurrentSpoolId { get; set; } // Spoolman spool ID
+    [ImportExport(ImportExportTargets.Import)]
     public bool IsAvailable { get; set; } = true; // Can accept new jobs
     public DateTime LastUpdated { get; set; }
     public bool SupportsAutoLeveling { get; set; }

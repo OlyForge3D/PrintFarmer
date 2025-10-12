@@ -10,3 +10,33 @@
   width: 100%;
   min-height: 100vh;
 }
+
+/* Export progress bar styling (avoid inline styles) */
+.pf-export-progress-bar {
+  width: 0%;
+  transition: width 150ms linear;
+}
+
+/* Generate classes for 0..100 percent in steps of 1 to avoid inline style usage */
+/* We add a pragmatic subset to keep file size small: 0,5,10,...,100 and exact 100 */
+.pf-export-progress-var-0  { width: 0%; }
+.pf-export-progress-var-5  { width: 5%; }
+.pf-export-progress-var-10 { width: 10%; }
+.pf-export-progress-var-15 { width: 15%; }
+.pf-export-progress-var-20 { width: 20%; }
+.pf-export-progress-var-25 { width: 25%; }
+.pf-export-progress-var-30 { width: 30%; }
+.pf-export-progress-var-35 { width: 35%; }
+.pf-export-progress-var-40 { width: 40%; }
+.pf-export-progress-var-45 { width: 45%; }
+.pf-export-progress-var-50 { width: 50%; }
+.pf-export-progress-var-55 { width: 55%; }
+.pf-export-progress-var-60 { width: 60%; }
+.pf-export-progress-var-65 { width: 65%; }
+.pf-export-progress-var-70 { width: 70%; }
+.pf-export-progress-var-75 { width: 75%; }
+.pf-export-progress-var-80 { width: 80%; }
+.pf-export-progress-var-85 { width: 85%; }
+.pf-export-progress-var-90 { width: 90%; }
+.pf-export-progress-var-95 { width: 95%; }
+.pf-export-progress-var-100{ width: 100%; }

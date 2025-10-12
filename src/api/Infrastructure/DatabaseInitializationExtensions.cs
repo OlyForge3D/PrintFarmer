@@ -87,7 +87,7 @@ public static class DatabaseInitializationExtensions
                                 {
                                     found.Add(reader.GetString(0));
                                 }
-                                if (required.All(r => found.Contains(r)))
+                                if (Array.TrueForAll(required, r => found.Contains(r)))
                                 {
                                     allPresent = true;
                                     break;

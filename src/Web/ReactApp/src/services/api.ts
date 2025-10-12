@@ -207,6 +207,105 @@ export class ApiClient {
     return response.data;
   }
 
+  async exportPrintersByIds(ids?: string[]): Promise<import('@/types/api').PrinterWithCapabilitiesDto[]> {
+    const resp = await this.client.post<import('@/types/api').PrinterWithCapabilitiesDto[]>('/printers/export', ids || []);
+    return resp.data;
+  }
+
+  /**
+   * Request a server-generated export file (CSV or JSON) and stream-download it in the browser.
+   * onProgress is optional and receives (loaded, total?) bytes while streaming.
+   */
+  async streamExportFile(ids?: string[], format: 'json' | 'csv' = 'json', filename?: string, onProgress?: (loaded: number, total?: number) => void): Promise<void> {
+    const base = (this.client.defaults.baseURL as string) || '/api';
+    const url = `${base.replace(/\/$/, '')}/printers/export/file?format=${encodeURIComponent(format)}`;
+
+    const token = localStorage.getItem('auth-token');
+    const correlationId = ApiClient.generateCorrelationId();
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-Correlation-Id': correlationId,
+      },
+      body: JSON.stringify(ids || []),
+      // Keep credentials false - API uses bearer token header
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => undefined);
+      throw new Error(`Export failed: ${resp.status} ${resp.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    // Try to determine filename from Content-Disposition header if not provided
+    const contentDisposition = resp.headers.get('content-disposition');
+    const derivedName = (() => {
+      if (filename) return filename;
+      if (!contentDisposition) return `printfarmer-printers-${new Date().toISOString().slice(0,10)}.${format}`;
+      const m = /filename\*=UTF-8''([^;\n]+)/i.exec(contentDisposition);
+      if (m && m[1]) return decodeURIComponent(m[1]);
+      const m2 = /filename="?([^";]+)"?/i.exec(contentDisposition);
+      if (m2 && m2[1]) return m2[1];
+      return `printfarmer-printers-${new Date().toISOString().slice(0,10)}.${format}`;
+    })();
+
+    // If there's no body stream available, fall back to blob()
+    const reader = resp.body?.getReader();
+    if (!reader) {
+      const blob = await resp.blob();
+      const urlObj = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlObj;
+      a.download = derivedName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(urlObj);
+      return;
+    }
+
+    const contentLengthHeader = resp.headers.get('content-length');
+    const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : undefined;
+    const chunks: Uint8Array[] = [];
+    let loaded = 0;
+    try {
+      // Read the stream
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          loaded += value.byteLength;
+          if (onProgress) onProgress(loaded, total);
+        }
+      }
+    } finally {
+      try { await reader.cancel(); } catch {}
+    }
+
+    // Combine chunks into a single Uint8Array (backed by an ArrayBuffer we control)
+    const totalLen = chunks.reduce((s, c) => s + c.byteLength, 0);
+    const combined = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const c of chunks) {
+      combined.set(c, offset);
+      offset += c.byteLength;
+    }
+    // Create blob from the combined Uint8Array (ArrayBufferView allowed as BlobPart)
+    const blob = new Blob([combined], { type: resp.headers.get('content-type') || (format === 'json' ? 'application/json' : 'text/csv') });
+    const urlObj = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = urlObj;
+    a.download = derivedName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(urlObj);
+  }
+
   async createPrinter(printer: CreatePrinterDto): Promise<Printer> {
     const response = await this.client.post<Printer>('/printers', printer);
     return response.data;

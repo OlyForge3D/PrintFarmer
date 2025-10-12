@@ -98,18 +98,18 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        // Determine whether tests request an in-memory SQLite database or a shared
-        // shared in-memory SQLite fixture.
-        // NOTE: Historically we forced the host environment to Development for both
-        // per-factory in-memory SQLite and shared-SQLite to simplify schema creation.
-        // That caused tests which expect the 'Testing' environment to see different
-        // behavior (e.g. debug endpoints). To preserve test expectations, only force
-        // Development for per-factory in-memory SQLite. When using a shared
-        // keeper-connection, prefer to preserve an already-set ASPNETCORE_ENVIRONMENT
-        // (commonly 'Testing') so tests that assert environment-gated behavior remain
-        // stable.
-        var useInMemorySqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
-        var useSharedSqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase);
+    // Determine whether tests request an in-memory SQLite database or a shared
+    // shared in-memory SQLite fixture.
+    // NOTE: Historically we forced the host environment to Development for both
+    // per-factory in-memory SQLite and shared-SQLite to simplify schema creation.
+    // That caused tests which expect the 'Testing' environment to see different
+    // behavior (e.g. debug endpoints). To preserve test expectations, only force
+    // Development for per-factory in-memory SQLite. When using a shared
+    // keeper-connection, prefer to preserve an already-set ASPNETCORE_ENVIRONMENT
+    // (commonly 'Testing') so tests that assert environment-gated behavior remain
+    // stable.
+    var useInMemorySqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
+    var useSharedSqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase);
         // If a shared fixture already prepared a global SqliteConnection, mark the
         // startup to skip its own DB initialization as early as possible so the
         // application won't race with the fixture's pre-seed.
@@ -519,19 +519,19 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         // Swallow - best-effort pre-seed
                     }
 
-                    // Ensure IMigrationStatusProvider is registered in tests to satisfy
-                    // Program.cs injection for the /api/debug/db-info endpoint. If the
-                    // application didn't register it (varies by startup path), provide
-                    // a test-friendly implementation that uses the AppDbContext.
-                    try
-                    {
-                        var migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
-                        if (migrationDesc == null)
+                        // Ensure IMigrationStatusProvider is registered in tests to satisfy
+                        // Program.cs injection for the /api/debug/db-info endpoint. If the
+                        // application didn't register it (varies by startup path), provide
+                        // a test-friendly implementation that uses the AppDbContext.
+                        try
                         {
-                            services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
+                            var migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
+                            if (migrationDesc == null)
+                            {
+                                services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
+                            }
                         }
-                    }
-                    catch { }
+                        catch { }
                 }
                 catch
                 {
