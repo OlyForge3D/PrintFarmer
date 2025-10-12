@@ -32,6 +32,7 @@ export function PrintersAdminPage() {
 
   const [previewItems, setPreviewItems] = React.useState<PreviewItem[] | null>(null);
   const [importing, setImporting] = React.useState<boolean>(false);
+  const [duplicateHandling, setDuplicateHandling] = React.useState<'skip' | 'overwrite' | 'rename'>('skip');
   const [importResults, setImportResults] = React.useState<import('@/types/api').BulkImportResultItem[] | null>(null);
   const [retryingIndex, setRetryingIndex] = React.useState<number | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
@@ -224,7 +225,7 @@ export function PrintersAdminPage() {
         notes: i.notes
       }));
 
-  const resp = await apiClient.bulkCreatePrinters(dtos);
+  const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
   setImportResults(resp.results ?? null);
   toast.success(`Imported ${resp.importedCount} printers${resp.skippedCount ? `, ${resp.skippedCount} skipped` : ''}`);
       // Keep previewItems so admin can review results; clear preview only when all imported
@@ -249,7 +250,7 @@ export function PrintersAdminPage() {
         apiKey: item.apiKey,
         notes: item.notes,
       };
-      const resp = await apiClient.bulkCreatePrinters([dto]);
+  const resp = await apiClient.bulkCreatePrinters([dto], { duplicateHandling });
       // resp.results is array; server returns index relative to input (0). Map it back to the preview item's original index
       const singleResult = resp.results && resp.results.length > 0 ? { ...resp.results[0], index: item.__index } : undefined;
       setImportResults(prev => {
@@ -298,7 +299,7 @@ export function PrintersAdminPage() {
         apiKey: i.apiKey,
         notes: i.notes,
       }));
-      const resp = await apiClient.bulkCreatePrinters(dtos);
+  const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
       // Merge results: map resp.results (0..n) back to original indices
       const mapped = resp.results?.map((r, idx) => ({ ...r, index: failedItems[idx].__index })) || [];
       setImportResults(prev => {
@@ -440,6 +441,14 @@ export function PrintersAdminPage() {
               </div>
 
               <div className="mt-3 flex gap-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <span className="text-pf-text-secondary">Duplicate handling:</span>
+                  <select value={duplicateHandling} onChange={e => setDuplicateHandling(e.target.value as 'skip' | 'overwrite' | 'rename')} className="px-2 py-1 rounded border bg-white text-sm">
+                    <option value="skip">Skip</option>
+                    <option value="overwrite">Overwrite</option>
+                    <option value="rename">Rename</option>
+                  </select>
+                </label>
                 <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="px-3 py-1 bg-pf-accent text-white rounded">{importing ? 'Importing...' : 'Confirm Import'}</button>
                 <button type="button" disabled={importing} aria-label="Cancel import preview" onClick={() => setPreviewItems(null)} className="px-3 py-1 border rounded">Cancel</button>
                 <button type="button" disabled={importing} aria-label="Retry all failed imports" onClick={handleRetryAllFailed} className="px-3 py-1 border rounded">Retry all failed</button>

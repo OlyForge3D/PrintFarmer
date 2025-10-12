@@ -76,7 +76,8 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
     private static string NormalizeServerUrl(string? input, int defaultPort)
     {
-        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+        if (string.IsNullOrWhiteSpace(input))
+            return string.Empty;
         string trimmed = input.Trim();
         // Ensure scheme
         if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -86,10 +87,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         try
         {
-            var uri = new Uri(trimmed);
+            Uri uri = new Uri(trimmed);
             // If port is not specified, append default port for comparison purposes
             int port = uri.IsDefaultPort ? defaultPort : uri.Port;
-            var ub = new UriBuilder(uri)
+            UriBuilder ub = new UriBuilder(uri)
             {
                 Port = port
             };
@@ -140,7 +141,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Write capability properties
         for (int i = 0; i < capPropInfos.Count; i++)
         {
-            var prop = capPropInfos[i];
+            System.Reflection.PropertyInfo prop = capPropInfos[i];
             string? raw = cap == null ? null : prop.GetValue(cap)?.ToString();
             string escaped = EscapeCsvValue(raw);
             // If last capability field, terminate with newline
@@ -156,6 +157,16 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             pipeWriter.Advance(1);
         }
 
+        await pipeWriter.FlushAsync(ct);
+    }
+
+    // Helper to write CSV header to the provided PipeWriter
+    private static async Task WriteCsvHeaderAsync(System.IO.Pipelines.PipeWriter pipeWriter, List<string> headerParts, CancellationToken ct)
+    {
+        string headerLine = string.Join(',', headerParts) + "\n";
+        Span<byte> span = pipeWriter.GetSpan(headerLine.Length * 4);
+        int written = Encoding.UTF8.GetBytes(headerLine.AsSpan(), span);
+        pipeWriter.Advance(written);
         await pipeWriter.FlushAsync(ct);
     }
 
@@ -535,6 +546,17 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress
         );
+    }
+
+    private static bool PropertySuppressedForExport(System.Reflection.PropertyInfo? pi)
+    {
+        if (pi == null)
+        {
+            return false;
+        }
+
+        ImportExportAttribute? attr = pi.GetCustomAttributes(typeof(ImportExportAttribute), inherit: true).FirstOrDefault() as ImportExportAttribute;
+        return attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0;
     }
 
     /// <summary>
@@ -2515,19 +2537,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                 query = query.Where(p => ids.Contains(p.Id));
             }
 
-            var printers = await query.ToListAsync(ct);
+            List<Printer> printers = await query.ToListAsync(ct);
 
             // Load capabilities for the selected printers in one query
-            var capQuery = db.PrinterCapabilities.AsNoTracking().AsQueryable();
+            IQueryable<PrinterCapabilities> capQuery = db.PrinterCapabilities.AsNoTracking().AsQueryable();
             if (ids != null && ids.Length > 0)
             {
                 capQuery = capQuery.Where(c => ids.Contains(c.PrinterId));
             }
-            var capabilities = await capQuery.ToListAsync(ct);
+            List<PrinterCapabilities> capabilities = await capQuery.ToListAsync(ct);
 
             var results = printers.Select(p =>
             {
-                var cap = capabilities.Find(c => c.PrinterId == p.Id);
+                PrinterCapabilities? cap = capabilities.Find(c => c.PrinterId == p.Id);
                 return new PrinterWithCapabilitiesDto
                 {
                     PrinterId = p.Id,
@@ -2582,148 +2604,49 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<IActionResult> StreamExportAsync([FromBody] Guid[]? ids, [FromQuery] string format = "csv", CancellationToken ct = default)
     {
         format = (format ?? "csv").ToLowerInvariant();
-        var query = db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).AsQueryable();
+        IQueryable<Printer> query = db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).AsQueryable();
         if (ids != null && ids.Length > 0)
         {
             query = query.Where(p => ids.Contains(p.Id));
         }
 
         // Prepare capability lookup
-        var capQuery = db.PrinterCapabilities.AsNoTracking().AsQueryable();
+        IQueryable<PrinterCapabilities> capQuery = db.PrinterCapabilities.AsNoTracking().AsQueryable();
         if (ids != null && ids.Length > 0)
         {
             capQuery = capQuery.Where(c => ids.Contains(c.PrinterId));
         }
 
-        var capabilities = await capQuery.ToDictionaryAsync(c => c.PrinterId, ct);
+        Dictionary<Guid, PrinterCapabilities> capabilities = await capQuery.ToDictionaryAsync(c => c.PrinterId, ct);
 
-        bool PropertySuppressedForExport(System.Reflection.PropertyInfo? pi)
-        {
-            if (pi == null)
-            {
-                return false;
-            }
-
-            var attr = pi.GetCustomAttributes(typeof(ImportExportAttribute), inherit: true).FirstOrDefault() as ImportExportAttribute;
-            return attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0;
-        }
+        // local helper removed; using class-level PropertySuppressedForExport method instead
 
         if (format == "json")
         {
-            Response.ContentType = "application/json";
-            Response.Headers["Content-Disposition"] = $"attachment; filename=printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
-            await using var writer = new Utf8JsonWriter(Response.BodyWriter);
-            writer.WriteStartArray();
-            await foreach (var p in query.AsAsyncEnumerable().WithCancellation(ct))
-            {
-                // Build a dictionary-backed object for JSON export, skipping properties marked to be suppressed for export
-                var dtoDict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                dtoDict["printerId"] = p.Id;
-                dtoDict["printerName"] = p.Name;
-                dtoDict["printerModel"] = p.Model?.Name ?? string.Empty;
-                dtoDict["manufacturerName"] = p.Manufacturer?.Name;
-                dtoDict["backend"] = (PrinterBackend?)p.Backend;
-                dtoDict["ipAddress"] = p.IpAddress;
-
-                if (capabilities.TryGetValue(p.Id, out var cap))
-                {
-                    var capDict = new Dictionary<string, object?>();
-                    var capProps = typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                    foreach (var prop in capProps)
-                    {
-                        if (PropertySuppressedForExport(prop))
-                        {
-                            continue;
-                        }
-
-                        var val = prop.GetValue(cap);
-                        // Convert to camelCase using spans to avoid Substring allocations (CA1845)
-                        ReadOnlySpan<char> nameSpan = prop.Name.AsSpan();
-                        string camel = char.ToLowerInvariant(nameSpan[0]).ToString() + nameSpan.Slice(1).ToString();
-                        capDict[camel] = val;
-                    }
-                    dtoDict["capabilities"] = capDict;
-                }
-
-                // Use resolver-enabled options so ImportExportAttribute is respected globally
-                JsonSerializer.Serialize(writer, dtoDict, _exportJsonOptions);
-                await writer.FlushAsync(ct);
-            }
-            writer.WriteEndArray();
-            await writer.FlushAsync(ct);
+            await StreamJsonExportAsync(query, capabilities, ct);
             return new EmptyResult();
         }
 
         // CSV streaming using pipe
-        var filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
+        string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
         Response.ContentType = "text/csv";
         Response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
 
         // Write header (include capability fields for parity with JSON export). Exclude properties marked to be suppressed for export.
-        var headerParts = new List<string>() { "Name", "ServerUrl", "OriginalServerUrl", "Notes", "ManufacturerName", "ModelName", "Backend", "ApiKey", "DateAcquired" };
-        // Add capability properties dynamically from PrinterCapabilities, excluding suppressed ones.
-        // Prefer using the configured TypeInfoResolver (so CSV and JSON use the same suppression rules).
-        var capPropsForCsv = new List<string>();
-        var capPropInfos = new List<System.Reflection.PropertyInfo>();
-        try
-        {
-            var capType = typeof(Farm.Infrastructure.Domain.PrinterCapabilities);
-            var resolver = _exportJsonOptions?.TypeInfoResolver;
-            if (resolver != null)
-            {
-                var ti = resolver.GetTypeInfo(capType, _exportJsonOptions!);
-                if (ti != null)
-                {
-                    foreach (var jp in ti.Properties)
-                    {
-                        var pi = capType.GetProperty(jp.Name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                        if (pi == null)
-                        {
-                            continue;
-                        }
-
-                        var attr = pi.GetCustomAttribute<ImportExportAttribute>(inherit: true);
-                        if (attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0)
-                        {
-                            continue;
-                        }
-
-                        capPropsForCsv.Add(jp.Name);
-                        capPropInfos.Add(pi);
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // If resolver introspection fails for any reason, fall back to reflection below
-        }
-
-        if (capPropsForCsv.Count == 0)
-        {
-            var infos = typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-                .Where(pi => !PropertySuppressedForExport(pi))
-                .ToArray();
-            capPropsForCsv = infos.Select(pi => pi.Name).ToList();
-            capPropInfos = infos.ToList();
-        }
+        List<string> headerParts = new List<string>() { "Name", "ServerUrl", "OriginalServerUrl", "Notes", "ManufacturerName", "ModelName", "Backend", "ApiKey", "DateAcquired" };
+        // Build capability property lists and append to headerParts
+        BuildCsvHeaderAndCapProps(ref headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos);
         // Map a few friendly names for CSV (NozzleDiameter -> NozzleDiameter, SupportedMaterials -> SupportedMaterials)
         headerParts.AddRange(capPropsForCsv);
         headerParts.Add("CapabilitiesLastUpdated");
 
         // Write header using PipeWriter to reduce temporary allocations
-        var pipeWriter = Response.BodyWriter;
-        string headerLine = string.Join(',', headerParts) + "\n";
-        {
-            var span = pipeWriter.GetSpan(headerLine.Length * 4);
-            int written = Encoding.UTF8.GetBytes(headerLine.AsSpan(), span);
-            pipeWriter.Advance(written);
-            await pipeWriter.FlushAsync(ct);
-        }
+        System.IO.Pipelines.PipeWriter pipeWriter = Response.BodyWriter;
+        await WriteCsvHeaderAsync(pipeWriter, headerParts, ct);
 
-        await foreach (var p in query.AsAsyncEnumerable().WithCancellation(ct))
+    await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
         {
-            capabilities.TryGetValue(p.Id, out var cap);
+            capabilities.TryGetValue(p.Id, out PrinterCapabilities? cap);
 
             // Build row values in the same order as headerParts
             // Pre-calc small buffer for a typical line; we still use GetBytes into the PipeWriter span per field
@@ -2749,6 +2672,24 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return new EmptyResult();
     }
 
+    // Extracted JSON streaming export to reduce nesting and satisfy analyzers (S1199).
+    private async Task StreamJsonExportAsync(IQueryable<Printer> query, Dictionary<Guid, PrinterCapabilities> capabilities, CancellationToken ct)
+    {
+        Response.ContentType = "application/json";
+        Response.Headers["Content-Disposition"] = $"attachment; filename=printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
+        await using Utf8JsonWriter writer = new Utf8JsonWriter(Response.BodyWriter);
+        writer.WriteStartArray();
+    await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            capabilities.TryGetValue(p.Id, out PrinterCapabilities? cap);
+            Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p, cap);
+            JsonSerializer.Serialize(writer, dtoDict, _exportJsonOptions);
+            await writer.FlushAsync(ct);
+        }
+        writer.WriteEndArray();
+        await writer.FlushAsync(ct);
+    }
+
     public enum DuplicateHandling { Skip, Error, Update }
 
     [HttpPost("import")]
@@ -2762,21 +2703,18 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             return BadRequest("No file provided");
         }
-        // parse requested duplicate handling
-        if (!Enum.TryParse<DuplicateHandling>(duplicateHandling, true, out var handling))
-        {
-            handling = DuplicateHandling.Skip;
-        }
+        // parse requested duplicate handling (we keep the query-string value for processor; local enum not needed)
+        Enum.TryParse<DuplicateHandling>(duplicateHandling, true, out _);
 
         if (file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
         {
-            var (dtos, parseErrors) = await _importParser.ParseCsvAsync(file.OpenReadStream(), ct);
+                (CreatePrinterDto[] dtos, List<string> parseErrors) = await _importParser.ParseCsvAsync(file.OpenReadStream(), ct);
             if (parseErrors.Count > 0)
             {
                 return BadRequest(string.Join(';', parseErrors));
             }
 
-            var processed = await _importProcessor.ProcessAsync(dtos, duplicateHandling, ct);
+            List<(string Name, string Status, System.Guid? Id, string? Reason)> processed = await _importProcessor.ProcessAsync(dtos, duplicateHandling, ct);
             return Ok(new
             {
                 ImportedCount = processed.Count(r => r.Status == "Imported"),
@@ -2790,13 +2728,13 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             // Parse JSON into CreatePrinterDto[] and forward to BulkCreateAsync logic
             try
             {
-                var (dtos, parseErrors) = await _importParser.ParseJsonAsync(file.OpenReadStream(), ct);
+                (CreatePrinterDto[] dtos, List<string> parseErrors) = await _importParser.ParseJsonAsync(file.OpenReadStream(), ct);
                 if (parseErrors.Count > 0)
                 {
                     return BadRequest(string.Join(';', parseErrors));
                 }
 
-                var processed = await _importProcessor.ProcessAsync(dtos, duplicateHandling, ct);
+                List<(string Name, string Status, System.Guid? Id, string? Reason)> processed = await _importProcessor.ProcessAsync(dtos, duplicateHandling, ct);
                 return Ok(new
                 {
                     ImportedCount = processed.Count(r => r.Status == "Imported"),
@@ -2835,7 +2773,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         List<BulkImportResultItem> results = new();
 
-        foreach (var (dto, idx) in dtos.Select((d, i) => (d, i)))
+    foreach ((CreatePrinterDto dto, int idx) in dtos.Select((d, i) => (d, i)))
         {
             try
             {
@@ -2873,34 +2811,6 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Results = results
         });
     }
-
-    // Simple result shape for bulk import responses
-    private sealed record BulkImportResultItem(int Index, string Name, string Status, Guid? Id = null, string? Reason = null);
-
-    private static string EscapeCsvValue(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return "";
-        }
-
-        // Escape quotes and wrap in quotes if contains comma, quote, or newline
-        if (value.Contains('"'))
-        {
-            value = value.Replace("\"", "\"\"");
-        }
-
-        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
-        {
-            value = $"\"{value}\"";
-        }
-
-        return value;
-    }
-
-    // CSV parsing and processing migrated to ImportParserService and ImportProcessorService
-
-    // CSV parsing and processing migrated to ImportParserService and ImportProcessorService
 
     private async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
     {
@@ -2948,8 +2858,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
 
         // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
-        int defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 :
-                         dto.Backend == PrinterBackend.SDCP ? 80 : 7125;
+        int defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : dto.Backend == PrinterBackend.SDCP ? 80 : 7125;
         string normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
         string resolvedBase = normalizedInput;
         string? resolvedIp = null;
@@ -2960,7 +2869,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             {
                 string hostToResolve = EnsureLocalSuffix(uri.Host);
                 IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
-                IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
+                IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
                 if (firstIp is not null)
                 {
                     UriBuilder ub = new(uri)
@@ -3000,7 +2909,6 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         // Auto-discover capabilities for the newly created printer (import scenario)
         try
         {
-            // Reload the printer with includes for proper discovery
             Printer? printerForDiscovery = await db.Printers
                 .Include(pr => pr.Manufacturer)
                 .Include(pr => pr.Model)
@@ -3009,7 +2917,6 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             if (printerForDiscovery != null)
             {
                 PrinterCapabilities? discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
-                // For bulk import, don't log individual success/failures to avoid log spam
                 if (discoveredCapabilities == null)
                 {
                     _logger.LogDebug($"Could not discover capabilities for imported printer: {p.Name} ({p.Id})");
@@ -3019,16 +2926,14 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         catch (Exception ex)
         {
             _logger.LogDebug($"Error during capability discovery for imported printer: {p.Name} ({p.Id}) - {ex.Message}");
-            // Don't fail the import if capability discovery fails
         }
 
-        // For import, we'll return a simplified PrinterDto without live status to avoid network delays
         return new PrinterDto(
             Id: p.Id,
             Name: p.Name,
             ServerUrl: p.ServerUrl,
             Notes: p.Notes,
-            IsOnline: false, // Will be updated by background service
+            IsOnline: false,
             State: null,
             ManufacturerName: null,
             ModelName: null,
@@ -3037,6 +2942,111 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress
         );
+    }
+
+    // Simple result shape for bulk import responses
+    private sealed record BulkImportResultItem(int Index, string Name, string Status, Guid? Id = null, string? Reason = null);
+
+    private static string EscapeCsvValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        if (value.Contains('"'))
+        {
+            value = value.Replace("\"", "\"\"");
+        }
+
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+        {
+            value = $"\"{value}\"";
+        }
+
+        return value;
+    }
+
+    // Helper to build CSV header parts and capability property infos for export
+    private static void BuildCsvHeaderAndCapProps(ref List<string> headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos)
+    {
+        capPropsForCsv = new List<string>();
+        capPropInfos = new List<System.Reflection.PropertyInfo>();
+
+        try
+        {
+            Type capType = typeof(Farm.Infrastructure.Domain.PrinterCapabilities);
+            var resolver = _exportJsonOptions?.TypeInfoResolver;
+            if (resolver != null)
+            {
+                var ti = resolver.GetTypeInfo(capType, _exportJsonOptions!);
+                if (ti != null)
+                {
+                    foreach (var jp in ti.Properties)
+                    {
+                        System.Reflection.PropertyInfo? pi = capType.GetProperty(jp.Name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                        if (pi == null)
+                            continue;
+
+                        ImportExportAttribute? attr = pi.GetCustomAttribute<ImportExportAttribute>(inherit: true);
+                        if (attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0)
+                            continue;
+
+                        capPropsForCsv.Add(jp.Name);
+                        capPropInfos.Add(pi);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // ignore and fall back to reflection
+        }
+
+        if (capPropsForCsv.Count == 0)
+        {
+            var infos = typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .Where(pi => !(pi.GetCustomAttribute<ImportExportAttribute>(inherit: true) is ImportExportAttribute a && (a.IgnoreFor & ImportExportTargets.Export) != 0))
+                .ToArray();
+            capPropsForCsv = infos.Select(pi => pi.Name).ToList();
+            capPropInfos = infos.ToList();
+        }
+
+        headerParts.AddRange(capPropsForCsv);
+        headerParts.Add("CapabilitiesLastUpdated");
+    }
+
+    private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p, PrinterCapabilities? cap)
+    {
+            Dictionary<string, object?> dtoDict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        dtoDict["printerId"] = p.Id;
+        dtoDict["printerName"] = p.Name;
+        dtoDict["printerModel"] = p.Model?.Name ?? string.Empty;
+        dtoDict["manufacturerName"] = p.Manufacturer?.Name;
+        dtoDict["backend"] = (PrinterBackend?)p.Backend;
+        dtoDict["ipAddress"] = p.IpAddress;
+
+        if (cap != null)
+        {
+            Dictionary<string, object?> capDict = new Dictionary<string, object?>();
+            System.Reflection.PropertyInfo[] capProps = typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            foreach (System.Reflection.PropertyInfo prop in capProps)
+            {
+                if (PropertySuppressedForExport(prop))
+                {
+                    continue;
+                }
+
+                object? val = prop.GetValue(cap);
+                ReadOnlySpan<char> nameSpan = prop.Name.AsSpan();
+                string camel = char.ToLowerInvariant(nameSpan[0]).ToString() + nameSpan.Slice(1).ToString();
+                capDict[camel] = val;
+            }
+            dtoDict["capabilities"] = capDict;
+        }
+
+        return dtoDict;
     }
 
     // Helper method to extract thumbnail URL from metadata

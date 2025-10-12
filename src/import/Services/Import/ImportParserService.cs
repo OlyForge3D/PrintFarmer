@@ -70,7 +70,7 @@ public class ImportParserService : IImportParserService
         string json = await reader.ReadToEndAsync(ct);
         try
         {
-            var dtos = JsonSerializer.Deserialize<CreatePrinterDto[]>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? Array.Empty<CreatePrinterDto>();
+            var dtos = JsonSerializer.Deserialize<CreatePrinterDto[]>(json, ImportJsonOptions.Default) ?? Array.Empty<CreatePrinterDto>();
             return (dtos, new List<string>());
         }
         catch (JsonException ex)

@@ -50,6 +50,14 @@ jobs:
             --filter "Category!=DbHeavy&Category!=Docker" \
             /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
 
+      - name: "Test Farm.Importing.Tests (explicit)"
+        working-directory: src
+        run: |
+          # Run the importing tests explicitly so they are covered even if not in the solution
+          dotnet test ./tests/Farm.Importing.Tests/Farm.Importing.Tests.csproj -c Debug --no-build --logger trx --results-directory TestResults/Importing \
+            --filter "Category!=DbHeavy&Category!=Docker" \
+            /p:CollectCoverage=true /p:CoverletOutput=./coverage/importing/ /p:CoverletOutputFormat=lcov
+
       - name: "Merge backend coverage (strict merge: combine SF blocks)"
         id: merge-backend-coverage
         run: |

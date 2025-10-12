@@ -311,8 +311,9 @@ export class ApiClient {
     return response.data;
   }
 
-  async bulkCreatePrinters(printers: CreatePrinterDto[]): Promise<BulkImportResponse> {
-    const resp = await this.client.post<BulkImportResponse>('/printers/bulk', printers);
+  async bulkCreatePrinters(printers: CreatePrinterDto[], options?: { duplicateHandling?: string }): Promise<BulkImportResponse> {
+    const qp = options?.duplicateHandling ? `?duplicateHandling=${encodeURIComponent(options.duplicateHandling)}` : '';
+    const resp = await this.client.post<BulkImportResponse>(`/printers/bulk${qp}`, printers);
     return resp.data;
   }
 
