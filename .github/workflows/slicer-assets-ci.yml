@@ -1,0 +1,97 @@
+name: Build and inject slicer assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      orca_version:
+        description: 'OrcaSlicer version to fetch/build'
+        required: false
+        default: '2.3.1'
+      prusa_version:
+        description: 'PrusaSlicer version / tag for preseed'
+        required: false
+        default: '2.9.3'
+      disable_slicer_builds:
+        description: 'Set to true to disable automatic slicer builds and deployments'
+        required: false
+        default: 'true'
+
+jobs:
+  build-assets:
+    name: Build / Download Assets (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y p7zip-full squashfs-tools bsdtar jq curl || true
+
+      - name: Set versions
+        run: |
+          echo "ORCA_VERSION=${{ github.event.inputs.orca_version || '2.3.1' }}" >> $GITHUB_ENV
+          echo "PRUSA_VERSION=${{ github.event.inputs.prusa_version || '2.9.3' }}" >> $GITHUB_ENV
+
+      - name: Download Orca AppImage and extract (placeholder)
+        id: orca_extract
+        run: |
+          set -e
+          mkdir -p orca_assets
+          # TODO: implement robust download + extraction for Orca AppImage
+          # Example (placeholder): curl -L -o orca.AppImage "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/OrcaSlicer_Linux_V${ORCA_VERSION}.AppImage"
+          # then extract using unsquashfs/7z/--appimage-extract into orca_assets/
+          echo "placeholder" > orca_assets/README.txt
+
+      - name: Upload Orca assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-assets
+          path: orca_assets/
+
+      - name: Build / produce Prusa preseed (amd64) (placeholder)
+        run: |
+          set -e
+          mkdir -p prusa_preseed
+          # TODO: Build Flatpak preseed on amd64 runner, or download preseed artifact
+          echo "placeholder prusa" > prusa_preseed/README.txt
+
+      - name: Upload Prusa preseed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prusa-preseed
+          path: prusa_preseed/
+
+  build-and-deploy:
+    name: Build images and run deploy script
+    needs: build-assets
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.disable_slicer_builds != 'true' && github.event.inputs.disable_slicer_builds != '1' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Orca assets artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: orca-assets
+          path: build_context/orca
+
+      - name: Download Prusa preseed artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prusa-preseed
+          path: build_context/prusa
+
+      - name: Make deploy script executable
+        run: |
+          chmod +x ./scripts/deploy-docker.sh || true
+
+      - name: Run deploy (build) using provided assets
+        env:
+          ORCA_ASSET_PATH: ${{ github.workspace }}/build_context/orca
+          PRUSA_PRESEED_PATH: ${{ github.workspace }}/build_context/prusa
+          # optional: set non-interactive to avoid prompts
+          NON_INTERACTIVE: 'true'
+        run: |
+          ./scripts/deploy-docker.sh --non-interactive

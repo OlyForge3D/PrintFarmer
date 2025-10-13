@@ -56,6 +56,17 @@ public abstract class BaseQueueConsumerService(
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, $"Failed to deserialize job payload: {json}");
+                    try
+                    {
+                        // If payload is corrupted, remove this entry from the processing list
+                        // to avoid repeatedly failing on the same bad payload.
+                        await db.ListRemoveAsync(_processingKey, raw, 1);
+                        _logger.LogWarning($"Removed malformed job payload from processing list (key={_processingKey})");
+                    }
+                    catch (Exception remEx)
+                    {
+                        _logger.LogError(remEx, "Failed to remove malformed payload from processing list");
+                    }
                 }
                 if (job == null)
                 {
@@ -146,10 +157,15 @@ public abstract class BaseQueueConsumerService(
         // Replace list (transaction could be added if needed)
         var tran = _redis.GetDatabase().CreateTransaction();
         _ = tran.KeyDeleteAsync(_processingKey);
+        // Push retained items in the original order using ListRightPushAsync so relative order is preserved
         foreach (var v in retained)
         {
-            _ = tran.ListLeftPushAsync(_processingKey, v);
+            _ = tran.ListRightPushAsync(_processingKey, v);
         }
-        await tran.ExecuteAsync();
+        var executed = await tran.ExecuteAsync();
+        if (!executed)
+        {
+            _logger.LogError($"Failed to rebuild processing list { _processingKey } during cleanup for job { jobId }");
+        }
     }
 }

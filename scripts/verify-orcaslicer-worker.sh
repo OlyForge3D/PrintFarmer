@@ -45,6 +45,28 @@ if [[ ${1-} == "--help" || ${1-} == "-h" ]]; then
   exit 0
 fi
 
+# Extra options (accepted before positional args):
+#   --redis <host:port> | -r <host:port>  -> explicit Redis connection string to pass into the worker container
+#   --discover-redis                       -> try to discover a running printfarmer-redis-distributed container and use its IP:6379
+ORCA_REDIS="${ORCA_REDIS-}"
+DISCOVER_REDIS="false"
+while [[ ${1-} == --redis || ${1-} == -r || ${1-} == --discover-redis ]]; do
+  case "${1}" in
+    --redis|-r)
+      ORCA_REDIS="${2-}"
+      shift 2
+      ;;
+    --discover-redis)
+      DISCOVER_REDIS="true"
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+export ORCA_REDIS DISCOVER_REDIS
+
 WORKER_NAME="orcaslicer-worker"
 ENV_PREFIX="ORCA"
 DEFAULT_IMAGE="orcaslicer-worker"

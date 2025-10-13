@@ -1,0 +1,13 @@
+# Temporary local variant that uses prebuilt orcaslicer-assets:local
+FROM printfarmer-slicer-base AS orca-tools
+USER root
+# keep the same tools as original orca-tools stage
+RUN true
+
+# Use the prebuilt assets image as orcaassets
+FROM orcaslicer-assets:local AS orcaassets
+
+# Now use the original build and final stages by including the original Dockerfile.orcaslicer
+# We'll COPY the rest of the Dockerfile contents starting at the final stage by reusing the original file content.
+
+# (We will reference the original Dockerfile.orcaslicer in the build command.)

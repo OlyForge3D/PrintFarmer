@@ -9,9 +9,9 @@
 #  - This image focuses ONLY on Orca-specific bits
 ############################################################
 
-ARG ORCASLICER_VERSION=1.8.1
+ARG ORCASLICER_VERSION=2.3.1
 # Default URL (x86_64). Dynamic discovery may override; we also attempt arm64/aarch64 patterns.
-ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage
+ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
 
@@ -60,7 +60,7 @@ RUN set -e; \
 ########################################
 # Orca Binary Assets Stage (download & extract) for better caching
 ########################################
-FROM orca-tools AS orcaassets
+FROM orcaslicer-assets:local AS orcaassets
 USER root
 WORKDIR /tmp
 ARG ORCASLICER_VERSION
@@ -151,6 +151,16 @@ LABEL component="orcaslicer-worker" \
     description="Dedicated OrcaSlicer worker container"
 USER root
 WORKDIR /app
+
+# Install runtime dependencies needed by the OrcaSlicer ELF (graphics / webkit / gstreamer)
+RUN set -e; \
+        apt-get update && apt-get install -y --no-install-recommends \
+            libegl1 libegl1-mesa libgles2 libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0-18 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+            gstreamer1.0-libav libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+            fontconfig locales tzdata && rm -rf /var/lib/apt/lists/*; \
+        # Ensure a minimal locale is present (some GTK/WebKit code expects it)
+        locale-gen en_US.UTF-8 || true
 
 # Copy binary assets (real or stub) & optional extracted directory
 COPY --from=orcaassets /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer

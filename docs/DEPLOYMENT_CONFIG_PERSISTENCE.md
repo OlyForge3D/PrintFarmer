@@ -143,6 +143,8 @@ ORCA_HOST_PORT=8081
 ENABLE_PRUSA_WORKER=no
 PRUSA_WORKER_COUNT=0
 PRUSA_HOST_PORT=8082
+# Global guard to pause slicer builds (optional)
+DISABLE_SLICER_BUILDS=false
 
 # Spoolman Integration
 ENABLE_SPOOLMAN=no

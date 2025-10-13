@@ -179,6 +179,7 @@ chown $USER:$USER .deploy-config
 - `ORCA_WORKER_COUNT` - Number (default: 1)
 - `ENABLE_PRUSA_WORKER` - `yes` or `no`
 - `PRUSA_WORKER_COUNT` - Number (default: 1)
+ - `DISABLE_SLICER_BUILDS` - `true` or `false` (when `true` the deploy script will force-disable Orca/Prusa worker builds and set worker counts to 0)
 
 ### Application
 - `ENVIRONMENT` - `Development` or `Production`
