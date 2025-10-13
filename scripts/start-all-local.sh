@@ -6,15 +6,13 @@
 #
 # Options:
 #   --foreground/-f    Run services in foreground (blocks until Ctrl+C)
-#   --with-redis       Start Redis container for distributed slicing (optional)
 #   --no-tests         Skip running initial tests
 #   --clean            Clean build artifacts before starting
-#   --fresh            Terminate all existing containers/apps and clean up database files before starting fresh
+#   --fresh            Terminate existing containers/apps and clean up database files before starting fresh
 #
 # Services started:
 #   1. API Backend (ASP.NET Core) - localhost:5245
 #   2. React Frontend (Vite) - localhost:3000
-#   3. Redis (optional, via Docker) - localhost:6379 (for distributed slicing only)
 #
 # Requirements:
 #   - .NET SDK 9.0.302+
@@ -31,14 +29,12 @@ REACT_DIR="$SRC_DIR/Web/ReactApp"
 
 API_URL=${API_URL:-http://localhost:5245}
 REACT_URL=${REACT_URL:-http://localhost:3000}
-REDIS_URL=${REDIS_URL:-localhost:6379}
 
 # Logging and PID management
 LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
 PID_DIR=${PID_DIR:-"$ROOT_DIR/.pids"}
 API_LOG="$LOG_DIR/api.log"
 REACT_LOG="$LOG_DIR/react.log"
-REDIS_LOG="$LOG_DIR/redis.log"
 META_FILE="$PID_DIR/services.meta"
 
 # Colors for output
@@ -50,7 +46,6 @@ NC='\033[0m' # No Color
 
 # Parse command line options
 FOREGROUND=0
-WITH_REDIS=0
 NO_TESTS=0
 CLEAN=0
 FRESH=0
@@ -59,10 +54,6 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --foreground|-f)
       FOREGROUND=1
-      shift
-      ;;
-    --with-redis)
-      WITH_REDIS=1
       shift
       ;;
     --no-tests)
@@ -112,15 +103,10 @@ check_port() {
 fresh_cleanup() {
   info "Starting fresh cleanup - terminating all existing containers and processes..."
   
-  # Stop and remove Redis container if it exists
-  if docker ps -q --filter "name=printfarmer-redis-distributed" | grep -q .; then
-    warn "Stopping Redis container: printfarmer-redis-distributed"
-    docker stop "printfarmer-redis-distributed" >/dev/null 2>&1 || true
-    docker rm -f "printfarmer-redis-distributed" >/dev/null 2>&1 || true
-  fi
+  # (Redis containers are not managed by this simplified local script)
   
   # Kill any processes on PrintFarmer ports
-  local ports=(5000 5245 7281 3000 6379)  # API, React, Redis ports
+  local ports=(5000 5245 7281 3000)  # API and React ports
   for port in "${ports[@]}"; do
     if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
       warn "Terminating processes on port $port"
@@ -191,11 +177,7 @@ cleanup() {
       warn "Stopped React dev server (PID: $REACT_PID)"
     fi
     
-    if [[ -n "${REDIS_CONTAINER_ID:-}" ]] && docker ps -q --filter "id=$REDIS_CONTAINER_ID" | grep -q .; then
-      docker stop "$REDIS_CONTAINER_ID" >/dev/null 2>&1 || true
-      docker rm "$REDIS_CONTAINER_ID" >/dev/null 2>&1 || true
-      warn "Stopped Redis container"
-    fi
+    # No Redis container to stop in the simplified local workflow
   fi
   
   # Clean up files
@@ -213,49 +195,7 @@ require_cmd dotnet
 require_cmd npm
 require_cmd node
 
-if [[ $WITH_REDIS -eq 1 ]]; then
-  require_cmd docker
-
-  # --- Docker health check and restart logic ---
-  if command -v docker &> /dev/null; then
-    info "Checking Docker daemon status..."
-    if ! docker info > /dev/null 2>&1; then
-      warn "Docker is installed but not responding. Attempting to restart Docker..."
-      if [[ "$OSTYPE" == "darwin"* ]]; then
-        open --background -a Docker
-        info "Waiting for Docker Desktop to start..."
-        for i in {1..30}; do
-          if docker info > /dev/null 2>&1; then
-            success "Docker is now responsive."
-            break
-          fi
-          sleep 2
-        done
-      else
-        sudo systemctl restart docker
-        info "Waiting for Docker daemon to restart..."
-        for i in {1..30}; do
-          if docker info > /dev/null 2>&1; then
-            success "Docker is now responsive."
-            break
-          fi
-          sleep 2
-        done
-      fi
-      if ! docker info > /dev/null 2>&1; then
-        error "Docker could not be started. Please start Docker manually."
-      fi
-    else
-      success "Docker is running."
-    fi
-
-    # Remove stopped Redis container if it exists but is not running
-    if docker ps -a --filter "name=printfarmer-redis-local" --format '{{.Status}}' | grep -v Up | grep -q .; then
-      warn "Removing stopped container: printfarmer-redis-local"
-      docker rm -f "printfarmer-redis-local" >/dev/null 2>&1 || true
-    fi
-  fi
-fi
+# Docker checks and Redis startup are intentionally omitted from this simplified local script.
 
 # Verify .NET version
 if ! dotnet --version | grep -q "^9\.0\."; then
@@ -296,9 +236,6 @@ fi
 info "Checking ports..."
 check_port ${API_URL##*:}
 check_port ${REACT_URL##*:}
-if [[ $WITH_REDIS -eq 1 ]]; then
-  check_port ${REDIS_URL##*:}
-fi
 
 # Bootstrap dependencies if needed
 info "Bootstrapping dependencies..."
@@ -317,31 +254,8 @@ if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
 fi
 cd "$SRC_DIR"
 
-success "Dependencies ready"
-
-# Start Redis if requested
-if [[ $WITH_REDIS -eq 1 ]]; then
-  info "Starting Redis container..."
-  REDIS_CONTAINER_ID=$(docker run -d --name printfarmer-redis-local -p 6379:6379 redis:7-alpine redis-server --appendonly yes)
-  if [[ -z "$REDIS_CONTAINER_ID" ]]; then
-    error "Failed to start Redis container"
-  fi
-  
-  # Wait for Redis to be ready
-  for i in {1..30}; do
-    if docker exec "$REDIS_CONTAINER_ID" redis-cli ping >/dev/null 2>&1; then
-      success "Redis container started (ID: ${REDIS_CONTAINER_ID:0:12})"
-      break
-    fi
-    if [[ $i -eq 30 ]]; then
-      error "Redis container failed to start within 30 seconds"
-    fi
-    sleep 1
-  done
-else
-  REDIS_CONTAINER_ID=""
-  info "Skipping Redis (distributed slicing will use local embedded worker only)"
-fi
+# Redis is not started by this script (slicing integration paused)
+REDIS_CONTAINER_ID=""
 
 # Environment setup
 export ASPNETCORE_ENVIRONMENT=Development
@@ -349,9 +263,7 @@ export DEPLOYMENT_MODE=monolithic
 export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"
 
-if [[ $WITH_REDIS -eq 1 ]]; then
-  export ConnectionStrings__Redis="$REDIS_URL"
-fi
+# No Redis connection string exported in simplified local script
 
 # Start API server
 info "Starting API server..."
@@ -377,13 +289,11 @@ else
 fi
 
 # Save service metadata
-cat > "$META_FILE" << EOF
+  cat > "$META_FILE" << EOF
 API_PID=$API_PID
 REACT_PID=$REACT_PID
-REDIS_CONTAINER_ID=$REDIS_CONTAINER_ID
 API_URL=$API_URL
 REACT_URL=$REACT_URL
-REDIS_URL=$REDIS_URL
 STARTED_AT=$(date)
 EOF
 
@@ -416,14 +326,7 @@ for i in {1..60}; do
   sleep 1
 done
 
-# Test Redis connection if enabled
-if [[ $WITH_REDIS -eq 1 ]]; then
-  if docker exec "$REDIS_CONTAINER_ID" redis-cli ping >/dev/null 2>&1; then
-    success "Redis ready at $REDIS_URL"
-  else
-    warn "Redis container running but not responding to ping"
-  fi
-fi
+# Redis checks removed from the simplified local script
 
 # Run initial tests unless disabled
 if [[ $NO_TESTS -eq 0 ]]; then
@@ -459,9 +362,7 @@ echo
 echo "📊 Service URLs:"
 echo "  • API Backend:     $API_URL"
 echo "  • React Frontend:  $REACT_URL"
-if [[ $WITH_REDIS -eq 1 ]]; then
-echo "  • Redis:           $REDIS_URL"
-fi
+# Redis is not started by this script
 echo
 echo "🔍 Health Checks:"
 echo "  • API Health:      $API_URL/healthz"
@@ -471,9 +372,7 @@ echo
 echo "📝 Log Files:"
 echo "  • API Logs:        $API_LOG"
 echo "  • React Logs:      $REACT_LOG"
-if [[ $WITH_REDIS -eq 1 ]]; then
-echo "  • Redis Logs:      docker logs $REDIS_CONTAINER_ID"
-fi
+# No Redis logs to show
 echo
 echo "🛠️  Development URLs:"
 echo "  • Main Application: $REACT_URL"
@@ -491,7 +390,7 @@ else
   echo "To stop all services, run:"
   echo "  kill $API_PID $REACT_PID"
   if [[ $WITH_REDIS -eq 1 ]]; then
-    echo "  docker stop $REDIS_CONTAINER_ID"
+    echo "  # No Redis container to stop"
   fi
   echo
   echo "Or simply run this script again with Ctrl+C to use the cleanup handler."
