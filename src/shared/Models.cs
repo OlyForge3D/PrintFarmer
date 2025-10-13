@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
+using Farm.Web.Shared.Annotations;
 
 namespace Farm.Web.Shared;
 
@@ -878,13 +879,13 @@ public record PrinterCapabilitiesDto(
     bool MultiMaterial = false,
     bool SupportsAutoLeveling = false,
     int NumberOfExtruders = 1,
-    int? MinHotendTemp = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? MinBedTemp = null,
     int? MaxBedTemp = null,
-    string? CurrentMaterial = null,
-    int? CurrentSpoolId = null,
-    bool IsAvailable = true,
+    [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? CurrentSpoolId = null,
+    [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true,
     DateTime LastUpdated = default);
 
 /// <summary>
@@ -901,9 +902,9 @@ public record CreatePrinterCapabilitiesDto(
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
-    int? MinHotendTemp = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? MinBedTemp = null,
     int? MaxBedTemp = null);
 
 /// <summary>
@@ -920,14 +921,14 @@ public record UpdatePrinterCapabilitiesDto(
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
-    int? MinHotendTemp = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? MinBedTemp = null,
     int? MaxBedTemp = null,
     int? MaxPrintSpeed = null,
-    string? CurrentMaterial = null,
-    int? CurrentSpoolId = null,
-    bool IsAvailable = true);
+    [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,
+    [property: ImportExport(ImportExportTargets.Import)] int? CurrentSpoolId = null,
+    [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true);
 
 // Queue Management DTOs
 /// <summary>
@@ -1420,6 +1421,10 @@ public class PrinterWithCapabilitiesDto
     public string PrinterName { get; set; } = string.Empty;
     public string PrinterModel { get; set; } = string.Empty;
     public PrinterCapabilitiesDto? Capabilities { get; set; }
+    // Additional export-friendly fields
+    public string? ManufacturerName { get; set; }
+    public PrinterBackend? Backend { get; set; }
+    public string? IpAddress { get; set; }
 }
 
 /// <summary>

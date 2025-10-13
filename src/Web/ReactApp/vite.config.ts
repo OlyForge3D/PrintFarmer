@@ -1,5 +1,6 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execSync } from 'node:child_process';
@@ -12,7 +13,12 @@ try {
 export default defineConfig({
   plugins: [react(), tsconfigPaths()],
   resolve: {
-    // alias removed, handled by vite-tsconfig-paths
+    // Keep an explicit fallback alias mapping for environments where
+    // the vite-tsconfig-paths plugin may not run (tests/CI). This
+    // mirrors the tsconfig path mapping for '@/...' -> './src/...'
+    alias: [
+      { find: '@', replacement: resolve(__dirname, 'src') }
+    ]
   },
   optimizeDeps: {
     include: [

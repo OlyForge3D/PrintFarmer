@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-  <ProjectReference Include="../Infrastructure/Farm.Infrastructure.csproj" />
+  <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />
@@ -45,10 +45,13 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.10.0-beta.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.10.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.10.0" />
+    <PackageReference Include="AutoMapper" Version="12.0.1" />
+    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\import\Farm.Importing.csproj" />
   <!-- Removed old Farm.Infrastructure reference after folder rename -->
   </ItemGroup>
 

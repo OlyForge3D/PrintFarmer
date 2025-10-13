@@ -44,7 +44,10 @@ PRUSA_WORKER_URL=${PRUSA_WORKER_URL:-http://localhost:8082}
 
 # Central DB connection string for API and workers
 DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-"Host=localhost;Port=5432;Database=printfarmer;Username=postgres;Password=postgres"}
-# NOTE: DB_CONNECTION_STRING is a shell variable for convenience. Always pass it to .NET apps as ConnectionStrings__DefaultConnection.
+# NOTE: DB_CONNECTION_STRING is a shell variable for convenience. We'll export it as the
+# canonical environment variable consumed by the application: ConnectionStrings__Default.
+# Also set ConnectionStrings__DefaultConnection and keep provider-specific vars for
+# backward compatibility.
 
 # Logging and PID management
 LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
@@ -465,6 +468,13 @@ if [[ $API_ONLY -eq 1 ]]; then
   export DEPLOYMENT_MODE=monolithic
   export ASPNETCORE_URLS="$API_URL"
   export ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING"
+  export ConnectionStrings__Default="$DB_CONNECTION_STRING"
+  # keep provider-specific var if env.postgres-dev.sh set it (helps older scripts)
+  if [[ -n "${ConnectionStrings__Postgres:-}" ]]; then
+    export ConnectionStrings__Postgres="$ConnectionStrings__Postgres"
+  else
+    export ConnectionStrings__Postgres="$DB_CONNECTION_STRING"
+  fi
   
   dotnet run --project api/Farm.Web.Api.csproj > "$API_LOG" 2>&1 &
   API_PID=$!
@@ -609,6 +619,8 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   cd "$ROOT_DIR"
   docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base . 
   docker tag printfarmer/slicer-base:latest slicer-base:latest
+  # Tag alternate name used by worker Dockerfiles if present
+  docker tag printfarmer/slicer-base:latest printfarmer-slicer-base:latest || true
   
   docker build -f Dockerfile.orcaslicer -t printfarmer/orcaslicer-worker .
 fi
@@ -618,6 +630,8 @@ if [[ $NO_PRUSA -eq 0 ]] && ( [[ $BUILD_PRUSA -eq 1 ]] || ! docker image inspect
   cd "$ROOT_DIR"
   docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base . 
   docker tag printfarmer/slicer-base:latest slicer-base:latest
+  # Tag alternate name used by worker Dockerfiles if present
+  docker tag printfarmer/slicer-base:latest printfarmer-slicer-base:latest || true
   docker build -f Dockerfile.prusaslicer -t printfarmer/prusaslicer-worker .
 fi
 
@@ -897,6 +911,12 @@ export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"
 export ConnectionStrings__Redis="$REDIS_URL"
 export ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING"
+# Backwards-compatible alias: some environments expect ConnectionStrings:Default
+# while others (historical) use ConnectionStrings:DefaultConnection. Export
+# both to avoid provider/connection-string mismatches (observed as Npgsql key
+# parsing errors when Postgres provider was selected but SQLite-style "Data
+# Source=..." connection string was used).
+export ConnectionStrings__Default="$DB_CONNECTION_STRING"
 export ENABLE_DISTRIBUTED_SLICING=true
 
 # Start API server
@@ -1026,6 +1046,26 @@ if [[ $NO_TESTS -eq 0 ]]; then
     else
       echo "$health_json"
     fi
+
+    # Provide additional diagnostics to surface root causes quickly
+    echo
+    warn "Dumping recent API logs to help diagnose the health failure (tail 200 lines):"
+    if [[ -f "$API_LOG" ]]; then
+      tail -n 200 "$API_LOG" || true
+    else
+      echo "(API log file not found: $API_LOG)"
+    fi
+
+    # If the worker containers exist, include their recent logs as well
+    if [[ -n "${ORCA_CONTAINER_ID:-}" ]]; then
+      warn "Recent Orca worker logs (docker logs --tail 200):"
+      docker logs --tail 200 "$ORCA_CONTAINER_ID" || true
+    fi
+    if [[ -n "${PRUSA_CONTAINER_ID:-}" ]]; then
+      warn "Recent Prusa worker logs (docker logs --tail 200):"
+      docker logs --tail 200 "$PRUSA_CONTAINER_ID" || true
+    fi
+
     exit 1
   fi
   

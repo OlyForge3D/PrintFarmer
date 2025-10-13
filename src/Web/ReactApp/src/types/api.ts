@@ -146,6 +146,17 @@ export interface PrinterSpoolInfo {
   last_used?: string;
 }
 
+// Combined printer identity with capabilities snapshot (mirrors shared DTO)
+export interface PrinterWithCapabilitiesDto {
+  printerId: string;
+  printerName: string;
+  printerModel: string;
+  capabilities?: PrinterCapabilitiesDto | null;
+  manufacturerName?: string | null;
+  backend?: PrinterBackend | null;
+  ipAddress?: string | null;
+}
+
 export interface FilamentInfo {
   id?: number;
   vendor?: VendorInfo;

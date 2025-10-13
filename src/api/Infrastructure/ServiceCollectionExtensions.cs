@@ -50,25 +50,28 @@ public static class ServiceCollectionExtensions
         });
 
         // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons
-        _ = services.AddDbContextFactory<AppDbContext>(options =>
+        // Build a DbContextOptions<AppDbContext> instance configured for the selected provider and
+        // register it as a Singleton so the factory and other singletons can consume it safely.
+        var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+        if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
-            if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseSqlServer(connectionString);
-            }
-            else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseNpgsql(connectionString);
-            }
-            else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-            }
-            else
-            {
-                _ = options.UseSqlite(connectionString);
-            }
-        });
+            _ = optionsBuilder.UseSqlServer(connectionString);
+        }
+        else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = optionsBuilder.UseNpgsql(connectionString);
+        }
+        else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+        }
+        else
+        {
+            _ = optionsBuilder.UseSqlite(connectionString);
+        }
+
+        _ = services.AddSingleton<DbContextOptions<AppDbContext>>(optionsBuilder.Options);
+        _ = services.AddDbContextFactory<AppDbContext>();
 
         return services;
     }

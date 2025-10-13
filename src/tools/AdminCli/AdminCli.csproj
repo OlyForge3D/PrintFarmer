@@ -5,5 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Farm.Tools.AdminCli</RootNamespace>
+    <!-- Avoid generating native apphost during build which can cause copy errors on some hosts -->
+    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
 </Project>

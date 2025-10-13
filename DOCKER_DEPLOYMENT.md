@@ -350,6 +350,16 @@ MONO_API_ENDPOINT=http://localhost:5001   # Monolithic API endpoint (used by wor
 
 If distributed slicing is disabled (`ENABLE_DISTRIBUTED_SLICING=false`) workers are ignored even if counts are set.
 
+### Pause slicer builds (new)
+
+If you want to pause automatic Orca/Prusa worker builds (for example when keeping slicing on hold), set the following in `.env.microservices` or export before running the deploy script:
+
+```bash
+DISABLE_SLICER_BUILDS=true
+```
+
+This causes the deploy script to force-disable worker flags and set worker counts to zero. To re-enable, set `DISABLE_SLICER_BUILDS=false` and configure the `ENABLE_*` flags and counts as required.
+
 - **Base Image:** redis:7-alpine
 - **Port:** 6379
 - **Purpose:** SignalR backplane for real-time updates

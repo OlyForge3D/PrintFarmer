@@ -19,6 +19,9 @@ permissions:
 jobs:
   tag-and-build:
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'release-${{ github.event.inputs.version }}'
+      cancel-in-progress: false
     steps:
       - name: Validate version
         run: |
@@ -26,12 +29,24 @@ jobs:
             echo "Version must be vX.Y.Z"; exit 1; fi
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Create tag
+      - name: Checkout (with PAT for push)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.REPO_PAT }}
+
+      - name: Create and push tag
         run: |
+          set -e
           git config user.name 'github-actions'
           git config user.email 'github-actions@github.com'
-          git tag ${GITHUB_EVENT_INPUTS_VERSION:-${{ github.event.inputs.version }}}
-          git push origin ${GITHUB_EVENT_INPUTS_VERSION:-${{ github.event.inputs.version }}}
+          TAG="${{ github.event.inputs.version }}"
+          echo "Creating and pushing tag $TAG"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; aborting to avoid overwrite."; exit 1
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
       - name: Call container workflow (API)
         run: echo "Containers workflow will run automatically on tag push."
   generate-release:

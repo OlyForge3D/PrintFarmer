@@ -1,0 +1,102 @@
+name: AppImage Preseed Uploader
+
+on:
+  workflow_dispatch:
+    inputs:
+      slicer:
+        description: 'Which slicer to fetch (prusa|orca)'
+        required: true
+        default: 'prusa'
+      version:
+        description: 'Version string (for Prusa: 2.8.0 or for Orca: 1.8.1). If empty, script will attempt to use latest release.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare environment
+        run: |
+          apt-get update && apt-get install -y curl jq ca-certificates || true
+
+      - name: Determine target
+        id: target
+        run: |
+          SLICER="${{ github.event.inputs.slicer }}"
+          VERSION_IN="${{ github.event.inputs.version }}"
+          if [ -z "$SLICER" ]; then echo "slicer=prusa" >> $GITHUB_OUTPUT; else echo "slicer=$SLICER" >> $GITHUB_OUTPUT; fi
+          echo "version=$VERSION_IN" >> $GITHUB_OUTPUT
+
+      - name: Fetch release info and download AppImage
+        id: download
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SLICER=${{ steps.target.outputs.slicer }}
+          VERSION_IN=${{ steps.target.outputs.version }}
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+
+          if [ "$SLICER" = "prusa" ]; then
+            REPO="prusa3d/PrusaSlicer"
+            ASSET_PATTERNS=("PrusaSlicer-" ".AppImage")
+            DEFAULT_EXT="PrusaSlicer-${VERSION_IN}+linux-x64-GTK3.AppImage"
+          else
+            REPO="SoftFever/OrcaSlicer"
+            ASSET_PATTERNS=("OrcaSlicer" "AppImage")
+          fi
+
+          API_URL="https://api.github.com/repos/${REPO}/releases"
+          AUTH_HEADER="-H Accept: application/vnd.github+json -H User-Agent: PrintFarmer-Preseed/1.0"
+          [ -n "${GITHUB_TOKEN:-}" ] && AUTH_HEADER="$AUTH_HEADER -H Authorization: Bearer ${GITHUB_TOKEN}"
+
+          echo "Querying releases for $REPO"
+          releases_json=$(curl -sS $AUTH_HEADER "$API_URL")
+
+          # Choose release by VERSION_IN if provided, else pick latest stable (non-prerelease)
+          if [ -n "$VERSION_IN" ]; then
+            tag_match="$VERSION_IN"
+            release_entry=$(echo "$releases_json" | jq -r --arg tag "$tag_match" '.[] | select(.tag_name==($tag) or .name==($tag) ) | .')
+          else
+            release_entry=$(echo "$releases_json" | jq -r '.[] | select(.prerelease==false) | .[0]' | head -n1)
+          fi
+
+          if [ -z "$release_entry" ] || [ "$release_entry" = "null" ]; then
+            echo "No release entry found for $SLICER $VERSION_IN" >&2
+            exit 2
+          fi
+
+          # Attempt to find a matching asset URL
+          asset_url=$(echo "$release_entry" | jq -r '.assets[]? | select(.name | test("AppImage" ; "i")) | .browser_download_url' | head -n1 || true)
+          if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
+            echo "No AppImage asset found in release; trying fallback listing" >&2
+            asset_url=$(curl -sS $AUTH_HEADER "$API_URL" | jq -r --arg tag "${VERSION_IN}" '.[] | select(.tag_name==($tag)) | .assets[]?.browser_download_url' | head -n1 || true)
+          fi
+
+          if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
+            echo "Unable to determine AppImage download URL for $REPO" >&2
+            exit 3
+          fi
+
+          echo "Downloading AppImage from: $asset_url"
+          # Save to known filename
+          OUTNAME="${SLICER}-appimage-${VERSION_IN:-latest}.AppImage"
+          curl -L -o "$OUTNAME" -fS "$asset_url"
+          ls -lh "$OUTNAME"
+          echo "artifact_name=$OUTNAME" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.download.outputs.artifact_name }}
+          path: ${{ steps.download.outputs.artifact_name }}
+
+      - name: Cleanup tmp
+        if: always()
+        run: |
+          rm -rf $TMPDIR || true

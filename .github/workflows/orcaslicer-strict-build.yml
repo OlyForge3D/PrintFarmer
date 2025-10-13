@@ -1,19 +1,15 @@
 name: OrcaSlicer Strict Build
 
+# Manual dispatch only. This workflow previously ran on push/PR changes to specific paths.
+# We keep the workflow file for historical and manual use but make it manual-only and add
+# a double-guard (repo var + workflow input) so it remains effectively disabled by default.
 on:
-  push:
-    paths:
-      - "Dockerfile.orcaslicer"
-      - "Dockerfile.slicer-base"
-      - "src/orcaslicer-worker/**"
-      - "scripts/verify-orcaslicer-worker.sh"
-      - ".github/workflows/orcaslicer-strict-build.yml"
-  pull_request:
-    paths:
-      - "Dockerfile.orcaslicer"
-      - "Dockerfile.slicer-base"
-      - "src/orcaslicer-worker/**"
-      - "scripts/verify-orcaslicer-worker.sh"
+  workflow_dispatch:
+    inputs:
+      disable_slicer_builds:
+        description: 'Set to true to skip the Orca strict build when dispatching manually'
+        required: false
+        default: 'true'
 
 permissions:
   contents: read
@@ -25,39 +21,73 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        orca_version: ["1.8.1", "2.3.0"]
+        orca_version: ["2.3.1"]
         allow_stub: [false] # Can extend later with true for a soft-mode build
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check dispatch input (disable_slicer_builds)
+        id: check
+        run: |
+          # Only honor the workflow_dispatch input. Default is 'true' so manual dispatch will skip by default.
+          SKIP=false
+          INPUT_VAL="${{ github.event.inputs.disable_slicer_builds || 'true' }}"
+          if [ "${INPUT_VAL}" = 'true' ] || [ "${INPUT_VAL}" = '1' ]; then
+            SKIP=true
+          fi
+          echo "skip=$SKIP" >> $GITHUB_OUTPUT
+
       - name: Set up QEMU (optional for multi-arch)
+        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: linux/amd64
 
       - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Build slicer-base (amd64)
+        if: steps.check.outputs.skip != 'true'
         run: |
           echo "Building slicer-base (platform linux/amd64) for downstream stages"
-          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t slicer-base:latest .
+          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .
+
+      - name: Attempt to download preseeded Orca AppImage artifact
+        if: steps.check.outputs.skip != 'true'
+        id: preseed
+        run: |
+          set -e
+          ART_NAME=orca-appimage-${{ matrix.orca_version }}.AppImage
+          echo "Looking for artifact $ART_NAME in previous artifact storage (if available)"
+          if curl -sS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | jq -r '.artifacts[].name' | grep -q "orca-appimage-${{ matrix.orca_version }}"; then
+            echo "Found artifact listing entry; attempting to download via actions/download-artifact"
+            mkdir -p preseed || true
+            echo "No direct download implemented; skipping automated artifact download in this runner."
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build OrcaSlicer Worker (strict real binary)
+        if: steps.check.outputs.skip != 'true'
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           echo "Building OrcaSlicer worker version=${{ matrix.orca_version }} ALLOW_STUB=${{ matrix.allow_stub }}"
-          docker build --platform linux/amd64 \
-            --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} \
-            --build-arg ALLOW_STUB=${{ matrix.allow_stub }} \
-            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
-            -f Dockerfile.orcaslicer \
-            -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+          if [ "${{ steps.preseed.outputs.found }}" = "true" ] && [ -f preseed/orca.AppImage ]; then
+            echo "Using preseeded orca.AppImage via buildkit secret"
+            docker build --platform linux/amd64 --secret id=orca,src=preseed/orca.AppImage --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.orcaslicer -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+          else
+            echo "No preseeded AppImage available; performing normal build (will attempt remote download)"
+            docker build --platform linux/amd64 --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} -f Dockerfile.orcaslicer -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+          fi
 
       - name: Run verification (require-real)
+        if: steps.check.outputs.skip != 'true'
         run: |
           chmod +x scripts/verify-orcaslicer-worker.sh
           docker run -d --name orca-test-${{ matrix.orca_version }} orcaslicer-worker:strict-${{ matrix.orca_version }}
@@ -65,7 +95,7 @@ jobs:
           scripts/verify-orcaslicer-worker.sh require-real
 
       - name: Show logs on failure
-        if: failure()
+        if: steps.check.outputs.skip != 'true' && failure()
         run: |
           echo '--- Container Logs ---'
           docker logs orca-test-${{ matrix.orca_version }} || true

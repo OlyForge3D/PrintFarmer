@@ -1,5 +1,6 @@
 ﻿using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
+using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -66,6 +67,8 @@ public static class Program
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
 
 
+        // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
+        _ = builder.Services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
         _ = builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Infrastructure.Telemetry.UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer derived)

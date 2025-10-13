@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { screen, waitFor, fireEvent } from '@testing-library/dom';
 import { cleanup, act } from '@testing-library/react';
 import { SpoolsPage } from '../../pages/SpoolsPage';
-import { BrowserRouter } from 'react-router-dom';
+import { TestRouter } from '@/test/utils/TestRouter';
 
 // Minimal fetch sequence mock
 interface MockResp { ok: boolean; status?: number; body?: unknown; }
@@ -22,7 +22,7 @@ function mockFetchSequence(responses: MockResp[]) {
 }
 
 function wrapper(children: React.ReactNode) {
-  return <BrowserRouter>{children}</BrowserRouter>;
+  return <TestRouter>{children}</TestRouter>;
 }
 
 describe('SpoolsPage column config', () => {

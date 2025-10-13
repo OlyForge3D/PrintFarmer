@@ -69,3 +69,15 @@ dotnet-install.sh.*
 # Deploy script generated compose files
 docker-compose.override.yml
 docker-compose.host-network.yml
+
+# Local Orca extraction artifacts (should not be committed)
+orca7z/
+orcaslicer_binary/
+
+# Local slicer assets and temporary build artifacts (do not commit)
+orcaslicer.AppImage
+orca_release_index.json
+build_context/
+orca_assets/
+prusa_preseed/
+

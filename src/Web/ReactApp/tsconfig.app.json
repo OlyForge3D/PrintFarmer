@@ -36,6 +36,9 @@
   ],
   "exclude": [
     "**/*.spec.*",
-    "**/*.spec.e2e.*"
+    "**/*.spec.e2e.*",
+    "src/test/**",
+    "src/**/*.test.*",
+    "src/**/__tests__/**"
   ]
 }

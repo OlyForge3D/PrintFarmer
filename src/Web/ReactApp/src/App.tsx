@@ -231,7 +231,25 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
-            <Router>
+            {/*
+              Enable react-router future flags to opt into upcoming behavior and silence
+              development warnings about future flags. These are safe opt-ins for our
+              current router version and recommended by react-router maintainers.
+            */}
+            <Router
+              // Future flags documented by react-router to opt into v7 behaviors. See
+              // https://reactrouter.com/en/main/upgrading/v6
+              future={{
+                // prevents double-slash when basename and paths are combined
+                v7_preventBasepathDoubleSlash: true,
+                // use route ids in path generation where applicable
+                v7_useIdInRoutePaths: true,
+                // wrap state updates in React.startTransition (opt-in for upcoming v7)
+                v7_startTransition: true,
+                // change relative path resolution in splat routes to v7 behavior
+                v7_relativeSplatPath: true,
+              }}
+            >
               <AuthenticatedAppRoutes />
             </Router>
             <ReactQueryDevtools initialIsOpen={false} />

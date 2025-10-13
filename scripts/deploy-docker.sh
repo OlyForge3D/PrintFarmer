@@ -34,6 +34,16 @@ if [ "${NON_INTERACTIVE:-}" = "1" ]; then
     NON_INTERACTIVE=true
 fi
 
+# Global guard: disable all slicer-related automatic builds when requested
+if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" = "1" ]; then
+    print_warning "DISABLE_SLICER_BUILDS is set; automatic Orca/Prusa worker builds will be disabled."
+    # Ensure variables exist so downstream logic respects the disable
+    ENABLE_ORCA_WORKER=no
+    ENABLE_PRUSA_WORKER=no
+    ORCA_WORKER_COUNT=0
+    PRUSA_WORKER_COUNT=0
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1304,7 +1314,8 @@ configure_additional() {
     if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
         echo
         echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer and/or PrusaSlicer workers and specify replica counts.${NC}"
-        prompt_yes_no "Enable OrcaSlicer worker(s)?" "yes" "ENABLE_ORCA_WORKER"
+    # Default to 'no' to avoid accidental enabling when slicer work is paused
+    prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
         else
@@ -1878,6 +1889,59 @@ deploy_containers() {
     if [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
     else
+        # ----- Prepare optional slicer assets ---------------------------------
+        # ORCA_ASSET_IMAGE  -> name of a prebuilt assets image (registry or local)
+        # ORCA_ASSET_PATH   -> local path containing extracted orcaslicer files (orca7z/ or orcaslicer-dist/)
+        # ORCA_ASSET_URL    -> URL to download an asset (handled as needed)
+        # PRUSA_PRESEED_PATH/URL/IMAGE similar for Prusa
+        ORCA_ASSET_IMAGE=${ORCA_ASSET_IMAGE:-}
+        ORCA_ASSET_PATH=${ORCA_ASSET_PATH:-}
+        ORCA_ASSET_URL=${ORCA_ASSET_URL:-}
+        PRUSA_PRESEED_PATH=${PRUSA_PRESEED_PATH:-}
+        PRUSA_PRESEED_URL=${PRUSA_PRESEED_URL:-}
+
+        # Prepare a temporary build_context folder that will be used by docker compose build
+        BUILD_CTX_DIR="./.tmp_build_context"
+        mkdir -p "$BUILD_CTX_DIR"
+
+        if [ -n "$ORCA_ASSET_IMAGE" ]; then
+            print_info "Using Orca assets image: $ORCA_ASSET_IMAGE"
+            docker pull "$ORCA_ASSET_IMAGE" || print_warning "Failed to pull $ORCA_ASSET_IMAGE; continuing and hoping it's local"
+            # Tag locally so Dockerfile can refer to orcaslicer-assets:ci
+            docker tag "$ORCA_ASSET_IMAGE" orcaslicer-assets:ci || true
+        elif [ -n "$ORCA_ASSET_PATH" ]; then
+            if [ -d "$ORCA_ASSET_PATH" ]; then
+                print_info "Copying Orca assets from $ORCA_ASSET_PATH into temporary build context"
+                rm -rf "$BUILD_CTX_DIR/orca" || true
+                mkdir -p "$BUILD_CTX_DIR/orca"
+                cp -a "$ORCA_ASSET_PATH"/. "$BUILD_CTX_DIR/orca/"
+            else
+                print_warning "ORCA_ASSET_PATH '$ORCA_ASSET_PATH' not found; skipping"
+            fi
+        elif [ -n "$ORCA_ASSET_URL" ]; then
+            print_info "Downloading Orca asset from $ORCA_ASSET_URL into temporary build context"
+            mkdir -p "$BUILD_CTX_DIR/orca" && curl -fsSL "$ORCA_ASSET_URL" -o "$BUILD_CTX_DIR/orca/orca_asset" || print_warning "Download failed"
+            # Extraction logic could be added here depending on asset type
+        fi
+
+        # Copy prusa preseed artifact into build context if provided
+        if [ -n "$PRUSA_PRESEED_PATH" ] && [ -d "$PRUSA_PRESEED_PATH" ]; then
+            print_info "Copying Prusa preseed from $PRUSA_PRESEED_PATH into temporary build context"
+            rm -rf "$BUILD_CTX_DIR/prusa" || true
+            mkdir -p "$BUILD_CTX_DIR/prusa"
+            cp -a "$PRUSA_PRESEED_PATH"/. "$BUILD_CTX_DIR/prusa/"
+        elif [ -n "$PRUSA_PRESEED_URL" ]; then
+            print_info "Downloading Prusa preseed from $PRUSA_PRESEED_URL into temporary build context"
+            mkdir -p "$BUILD_CTX_DIR/prusa" && curl -fsSL "$PRUSA_PRESEED_URL" -o "$BUILD_CTX_DIR/prusa/prusa_artifact" || print_warning "Download failed"
+        fi
+
+        # If we prepared files into .tmp_build_context, make them available to docker-compose by copying into repo root under build_context/
+        if [ -d "$BUILD_CTX_DIR" ]; then
+            rm -rf ./build_context || true
+            mv "$BUILD_CTX_DIR" ./build_context
+            print_info "Prepared temporary build_context at ./build_context"
+        fi
+
         # Build slicer-base first if workers are enabled (required dependency)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ] || [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
             print_info "Building printfarmer-slicer-base image (required for worker containers)..."

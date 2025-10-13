@@ -195,6 +195,16 @@ Disable entirely:
 ENABLE_DISTRIBUTED_SLICING=false
 ```
 
+Pause slicer builds (new):
+
+If you want to pause any automatic slicer builds and prevent the deploy scripts/CI from building or starting Orca/Prusa workers, set:
+
+```bash
+DISABLE_SLICER_BUILDS=true
+```
+
+When this is set the deploy script will force-disable worker flags and set worker counts to 0. To re-enable, set `DISABLE_SLICER_BUILDS=false` and then configure `ENABLE_ORCA_WORKER` / `ENABLE_PRUSA_WORKER` with desired counts.
+
 ---
 ## 📚 Catalog Normalization & Duplicate Handling (Deployment Notes)
 

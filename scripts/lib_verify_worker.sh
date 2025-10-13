@@ -61,7 +61,22 @@ vw_require_docker() {
 
 vw_start_container() {
   vw_log "Starting ephemeral container (${IMAGE}) mode=${MODE}..."
-  ID=$(docker run -d --rm --name "${CONTAINER_NAME}" "${IMAGE}" 2>/dev/null || true)
+  # If ORCA_REDIS was provided by caller or discovered, forward it as ConnectionStrings__Redis
+  local docker_envs=()
+  if [[ -n "${ORCA_REDIS-}" ]]; then
+    docker_envs+=( -e "ConnectionStrings__Redis=${ORCA_REDIS}" )
+  elif [[ "${DISCOVER_REDIS-}" == "true" ]]; then
+    # try to discover a container named printfarmer-redis-distributed on the default bridge network
+    if docker inspect printfarmer-redis-distributed >/dev/null 2>&1; then
+      local ip
+      ip=$(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' printfarmer-redis-distributed 2>/dev/null || true)
+      if [[ -n "${ip}" ]]; then
+        docker_envs+=( -e "ConnectionStrings__Redis=${ip}:6379" )
+      fi
+    fi
+  fi
+
+  ID=$(docker run -d --rm --name "${CONTAINER_NAME}" ${docker_envs[*]} "${IMAGE}" 2>/dev/null || true)
   if [ -z "${ID}" ]; then vw_err "Failed to start container from image '${IMAGE}'."; exit 3; fi
   cleanup() { docker kill "${CONTAINER_NAME}" >/dev/null 2>&1 || true; }; trap cleanup EXIT
 }
