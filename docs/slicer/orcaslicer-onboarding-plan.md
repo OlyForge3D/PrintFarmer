@@ -34,6 +34,18 @@ Tasks
 - [ ] Emit SignalR event `SlicerServiceUpdated` when list changes
 - [ ] Add unit/integration tests for registration/heartbeat
 - [ ] Add admin UI page under `/settings/slicers` to view/disable services
+  
+Additional registry & auth details
+-- API routes (Phase 1):
+  - POST `/api/slicers/register` — body: RegisterSlicerDto. Returns { id, apiKey }.
+  - GET `/api/slicers` — list registered services.
+  - GET `/api/slicers/{id}` — get single service.
+  - POST `/api/slicers/{id}/heartbeat` — heartbeat payload: { status, freeSlots }.
+  - POST `/api/slicers/{id}/deregister` — deregister service.
+
+- SignalR hub: `/hubs/slicers` with events `SlicerRegistered`, `SlicerHeartbeat`, `SlicerDeregistered` (see `docs/slicer/hub-contract.md`).
+
+- Optional lightweight auth (Phase 1): set environment variable `SLICER_REGISTRATION_KEY` on the API host to require header `X-Slicer-ApiKey` for register/heartbeat/deregister.
 
 Acceptance criteria
 - Services can register and appear in `/api/slicers`

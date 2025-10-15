@@ -1,14 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Importing.Services.Adapters;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using FluentValidation.Results;
 using Microsoft.EntityFrameworkCore;
-using Farm.Importing.Services.Adapters;
 
 namespace Farm.Importing.Services.Import;
 
@@ -117,8 +117,15 @@ public class ImportProcessorService : IImportProcessorService
         if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
         {
             (Guid defMan, Guid defModel) = await _defaultCatalog.GetDefaultCatalogIdsAsync();
-            if (manufacturerId == Guid.Empty) manufacturerId = defMan;
-            if (modelId == Guid.Empty) modelId = defModel;
+            if (manufacturerId == Guid.Empty)
+            {
+                manufacturerId = defMan;
+            }
+
+            if (modelId == Guid.Empty)
+            {
+                modelId = defModel;
+            }
         }
 
         int defaultPort = dto.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 7125;

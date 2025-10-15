@@ -1,10 +1,10 @@
-﻿using Xunit;
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Farm.Infrastructure.Telemetry;
+using Xunit;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
 

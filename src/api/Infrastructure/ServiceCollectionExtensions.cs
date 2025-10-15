@@ -122,7 +122,19 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
         _ = services.AddSingleton<ICircuitBreakerService, CircuitBreakerService>();
         // SystemLogCleanupService is a background worker; register as hosted service
-        _ = services.AddHostedService<SystemLogCleanupService>();
+        // Skip background hosted services during tests when TEST_DISABLE_BACKGROUND_SERVICES is set.
+        bool disableBg = false;
+        try
+        {
+            var env = Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES");
+            disableBg = !string.IsNullOrEmpty(env) && (string.Equals(env, "true", StringComparison.OrdinalIgnoreCase) || env == "1");
+        }
+        catch { }
+
+        if (!disableBg)
+        {
+            _ = services.AddHostedService<SystemLogCleanupService>();
+        }
         _ = services.AddScoped<DatabaseInitializer>();
         _ = services.AddScoped<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer, DatabaseInitializer>();
         // NetworkUrlRewriteService is stateless and depends on IConfiguration and logging - safe as a Singleton
@@ -181,10 +193,13 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
 
         // Background worker to process harvest file jobs from the queue
-        _ = services.AddHostedService<HarvestWorkerService>();
+        if (!disableBg)
+        {
+            _ = services.AddHostedService<HarvestWorkerService>();
 
-        // Realtime update service for Klipper/Moonraker printers
-        _ = services.AddHostedService<MoonrakerSubscriptionService>();
+            // Realtime update service for Klipper/Moonraker printers
+            _ = services.AddHostedService<MoonrakerSubscriptionService>();
+        }
         return services;
     }
 }

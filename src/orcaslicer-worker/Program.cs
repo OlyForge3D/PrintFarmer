@@ -1,6 +1,6 @@
-﻿using Farm.OrcaSlicer.Worker.Health;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;

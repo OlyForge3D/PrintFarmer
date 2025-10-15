@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -22,7 +23,6 @@ using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Reflection;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -77,7 +77,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     private static string NormalizeServerUrl(string? input, int defaultPort)
     {
         if (string.IsNullOrWhiteSpace(input))
+        {
             return string.Empty;
+        }
+
         string trimmed = input.Trim();
         // Ensure scheme
         if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -2644,7 +2647,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         System.IO.Pipelines.PipeWriter pipeWriter = Response.BodyWriter;
         await WriteCsvHeaderAsync(pipeWriter, headerParts, ct);
 
-    await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
+        await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
         {
             capabilities.TryGetValue(p.Id, out PrinterCapabilities? cap);
 
@@ -2679,7 +2682,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         Response.Headers["Content-Disposition"] = $"attachment; filename=printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
         await using Utf8JsonWriter writer = new Utf8JsonWriter(Response.BodyWriter);
         writer.WriteStartArray();
-    await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
+        await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
         {
             capabilities.TryGetValue(p.Id, out PrinterCapabilities? cap);
             Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p, cap);
@@ -2708,7 +2711,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         if (file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
         {
-                (CreatePrinterDto[] dtos, List<string> parseErrors) = await _importParser.ParseCsvAsync(file.OpenReadStream(), ct);
+            (CreatePrinterDto[] dtos, List<string> parseErrors) = await _importParser.ParseCsvAsync(file.OpenReadStream(), ct);
             if (parseErrors.Count > 0)
             {
                 return BadRequest(string.Join(';', parseErrors));
@@ -2773,7 +2776,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
         List<BulkImportResultItem> results = new();
 
-    foreach ((CreatePrinterDto dto, int idx) in dtos.Select((d, i) => (d, i)))
+        foreach ((CreatePrinterDto dto, int idx) in dtos.Select((d, i) => (d, i)))
         {
             try
             {
@@ -2987,11 +2990,15 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
                     {
                         System.Reflection.PropertyInfo? pi = capType.GetProperty(jp.Name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
                         if (pi == null)
+                        {
                             continue;
+                        }
 
                         ImportExportAttribute? attr = pi.GetCustomAttribute<ImportExportAttribute>(inherit: true);
                         if (attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0)
+                        {
                             continue;
+                        }
 
                         capPropsForCsv.Add(jp.Name);
                         capPropInfos.Add(pi);
@@ -3019,7 +3026,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
 
     private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p, PrinterCapabilities? cap)
     {
-            Dictionary<string, object?> dtoDict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, object?> dtoDict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         dtoDict["printerId"] = p.Id;
         dtoDict["printerName"] = p.Name;
         dtoDict["printerModel"] = p.Model?.Name ?? string.Empty;

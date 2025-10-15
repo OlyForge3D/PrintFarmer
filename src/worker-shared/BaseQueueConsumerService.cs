@@ -165,7 +165,7 @@ public abstract class BaseQueueConsumerService(
         var executed = await tran.ExecuteAsync();
         if (!executed)
         {
-            _logger.LogError($"Failed to rebuild processing list { _processingKey } during cleanup for job { jobId }");
+            _logger.LogError($"Failed to rebuild processing list {_processingKey} during cleanup for job {jobId}");
         }
     }
 }

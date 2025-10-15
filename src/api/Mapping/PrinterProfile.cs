@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using AutoMapper;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;

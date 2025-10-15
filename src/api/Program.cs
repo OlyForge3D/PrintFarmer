@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -28,7 +29,6 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Json;
-using AutoMapper;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -166,8 +166,22 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configure OpenTelemetry
-builder.Services.AddOpenTelemetry()
+// Configure OpenTelemetry (skippable for tests)
+bool disableTelemetry = false;
+try
+{
+    string? disableEnv = Environment.GetEnvironmentVariable("DISABLE_TELEMETRY");
+    if (!string.IsNullOrEmpty(disableEnv) && string.Equals(disableEnv, "true", StringComparison.OrdinalIgnoreCase))
+    {
+        disableTelemetry = true;
+    }
+}
+catch { /* best-effort */ }
+
+// Also skip telemetry when running under the 'Testing' environment to avoid external exporters
+if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
     {
         _ = resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
@@ -257,6 +271,8 @@ builder.Services.AddOpenTelemetry()
             });
         }
     });
+
+} // end skip-telemetry guard
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
@@ -390,7 +406,22 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 
 // Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
 #pragma warning disable S1075 // URIs should not be hardcoded
-builder.WebHost.UseUrls("http://0.0.0.0:5245");
+// Only bind HTTP listener in non-testing environments. When running integration
+// tests via WebApplicationFactory/TestServer the test host provides its own
+// in-memory server; calling UseUrls here can interfere with TestServer and
+// result in "server has not been started" errors in CreateClient().
+try
+{
+    var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+    if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
+    {
+        builder.WebHost.UseUrls("http://0.0.0.0:5245");
+    }
+}
+catch
+{
+    // Best-effort; do not fail startup if env APIs are not available in some hosts
+}
 #pragma warning restore S1075 // URIs should not be hardcoded
 // Capture a few startup/root services from the service collection before building the
 // final application service provider. This avoids sprinkling `app.Services.GetService`
@@ -403,7 +434,27 @@ Microsoft.Extensions.Logging.ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
 Farm.Web.Api.Services.Interfaces.IStartupStatus? _capturedStartupStatus = null;
 
-WebApplication app = builder.Build();
+WebApplication app;
+try
+{
+    app = builder.Build();
+}
+catch (Exception ex)
+{
+    try
+    {
+        var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+#pragma warning disable CA1303
+            Console.WriteLine("Program.cs: Build() threw during test startup:");
+            Console.WriteLine(ex.ToString());
+#pragma warning restore CA1303
+        }
+    }
+    catch { }
+    throw;
+}
 
 // Populate previously-deferred startup captures using the built application service provider.
 // Use CreateAsyncScope to resolve scoped/singleton services safely without calling BuildServiceProvider on the service collection.
@@ -499,6 +550,8 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
+// Expose Slicer progress hub for slicer registry and progress events
+app.MapHub<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>("/hubs/slicers");
 
 // Health checks
 // Capture host environment and resolve startup status from the root service provider (app.Services)
@@ -715,9 +768,57 @@ if (isMonolithicDeployment)
 
 // Initialize database (ensures schema exists before resolving SettingsService)
 // Delegate initialization to ProgramHelpers to keep Program.cs minimal and avoid nested blocks (addresses S1199)
-await ProgramHelpers.InitializeDatabaseAsync(app);
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    try
+    {
+        await ProgramHelpers.InitializeDatabaseAsync(app);
+    }
+    catch (Exception ex)
+    {
+        try
+        {
+            var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+            {
+#pragma warning disable CA1303
+                Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");
+                Console.WriteLine(ex.ToString());
+#pragma warning restore CA1303
+            }
+        }
+        catch { }
+        throw;
+    }
+}
+else
+{
+    try
+    {
+#pragma warning disable CA1303
+        Console.WriteLine("Program.cs: Skipping InitializeDatabaseAsync because environment is Testing");
+#pragma warning restore CA1303
+    }
+    catch { }
+}
 
-await app.RunAsync();
+// In test environments the test host (WebApplicationFactory/TestServer) manages the server lifecycle.
+// Avoid calling RunAsync when running under the 'Testing' environment to prevent interfering with the test host.
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    await app.RunAsync();
+}
+else
+{
+    // Signal that the app would have run in non-test environments. Keep the task completed for top-level return.
+    try
+    {
+#pragma warning disable CA1303
+        Console.WriteLine("Program.cs: Skipping app.RunAsync() because environment is Testing");
+#pragma warning restore CA1303
+    }
+    catch { }
+}
 
 // Expose Program for WebApplicationFactory in tests
 [SuppressMessage("Design", "CA1052:Static holder types should be Static or NotInheritable", Justification = "Public partial Program required for WebApplicationFactory in tests and minimal hosting model.")]
@@ -730,6 +831,31 @@ public partial class Program
         WriteIndented = false
     };
     protected Program() { }
+}
+
+// Small test-only startup filter used from Program when running under Testing
+namespace Farm.Web.Api.Testing
+{
+    internal sealed class TestStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        private readonly System.Action _onConfigure;
+
+        public TestStartupFilter(System.Action onConfigure)
+        {
+            _onConfigure = onConfigure ?? throw new System.ArgumentNullException(nameof(onConfigure));
+        }
+
+        public System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next)
+        {
+            return app =>
+            {
+                try
+                { _onConfigure(); }
+                catch { }
+                next(app);
+            };
+        }
+    }
 }
 
 

@@ -9,20 +9,20 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
     public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "TestScheme";
-    // Adapter to provide the (obsolete) ISystemClock interface from a TimeProvider instance.
-    // This adapter is required because the AuthenticationHandler base in the project's
-    // referenced ASP.NET assemblies currently expects an ISystemClock. To fully remove
-    // this adapter we'd need to upgrade the ASP.NET packages to a version that supports
-    // TimeProvider in the base constructor.
+        // Adapter to provide the (obsolete) ISystemClock interface from a TimeProvider instance.
+        // This adapter is required because the AuthenticationHandler base in the project's
+        // referenced ASP.NET assemblies currently expects an ISystemClock. To fully remove
+        // this adapter we'd need to upgrade the ASP.NET packages to a version that supports
+        // TimeProvider in the base constructor.
 #pragma warning disable CS0618
-    private sealed class TimeProviderSystemClock : Microsoft.AspNetCore.Authentication.ISystemClock
-    {
-        private readonly TimeProvider _tp;
-        public TimeProviderSystemClock(TimeProvider tp) => _tp = tp ?? TimeProvider.System;
-        public DateTimeOffset UtcNow => _tp.GetUtcNow();
-    }
+        private sealed class TimeProviderSystemClock : Microsoft.AspNetCore.Authentication.ISystemClock
+        {
+            private readonly TimeProvider _tp;
+            public TimeProviderSystemClock(TimeProvider tp) => _tp = tp ?? TimeProvider.System;
+            public DateTimeOffset UtcNow => _tp.GetUtcNow();
+        }
 #pragma warning restore CS0618
-        #pragma warning disable CS0618 // using adapter for ISystemClock for current ASP.NET ref
+#pragma warning disable CS0618 // using adapter for ISystemClock for current ASP.NET ref
         public TestAuthHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
             ILoggerFactory logger,
@@ -30,7 +30,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
             : base(options, logger, encoder, new TimeProviderSystemClock(options.CurrentValue.TimeProvider ?? TimeProvider.System))
         {
         }
-        #pragma warning restore CS0618
+#pragma warning restore CS0618
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {

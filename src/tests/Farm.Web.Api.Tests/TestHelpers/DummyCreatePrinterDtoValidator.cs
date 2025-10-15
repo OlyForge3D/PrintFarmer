@@ -1,5 +1,5 @@
+﻿using Farm.Web.Shared;
 using FluentValidation;
-using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.TestHelpers;
 

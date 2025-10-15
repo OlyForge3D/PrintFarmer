@@ -1,10 +1,10 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Linq;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
-using System.Linq;
 
 namespace Farm.Web.Api.Infrastructure;
 

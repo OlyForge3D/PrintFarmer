@@ -29,6 +29,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Model3D> Models3D => Set<Model3D>();
     public DbSet<SlicerProfile> SlicerProfiles => Set<SlicerProfile>();
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
+    public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -506,6 +507,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.IsDefault);
             b.HasIndex(p => p.IsPublic);
             b.HasIndex(p => p.CreatedByUserId);
+        });
+
+        // Slicer Service (Registry) Entity Configuration
+        modelBuilder.Entity<SlicerService>(b =>
+        {
+            b.HasKey(s => s.Id);
+            b.Property(s => s.Name).IsRequired().HasMaxLength(200);
+            b.Property(s => s.Version).HasMaxLength(64);
+            b.Property(s => s.Host).HasMaxLength(512);
+            b.Property(s => s.UiManifestUrl).HasMaxLength(512);
+            b.Property(s => s.CapabilitiesJson).HasColumnType("TEXT");
+            b.Property(s => s.Status).HasMaxLength(64);
+            b.Property(s => s.ApiKey).HasMaxLength(128);
+            b.HasIndex(s => s.Name);
+            b.HasIndex(s => s.SlicerType);
+            b.HasIndex(s => s.Status);
         });
 
         modelBuilder.Entity<PasswordPolicy>(b =>

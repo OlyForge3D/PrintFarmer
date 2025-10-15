@@ -17,6 +17,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
 import PrintersAdminPage from '@/pages/admin/PrintersAdminPage';
+import SlicersAdminPage from '@/pages/admin/SlicersAdminPage';
 import LogsPage from './pages/logs/LogsPage';
 import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
 import { SpoolsPage } from '@/pages/SpoolsPage';
@@ -119,6 +120,14 @@ function AuthenticatedAppRoutes() {
           element={
             <ProtectedRoute requiredRole="farm_admin">
               <PrintersAdminPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/slicers"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <SlicersAdminPage />
             </ProtectedRoute>
           }
         />

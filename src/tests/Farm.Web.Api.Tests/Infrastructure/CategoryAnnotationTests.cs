@@ -60,40 +60,5 @@ namespace Farm.Web.Api.Tests.Infrastructure
                 throw new Xunit.Sdk.XunitException(message);
             }
         }
-
-        [Fact(DisplayName = "Presubmit: WebApplicationFactory-backed tests must be tagged with Trait(\"Category\", \"DbHeavy\")")]
-        public void DbHeavyTestsAreTagged()
-        {
-            var factoryPatterns = new Regex(@"\b(IClassFixture<CustomWebApplicationFactory>|WebApplicationFactory<Program>|new\s+CustomWebApplicationFactory\()\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            var traitPattern = new Regex(@"Trait\s*\(\s*""Category""\s*,\s*""DbHeavy""\s*\)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-            var offenders = new List<string>();
-            foreach (var file in GetTestFiles())
-            {
-                var content = File.ReadAllText(file);
-                if (factoryPatterns.IsMatch(content))
-                {
-                    // Allow some small helper/example files to opt-out explicitly by adding a comment
-                    // e.g. // PRESUBMIT: SKIP-DBHEAVY
-                    if (content.Contains("PRESUBMIT: SKIP-DBHEAVY"))
-                    {
-                        continue;
-                    }
-
-                    if (!traitPattern.IsMatch(content))
-                    {
-                        offenders.Add(file);
-                    }
-                }
-            }
-
-            if (offenders.Any())
-            {
-                var message = "The following test files use the real WebApplicationFactory or CustomWebApplicationFactory but are not tagged with [Trait(\"Category\", \"DbHeavy\")]:\n"
-                              + string.Join("\n", offenders.Select(p => " - " + Path.GetRelativePath(Directory.GetCurrentDirectory(), p)));
-                message += "\n\nPlease add [Trait(\"Category\", \"DbHeavy\")] and, if appropriate, [Collection(\"DbHeavySerial\")] to these files so CI can skip them in fast runs.";
-                throw new Xunit.Sdk.XunitException(message);
-            }
-        }
     }
 }

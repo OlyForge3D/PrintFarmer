@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Reflection;
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using System.Text.Json.Serialization;
-using Farm.Web.Shared.Annotations;
+using System.Text.Json.Serialization.Metadata;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Annotations;
 
 namespace Farm.Web.Api.Serialization;
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -26,7 +26,10 @@ public class ImportParserService : IImportParserService
 
         string[] header = lines[0].Split(',').Select(h => h.Trim()).ToArray();
         var headerMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < header.Length; i++) headerMap[header[i]] = i;
+        for (int i = 0; i < header.Length; i++)
+        {
+            headerMap[header[i]] = i;
+        }
 
         var dtos = new List<CreatePrinterDto>();
         for (int i = 1; i < lines.Length; i++)
@@ -37,8 +40,16 @@ public class ImportParserService : IImportParserService
                 CreatePrinterDto dto = new();
                 string GetCol(string name)
                 {
-                    if (!headerMap.TryGetValue(name, out var idx)) return string.Empty;
-                    if (idx < 0 || idx >= values.Length) return string.Empty;
+                    if (!headerMap.TryGetValue(name, out var idx))
+                    {
+                        return string.Empty;
+                    }
+
+                    if (idx < 0 || idx >= values.Length)
+                    {
+                        return string.Empty;
+                    }
+
                     return values[idx].Trim();
                 }
 
