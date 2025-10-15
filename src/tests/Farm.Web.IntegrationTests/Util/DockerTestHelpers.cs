@@ -1,10 +1,11 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Xunit.Abstractions;
 
-namespace Farm.Web.Api.Tests.Util;
+namespace Farm.Web.IntegrationTests.Util;
 
 /// <summary>
 /// Shared helper utilities for Docker-based integration tests providing adaptive polling.
+/// Copied into the integration project so it is self-contained.
 /// </summary>
 public static class DockerTestHelpers
 {

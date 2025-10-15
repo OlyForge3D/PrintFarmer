@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   <NoWarn>$(NoWarn);S2699</NoWarn>
+  <!-- Default quick-run filter: exclude Docker tests unless explicitly overridden -->
+  <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <!-- Enable deterministic per-project coverlet outputs (lcov) so CI can merge them predictably -->
@@ -42,5 +44,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\..\shared\Farm.Web.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->
+  <ItemGroup>
+    <Compile Remove="SlicerServices\OrcaSlicerDockerIntegrationTests.cs" />
+    <Compile Remove="SlicerServices\PrusaSlicerDockerIntegrationTests.cs" />
+    <Compile Remove="SlicerServices\SlicerWorkerDockerCommonTests.cs" />
+    <Compile Remove="Util\DockerTestHelpers.cs" />
   </ItemGroup>
 </Project>

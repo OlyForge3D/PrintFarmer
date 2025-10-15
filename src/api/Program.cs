@@ -86,8 +86,23 @@ builder.Services.AddScoped<Farm.Importing.Services.Adapters.IDefaultCatalogAdapt
 // Register the importing project's processor implementation now that it uses adapter abstractions
 builder.Services.AddScoped<Farm.Importing.Services.Import.IImportProcessorService, Farm.Importing.Services.Import.ImportProcessorService>();
 
+// Schema health service (thin wrapper around DB readiness checks)
+builder.Services.AddScoped<Farm.Web.Api.Services.SchemaHealth.ISchemaHealthService, Farm.Web.Api.Services.SchemaHealth.SchemaHealthService>();
+// Schema health repository (data access layer)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Web.Api.Repositories.SchemaHealth.SchemaHealthRepository>();
+
+// SignalR test service
+builder.Services.AddScoped<Farm.Web.Api.Services.SignalR.ISignalRTestService, Farm.Web.Api.Services.SignalR.SignalRTestService>();
+
+// Password policy service + repository
+builder.Services.AddScoped<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService, Farm.Web.Api.Services.PasswordPolicy.PasswordPolicyService>();
+builder.Services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Web.Api.Repositories.PasswordPolicy.PasswordPolicyRepository>();
+
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
+
+// Unit of Work (scoped per-request) to share AppDbContext across repositories
+builder.Services.AddScoped<Farm.Web.Api.Infrastructure.UnitOfWork.IUnitOfWork, Farm.Web.Api.Infrastructure.UnitOfWork.UnitOfWork>();
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.

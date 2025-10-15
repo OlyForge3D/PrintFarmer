@@ -2,7 +2,7 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Moq;
 
-namespace Farm.Web.Api.Tests
+namespace Farm.Web.Api.Tests.Minimal
 {
     // Minimal compatibility CustomWebApplicationFactory providing the helper
     // methods many tests rely on. These are intentionally simple/no-op

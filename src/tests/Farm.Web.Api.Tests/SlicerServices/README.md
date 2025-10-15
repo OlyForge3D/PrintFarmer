@@ -36,6 +36,10 @@ Worker-specific / cross-stack behavior still lives in:
 - `PrusaSlicerDockerIntegrationTests`
 - `OrcaSlicerDockerIntegrationTests`
 - Mixed / microservices composition: e.g. combined health start test
+Worker-specific / cross-stack behavior has been moved to the dedicated integration test project:
+- `src/tests/Farm.Web.IntegrationTests/SlicerServices/PrusaSlicerDockerIntegrationTests.cs`
+- `src/tests/Farm.Web.IntegrationTests/SlicerServices/OrcaSlicerDockerIntegrationTests.cs`
+- Mixed / microservices composition: see the integration project for combined health/start tests
 
 Removed / skipped tests: Redundant Prusa-only binary & version tests were removed after consolidation.
 
