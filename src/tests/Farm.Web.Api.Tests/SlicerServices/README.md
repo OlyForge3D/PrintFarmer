@@ -32,14 +32,13 @@ orcaslicer-worker (port 8081, /usr/local/bin/orcaslicer)
 ```
 
 ### Per-Worker Tests
-Worker-specific / cross-stack behavior still lives in:
-- `PrusaSlicerDockerIntegrationTests`
-- `OrcaSlicerDockerIntegrationTests`
-- Mixed / microservices composition: e.g. combined health start test
-Worker-specific / cross-stack behavior has been moved to the dedicated integration test project:
+Worker-specific / cross-stack behavior has been moved to the dedicated integration test project. See the integration project for all Docker-backed slicer worker tests:
+
 - `src/tests/Farm.Web.IntegrationTests/SlicerServices/PrusaSlicerDockerIntegrationTests.cs`
 - `src/tests/Farm.Web.IntegrationTests/SlicerServices/OrcaSlicerDockerIntegrationTests.cs`
-- Mixed / microservices composition: see the integration project for combined health/start tests
+- `src/tests/Farm.Web.IntegrationTests/SlicerServices/SlicerWorkerDockerCommonTests.cs`
+
+Note: The tests were intentionally moved out of `Farm.Web.Api.Tests` to keep the fast-running API test project free of Docker dependencies. Use the integration project when you need to run Docker-backed tests.
 
 Removed / skipped tests: Redundant Prusa-only binary & version tests were removed after consolidation.
 
@@ -56,8 +55,9 @@ Hard-coded long `Task.Delay` sequences caused slow / flaky builds. Adaptive poll
 - Fails fast when a service will not become ready
 
 ### Running Only Non-Docker Tests
-Use a trait exclusion (example):
-```
+By default the API test project no longer includes Docker-backed tests. To exclude Docker tests in other projects you can use a trait exclusion (example):
+
+```bash
 dotnet test --filter "Category!=Docker"
 ```
 
