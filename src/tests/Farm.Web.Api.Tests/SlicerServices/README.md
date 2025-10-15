@@ -1,15 +1,6 @@
-## Slicer Services Test Strategy
+## Slicer Services Test Strategy (archival)
 
-This folder contains integration and Docker-based tests for the PrusaSlicer and OrcaSlicer workers.
-
-### Goals
-1. Validate per-worker functionality (queue integration, progress notifications, local storage, etc.).
-2. Exercise Docker images for each slicer worker to ensure:
-   - Image builds successfully
-   - Binary is present & executable
-   - Environment variables are wired correctly
-   - (Where exposed) health endpoints become responsive within adaptive timeout windows
-3. Avoid duplication while keeping per-worker failure signals clear.
+Docker-backed slicer worker tests were moved to the dedicated integration test project to keep the fast-running API test project Docker-free. This folder is retained for historical context. Active Docker-backed tests are now under `src/tests/Farm.Web.IntegrationTests/SlicerServices/`.
 
 ### Shared Docker Testing Pattern
 Earlier each worker had its own copy of Docker command + polling logic. These were consolidated into:
