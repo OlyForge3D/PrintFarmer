@@ -197,6 +197,28 @@ The following small-scope refactor and validation work was completed on branch `
   - `src/tests/Farm.Web.Api.Tests/Controllers/MoonrakerDiagnosticsControllerTests.cs` — controller mapping tests for success and failure.
 - Small frontend test fix to satisfy ESLint in `src/Web/ReactApp/src/test/pages/admin/SlicersAdminPage.test.tsx` so frontend tests run cleanly.
 
+### Recent progress (Spoolman Phase 2)
+
+- Added initial Phase 2 test coverage for `SpoolmanService` (branch: `feature/orcaslicer-reimplementation`):
+  - `src/tests/Farm.Web.Api.Tests/Services/SpoolmanServiceTests.cs` — tests added for:
+    - Unconfigured behavior (returns empty list and logs debug)
+    - Candidate endpoint success path (returns items from a candidate endpoint)
+    - Pagination across multiple pages using `next` links (combines results across pages)
+    - Material parsing for both string-array (`["PLA","ABS"]`) and object-array (`[{"id":10,"name":"PETG"},...]`) formats
+    - Network scan discovery behavior for IP-based probes
+
+All Spoolman tests and the existing test suite were run locally and passed (333 tests, 0 failures). Two minor analyzer warnings remain (CS8625 and CA2201) and can be addressed before a PR if desired.
+
+Current status:
+- Moonraker diagnostics refactor: Done (service + controller + tests).
+- Catalog service refactor (repository scaffolding & service updates): Done/Integrated.
+- Spoolman refactor: In-progress (initial tests added, further refactors planned).
+
+Next steps recommended:
+- Expand Spoolman tests to cover more pagination edge cases and GetSpoolById behavior.
+- Extract HTTP test helper to a shared test utility if more HTTP tests are added.
+- Prepare a focused PR with the Moonraker + Catalog + Spoolman test changes; run `dotnet format` and address analyzer warnings prior to PR.
+
 Validation performed locally:
 
 - Backend: `dotnet build` and `dotnet test` ran successfully after fixes.

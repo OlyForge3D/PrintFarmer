@@ -20,12 +20,11 @@ namespace Farm.Web.Api.Tests.Services
             mockCache.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             // Minimal dependencies: use NullLogger implementations and an in-memory AppDbContext is not required for this test
-            var dummyDb = new Moq.Mock<Farm.Infrastructure.Data.AppDbContext>(new object[] { new Microsoft.EntityFrameworkCore.DbContextOptions<Farm.Infrastructure.Data.AppDbContext>() });
             var normLogger = new Moq.Mock<Farm.Infrastructure.Normalization.INormalizationEventLogger>();
             var unifiedLogging = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
             var mockRepo = new Moq.Mock<Farm.Web.Api.Repositories.Catalog.ICatalogRepository>();
 
-            var svc = new CatalogService(dummyDb.Object, mockRepo.Object, normLogger.Object, mockCache.Object, unifiedLogging.Object);
+            var svc = new CatalogService(mockRepo.Object, normLogger.Object, mockCache.Object, unifiedLogging.Object);
             var (list, etag) = await svc.GetManufacturersAsync(CancellationToken.None);
 
             Assert.Equal(expected.Item2, etag);

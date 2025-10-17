@@ -77,7 +77,7 @@ public class MoonrakerDiagnosticsServiceTests
         var res = await svc.GetFileRootsAsync("http://example.local");
 
         Assert.NotNull(res);
-        // Verify LogWarning called at least twice (once per retry)
-        mockLogger.Verify(l => l.LogWarning(It.IsAny<Exception>(), It.IsAny<string>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.AtLeast(2));
+    // Verify LogWarning called at least twice (once per retry) - match existing overloads
+    mockLogger.Verify(l => l.LogWarning(It.IsAny<Exception>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()), Times.AtLeast(2));
     }
 }

@@ -12,15 +12,13 @@ namespace Farm.Web.Api.Services.Catalog;
 
 public class CatalogService : ICatalogService
 {
-    private readonly AppDbContext _db;
     private readonly ICatalogRepository _repo;
     private readonly INormalizationEventLogger _normLogger;
     private readonly ICatalogCache _catalogCache;
     private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService;
 
-    public CatalogService(AppDbContext db, ICatalogRepository repo, INormalizationEventLogger normLogger, ICatalogCache catalogCache, Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService)
+    public CatalogService(ICatalogRepository repo, INormalizationEventLogger normLogger, ICatalogCache catalogCache, Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService)
     {
-        _db = db;
         _repo = repo ?? throw new ArgumentNullException(nameof(repo));
         _normLogger = normLogger;
         _catalogCache = catalogCache;
@@ -111,17 +109,14 @@ public class CatalogService : ICatalogService
         string normalizedName = CatalogNameNormalizer.NormalizeModel(originalModelName);
         _normLogger.Log("Model", originalModelName, normalizedName, "create");
 
-    bool mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
+        bool mfgExists = await _repo.ManufacturerExistsAsync(req.ManufacturerId, ct);
         if (!mfgExists)
         {
             throw new KeyNotFoundException("Manufacturer not found");
         }
 
-        var candidateNames = await _db.Models.AsNoTracking()
-            .Where(m => m.ManufacturerId == req.ManufacturerId)
-            .Select(m => new { m.Id, m.ManufacturerId, m.Name, m.MotionType, m.MaxX, m.MaxY, m.MaxZ, m.DefaultBackend })
-            .ToListAsync(ct);
-        var existing = candidateNames.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        var candidateModels = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).ToList();
+        var existing = candidateModels.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
             string? headerName = null;
@@ -158,47 +153,38 @@ public class CatalogService : ICatalogService
         };
 
         await _repo.AddModelAsync(model, ct);
-
-        if (req.SupportedFilamentTypeIds?.Length > 0)
-        {
-            List<Guid> validFilamentTypeIds = (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToList();
-
-            foreach (Guid filamentTypeId in validFilamentTypeIds)
-            {
-                _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
-                {
-                    PrinterModelId = model.Id,
-                    FilamentTypeId = filamentTypeId
-                });
-            }
-        }
-
+        // Persist the model so we can update filament types via repository helpers
         try
         {
             await _repo.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
-            PrinterModel existingNow = await _db.Models.AsNoTracking()
-                .FirstOrDefaultAsync(m => m.ManufacturerId == req.ManufacturerId && m.Name == normalizedName, ct) ?? new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
+            var existingNowDto = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
+            PrinterModel existingNow = existingNowDto is not null ? new PrinterModel { Id = existingNowDto.Id, Name = existingNowDto.Name, ManufacturerId = existingNowDto.ManufacturerId } : new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
             throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MotionType.HasValue ? (MotionType)existingNow.MotionType.Value : (MotionType?)null, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
                 existingNow.DefaultBackend.HasValue ? (PrinterBackend)existingNow.DefaultBackend.Value : (PrinterBackend?)null), null,
                 $"A model with the normalized name '{existingNow.Name}' already exists for this manufacturer.");
         }
+        // If there are supported filament type ids, validate and attach via repository helper
+        if (req.SupportedFilamentTypeIds?.Length > 0)
+        {
+            var validFilamentTypeIds = (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToArray();
+            await _repo.UpdateModelFilamentTypesAsync(model.Id, validFilamentTypeIds, ct);
+            await _repo.SaveChangesAsync(ct);
+        }
 
-        PrinterModel? createdModel = await _db.Models.AsNoTracking()
-            .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
-            .FirstOrDefaultAsync(m => m.Id == model.Id, ct);
+        var createdModel = await _repo.GetModelWithFilamentNamesAsync(model.Id, ct);
 
         _catalogCache.InvalidateModels(model.ManufacturerId);
-        return new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null, model.MaxX, model.MaxY, model.MaxZ,
+        return createdModel ?? new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            createdModel?.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
+            Array.Empty<string>());
     }
 
     public async Task<PrinterModelDto?> UpdateModelAsync(Guid id, Farm.Web.Api.Controllers.Requests.UpdateModelRequest req, CancellationToken ct)
     {
-        PrinterModel? model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == id, ct);
+        PrinterModel? model = await _repo.GetModelEntityAsync(id, ct);
         if (model is null)
         {
             return null;
