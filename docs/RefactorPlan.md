@@ -96,10 +96,10 @@ Below is an inventory of controllers discovered in the API and a suggested compl
 Order is a recommendation for the safest incremental refactor: start with Low complexity controllers, then Medium, and finally High. Each controller below includes short notes and the suggested phase.
 
 ### Low complexity (Phase 1)
-- `SlicerController` — empty legacy placeholder, no DB (Phase 1)
+- `SlicerController` — empty legacy placeholder, no DB (Phase 1) (done)
 - `SchemaHealthController` — thin DB check (already refactored to service + repository) (Phase 1 - Done)
-- `SignalRTestController` — only SignalR hub calls and simple payloads; no DB (Phase 1)
-- `PasswordPolicyController` — small settings CRUD but limited surface area (Phase 1)
+- `SignalRTestController` — only SignalR hub calls and simple payloads; no DB (Phase 1) (done)
+- `PasswordPolicyController` — small settings CRUD but limited surface area (Phase 1) (done)
 
 ### Medium complexity (Phase 2)
 - `CatalogController` — uses `AppDbContext` and caching layer (`ICatalogCache`); mostly read/write catalog models (Phase 2)
@@ -182,3 +182,28 @@ Per-controller checklist (adds stricter testing and staged rollout):
 ---
 
 I'll update the managed todo list with the phase work items as you want them tracked (per-controller or per-phase). Tell me whether you prefer one-PR-per-controller or small batches (1–3 controllers per PR) for Phase 2/3 and I'll adjust the plan accordingly.
+
+## Completed work (summary)
+
+The following small-scope refactor and validation work was completed on branch `feature/orcaslicer-reimplementation` as part of an incremental rollout of Option 4 (Scaffold Interfaces & Thin Controllers):
+
+- Implemented `IMoonrakerDiagnosticsService` at `src/api/Services/Interfaces/IMoonrakerDiagnosticsService.cs`.
+- Implemented `MoonrakerDiagnosticsService` at `src/api/Services/MoonrakerDiagnosticsService.cs`.
+  - The service encapsulates retry logic (3 attempts with exponential backoff) in `ExecuteWithRetriesAsync` and delegates actual HTTP calls to the existing `IMoonrakerClient`.
+- Refactored `MoonrakerDiagnosticsController` to be a thin controller that delegates to `IMoonrakerDiagnosticsService` (file: `src/api/Controllers/MoonrakerDiagnosticsController.cs`).
+- Registered the new service in DI in `src/api/Program.cs` (scoped lifetime).
+- Added unit tests for service and controller:
+  - `src/tests/Farm.Web.Api.Tests/Services/MoonrakerDiagnosticsServiceTests.cs` — happy path, client-always-throws (null/failed), retry-until-success (setup throws twice then returns), and logging verification tests that assert `IUnifiedLoggingService.LogWarning` is called during retries.
+  - `src/tests/Farm.Web.Api.Tests/Controllers/MoonrakerDiagnosticsControllerTests.cs` — controller mapping tests for success and failure.
+- Small frontend test fix to satisfy ESLint in `src/Web/ReactApp/src/test/pages/admin/SlicersAdminPage.test.tsx` so frontend tests run cleanly.
+
+Validation performed locally:
+
+- Backend: `dotnet build` and `dotnet test` ran successfully after fixes.
+- Frontend: production build (`npm run build`) and Vitest runs were executed for local verification; ESLint issues addressed.
+
+Recommended next steps:
+
+- Prepare a focused PR summarizing the change, tests added, and why retry logic was moved to the service.
+- Add a CI job to run the frontend production build + lint to catch regressions early.
+- Run `dotnet format` and `npm run lint` as part of the PR checks to ensure style consistency.
