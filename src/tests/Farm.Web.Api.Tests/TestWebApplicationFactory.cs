@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -16,9 +17,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Moq;
 using Microsoft.Extensions.Logging;
-using Farm.Web.Api.Tests.TestInfrastructure;
+using Moq;
 
 // PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
 namespace Farm.Web.Api.Tests;

@@ -1,8 +1,8 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using System.Collections.Generic;
 
 namespace Farm.Web.Api.Repositories.Model
 {

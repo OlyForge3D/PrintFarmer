@@ -102,7 +102,7 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
     [ProducesResponseType(304)]
     public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, [FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
     {
-    (IReadOnlyList<PrinterModelDto>? list, string? etag) = await _catalogService.GetModelsAsync(manufacturerId, ct);
+        (IReadOnlyList<PrinterModelDto>? list, string? etag) = await _catalogService.GetModelsAsync(manufacturerId, ct);
         if (!string.IsNullOrEmpty(ifNoneMatch))
         {
             HashSet<string> clientEtags = ifNoneMatch.Split(',').Select(s => s.Trim()).ToHashSet(StringComparer.Ordinal);

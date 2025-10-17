@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,8 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Shared = Farm.Web.Shared;
 using Xunit;
+using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.Services
 {

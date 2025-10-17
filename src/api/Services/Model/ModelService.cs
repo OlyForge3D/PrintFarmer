@@ -1,27 +1,27 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.EntityFrameworkCore;
-using Shared = Farm.Web.Shared;
-using Farm.Web.Api.Services.Interfaces; // for ModelAnalysisResult
 using Farm.Web.Api.Repositories.Model;
+using Farm.Web.Api.Services.Interfaces; // for ModelAnalysisResult
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Model
 {
     public class ModelService : IModelService
     {
-    private readonly IModelRepository _repository;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly string _modelsPath;
-    private readonly IModelAnalysisService? _analysisService;
-    private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
+        private readonly IModelRepository _repository;
+        private readonly IUnifiedLoggingService _logger;
+        private readonly string _modelsPath;
+        private readonly IModelAnalysisService? _analysisService;
+        private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
         public ModelService(IModelRepository repository, IUnifiedLoggingService logger, IConfiguration configuration, Farm.Web.Api.Services.IO.IFileSystem fileSystem, IModelAnalysisService? analysisService = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));

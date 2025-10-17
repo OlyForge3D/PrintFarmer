@@ -1,12 +1,12 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Exceptions;
-using Farm.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Normalization;
+using Farm.Web.Api.Repositories.Catalog;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Repositories.Catalog;
 namespace Farm.Web.Api.Services.Catalog;
 
 
@@ -48,9 +48,9 @@ public class CatalogService : ICatalogService
         string normalized = CatalogNameNormalizer.NormalizeManufacturer(original);
         _normLogger.Log("Manufacturer", original, normalized, "create");
 
-            var manufacturerRows = await _repo.GetManufacturersAsync(ct);
-            var existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
-            if (existing.Id != Guid.Empty)
+        var manufacturerRows = await _repo.GetManufacturersAsync(ct);
+        var existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
+        if (existing.Id != Guid.Empty)
         {
             string? headerName = null;
             if (!string.Equals(original.Trim(), existing.Name, StringComparison.Ordinal))
@@ -95,7 +95,7 @@ public class CatalogService : ICatalogService
 
     public async Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
-    return await _catalogCache.GetModelsAsync(manufacturerId, ct);
+        return await _catalogCache.GetModelsAsync(manufacturerId, ct);
     }
 
     public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct)
@@ -124,8 +124,9 @@ public class CatalogService : ICatalogService
             {
                 headerName = existing.Name;
             }
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MotionType.HasValue ? (MotionType)existing.MotionType.Value : (MotionType?)null, existing.MaxX, existing.MaxY, existing.MaxZ,
-                existing.DefaultBackend.HasValue ? (PrinterBackend)existing.DefaultBackend.Value : (PrinterBackend?)null), headerName,
+            // existing comes from cached DTOs and already exposes nullable enum properties
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existing.Id, existing.Name, existing.ManufacturerId, existing.MotionType, existing.MaxX, existing.MaxY, existing.MaxZ,
+                existing.DefaultBackend), headerName,
                 $"A model with the normalized name '{existing.Name}' already exists for this manufacturer.");
         }
 
@@ -162,8 +163,9 @@ public class CatalogService : ICatalogService
         {
             var existingNowDto = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
             PrinterModel existingNow = existingNowDto is not null ? new PrinterModel { Id = existingNowDto.Id, Name = existingNowDto.Name, ManufacturerId = existingNowDto.ManufacturerId } : new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
-            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, existingNow.MotionType.HasValue ? (MotionType)existingNow.MotionType.Value : (MotionType?)null, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
-                existingNow.DefaultBackend.HasValue ? (PrinterBackend)existingNow.DefaultBackend.Value : (PrinterBackend?)null), null,
+            // existingNow.* properties coming from DTOs/repository are stored as nullable ints; convert to enum types for the DTO
+            throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, (MotionType?)existingNow.MotionType, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
+                (PrinterBackend?)existingNow.DefaultBackend), null,
                 $"A model with the normalized name '{existingNow.Name}' already exists for this manufacturer.");
         }
         // If there are supported filament type ids, validate and attach via repository helper

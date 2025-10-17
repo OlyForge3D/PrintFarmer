@@ -6,10 +6,10 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Model;
-using Microsoft.Extensions.Configuration;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -81,17 +81,17 @@ public class ModelController : ControllerBase
             return BadRequest("Unsafe file path generated");
         }
 
-            // Upload remains controller-owned for now (complex file handling). Delegate read/delete flows to service.
-            try
-            {
-                var result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
-                return CreatedAtRoute("GetModel", new { id = result.Id }, result);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to upload model file: {modelFile.FileName}: {ex.Message}");
-                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload model file");
-            }
+        // Upload remains controller-owned for now (complex file handling). Delegate read/delete flows to service.
+        try
+        {
+            var result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
+            return CreatedAtRoute("GetModel", new { id = result.Id }, result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to upload model file: {modelFile.FileName}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload model file");
+        }
     }
 
     /// <summary>
@@ -140,7 +140,7 @@ public class ModelController : ControllerBase
     [HttpGet("{id:guid}/file")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> GetModelFileAsync(Guid id)
+    public async Task<IActionResult> GetModelFileAsync(Guid id)
     {
         var path = await _modelService.GetModelFilePathAsync(id, CancellationToken.None);
         if (string.IsNullOrEmpty(path) || !_fileSystem.FileExists(path) || !IsSafePath(path, _modelsPath))

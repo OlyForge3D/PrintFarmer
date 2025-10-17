@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Repositories.SchemaHealth;

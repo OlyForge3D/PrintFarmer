@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
-using Farm.Web.Api.Services.IO;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.IO;
 using Farm.Web.Shared;
 using Microsoft.Extensions.Options;
 
@@ -269,7 +269,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 {
                     if (!_fileSystem.EnumerateFileSystemEntries(dir).Any())
                     {
-                        try { _fileSystem.DeleteDirectory(dir); } catch { try { Directory.Delete(dir); } catch { } }
+                        try
+                        { _fileSystem.DeleteDirectory(dir); }
+                        catch { try { Directory.Delete(dir); } catch { } }
                     }
                 }
                 catch (Exception ex)

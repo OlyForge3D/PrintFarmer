@@ -6,8 +6,8 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Filament;
+using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Shared = Farm.Web.Shared;
@@ -46,24 +46,24 @@ public class FilamentTypeController : ControllerBase
     public async Task<ActionResult<IEnumerable<Shared.FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
     {
         // Ensure initialization is complete to prevent race conditions during startup
-            try
-            {
-                if (!_startupStatus.IsReady)
-                {
-                    return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-                }
-                var list = await _filamentService.GetFilamentTypesAsync(ct);
-                return Ok(list);
-            }
-            catch (InvalidOperationException)
+        try
+        {
+            if (!_startupStatus.IsReady)
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "[FilamentTypeController] Exception in GetFilamentTypesAsync: {Message}", ex.Message);
-                return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
-            }
+            var list = await _filamentService.GetFilamentTypesAsync(ct);
+            return Ok(list);
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[FilamentTypeController] Exception in GetFilamentTypesAsync: {Message}", ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
     }
 
     /// <summary>
@@ -78,24 +78,24 @@ public class FilamentTypeController : ControllerBase
     [ProducesResponseType(503)]
     public async Task<ActionResult<Shared.FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
     {
-            try
-            {
-                if (!_startupStatus.IsReady)
-                {
-                    return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-                }
-                var presets = await _filamentService.GetFilamentPresetsAsync(ct);
-                return Ok(presets);
-            }
-            catch (InvalidOperationException)
+        try
+        {
+            if (!_startupStatus.IsReady)
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Error in GetFilamentPresetsAsync: {Message}", ex.Message);
-                return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
-            }
+            var presets = await _filamentService.GetFilamentPresetsAsync(ct);
+            return Ok(presets);
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in GetFilamentPresetsAsync: {Message}", ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
     }
 
     /// <summary>

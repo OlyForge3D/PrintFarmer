@@ -112,7 +112,7 @@ public class SetupController(
         }
 
         // Load password policy (default values if none present)
-            PasswordPolicyEntity? policy = await _db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
+        PasswordPolicyEntity? policy = await _db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
         int minLength = policy?.MinLength ?? 8;
         if (request.Password.Length < minLength)
         {

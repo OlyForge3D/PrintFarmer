@@ -16,7 +16,11 @@ public class SchemaHealthController(ISchemaHealthService health) : ControllerBas
     public async Task<IActionResult> SchemaReadyAsync(CancellationToken ct)
     {
         var ready = await _health.IsSchemaReadyAsync(ct);
-        if (ready) return Ok(new { ready = true });
+        if (ready)
+        {
+            return Ok(new { ready = true });
+        }
+
         return StatusCode(StatusCodes.Status503ServiceUnavailable, new { ready = false });
     }
 }

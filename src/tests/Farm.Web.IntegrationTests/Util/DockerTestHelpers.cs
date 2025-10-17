@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Xunit.Abstractions;
 
 namespace Farm.Web.IntegrationTests.Util;

@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Services.PasswordPolicy;
 using Farm.Web.Shared;
@@ -12,16 +12,16 @@ public class PasswordPolicyServiceTests
     [Fact]
     public async Task GetAsync_Returns_DefaultDto_WhenRepositoryEmpty()
     {
-    var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
-    repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.PasswordPolicyEntity?)null);
+        var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
+        repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.PasswordPolicyEntity?)null);
         var svc = new PasswordPolicyService(repo.Object);
 
-    var dto = await svc.GetAsync(CancellationToken.None);
+        var dto = await svc.GetAsync(CancellationToken.None);
 
         Assert.NotNull(dto);
-    // Default MinLength set in shared DTO is 8.
-    // Service should return that default DTO when repository has no entity.
-    Assert.Equal(8, dto.MinLength);
+        // Default MinLength set in shared DTO is 8.
+        // Service should return that default DTO when repository has no entity.
+        Assert.Equal(8, dto.MinLength);
     }
 
     [Fact]
@@ -41,13 +41,13 @@ public class PasswordPolicyServiceTests
 
         var result = await svc.UpdateAsync(request, CancellationToken.None);
 
-    // Ensure SaveAsync was called and our callback captured the saved entity
-    Assert.NotNull(savedEntity);
-    Assert.Equal(14, savedEntity!.MinLength);
+        // Ensure SaveAsync was called and our callback captured the saved entity
+        Assert.NotNull(savedEntity);
+        Assert.Equal(14, savedEntity!.MinLength);
 
-    // Now ensure the service returned the updated values
-    Assert.Equal(14, result.MinLength);
-    Assert.True(result.RequireDigit);
+        // Now ensure the service returned the updated values
+        Assert.Equal(14, result.MinLength);
+        Assert.True(result.RequireDigit);
         repo.Verify(r => r.SaveAsync(It.IsAny<Farm.Infrastructure.Domain.PasswordPolicyEntity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

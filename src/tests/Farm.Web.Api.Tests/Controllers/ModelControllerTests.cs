@@ -1,16 +1,16 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Model;
-using Microsoft.AspNetCore.Mvc;
-using Moq;
-using Microsoft.Extensions.Configuration;
-using System.IO;
-using Shared = Farm.Web.Shared;
-using Xunit;
 using Farm.Web.Api.Tests.Services;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Moq;
+using Xunit;
+using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.Controllers
 {

@@ -1,6 +1,6 @@
+﻿using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using System.Data.Common;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
 

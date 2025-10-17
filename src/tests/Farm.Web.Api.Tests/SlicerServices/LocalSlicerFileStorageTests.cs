@@ -1,8 +1,8 @@
 ﻿using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Tests.Services;
 using Farm.Web.Api.Tests.TestUtils;
 using Microsoft.Extensions.Options;
 using Moq;
-using Farm.Web.Api.Tests.Services;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
@@ -101,9 +101,9 @@ public class LocalSlicerFileStorageTests : IDisposable
         var filePath = Path.Combine(_tempBasePath, key);
         (await _testFs.ReadAllBytesAsync(filePath)).Should().NotBeNull();
 
-    var directoryPath = Path.GetDirectoryName(filePath);
-    directoryPath.Should().NotBeNull();
-    _testFs.DirectoryExists(directoryPath!).Should().BeTrue();
+        var directoryPath = Path.GetDirectoryName(filePath);
+        directoryPath.Should().NotBeNull();
+        _testFs.DirectoryExists(directoryPath!).Should().BeTrue();
     }
 
     [Fact]
@@ -124,8 +124,8 @@ public class LocalSlicerFileStorageTests : IDisposable
         await stream.CopyToAsync(memoryStream);
         var downloadedContent = memoryStream.ToArray();
 
-    var filePath = Path.Combine(_tempBasePath, key);
-    var uploadedContent = await _testFs.ReadAllBytesAsync(filePath);
+        var filePath = Path.Combine(_tempBasePath, key);
+        var uploadedContent = await _testFs.ReadAllBytesAsync(filePath);
         uploadedContent.Should().BeEquivalentTo(originalContent);
     }
 
@@ -171,8 +171,8 @@ public class LocalSlicerFileStorageTests : IDisposable
         await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
 
         // Act
-    var filePath = Path.Combine(_tempBasePath, key);
-    var downloadedContent = await _testFs.ReadAllBytesAsync(filePath);
+        var filePath = Path.Combine(_tempBasePath, key);
+        var downloadedContent = await _testFs.ReadAllBytesAsync(filePath);
 
         // Assert
         downloadedContent.Should().BeEquivalentTo(originalContent);
@@ -421,10 +421,10 @@ public class LocalSlicerFileStorageTests : IDisposable
     }
 
     [Fact]
-        public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
+    public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
     {
         // Arrange & Act & Assert
-    Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()))); 
+        Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>())));
     }
 
     [Fact]
@@ -435,23 +435,23 @@ public class LocalSlicerFileStorageTests : IDisposable
         var options = new LocalFileStorageOptions { BasePath = newTempPath };
         var optionsWrapper = Options.Create(options);
 
-            try
-                {
-                    // Act
-                    var testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
-                    var storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, testFs);
+        try
+        {
+            // Act
+            var testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
+            var storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, testFs);
 
-                    // Assert - the storage implementation should create the base directory via the file system
-                    testFs.DirectoryExists(newTempPath).Should().BeTrue();
-                }
-            finally
+            // Assert - the storage implementation should create the base directory via the file system
+            testFs.DirectoryExists(newTempPath).Should().BeTrue();
+        }
+        finally
+        {
+            // Cleanup
+            if (Directory.Exists(newTempPath))
             {
-                // Cleanup
-                if (Directory.Exists(newTempPath))
-                {
-                    Directory.Delete(newTempPath, true);
-                }
+                Directory.Delete(newTempPath, true);
             }
+        }
     }
 
     // Helper methods

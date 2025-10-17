@@ -46,7 +46,7 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
           <button
             className="px-2 py-1 border rounded bg-pf-panel text-sm"
             onClick={() => setShowDetails(v => !v)}
-            aria-expanded={showDetails ? 'true' : 'false'}
+            aria-expanded={showDetails}
             aria-controls={`slicer-details-${s.id}`}
           >
             {showDetails ? 'Hide' : 'Details'}
