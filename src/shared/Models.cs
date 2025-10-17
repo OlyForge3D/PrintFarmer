@@ -455,6 +455,19 @@ public record SpoolmanMaterialDto(
     string? ColorHex = null
 );
 
+/// <summary>
+/// Result of probing a Spoolman endpoint (used by the setup flow and health probes).
+/// </summary>
+public record SpoolmanProbeResult(
+    bool Success,
+    string? NormalizedUrl = null,
+    string? EndpointTried = null,
+    int? StatusCode = null,
+    string? Version = null,
+    string? Message = null,
+    string? ErrorCategory = null
+);
+
 // Printer details for edit page
 /// <summary>
 /// Extended printer details used for edit forms and detail pages.
