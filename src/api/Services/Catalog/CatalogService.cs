@@ -6,19 +6,22 @@ using Farm.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
-
+using Farm.Web.Api.Repositories.Catalog;
 namespace Farm.Web.Api.Services.Catalog;
+
 
 public class CatalogService : ICatalogService
 {
     private readonly AppDbContext _db;
+    private readonly ICatalogRepository _repo;
     private readonly INormalizationEventLogger _normLogger;
     private readonly ICatalogCache _catalogCache;
     private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService;
 
-    public CatalogService(AppDbContext db, INormalizationEventLogger normLogger, ICatalogCache catalogCache, Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService)
+    public CatalogService(AppDbContext db, ICatalogRepository repo, INormalizationEventLogger normLogger, ICatalogCache catalogCache, Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService)
     {
         _db = db;
+        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
         _normLogger = normLogger;
         _catalogCache = catalogCache;
         _unifiedLoggingService = unifiedLoggingService;
@@ -47,11 +50,9 @@ public class CatalogService : ICatalogService
         string normalized = CatalogNameNormalizer.NormalizeManufacturer(original);
         _normLogger.Log("Manufacturer", original, normalized, "create");
 
-        var manufacturerRows = await _db.Manufacturers.AsNoTracking()
-            .Select(m => new { m.Id, m.Name })
-            .ToListAsync(ct);
-        var existing = manufacturerRows.Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
-        if (existing != null)
+            var manufacturerRows = await _repo.GetManufacturersAsync(ct);
+            var existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
+            if (existing.Id != Guid.Empty)
         {
             string? headerName = null;
             if (!string.Equals(original.Trim(), existing.Name, StringComparison.Ordinal))
@@ -63,17 +64,24 @@ public class CatalogService : ICatalogService
         }
 
         Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = normalized };
-        _ = _db.Manufacturers.Add(mfg);
+        await _repo.AddManufacturerAsync(mfg.Id, mfg.Name, ct);
         try
         {
-            _ = await _db.SaveChangesAsync(ct);
+            await _repo.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
-            Manufacturer existingNow = await _db.Manufacturers.AsNoTracking()
-                .FirstOrDefaultAsync(m => m.Name == normalized, ct) ?? new Manufacturer { Id = mfg.Id, Name = normalized };
-            throw new DuplicateEntityException("Manufacturer", new ManufacturerDto(existingNow.Id, existingNow.Name), null,
-                $"A manufacturer with the normalized name '{existingNow.Name}' already exists.");
+            var existingNow = await _repo.GetManufacturerByIdAsync(mfg.Id, ct);
+            if (existingNow == null)
+            {
+                var found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
+                existingNow = found == default ? ((Guid, string)?)null : found;
+            }
+            var existingId = existingNow.HasValue ? existingNow.Value.Id : Guid.Empty;
+            var existingName = existingNow.HasValue ? existingNow.Value.Name : normalized;
+            var headerName = existingNow.HasValue ? existingNow.Value.Name : null;
+            throw new DuplicateEntityException("Manufacturer", new ManufacturerDto(existingId, existingName), headerName,
+                $"A manufacturer with the normalized name '{existingName}' already exists.");
         }
 
         _catalogCache.InvalidateManufacturers();
@@ -83,43 +91,18 @@ public class CatalogService : ICatalogService
 
     public async Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
     {
-        Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        return m is null ? null : new ManufacturerDto(m.Id, m.Name);
+        var m = await _repo.GetManufacturerByIdAsync(id, ct);
+        return m is null ? null : new ManufacturerDto(m.Value.Id, m.Value.Name);
     }
 
     public async Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
-        return await _catalogCache.GetModelsAsync(manufacturerId, ct);
+    return await _catalogCache.GetModelsAsync(manufacturerId, ct);
     }
 
     public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct)
     {
-        PrinterModel? model = await _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
-            .FirstOrDefaultAsync(m => m.Id == id, ct);
-        if (model is null)
-        {
-            return null;
-        }
-        return new PrinterModelDto(model.Id,
-            model.Name,
-            model.ManufacturerId,
-            model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null,
-            model.MaxX,
-            model.MaxY,
-            model.MaxZ,
-            model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
-            model.DefaultNozzleDiameter,
-            model.HasHeatedBed,
-            model.HasEnclosure,
-            model.MultiMaterial,
-            model.NumberOfExtruders,
-            model.SupportsAutoLeveling,
-            model.MinHotendTemp,
-            model.MaxHotendTemp,
-            model.MinBedTemp,
-            model.MaxBedTemp,
-            model.MaxPrintSpeed);
+        return await _repo.GetModelByIdAsync(id, ct);
     }
 
     public async Task<PrinterModelDto> CreateModelAsync(Farm.Web.Api.Controllers.Requests.CreateModelRequest req, CancellationToken ct)
@@ -128,7 +111,7 @@ public class CatalogService : ICatalogService
         string normalizedName = CatalogNameNormalizer.NormalizeModel(originalModelName);
         _normLogger.Log("Model", originalModelName, normalizedName, "create");
 
-        bool mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
+    bool mfgExists = await _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == req.ManufacturerId, ct);
         if (!mfgExists)
         {
             throw new KeyNotFoundException("Manufacturer not found");
@@ -173,14 +156,12 @@ public class CatalogService : ICatalogService
             MaxBedTemp = req.MaxBedTemp,
             MaxPrintSpeed = req.MaxPrintSpeed
         };
-        _ = _db.Models.Add(model);
+
+        await _repo.AddModelAsync(model, ct);
 
         if (req.SupportedFilamentTypeIds?.Length > 0)
         {
-            List<Guid> validFilamentTypeIds = await _db.FilamentTypes.AsNoTracking()
-                .Where(f => req.SupportedFilamentTypeIds.Contains(f.Id))
-                .Select(f => f.Id)
-                .ToListAsync(ct);
+            List<Guid> validFilamentTypeIds = (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToList();
 
             foreach (Guid filamentTypeId in validFilamentTypeIds)
             {
@@ -194,7 +175,7 @@ public class CatalogService : ICatalogService
 
         try
         {
-            _ = await _db.SaveChangesAsync(ct);
+            await _repo.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
@@ -284,25 +265,13 @@ public class CatalogService : ICatalogService
 
         if (req.SupportedFilamentTypeIds != null)
         {
-            _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
-            if (req.SupportedFilamentTypeIds.Length > 0)
-            {
-                List<Guid> validFilamentTypeIds = await _db.FilamentTypes.AsNoTracking()
-                    .Where(f => req.SupportedFilamentTypeIds.Contains(f.Id))
-                    .Select(f => f.Id)
-                    .ToListAsync(ct);
-                foreach (Guid filamentTypeId in validFilamentTypeIds)
-                {
-                    _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
-                    {
-                        PrinterModelId = model.Id,
-                        FilamentTypeId = filamentTypeId
-                    });
-                }
-            }
+            var validFilamentTypeIds = req.SupportedFilamentTypeIds.Length > 0
+                ? (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToArray()
+                : Array.Empty<Guid>();
+            await _repo.UpdateModelFilamentTypesAsync(model.Id, validFilamentTypeIds, ct);
         }
 
-        _ = await _db.SaveChangesAsync(ct);
+        await _repo.SaveChangesAsync(ct);
         _catalogCache.InvalidateModels(model.ManufacturerId);
         return new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null, model.MaxX, model.MaxY, model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,

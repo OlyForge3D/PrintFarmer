@@ -100,10 +100,16 @@ builder.Services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPol
 
 // Catalog service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Catalog.ICatalogService, Farm.Web.Api.Services.Catalog.CatalogService>();
+// Catalog repository
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Catalog.ICatalogRepository, Farm.Web.Api.Repositories.Catalog.CatalogRepository>();
 // Filament type service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Filament.IFilamentTypeService, Farm.Web.Api.Services.Filament.FilamentTypeService>();
+// Filament repository
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Filament.IFilamentTypeRepository, Farm.Web.Api.Repositories.Filament.FilamentTypeRepository>();
 // Model service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
+// Moonraker diagnostics service (scaffolded)
+builder.Services.AddScoped<Farm.Web.Api.Services.Interfaces.IMoonrakerDiagnosticsService, Farm.Web.Api.Services.MoonrakerDiagnosticsService>();
 // File system abstraction for testability
 builder.Services.AddSingleton<Farm.Web.Api.Services.IO.IFileSystem, Farm.Web.Api.Services.IO.SystemFileSystem>();
 // Model repository (for service -> persistence abstraction)

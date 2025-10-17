@@ -12,10 +12,10 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/moonraker-test")]
 [Tags("Moonraker Diagnostics")]
 public class MoonrakerDiagnosticsController(
-    IMoonrakerClient moonrakerClient,
+    IMoonrakerDiagnosticsService diagnosticsService,
     IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly IMoonrakerDiagnosticsService _diagnosticsService = diagnosticsService;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
@@ -36,51 +36,20 @@ public class MoonrakerDiagnosticsController(
 
         try
         {
-            // Apply retry logic
-            const int MaxRetries = 3;
-            const int InitialDelayMs = 500;
-
-            int retryCount = 0;
-            bool success = false;
-            FileRoot[]? roots = null;
-            Exception? lastException = null;
-
-            while (!success && retryCount < MaxRetries)
+            // Delegate to diagnostics service (which encapsulates retry logic)
+            var roots = await _diagnosticsService.GetFileRootsAsync(url);
+            if (roots is null)
             {
-                try
-                {
-                    if (retryCount > 0)
-                    {
-                        int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                        _logger.LogInformation($"Retry {retryCount}/{MaxRetries} after {delay}ms", null, null);
-                        await Task.Delay(delay);
-                    }
-
-                    roots = await _moonrakerClient.GetFileRootsAsync(url);
-                    success = true;
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                    retryCount++;
-                    _logger.LogWarning(ex, $"GetFileRootsAsync attempt {retryCount}/{MaxRetries} failed", null, null);
-                }
+                return Problem($"GetFileRootsAsync failed after retries", statusCode: 500);
             }
 
-            if (success)
+            if (roots.Length == 0)
             {
-                if (roots is { Length: > 0 })
-                {
-                    _logger.LogInformation($"GetFileRootsAsync succeeded, found {roots.Length} roots", null, null);
-                    return Ok(roots);
-                }
-
                 return NotFound("No roots found");
             }
 
-            // failure path
-            _logger.LogError(lastException!, $"GetFileRootsAsync failed after retries", null, null);
-            return Problem($"GetFileRootsAsync failed after {MaxRetries} attempts", statusCode: 500);
+            _logger.LogInformation($"GetFileRootsAsync succeeded, found {roots.Length} roots", null, null);
+            return Ok(roots);
         }
         catch (Exception ex)
         {
@@ -106,52 +75,15 @@ public class MoonrakerDiagnosticsController(
 
         try
         {
-            // Apply retry logic
-            const int MaxRetries = 3;
-            const int InitialDelayMs = 500;
-
-            int retryCount = 0;
-            bool success = false;
-            Farm.Web.Api.Services.DirectoryInfo? directory = null;
-            Exception? lastException = null;
-
-            while (!success && retryCount < MaxRetries)
+            // Delegate to diagnostics service (which encapsulates retry logic)
+            var directory = await _diagnosticsService.GetDirectoryAsync(url, path);
+            if (directory is null)
             {
-                try
-                {
-                    if (retryCount > 0)
-                    {
-                        int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                        _logger.LogInformation($"Retry GetDirectoryAsync {retryCount}/{MaxRetries} after {delay}ms", null, null);
-                        await Task.Delay(delay);
-                    }
-
-                    directory = await _moonrakerClient.GetDirectoryAsync(url, path, extended: true);
-                    success = true;
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                    retryCount++;
-                    _logger.LogWarning(ex, $"GetDirectoryAsync attempt {retryCount}/{MaxRetries} failed", null, null);
-                }
+                return Problem($"GetDirectoryAsync failed after retries", statusCode: 500);
             }
 
-            if (success)
-            {
-                if (directory is not null)
-                {
-                    _logger.LogInformation($"GetDirectoryAsync completed, directoryInfo is not null", null, null);
-                    return Ok(directory);
-                }
-
-                _logger.LogInformation($"GetDirectoryAsync completed, directoryInfo is null", null, null);
-                return NotFound("Directory info not found");
-            }
-
-            // failure path
-            _logger.LogError(lastException!, $"GetDirectoryAsync failed after retries", null, null);
-            return Problem($"GetDirectoryAsync failed after {MaxRetries} attempts", statusCode: 500);
+            _logger.LogInformation($"GetDirectoryAsync completed", null, null);
+            return Ok(directory);
         }
         catch (Exception ex)
         {
@@ -178,52 +110,21 @@ public class MoonrakerDiagnosticsController(
 
         try
         {
-            // Apply retry logic
-            const int MaxRetries = 3;
-            const int InitialDelayMs = 500;
-
-            int retryCount = 0;
-            bool success = false;
-            MoonrakerFileInfo[]? fileList = null;
-            Exception? lastException = null;
-
-            while (!success && retryCount < MaxRetries)
+            // Delegate to diagnostics service (which encapsulates retry logic)
+            var fileList = await _diagnosticsService.GetDetailedFileListAsync(url, root, path);
+            if (fileList is null)
             {
-                try
-                {
-                    if (retryCount > 0)
-                    {
-                        int delay = InitialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                        _logger.LogInformation($"Retry GetDetailedFileListAsync {retryCount}/{MaxRetries} after {delay}ms", null, null);
-                        await Task.Delay(delay);
-                    }
-
-                    fileList = await _moonrakerClient.GetDetailedFileListAsync(url, root, path);
-                    success = true;
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                    retryCount++;
-                    _logger.LogWarning(ex, $"GetDetailedFileListAsync attempt {retryCount}/{MaxRetries} failed", null, null);
-                }
+                return Problem($"GetDetailedFileListAsync failed after retries", statusCode: 500);
             }
 
-            if (success)
+            if (fileList.Length == 0)
             {
-                if (fileList is { Length: > 0 })
-                {
-                    _logger.LogInformation($"GetDetailedFileListAsync returned {fileList.Length} files", null, null);
-                    return Ok(fileList);
-                }
-
                 _logger.LogInformation($"GetDetailedFileListAsync returned 0 files", null, null);
                 return Ok(Array.Empty<MoonrakerFileInfo>());
             }
 
-            // failure path
-            _logger.LogError(lastException!, $"GetDetailedFileListAsync failed after retries", null, null);
-            return Problem($"GetDetailedFileListAsync failed after {MaxRetries} attempts", statusCode: 500);
+            _logger.LogInformation($"GetDetailedFileListAsync returned {fileList.Length} files", null, null);
+            return Ok(fileList);
         }
         catch (Exception ex)
         {

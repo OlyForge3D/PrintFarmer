@@ -9,18 +9,19 @@ using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Shared = Farm.Web.Shared;
+using Farm.Web.Api.Repositories.Filament;
 
 namespace Farm.Web.Api.Services.Filament
 {
     public class FilamentTypeService : IFilamentTypeService
     {
-        private readonly AppDbContext _db;
+        private readonly IFilamentTypeRepository _repo;
         private readonly Farm.Web.Api.Services.Interfaces.IStartupStatus _startupStatus;
         private readonly ISpoolmanService _spoolmanService;
 
-        public FilamentTypeService(AppDbContext db, Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus, ISpoolmanService spoolmanService)
+        public FilamentTypeService(IFilamentTypeRepository repo, Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus, ISpoolmanService spoolmanService)
         {
-            _db = db ?? throw new ArgumentNullException(nameof(db));
+            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
             _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
         }
@@ -32,10 +33,7 @@ namespace Farm.Web.Api.Services.Filament
                 throw new InvalidOperationException("System is still initializing");
             }
 
-            List<Shared.FilamentTypeDto> list = await _db.FilamentTypes.AsNoTracking().OrderBy(f => f.Name)
-                .Select(f => new Shared.FilamentTypeDto(f.Id, f.Name, new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
-                .ToListAsync(ct);
-            return list;
+            return await _repo.GetFilamentTypesAsync(ct);
         }
 
         public async Task<Shared.FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct)
@@ -45,13 +43,7 @@ namespace Farm.Web.Api.Services.Filament
                 throw new InvalidOperationException("System is still initializing");
             }
 
-            Dictionary<string, Shared.TempTargets> presets = await _db.FilamentTypes
-                .AsNoTracking()
-                .OrderBy(f => f.Name)
-                .ToDictionaryAsync(
-                    f => f.Name,
-                    f => new Shared.TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), ct);
-            return new Shared.FilamentPresetsDto(presets);
+            return await _repo.GetFilamentPresetsAsync(ct);
         }
 
         public async Task<Shared.FilamentTypeDto> CreateFilamentTypeAsync(Shared.CreateFilamentTypeRequest req, CancellationToken ct)
@@ -62,12 +54,11 @@ namespace Farm.Web.Api.Services.Filament
             }
 
             string trimmed = req.Name.Trim();
-            FilamentType? existing = await _db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(f => f.Name == trimmed, ct);
-            if (existing is not null)
+            var existing = await _repo.GetByNameAsync(trimmed, ct);
+            if (existing != null)
             {
-                return new Shared.FilamentTypeDto(existing.Id, existing.Name, new Shared.TempTargets(existing.DefaultHotendTemp, existing.DefaultBedTemp));
+                throw new InvalidOperationException("Filament type with this name already exists");
             }
-
             FilamentType filamentType = new()
             {
                 Id = Guid.NewGuid(),
@@ -76,10 +67,8 @@ namespace Farm.Web.Api.Services.Filament
                 DefaultBedTemp = req.DefaultTemperatures.Bed,
                 CreatedAt = DateTime.UtcNow
             };
-
-            _ = _db.FilamentTypes.Add(filamentType);
-            _ = await _db.SaveChangesAsync(ct);
-
+            await _repo.AddFilamentTypeAsync(filamentType, ct);
+            await _repo.SaveChangesAsync(ct);
             return new Shared.FilamentTypeDto(filamentType.Id, filamentType.Name, new Shared.TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp));
         }
 
@@ -90,33 +79,35 @@ namespace Farm.Web.Api.Services.Filament
                 throw new ArgumentException("Request body is required", nameof(req));
             }
 
-            FilamentType? filamentType = await _db.FilamentTypes.FindAsync(new object[] { id }, ct);
-            if (filamentType is null)
+            var dto = await _repo.GetByIdAsync(id, ct);
+            if (dto is null)
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
-
+            var entity = await _repo.GetEntityByIdAsync(id, ct);
+            if (entity is null)
+            {
+                throw new KeyNotFoundException("Filament type not found");
+            }
             if (!string.IsNullOrWhiteSpace(req.Name))
             {
-                filamentType.Name = req.Name.Trim();
+                entity.Name = req.Name.Trim();
             }
-
-            filamentType.DefaultHotendTemp = req.DefaultTemperatures.Hotend;
-            filamentType.DefaultBedTemp = req.DefaultTemperatures.Bed;
-
-            _ = await _db.SaveChangesAsync(ct);
+            entity.DefaultHotendTemp = req.DefaultTemperatures.Hotend;
+            entity.DefaultBedTemp = req.DefaultTemperatures.Bed;
+            await _repo.UpdateFilamentTypeAsync(entity, ct);
+            await _repo.SaveChangesAsync(ct);
         }
 
         public async Task DeleteFilamentTypeAsync(Guid id, CancellationToken ct)
         {
-            FilamentType? filamentType = await _db.FilamentTypes.FindAsync(new object[] { id }, ct);
-            if (filamentType is null)
+            var dto = await _repo.GetByIdAsync(id, ct);
+            if (dto is null)
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
-
-            _ = _db.FilamentTypes.Remove(filamentType);
-            _ = await _db.SaveChangesAsync(ct);
+            await _repo.DeleteFilamentTypeAsync(id, ct);
+            await _repo.SaveChangesAsync(ct);
         }
 
         public async Task SaveFilamentPresetsAsync(Shared.FilamentPresetsDto presets, CancellationToken ct)
@@ -130,7 +121,8 @@ namespace Farm.Web.Api.Services.Filament
             {
                 string name = kvp.Key.Trim();
                 Shared.TempTargets tempTargets = kvp.Value;
-                FilamentType? filamentType = await _db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == name, ct);
+                // use repository to load or create
+                FilamentType? filamentType = await _repo.GetByNameAsync(name, ct);
                 if (filamentType == null)
                 {
                     filamentType = new FilamentType
@@ -141,15 +133,16 @@ namespace Farm.Web.Api.Services.Filament
                         DefaultBedTemp = tempTargets.Bed,
                         CreatedAt = DateTime.UtcNow
                     };
-                    _ = _db.FilamentTypes.Add(filamentType);
+                    await _repo.AddFilamentTypeAsync(filamentType, ct);
                 }
                 else
                 {
                     filamentType.DefaultHotendTemp = tempTargets.Hotend;
                     filamentType.DefaultBedTemp = tempTargets.Bed;
+                    await _repo.UpdateFilamentTypeAsync(filamentType, ct);
                 }
             }
-            _ = await _db.SaveChangesAsync(ct);
+            await _repo.SaveChangesAsync(ct);
         }
 
         public async Task<Shared.SpoolmanFilamentImportResult> ImportFromSpoolmanAsync(CancellationToken ct)
@@ -175,9 +168,7 @@ namespace Farm.Web.Api.Services.Filament
                 }
             }
 
-            List<string> existingTypes = await _db.FilamentTypes
-                .Select(ft => ft.Name)
-                .ToListAsync(ct);
+            List<string> existingTypes = (await _repo.GetFilamentTypesAsync(ct)).Select(f => f.Name).ToList();
 
             HashSet<string> existingTypesSet = new(existingTypes, StringComparer.OrdinalIgnoreCase);
 
@@ -202,12 +193,12 @@ namespace Farm.Web.Api.Services.Filament
                     CreatedAt = DateTime.UtcNow
                 };
 
-                _ = _db.FilamentTypes.Add(newFilamentType);
+                await _repo.AddFilamentTypeAsync(newFilamentType, ct);
                 importedNames.Add(materialName);
                 importedCount++;
             }
 
-            _ = await _db.SaveChangesAsync(ct);
+            await _repo.SaveChangesAsync(ct);
 
             return new Shared.SpoolmanFilamentImportResult(
                 ImportedCount: importedCount,

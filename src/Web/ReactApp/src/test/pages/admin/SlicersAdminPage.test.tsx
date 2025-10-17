@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import type { Mock } from 'vitest';
 import SlicersAdminPage from '../../../../src/pages/admin/SlicersAdminPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -40,7 +41,8 @@ describe('SlicersAdminPage', () => {
 
     fireEvent.click(deregBtn);
 
-    const mod = (await vi.importMock('../../../../src/services/slicerRegistry')) as any;
-    await waitFor(() => expect(mod.slicerRegistry.deregisterSlicer).toHaveBeenCalled());
+  type SlicerRegistryMock = { slicerRegistry: { deregisterSlicer: Mock } };
+  const mod = (await vi.importMock('../../../../src/services/slicerRegistry')) as unknown as SlicerRegistryMock;
+  await waitFor(() => expect(mod.slicerRegistry.deregisterSlicer).toHaveBeenCalled());
   });
 });
