@@ -16,12 +16,12 @@ public class PasswordPolicyRepository : IPasswordPolicyRepository
 
     private AppDbContext Db => _uow.Context;
 
-    public async Task<Farm.Infrastructure.Domain.PasswordPolicy?> GetAsync(CancellationToken ct = default)
+    public async Task<Farm.Infrastructure.Domain.PasswordPolicyEntity?> GetAsync(CancellationToken ct = default)
     {
         return await Db.PasswordPolicies.OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
     }
 
-    public async Task SaveAsync(Farm.Infrastructure.Domain.PasswordPolicy policy, CancellationToken ct = default)
+    public async Task SaveAsync(Farm.Infrastructure.Domain.PasswordPolicyEntity policy, CancellationToken ct = default)
     {
         if (policy.Id == default)
         {

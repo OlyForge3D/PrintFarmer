@@ -1,5 +1,6 @@
 ﻿namespace Farm.Web.Api.Domain;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1724:Type names should not match namespace", Justification = "PasswordPolicy domain type name duplicates infra domain for backwards compatibility; rename deferred.")]
 public class PasswordPolicy
 {
     public int Id { get; set; }

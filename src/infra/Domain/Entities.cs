@@ -535,7 +535,8 @@ public class SlicerSettings
     public double JitterPercent { get; set; } = 15.0;
 }
 
-public class PasswordPolicy
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1724:Type names should not match namespace", Justification = "Renamed infra domain type to PasswordPolicyEntity to avoid CA1724 conflicts with API domain type.")]
+public class PasswordPolicyEntity
 {
     public int Id { get; set; }
     public int MinLength { get; set; } = 8;

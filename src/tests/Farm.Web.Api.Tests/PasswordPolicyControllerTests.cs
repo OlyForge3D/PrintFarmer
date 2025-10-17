@@ -14,7 +14,7 @@ public class PasswordPolicyControllerTests
     public async Task GetAsync_ReturnsDto_FromService()
     {
         // Arrange
-        var svc = new Mock<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService>();
+    var svc = new Mock<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService>();
         var expected = new PasswordPolicyDto { MinLength = 10, RequireDigit = true };
         svc.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
         var controller = new PasswordPolicyController(svc.Object);

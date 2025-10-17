@@ -98,11 +98,25 @@ builder.Services.AddScoped<Farm.Web.Api.Services.SignalR.ISignalRTestService, Fa
 builder.Services.AddScoped<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService, Farm.Web.Api.Services.PasswordPolicy.PasswordPolicyService>();
 builder.Services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Web.Api.Repositories.PasswordPolicy.PasswordPolicyRepository>();
 
+// Catalog service (refactor: Controllers -> Services)
+builder.Services.AddScoped<Farm.Web.Api.Services.Catalog.ICatalogService, Farm.Web.Api.Services.Catalog.CatalogService>();
+// Filament type service (refactor: Controllers -> Services)
+builder.Services.AddScoped<Farm.Web.Api.Services.Filament.IFilamentTypeService, Farm.Web.Api.Services.Filament.FilamentTypeService>();
+// Model service (refactor: Controllers -> Services)
+builder.Services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
+// File system abstraction for testability
+builder.Services.AddSingleton<Farm.Web.Api.Services.IO.IFileSystem, Farm.Web.Api.Services.IO.SystemFileSystem>();
+// Model repository (for service -> persistence abstraction)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Model.IModelRepository, Farm.Web.Api.Repositories.Model.EfModelRepository>();
+// Local slicer file storage (explicit registration to ensure IFileSystem is injected)
+builder.Services.AddScoped<Farm.Web.Api.Services.SlicerServices.LocalSlicerFileStorage>();
+builder.Services.AddScoped<Farm.Web.Shared.ISlicerFileStorage>(sp => sp.GetRequiredService<Farm.Web.Api.Services.SlicerServices.LocalSlicerFileStorage>());
+
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 
 // Unit of Work (scoped per-request) to share AppDbContext across repositories
-builder.Services.AddScoped<Farm.Web.Api.Infrastructure.UnitOfWork.IUnitOfWork, Farm.Web.Api.Infrastructure.UnitOfWork.UnitOfWork>();
+builder.Services.AddScoped<Farm.Web.Api.Infrastructure.UnitOfWork.IUnitOfWork, Farm.Web.Api.Infrastructure.UnitOfWork.AppUnitOfWork>();
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.

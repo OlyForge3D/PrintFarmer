@@ -15,7 +15,10 @@ public class PasswordPolicyService : IPasswordPolicyService
     public async Task<PasswordPolicyDto> GetAsync(CancellationToken ct = default)
     {
         var entity = await _repo.GetAsync(ct);
-        if (entity == null) return new PasswordPolicyDto();
+        if (entity == null)
+        {
+            return new PasswordPolicyDto();
+        }
         return new PasswordPolicyDto
         {
             MinLength = entity.MinLength,
@@ -28,12 +31,27 @@ public class PasswordPolicyService : IPasswordPolicyService
 
     public async Task<PasswordPolicyDto> UpdateAsync(Shared.UpdatePasswordPolicyRequest request, CancellationToken ct = default)
     {
-        var entity = await _repo.GetAsync(ct) ?? new Farm.Infrastructure.Domain.PasswordPolicy();
-        if (request.MinLength.HasValue) entity.MinLength = request.MinLength.Value;
-        if (request.RequireUppercase.HasValue) entity.RequireUppercase = request.RequireUppercase.Value;
-        if (request.RequireLowercase.HasValue) entity.RequireLowercase = request.RequireLowercase.Value;
-        if (request.RequireDigit.HasValue) entity.RequireDigit = request.RequireDigit.Value;
-        if (request.RequireSymbol.HasValue) entity.RequireSymbol = request.RequireSymbol.Value;
+    var entity = await _repo.GetAsync(ct) ?? new Farm.Infrastructure.Domain.PasswordPolicyEntity();
+        if (request.MinLength.HasValue)
+        {
+            entity.MinLength = request.MinLength.Value;
+        }
+        if (request.RequireUppercase.HasValue)
+        {
+            entity.RequireUppercase = request.RequireUppercase.Value;
+        }
+        if (request.RequireLowercase.HasValue)
+        {
+            entity.RequireLowercase = request.RequireLowercase.Value;
+        }
+        if (request.RequireDigit.HasValue)
+        {
+            entity.RequireDigit = request.RequireDigit.Value;
+        }
+        if (request.RequireSymbol.HasValue)
+        {
+            entity.RequireSymbol = request.RequireSymbol.Value;
+        }
         entity.UpdatedAt = DateTime.UtcNow;
         await _repo.SaveAsync(entity, ct);
 

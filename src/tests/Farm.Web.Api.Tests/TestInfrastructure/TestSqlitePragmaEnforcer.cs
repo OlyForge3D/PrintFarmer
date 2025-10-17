@@ -17,8 +17,14 @@ internal sealed class TestSqlitePragmaEnforcer : DbCommandInterceptor
     {
         try
         {
-            if (conn == null) return;
-            if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+            if (conn == null)
+            {
+                return;
+            }
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                conn.Open();
+            }
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "PRAGMA foreign_keys = ON;";
             cmd.ExecuteNonQuery();

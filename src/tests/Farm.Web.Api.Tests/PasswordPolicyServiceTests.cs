@@ -12,11 +12,11 @@ public class PasswordPolicyServiceTests
     [Fact]
     public async Task GetAsync_Returns_DefaultDto_WhenRepositoryEmpty()
     {
-        var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
-        repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.PasswordPolicy?)null);
+    var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
+    repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.PasswordPolicyEntity?)null);
         var svc = new PasswordPolicyService(repo.Object);
 
-        var dto = await svc.GetAsync(CancellationToken.None);
+    var dto = await svc.GetAsync(CancellationToken.None);
 
         Assert.NotNull(dto);
     // Default MinLength set in shared DTO is 8.
@@ -29,10 +29,10 @@ public class PasswordPolicyServiceTests
     {
         var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
         // repository initially returns null -> service creates new entity and calls SaveAsync
-        Farm.Infrastructure.Domain.PasswordPolicy? savedEntity = null;
-        repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => savedEntity);
-        repo.Setup(r => r.SaveAsync(It.IsAny<Farm.Infrastructure.Domain.PasswordPolicy>(), It.IsAny<CancellationToken>()))
-            .Callback<Farm.Infrastructure.Domain.PasswordPolicy, CancellationToken>((p, ct) => savedEntity = p)
+        Farm.Infrastructure.Domain.PasswordPolicyEntity? savedEntity = null;
+        repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).Returns((CancellationToken ct) => Task.FromResult(savedEntity));
+        repo.Setup(r => r.SaveAsync(It.IsAny<Farm.Infrastructure.Domain.PasswordPolicyEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<Farm.Infrastructure.Domain.PasswordPolicyEntity, CancellationToken>((p, ct) => savedEntity = p)
             .Returns(Task.CompletedTask)
             .Verifiable();
 
@@ -48,6 +48,6 @@ public class PasswordPolicyServiceTests
     // Now ensure the service returned the updated values
     Assert.Equal(14, result.MinLength);
     Assert.True(result.RequireDigit);
-    repo.Verify(r => r.SaveAsync(It.IsAny<Farm.Infrastructure.Domain.PasswordPolicy>(), It.IsAny<CancellationToken>()), Times.Once);
+        repo.Verify(r => r.SaveAsync(It.IsAny<Farm.Infrastructure.Domain.PasswordPolicyEntity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

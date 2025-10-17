@@ -38,7 +38,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Domain.Action> Actions => Set<Domain.Action>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
-    public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
+    public DbSet<PasswordPolicyEntity> PasswordPolicies => Set<PasswordPolicyEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -525,8 +525,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(s => s.Status);
         });
 
-        modelBuilder.Entity<PasswordPolicy>(b =>
+        modelBuilder.Entity<PasswordPolicyEntity>(b =>
         {
+            // Keep the existing table name to avoid creating a migration due to the rename
+            b.ToTable("PasswordPolicies");
             b.HasKey(pp => pp.Id);
             b.Property(pp => pp.MinLength).IsRequired();
             b.Property(pp => pp.RequireUppercase);
@@ -566,7 +568,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         if (Database.ProviderName != null)
         {
             // Use a static value for UpdatedAt to avoid model instability in migrations
-            modelBuilder.Entity<PasswordPolicy>().HasData(new PasswordPolicy
+            modelBuilder.Entity<PasswordPolicyEntity>().HasData(new PasswordPolicyEntity
             {
                 Id = 1,
                 MinLength = 8,

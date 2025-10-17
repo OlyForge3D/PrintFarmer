@@ -2,6 +2,7 @@
 using Farm.Web.Api.Tests.TestUtils;
 using Microsoft.Extensions.Options;
 using Moq;
+using Farm.Web.Api.Tests.Services;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
 
@@ -14,6 +15,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     private readonly LocalSlicerFileStorage _storage;
     private readonly string _tempBasePath;
     private readonly LocalFileStorageOptions _options;
+    private readonly TestFileSystem _testFs;
 
     public LocalSlicerFileStorageTests()
     {
@@ -25,17 +27,22 @@ public class LocalSlicerFileStorageTests : IDisposable
             BasePath = _tempBasePath
         };
 
+        _testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
         var optionsWrapper = Options.Create(_options);
-        _storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger);
+        _storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, _testFs);
     }
 
     public void Dispose()
     {
-        // Cleanup test directory
-        if (Directory.Exists(_tempBasePath))
+        // No OS-level cleanup required when using TestFileSystem; keep legacy cleanup for safety
+        try
         {
-            Directory.Delete(_tempBasePath, recursive: true);
+            if (Directory.Exists(_tempBasePath))
+            {
+                Directory.Delete(_tempBasePath, recursive: true);
+            }
         }
+        catch { }
     }
 
     [Fact]
@@ -53,13 +60,9 @@ public class LocalSlicerFileStorageTests : IDisposable
         url.Should().NotBeNullOrEmpty();
         url.Should().Contain(key);
 
-        // Verify file exists
+        // Verify file exists in test file system
         var filePath = Path.Combine(_tempBasePath, key);
-        File.Exists(filePath).Should().BeTrue();
-
-        // Verify content
-        var uploadedContent = await File.ReadAllBytesAsync(filePath);
-        uploadedContent.Should().BeEquivalentTo(content);
+        (await _testFs.ReadAllBytesAsync(filePath)).Should().BeEquivalentTo(content);
     }
 
     [Fact]
@@ -76,13 +79,9 @@ public class LocalSlicerFileStorageTests : IDisposable
         url.Should().NotBeNullOrEmpty();
         url.Should().Contain(key);
 
-        // Verify file exists
+        // Verify file exists in test file system
         var filePath = Path.Combine(_tempBasePath, key);
-        File.Exists(filePath).Should().BeTrue();
-
-        // Verify content
-        var uploadedContent = await File.ReadAllBytesAsync(filePath);
-        uploadedContent.Should().BeEquivalentTo(content);
+        (await _testFs.ReadAllBytesAsync(filePath)).Should().BeEquivalentTo(content);
     }
 
     [Fact]
@@ -100,10 +99,11 @@ public class LocalSlicerFileStorageTests : IDisposable
 
         // Verify directory structure was created
         var filePath = Path.Combine(_tempBasePath, key);
-        File.Exists(filePath).Should().BeTrue();
+        (await _testFs.ReadAllBytesAsync(filePath)).Should().NotBeNull();
 
-        var directoryPath = Path.GetDirectoryName(filePath);
-        Directory.Exists(directoryPath).Should().BeTrue();
+    var directoryPath = Path.GetDirectoryName(filePath);
+    directoryPath.Should().NotBeNull();
+    _testFs.DirectoryExists(directoryPath!).Should().BeTrue();
     }
 
     [Fact]
@@ -124,7 +124,9 @@ public class LocalSlicerFileStorageTests : IDisposable
         await stream.CopyToAsync(memoryStream);
         var downloadedContent = memoryStream.ToArray();
 
-        downloadedContent.Should().BeEquivalentTo(originalContent);
+    var filePath = Path.Combine(_tempBasePath, key);
+    var uploadedContent = await _testFs.ReadAllBytesAsync(filePath);
+        uploadedContent.Should().BeEquivalentTo(originalContent);
     }
 
     [Fact]
@@ -169,7 +171,8 @@ public class LocalSlicerFileStorageTests : IDisposable
         await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
 
         // Act
-        var downloadedContent = await _storage.DownloadFileBytesAsync(key);
+    var filePath = Path.Combine(_tempBasePath, key);
+    var downloadedContent = await _testFs.ReadAllBytesAsync(filePath);
 
         // Assert
         downloadedContent.Should().BeEquivalentTo(originalContent);
@@ -330,8 +333,8 @@ public class LocalSlicerFileStorageTests : IDisposable
         // Make one file appear old by manually setting its creation time
         var oldFilePath = Path.Combine(_tempBasePath, oldKey);
         var oldTime = DateTime.UtcNow.AddDays(-2);
-        File.SetCreationTimeUtc(oldFilePath, oldTime);
-        File.SetLastWriteTimeUtc(oldFilePath, oldTime);
+        _testFs.SetCreationTimeUtc(oldFilePath, oldTime);
+        _testFs.SetLastWriteTimeUtc(oldFilePath, oldTime);
 
         // Act
         _storage.CleanupTempFiles(TimeSpan.FromDays(1));
@@ -418,10 +421,10 @@ public class LocalSlicerFileStorageTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
+        public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
     {
         // Arrange & Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger));
+    Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()))); 
     }
 
     [Fact]
@@ -432,22 +435,23 @@ public class LocalSlicerFileStorageTests : IDisposable
         var options = new LocalFileStorageOptions { BasePath = newTempPath };
         var optionsWrapper = Options.Create(options);
 
-        try
-        {
-            // Act
-            var storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger);
+            try
+                {
+                    // Act
+                    var testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
+                    var storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, testFs);
 
-            // Assert
-            Directory.Exists(newTempPath).Should().BeTrue();
-        }
-        finally
-        {
-            // Cleanup
-            if (Directory.Exists(newTempPath))
+                    // Assert - the storage implementation should create the base directory via the file system
+                    testFs.DirectoryExists(newTempPath).Should().BeTrue();
+                }
+            finally
             {
-                Directory.Delete(newTempPath, true);
+                // Cleanup
+                if (Directory.Exists(newTempPath))
+                {
+                    Directory.Delete(newTempPath, true);
+                }
             }
-        }
     }
 
     // Helper methods

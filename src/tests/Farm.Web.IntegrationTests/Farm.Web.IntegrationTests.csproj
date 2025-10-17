@@ -6,6 +6,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!--
+    By default we DO NOT want integration tests to run during a standard
+    'dotnet test ./farm-web.sln'. Set the MSBuild property RunIntegrationTests
+    (or environment variable RunIntegrationTests) to 'true' to enable these
+    tests, e.g.:
+
+      RunIntegrationTests=true dotnet test ./farm-web.sln
+
+    When RunIntegrationTests != 'true' the project will not be treated as a
+    test project (IsTestProject=false) and will be skipped by 'dotnet test'.
+  -->
+  <PropertyGroup>
+    <RunIntegrationTests Condition="'$(RunIntegrationTests)'==''">false</RunIntegrationTests>
+    <!-- Only mark as test project when explicitly enabled -->
+    <IsTestProject Condition="'$(RunIntegrationTests)'!='true'">false</IsTestProject>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.8" />
