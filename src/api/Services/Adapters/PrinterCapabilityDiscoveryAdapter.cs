@@ -10,6 +10,6 @@ public class PrinterCapabilityDiscoveryAdapter : IPrinterCapabilityDiscoveryAdap
 {
     private readonly IPrinterCapabilityDiscoveryService _inner;
     public PrinterCapabilityDiscoveryAdapter(IPrinterCapabilityDiscoveryService inner) => _inner = inner;
-    public Task<PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
+    public Task<Farm.Infrastructure.Domain.PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
         => _inner.DiscoverCapabilitiesAsync(printer, cancellationToken);
 }

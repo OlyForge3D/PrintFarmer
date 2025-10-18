@@ -25,7 +25,8 @@ public class SpoolmanServiceTests
 #pragma warning restore CS8603 // Possible null reference return
 
         var logger = new Mock<IUnifiedLoggingService>();
-        var http = new HttpClient(new FakeHttpMessageHandler());
+        using var _handler = new FakeHttpMessageHandler();
+        using var http = new HttpClient(_handler);
 
         var svc = new SpoolmanService(http, settings.Object, logger.Object);
 
@@ -43,31 +44,31 @@ public class SpoolmanServiceTests
         var logger = new Mock<IUnifiedLoggingService>();
 
         // First page returns a 'next' field pointing to second page; second page returns final array
-        var handler = new FakeHttpMessageHandler((req) =>
-            {
-                if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool") || req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
+        using var handler = new FakeHttpMessageHandler((req) =>
                 {
-                    if (req.RequestUri!.Query.Contains("page=2"))
+                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool") || req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
                     {
-                        var json2 = JsonSerializer.Serialize(new[] { new { id = 2, name = "Second" } });
+                        if (req.RequestUri!.Query.Contains("page=2"))
+                        {
+                            var json2 = JsonSerializer.Serialize(new[] { new { id = 2, name = "Second" } });
+                            return new HttpResponseMessage(HttpStatusCode.OK)
+                            {
+                                Content = new StringContent(json2, Encoding.UTF8, "application/json")
+                            };
+                        }
+
+                        // Return object with results and next -> /api/v1/spools?page=2
+                        var page1 = new { results = new[] { new { id = 1, name = "First" } }, next = "/api/v1/spools?page=2" };
+                        var json1 = JsonSerializer.Serialize(page1);
                         return new HttpResponseMessage(HttpStatusCode.OK)
                         {
-                            Content = new StringContent(json2, Encoding.UTF8, "application/json")
+                            Content = new StringContent(json1, Encoding.UTF8, "application/json")
                         };
                     }
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                });
 
-                    // Return object with results and next -> /api/v1/spools?page=2
-                    var page1 = new { results = new[] { new { id = 1, name = "First" } }, next = "/api/v1/spools?page=2" };
-                    var json1 = JsonSerializer.Serialize(page1);
-                    return new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent(json1, Encoding.UTF8, "application/json")
-                    };
-                }
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            });
-
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         var svc = new SpoolmanService(http, settings.Object, logger.Object);
 
         var items = await svc.ListSpoolsAsync(CancellationToken.None);
@@ -86,30 +87,30 @@ public class SpoolmanServiceTests
 
         // Handler will respond to material endpoint: first call returns string array, second call returns object array
         int call = 0;
-        var handler = new FakeHttpMessageHandler((req) =>
-            {
-                if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/material"))
+        using var handler = new FakeHttpMessageHandler((req) =>
                 {
-                    call++;
-                    if (call == 1)
+                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/material"))
                     {
-                        var arr = new[] { "PLA", "ABS" };
+                        call++;
+                        if (call == 1)
+                        {
+                            var arr = new[] { "PLA", "ABS" };
+                            return new HttpResponseMessage(HttpStatusCode.OK)
+                            {
+                                Content = new StringContent(JsonSerializer.Serialize(arr), Encoding.UTF8, "application/json")
+                            };
+                        }
+
+                        var objects = new[] { new { id = 10, name = "PETG", density = (double?)1.24 }, new { id = 11, name = "TPU", density = (double?)null } };
                         return new HttpResponseMessage(HttpStatusCode.OK)
                         {
-                            Content = new StringContent(JsonSerializer.Serialize(arr), Encoding.UTF8, "application/json")
+                            Content = new StringContent(JsonSerializer.Serialize(objects), Encoding.UTF8, "application/json")
                         };
                     }
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                });
 
-                    var objects = new[] { new { id = 10, name = "PETG", density = (double?)1.24 }, new { id = 11, name = "TPU", density = (double?)null } };
-                    return new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent(JsonSerializer.Serialize(objects), Encoding.UTF8, "application/json")
-                    };
-                }
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            });
-
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         var svc = new SpoolmanService(http, settings.Object, logger.Object);
 
         // First call should parse the string array and return two materials
@@ -132,20 +133,20 @@ public class SpoolmanServiceTests
         var logger = new Mock<IUnifiedLoggingService>();
 
         // Prepare a message handler that responds to /api/v1/spools with a JSON array of one object
-        var handler = new FakeHttpMessageHandler((req) =>
-            {
-                if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
+        using var handler = new FakeHttpMessageHandler((req) =>
                 {
-                    var json = JsonSerializer.Serialize(new[] { new { id = 42, name = "Test Spool" } });
-                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
                     {
-                        Content = new StringContent(json, Encoding.UTF8, "application/json")
-                    };
-                }
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            });
+                        var json = JsonSerializer.Serialize(new[] { new { id = 42, name = "Test Spool" } });
+                        return new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(json, Encoding.UTF8, "application/json")
+                        };
+                    }
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                });
 
-        var http = new HttpClient(handler)
+        using var http = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://spoolman.local")
         };
@@ -165,20 +166,20 @@ public class SpoolmanServiceTests
         var logger = new Mock<IUnifiedLoggingService>();
 
         // Handler that responds to /api/v1/info for one IP and times out for others
-        var handler = new FakeHttpMessageHandler((req) =>
-            {
-                if (req.RequestUri!.Host == "192.168.1.5" && req.RequestUri.AbsolutePath == "/api/v1/info")
+        using var handler = new FakeHttpMessageHandler((req) =>
                 {
-                    var json = JsonSerializer.Serialize(new { version = "1.2.3" });
-                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    if (req.RequestUri!.Host == "192.168.1.5" && req.RequestUri.AbsolutePath == "/api/v1/info")
                     {
-                        Content = new StringContent(json, Encoding.UTF8, "application/json")
-                    };
-                }
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            });
+                        var json = JsonSerializer.Serialize(new { version = "1.2.3" });
+                        return new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(json, Encoding.UTF8, "application/json")
+                        };
+                    }
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                });
 
-        var http = new HttpClient(handler);
+        using var http = new HttpClient(handler);
         var svc = new SpoolmanService(http, settings.Object, logger.Object);
 
         var results = await svc.ScanNetworkForSpoolmanAsync(new[] { "192.168.1.0/29" });
@@ -193,32 +194,32 @@ public class SpoolmanServiceTests
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local/root" });
         var logger = new Mock<IUnifiedLoggingService>();
 
-        var handler = new FakeHttpMessageHandler((req) =>
-        {
-            // If the request URI contains page=2 return the second page
-            if (req.RequestUri!.AbsoluteUri.Contains("page=2"))
+        using var handler = new FakeHttpMessageHandler((req) =>
             {
-                var json2 = JsonSerializer.Serialize(new[] { new { id = 102, name = "RelSecond" } });
-                return new HttpResponseMessage(HttpStatusCode.OK)
+                // If the request URI contains page=2 return the second page
+                if (req.RequestUri!.AbsoluteUri.Contains("page=2"))
                 {
-                    Content = new StringContent(json2, Encoding.UTF8, "application/json")
-                };
-            }
+                    var json2 = JsonSerializer.Serialize(new[] { new { id = 102, name = "RelSecond" } });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json2, Encoding.UTF8, "application/json")
+                    };
+                }
 
-            if (req.RequestUri.AbsolutePath.Contains("/api/v1/spool"))
-            {
-                // page 1 has next "/api/v1/spools?page=2" (relative)
-                var page1 = new { results = new[] { new { id = 101, name = "RelFirst" } }, next = "/api/v1/spools?page=2" };
-                return new HttpResponseMessage(HttpStatusCode.OK)
+                if (req.RequestUri.AbsolutePath.Contains("/api/v1/spool"))
                 {
-                    Content = new StringContent(JsonSerializer.Serialize(page1), Encoding.UTF8, "application/json")
-                };
-            }
+                    // page 1 has next "/api/v1/spools?page=2" (relative)
+                    var page1 = new { results = new[] { new { id = 101, name = "RelFirst" } }, next = "/api/v1/spools?page=2" };
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(JsonSerializer.Serialize(page1), Encoding.UTF8, "application/json")
+                    };
+                }
 
-            return new HttpResponseMessage(HttpStatusCode.NotFound);
-        });
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            });
 
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local/root") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local/root") };
         var svc = new SpoolmanService(http, settings.Object, logger.Object);
 
         var items = await svc.ListSpoolsAsync(CancellationToken.None);
@@ -233,22 +234,22 @@ public class SpoolmanServiceTests
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         var logger = new Mock<IUnifiedLoggingService>();
 
-        var handler = new FakeHttpMessageHandler((req) =>
-        {
-            // If requesting the specific spool, return HTML (non-JSON)
-            if (req.RequestUri!.AbsolutePath.EndsWith("/api/v1/spool/99"))
+        using var handler = new FakeHttpMessageHandler((req) =>
             {
-                return new HttpResponseMessage(HttpStatusCode.OK)
+                // If requesting the specific spool, return HTML (non-JSON)
+                if (req.RequestUri!.AbsolutePath.EndsWith("/api/v1/spool/99"))
                 {
-                    Content = new StringContent("<html>oops</html>", Encoding.UTF8, "text/html")
-                };
-            }
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("<html>oops</html>", Encoding.UTF8, "text/html")
+                    };
+                }
 
-            // For other spools, return 404
-            return new HttpResponseMessage(HttpStatusCode.NotFound);
-        });
+                // For other spools, return 404
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            });
 
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         var svc = new SpoolmanService(http, settings.Object, logger.Object);
 
         var res = await svc.GetSpoolByIdAsync(99, CancellationToken.None);

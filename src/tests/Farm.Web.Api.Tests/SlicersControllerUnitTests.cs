@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.SlicerServices;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
@@ -17,12 +19,7 @@ namespace Farm.Web.Api.Tests
     {
         private static AppDbContext CreateInMemoryDb()
         {
-            var opts = new DbContextOptionsBuilder<AppDbContext>()
-                .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
-                .Options;
-            var db = new AppDbContext(opts);
-            db.Database.EnsureCreated();
-            return db;
+            return TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
         }
 
         private static Mock<IHubContext<SlicerProgressHub>> CreateMockHub(out Mock<IClientProxy> clientProxy)
@@ -45,7 +42,9 @@ namespace Farm.Web.Api.Tests
             using var db = CreateInMemoryDb();
             var mockHub = CreateMockHub(out var clientProxy);
 
-            var controller = new SlicersController(db, mockHub.Object);
+            var repo = new EfSlicersRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var controller = new SlicersController(service);
 
             var dto = new RegisterSlicerDto
             {
@@ -80,7 +79,9 @@ namespace Farm.Web.Api.Tests
             await db.SaveChangesAsync();
 
             var mockHub = CreateMockHub(out _);
-            var controller = new SlicersController(db, mockHub.Object);
+            var repo = new EfSlicersRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var controller = new SlicersController(service);
 
             var res = await controller.ListAsync();
             res.Should().BeOfType<OkObjectResult>();
@@ -99,7 +100,9 @@ namespace Farm.Web.Api.Tests
             await db.SaveChangesAsync();
 
             var mockHub = CreateMockHub(out var clientProxy);
-            var controller = new SlicersController(db, mockHub.Object);
+            var repo = new EfSlicersRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var controller = new SlicersController(service);
 
             var hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
             var res = await controller.HeartbeatAsync(id, hb);
@@ -126,7 +129,9 @@ namespace Farm.Web.Api.Tests
             await db.SaveChangesAsync();
 
             var mockHub = CreateMockHub(out var clientProxy);
-            var controller = new SlicersController(db, mockHub.Object);
+            var repo = new EfSlicersRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var controller = new SlicersController(service);
 
             var res = await controller.DeregisterAsync(id);
             res.Should().BeOfType<NoContentResult>();

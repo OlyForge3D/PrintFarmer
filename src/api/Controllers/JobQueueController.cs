@@ -2,6 +2,8 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
+using Farm.Web.Api.Repositories.Queue;
+using Farm.Infrastructure.Repositories.Printers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,7 +15,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/job-queue")]
 [Tags("Print Job Queue")]
-public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) : ControllerBase
+public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository printersRepo, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all jobs in the queue
@@ -25,18 +27,13 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
     {
         try
         {
-            List<PrintJob> jobs = await db.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .OrderBy(j => j.QueuePosition)
-                .ThenBy(j => j.CreatedAt)
-                .ToListAsync();
+            List<PrintJob> jobs = await queueRepo.GetAllPrintJobsAsync(CancellationToken.None) ?? new List<PrintJob>();
 
             return Ok(jobs.Select(job => new JobQueuePrintJobDto
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
+                GcodeFileName = job.GcodeFile?.OriginalFileName ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
                 Status = (PrintJobStatus?)job.Status,
@@ -79,7 +76,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
         try
         {
             // Validate the gcode file exists
-            GcodeFile? gcodeFile = await db.GcodeFiles.FindAsync(request.GcodeFileId);
+            GcodeFile? gcodeFile = await queueRepo.GetGcodeFileAsync(request.GcodeFileId, CancellationToken.None);
             if (gcodeFile == null)
             {
                 return NotFound($"G-code file with ID {request.GcodeFileId} not found");
@@ -104,48 +101,64 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
                 QueuedAt = DateTime.UtcNow
             };
 
-            // Set queue position
-            int maxPosition = await db.PrintJobs
-                .Where(j => j.Status == PrintJobStatus.Queued)
-                .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
-            job.QueuePosition = maxPosition + 1;
+            // Set queue position (global queued jobs)
+            int maxPosition = await queueRepo.GetNextGlobalQueuePositionAsync(CancellationToken.None);
+            job.QueuePosition = maxPosition;
 
-            _ = db.PrintJobs.Add(job);
-            _ = await db.SaveChangesAsync();
+            await queueRepo.AddPrintJobAsync(job, CancellationToken.None);
+            await queueRepo.SaveChangesAsync(CancellationToken.None);
 
-            // Load related entities for response
-            await db.Entry(job)
-                .Reference(j => j.GcodeFile)
-                .LoadAsync();
+            // Load related entities for response via repo-loaded entities
+            PrintJob? saved = await queueRepo.GetPrintJobByIdAsync(job.Id, CancellationToken.None);
 
-            if (job.AssignedPrinterId.HasValue)
+            if (saved == null)
             {
-                await db.Entry(job)
-                    .Reference(j => j.AssignedPrinter)
-                    .LoadAsync();
+                // This should not happen immediately after save, but guard for analysis
+                return CreatedAtAction(nameof(GetJobAsync), new { id = job.Id }, new JobQueuePrintJobDto
+                {
+                    Id = job.Id,
+                    GcodeFileId = job.GcodeFileId,
+                    GcodeFileName = job.Name,
+                    AssignedPrinterId = job.AssignedPrinterId,
+                    AssignedPrinterName = string.Empty,
+                    Status = (PrintJobStatus?)job.Status,
+                    Priority = job.Priority,
+                    QueuePosition = job.QueuePosition,
+                    RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                    RequiredMaterialType = job.RequiredMaterialType,
+                    EstimatedPrintTime = job.EstimatedPrintTime,
+                    EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                    ActualStartTime = job.ActualStartTime,
+                    ActualEndTime = job.ActualEndTime,
+                    ActualPrintTime = job.ActualPrintTime,
+                    ActualFilamentUsage = job.ActualFilamentUsage,
+                    FailureReason = job.FailureReason,
+                    CreatedAt = job.CreatedAt,
+                    UpdatedAt = job.UpdatedAt
+                });
             }
 
             return CreatedAtAction(nameof(GetJobAsync), new { id = job.Id }, new JobQueuePrintJobDto
             {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
+                Id = saved.Id,
+                GcodeFileId = saved.GcodeFileId,
+                GcodeFileName = saved.GcodeFile?.OriginalFileName ?? string.Empty,
+                AssignedPrinterId = saved.AssignedPrinterId,
+                AssignedPrinterName = saved.AssignedPrinter?.Name ?? string.Empty,
+                Status = (PrintJobStatus?)saved.Status,
+                Priority = saved.Priority,
+                QueuePosition = saved.QueuePosition,
+                RequiredNozzleDiameter = saved.RequiredNozzleDiameter,
+                RequiredMaterialType = saved.RequiredMaterialType,
+                EstimatedPrintTime = saved.EstimatedPrintTime,
+                EstimatedFilamentUsage = saved.EstimatedFilamentUsage,
+                ActualStartTime = saved.ActualStartTime,
+                ActualEndTime = saved.ActualEndTime,
+                ActualPrintTime = saved.ActualPrintTime,
+                ActualFilamentUsage = saved.ActualFilamentUsage,
+                FailureReason = saved.FailureReason,
+                CreatedAt = saved.CreatedAt,
+                UpdatedAt = saved.UpdatedAt
             });
         }
         catch (Exception ex)
@@ -166,10 +179,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
     {
         try
         {
-            PrintJob? job = await db.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .FirstOrDefaultAsync(j => j.Id == id);
+            PrintJob? job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
 
             if (job == null)
             {
@@ -180,7 +190,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
+                GcodeFileName = job.GcodeFile?.OriginalFileName ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
                 Status = (PrintJobStatus?)(int)job.Status,
@@ -222,10 +232,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
         }
         try
         {
-            PrintJob? job = await db.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .FirstOrDefaultAsync(j => j.Id == id);
+            PrintJob? job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
 
             if (job == null)
             {
@@ -246,7 +253,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
             if (request.AssignedPrinterId.HasValue)
             {
                 // Validate printer exists
-                Printer? printer = await db.Printers.FindAsync(request.AssignedPrinterId.Value);
+                Printer? printer = await printersRepo.FindByIdAsync(request.AssignedPrinterId.Value, CancellationToken.None);
                 if (printer == null)
                 {
                     return BadRequest($"Printer with ID {request.AssignedPrinterId} not found");
@@ -266,21 +273,19 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
 
             job.UpdatedAt = DateTime.UtcNow;
 
-            _ = await db.SaveChangesAsync();
+            await queueRepo.SaveChangesAsync(CancellationToken.None);
 
             // Reload printer if assignment changed
             if (request.AssignedPrinterId.HasValue)
             {
-                await db.Entry(job)
-                    .Reference(j => j.AssignedPrinter)
-                    .LoadAsync();
+                job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
             }
 
             return Ok(new JobQueuePrintJobDto
             {
-                Id = job.Id,
+                Id = job!.Id,
                 GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
+                GcodeFileName = job.GcodeFile?.OriginalFileName ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
                 Status = (PrintJobStatus?)(int)job.Status,
@@ -318,7 +323,7 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
     {
         try
         {
-            PrintJob? job = await db.PrintJobs.FindAsync(id);
+            PrintJob? job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
             if (job == null)
             {
                 return NotFound($"Print job with ID {id} not found");
@@ -330,8 +335,8 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
                 return BadRequest("Cannot delete a job that is currently printing");
             }
 
-            _ = db.PrintJobs.Remove(job);
-            _ = await db.SaveChangesAsync();
+            await queueRepo.RemovePrintJobAsync(job, CancellationToken.None);
+            await queueRepo.SaveChangesAsync(CancellationToken.None);
 
             return NoContent();
         }

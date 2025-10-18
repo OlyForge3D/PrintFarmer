@@ -385,8 +385,8 @@ public class SlicerOrchestrator(
             throw new ArgumentException("ModelFileUrl is required", nameof(request));
         }
 
-        // Validate slicer engine is available
-        if (!_engineCatalog.TryGetValue(request.SlicerEngine, out EngineMetadata? engineMeta))
+        // Validate slicer engine is a defined enum value and available
+        if (!Enum.IsDefined(request.SlicerEngine) || !_engineCatalog.TryGetValue(request.SlicerEngine, out EngineMetadata? engineMeta))
         {
             throw new ArgumentException($"Slicer engine {request.SlicerEngine} is not available", nameof(request));
         }
@@ -394,7 +394,7 @@ public class SlicerOrchestrator(
         // Treat obviously-placeholder or invalid model URLs as bad input (argument error) rather than missing files.
         // Tests may pass placeholders like "about:blank" to indicate an empty/invalid model; handle that explicitly.
         var modelUrl = request.ModelFileUrl;
-        if (modelUrl?.IsAbsoluteUri == true)
+        if (modelUrl.IsAbsoluteUri)
         {
             string scheme = modelUrl.Scheme ?? string.Empty;
             if (string.Equals(scheme, "about", StringComparison.OrdinalIgnoreCase) ||

@@ -22,14 +22,14 @@ public class PrinterCapabilityDiscoveryService(
     private readonly IPrusaLinkClient _prusaClient = prusaClient;
     private readonly IUnifiedLoggingService _logger = logger;
 
-    public async Task<PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
+    public async Task<Farm.Infrastructure.Domain.PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default)
     {
         try
         {
             _logger.LogInformation($"Starting capability discovery for printer {printer.Id} ({printer.Name})");
 
             // Start with model defaults
-            PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer) ?? new PrinterCapabilities
+            Farm.Infrastructure.Domain.PrinterCapabilities? capabilities = await GetModelDefaultCapabilitiesAsync(printer) ?? new Farm.Infrastructure.Domain.PrinterCapabilities
             {
                 Id = Guid.NewGuid(),
                 PrinterId = printer.Id,
@@ -63,7 +63,7 @@ public class PrinterCapabilityDiscoveryService(
         }
     }
 
-    public async Task<PrinterCapabilities> RefreshCapabilitiesAsync(PrinterCapabilities capabilities, Printer printer, CancellationToken cancellationToken = default)
+    public async Task<Farm.Infrastructure.Domain.PrinterCapabilities> RefreshCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, Printer printer, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -96,7 +96,7 @@ public class PrinterCapabilityDiscoveryService(
         }
     }
 
-    public async Task<CapabilityValidationResult> ValidateCapabilitiesAsync(PrinterCapabilities capabilities, Printer printer)
+    public async Task<CapabilityValidationResult> ValidateCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, Printer printer)
     {
         CapabilityValidationResult result = new();
 
@@ -175,7 +175,7 @@ public class PrinterCapabilityDiscoveryService(
         return result;
     }
 
-    public async Task<PrinterCapabilities?> GetModelDefaultCapabilitiesAsync(Printer printer)
+    public async Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetModelDefaultCapabilitiesAsync(Printer printer)
     {
         ArgumentNullException.ThrowIfNull(printer);
 
@@ -192,7 +192,7 @@ public class PrinterCapabilityDiscoveryService(
             }
 
             PrinterModel model = printerWithModel.Model;
-            PrinterCapabilities capabilities = new()
+            Farm.Infrastructure.Domain.PrinterCapabilities capabilities = new()
             {
                 Id = Guid.NewGuid(),
                 PrinterId = printer.Id,
@@ -403,7 +403,7 @@ public class PrinterCapabilityDiscoveryService(
         return Task.FromResult<DiscoveredCapabilities?>(discovered);
     }
 
-    private static void ApplyDiscoveredCapabilities(PrinterCapabilities capabilities, DiscoveredCapabilities discovered)
+    private static void ApplyDiscoveredCapabilities(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, DiscoveredCapabilities discovered)
     {
         if (discovered.NozzleDiameter.HasValue)
         {
@@ -456,7 +456,7 @@ public class PrinterCapabilityDiscoveryService(
         }
     }
 
-    private static void SetDefaultsByManufacturerAndModel(PrinterCapabilities capabilities, Printer printer)
+    private static void SetDefaultsByManufacturerAndModel(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, Printer printer)
     {
         // Use OrdinalIgnoreCase when comparing manufacturer/model names elsewhere; avoid creating lowered copies here
         string? manufacturerName = printer.Manufacturer?.Name;

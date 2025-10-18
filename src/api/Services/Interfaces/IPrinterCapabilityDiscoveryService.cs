@@ -15,7 +15,7 @@ public interface IPrinterCapabilityDiscoveryService
     /// <param name="printer">Printer entity with API connection info</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Discovered printer capabilities or null if discovery fails</returns>
-    Task<PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default);
+    Task<Farm.Infrastructure.Domain.PrinterCapabilities?> DiscoverCapabilitiesAsync(Printer printer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update existing capabilities with fresh data from printer API
@@ -24,7 +24,7 @@ public interface IPrinterCapabilityDiscoveryService
     /// <param name="printer">Printer entity with API connection info</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Updated capabilities</returns>
-    Task<PrinterCapabilities> RefreshCapabilitiesAsync(PrinterCapabilities capabilities, Printer printer, CancellationToken cancellationToken = default);
+    Task<Farm.Infrastructure.Domain.PrinterCapabilities> RefreshCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, Printer printer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Validate capabilities against known printer model specifications
@@ -32,14 +32,14 @@ public interface IPrinterCapabilityDiscoveryService
     /// <param name="capabilities">Capabilities to validate</param>
     /// <param name="printer">Printer with model information</param>
     /// <returns>Validation results with warnings and errors</returns>
-    Task<CapabilityValidationResult> ValidateCapabilitiesAsync(PrinterCapabilities capabilities, Printer printer);
+    Task<CapabilityValidationResult> ValidateCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, Printer printer);
 
     /// <summary>
     /// Get default capabilities based on printer model
     /// </summary>
     /// <param name="printer">Printer with model information</param>
     /// <returns>Default capabilities based on model data</returns>
-    Task<PrinterCapabilities?> GetModelDefaultCapabilitiesAsync(Printer printer);
+    Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetModelDefaultCapabilitiesAsync(Printer printer);
 }
 
 /// <summary>

@@ -18,7 +18,7 @@ public class SignalRTestController(
     /// Test endpoint to verify SignalR hub can send messages
     /// </summary>
     [HttpPost("send-test-message")]
-    public async Task<IActionResult> SendTestMessageAsync([FromBody] SignalRTestRequest request)
+    public async Task<IActionResult> SendTestMessageAsync([FromBody] Farm.Web.Shared.Contracts.SignalR.SignalRTestRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
@@ -37,7 +37,7 @@ public class SignalRTestController(
     /// Test discovery group functionality specifically
     /// </summary>
     [HttpPost("test-discovery-group")]
-    public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] DiscoveryTestRequest request)
+    public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] Farm.Web.Shared.Contracts.SignalR.DiscoveryTestRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
@@ -73,15 +73,4 @@ public class SignalRTestController(
     }
 }
 
-public class SignalRTestRequest
-{
-    public string? ConnectionId { get; set; }
-    public string? GroupName { get; set; }
-    public string? Message { get; set; }
-}
-
-public class DiscoveryTestRequest
-{
-    public string? SessionId { get; set; }
-    public bool DelayBetweenMessages { get; set; } = true;
-}
+// DTOs moved to Farm.Web.Shared.Contracts.SignalR.SignalRTestDtos.cs

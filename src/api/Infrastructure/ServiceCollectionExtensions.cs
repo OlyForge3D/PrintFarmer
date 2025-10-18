@@ -118,6 +118,15 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
         _ = services.AddScoped<IPrinterCapabilityDiscoveryService, PrinterCapabilityDiscoveryService>();
 
+        // Repositories (in infra project)
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Printers.IPrintersRepository, Farm.Infrastructure.Repositories.Printers.EfPrintersRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProfilesRepository, Farm.Infrastructure.Repositories.Slicing.EfProfilesRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
+        // Catalog repository contract moved to infra; register infra implementation
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
+
         // Business Services
         _ = services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
         _ = services.AddSingleton<ICircuitBreakerService, CircuitBreakerService>();

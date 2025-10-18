@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 public partial class SlicerAdminController : ControllerBase
 {
     [HttpPost("dryrun")]
-    public ActionResult<DryRunResult> DryRun([FromBody] DryRunRequest request)
+    public ActionResult<Farm.Web.Shared.Contracts.Admin.DryRunResult> DryRun([FromBody] Farm.Web.Shared.Contracts.Admin.DryRunRequest request)
     {
         if (request == null)
         {
@@ -32,7 +32,7 @@ public partial class SlicerAdminController : ControllerBase
             }
         }
 
-        DryRunResult result = new();
+        var result = new Farm.Web.Shared.Contracts.Admin.DryRunResult();
 
         // Known placeholders we support
         string[] known = new[] { "input", "output", "config", "profile" };
@@ -50,18 +50,18 @@ public partial class SlicerAdminController : ControllerBase
         {
             if (!known.Contains(ph, StringComparer.OrdinalIgnoreCase))
             {
-                result._warnings.Add($"Unknown placeholder '{{{ph}}}' — it will remain unexpanded.");
+                result.AddWarning($"Unknown placeholder '{{{ph}}}' — it will remain unexpanded.");
             }
         }
 
         // Basic validation rules
         if (!placeholders.Contains("input", StringComparer.OrdinalIgnoreCase))
         {
-            result._issues.Add("Template should include an {input} placeholder pointing to the model path.");
+            result.AddIssue("Template should include an {input} placeholder pointing to the model path.");
         }
         if (!placeholders.Contains("output", StringComparer.OrdinalIgnoreCase))
         {
-            result._warnings.Add("Template does not include an {output} placeholder — default output name will be used.");
+            result.AddWarning("Template does not include an {output} placeholder — default output name will be used.");
         }
 
         // Do a safe render using sample values
@@ -74,7 +74,7 @@ public partial class SlicerAdminController : ControllerBase
         // Safety checks on rendered args
         if (rendered.Contains("..", StringComparison.Ordinal) || rendered.Contains("~", StringComparison.Ordinal))
         {
-            result._warnings.Add("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
+            result.AddWarning("Rendered args contain path traversal sequences (.. or ~). Ensure templates are safe and admin-provided paths are trusted.");
         }
 
         result.IsValid = result.Issues.Count == 0;
@@ -85,21 +85,4 @@ public partial class SlicerAdminController : ControllerBase
 
     [System.Text.RegularExpressions.GeneratedRegex("\\{([a-zA-Z0-9_]+)\\}")]
     private static partial System.Text.RegularExpressions.Regex MyRegex();
-}
-
-public class DryRunRequest
-{
-    public string? Template { get; set; }
-    public SlicerEngineType Engine { get; set; } = SlicerEngineType.OrcaSlicer;
-}
-
-public class DryRunResult
-{
-    public bool IsValid { get; set; }
-    internal readonly List<string> _issues = new();
-    internal readonly List<string> _warnings = new();
-    public IReadOnlyList<string> Issues => _issues;
-    public IReadOnlyList<string> Warnings => _warnings;
-    public string? Rendered { get; set; }
-    public Dictionary<string, string> SamplePlaceholders { get; set; } = new();
 }

@@ -10,10 +10,10 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
-public class ProfilesController(AppDbContext context, IUnifiedLoggingService logger) : ControllerBase
+public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Services.Slicing.IProfilesService profilesService) : ControllerBase
 {
-    private readonly AppDbContext _context = context;
     private readonly IUnifiedLoggingService _logger = logger;
+    private readonly Farm.Web.Api.Services.Slicing.IProfilesService _profilesService = profilesService;
 
     [HttpPost]
     [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status201Created)]
@@ -39,44 +39,27 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
             {
                 return BadRequest("Invalid quality setting");
             }
-            SlicerProfile profile = new()
+            // Map to service request and delegate creation
+            var createReq = new Farm.Web.Shared.CreateSlicerProfileDto
             {
-                Id = Guid.NewGuid(),
-                Name = request.Name!,
+                Name = request.Name,
                 Description = request.Description,
-                SlicerType = slicerType,
+                SlicerType = request.SlicerType,
                 LayerHeight = request.LayerHeight,
                 InfillPercentage = request.InfillPercentage,
                 PrintSpeed = request.PrintSpeed,
                 NozzleTemperature = request.NozzleTemperature,
                 BedTemperature = request.BedTemperature,
                 EnableSupports = request.EnableSupports,
-                Material = request.Material ?? "PLA",
-                Quality = quality,
+                Material = request.Material,
+                Quality = request.Quality,
                 IsDefault = request.IsDefault,
                 IsPublic = request.IsPublic,
-                CreatedAt = DateTime.UtcNow
+                AdvancedSettings = request.AdvancedSettings
             };
-            _ = _context.SlicerProfiles.Add(profile);
-            _ = await _context.SaveChangesAsync();
-            SlicerProfileResponseDto response = new()
-            {
-                Id = profile.Id,
-                Name = profile.Name,
-                Description = profile.Description,
-                SlicerType = profile.SlicerType.ToString(),
-                LayerHeight = profile.LayerHeight,
-                InfillPercentage = profile.InfillPercentage,
-                PrintSpeed = (int)profile.PrintSpeed,
-                NozzleTemperature = profile.NozzleTemperature,
-                BedTemperature = profile.BedTemperature,
-                EnableSupports = profile.EnableSupports,
-                Material = profile.Material,
-                Quality = profile.Quality.ToString(),
-                IsDefault = profile.IsDefault,
-                IsPublic = profile.IsPublic
-            };
-            return Created($"/api/slicer/profiles/{profile.Id}", response);
+
+            var created = await _profilesService.CreateProfileAsync(createReq, CancellationToken.None);
+            return Created($"/api/slicer/profiles/{created.Id}", created);
         }
         catch (Exception ex)
         {
@@ -90,28 +73,12 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProfileAsync(Guid id)
     {
-        SlicerProfile? profile = await _context.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == id);
+        var profile = await _profilesService.GetProfileAsync(id, CancellationToken.None);
         if (profile == null)
         {
             return NotFound();
         }
-        return Ok(new SlicerProfileResponseDto
-        {
-            Id = profile.Id,
-            Name = profile.Name,
-            Description = profile.Description,
-            SlicerType = profile.SlicerType.ToString(),
-            LayerHeight = profile.LayerHeight,
-            InfillPercentage = profile.InfillPercentage,
-            PrintSpeed = (int)profile.PrintSpeed,
-            NozzleTemperature = profile.NozzleTemperature,
-            BedTemperature = profile.BedTemperature,
-            EnableSupports = profile.EnableSupports,
-            Material = profile.Material,
-            Quality = profile.Quality.ToString(),
-            IsDefault = profile.IsDefault,
-            IsPublic = profile.IsPublic
-        });
+        return Ok(profile);
     }
 
     [HttpDelete("{id:guid}")]
@@ -119,14 +86,15 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteProfileAsync(Guid id)
     {
-        SlicerProfile? profile = await _context.SlicerProfiles.FirstOrDefaultAsync(p => p.Id == id);
-        if (profile == null)
+        try
+        {
+            await _profilesService.DeleteProfileAsync(id, CancellationToken.None);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
         {
             return NotFound();
         }
-        _ = _context.SlicerProfiles.Remove(profile);
-        _ = await _context.SaveChangesAsync();
-        return NoContent();
     }
 
     [HttpGet]
@@ -135,6 +103,7 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
     {
         try
         {
+            // For list operations, delegate to service which handles defaults & filtering
             if (string.IsNullOrWhiteSpace(printerId) && string.IsNullOrWhiteSpace(slicerType))
             {
                 return Ok(DefaultProfiles().Select(d => (object)new
@@ -152,44 +121,22 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
                 }));
             }
 
-            IQueryable<SlicerProfile> query = _context.SlicerProfiles
-                .Include(p => p.PrinterModel)
-                .Include(p => p.SpecificPrinter)
-                .Where(p => p.IsPublic || p.CreatedByUserId == null);
-
-            if (!string.IsNullOrEmpty(printerId) && Guid.TryParse(printerId, out Guid printerGuid))
+            var list = await _profilesService.GetProfilesAsync(CancellationToken.None);
+            // Map to lightweight view for the client (SlicerProfileDto doesn't include Name/SlicerType)
+            IEnumerable<object> mapped = list.Select(p => (object)new
             {
-                Printer? printer = await _context.Printers.Include(p => p.Model).FirstOrDefaultAsync(p => p.Id == printerGuid);
-                if (printer != null)
-                {
-                    query = query.Where(p => p.SpecificPrinterId == printerGuid || (p.PrinterModelId == printer.ModelId && p.SpecificPrinterId == null) || (p.PrinterModelId == null && p.SpecificPrinterId == null));
-                }
-            }
+                p.LayerHeight,
+                p.InfillPercentage,
+                printSpeed = p.PrintSpeed,
+                p.NozzleTemperature,
+                p.BedTemperature,
+                supports = p.Supports,
+                p.Material,
+                quality = p.Quality
+            });
 
-            if (!string.IsNullOrEmpty(slicerType) && Enum.TryParse<SlicerType>(slicerType, true, out SlicerType slicerTypeEnum))
-            {
-                query = query.Where(p => p.SlicerType == slicerTypeEnum);
-            }
-
-            var profiles = await query
-                .OrderBy(p => p.IsDefault ? 0 : 1)
-                .ThenBy(p => p.Name)
-                .Select(p => new
-                {
-                    name = p.Name,
-                    slicerType = p.SlicerType.ToString(),
-                    p.LayerHeight,
-                    p.InfillPercentage,
-                    printSpeed = (int)p.PrintSpeed,
-                    p.NozzleTemperature,
-                    p.BedTemperature,
-                    supports = p.EnableSupports,
-                    p.Material,
-                    quality = p.Quality.ToString()
-                })
-                .ToListAsync();
-
-            if (profiles.Count == 0)
+            var final = mapped.ToList();
+            if (final.Count == 0)
             {
                 return Ok(DefaultProfiles().Select(d => (object)new
                 {
@@ -206,17 +153,7 @@ public class ProfilesController(AppDbContext context, IUnifiedLoggingService log
                 }));
             }
 
-            Dictionary<string, int> qualityOrder = new(StringComparer.OrdinalIgnoreCase)
-            {
-                ["draft"] = 0,
-                ["standard"] = 1,
-                ["fine"] = 2
-            };
-            profiles = [.. profiles
-                .OrderBy(p => qualityOrder.TryGetValue(p.quality, out int precedence) ? precedence : 99)
-                .ThenBy(p => p.name)];
-
-            return Ok(profiles);
+            return Ok(final);
         }
         catch (Exception ex)
         {

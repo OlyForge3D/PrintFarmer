@@ -100,7 +100,7 @@ public class PrinterCapabilityUpdateService(
             // Get all printers with capabilities that haven't been updated recently
             _logger.LogDebug($"Querying stale printer capabilities", null, null);
             DateTime staleThreshold = DateTime.UtcNow.AddHours(-2); // Update if older than 2 hours
-            List<PrinterCapabilities> capabilities = await context.PrinterCapabilities
+            List<Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await context.PrinterCapabilities
                 .Include(c => c.Printer)
                 .ThenInclude(p => p.Model)
                 .Include(c => c.Printer.Manufacturer)
@@ -118,7 +118,7 @@ public class PrinterCapabilityUpdateService(
 
             _logger.LogInformation($"Updating capabilities for {capabilities.Count} printers", null, null);
 
-            foreach (PrinterCapabilities? capability in capabilities)
+            foreach (Farm.Infrastructure.Domain.PrinterCapabilities? capability in capabilities)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {

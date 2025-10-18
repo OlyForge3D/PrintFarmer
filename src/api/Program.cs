@@ -98,14 +98,28 @@ builder.Services.AddScoped<Farm.Web.Api.Services.SignalR.ISignalRTestService, Fa
 builder.Services.AddScoped<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService, Farm.Web.Api.Services.PasswordPolicy.PasswordPolicyService>();
 builder.Services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Web.Api.Repositories.PasswordPolicy.PasswordPolicyRepository>();
 
+// Users service (wraps users repository + auth/password services)
+builder.Services.AddScoped<Farm.Web.Api.Services.Users.IUsersService, Farm.Web.Api.Services.Users.UsersService>();
+
 // Catalog service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Catalog.ICatalogService, Farm.Web.Api.Services.Catalog.CatalogService>();
 // Catalog repository
-builder.Services.AddScoped<Farm.Web.Api.Repositories.Catalog.ICatalogRepository, Farm.Web.Api.Repositories.Catalog.CatalogRepository>();
 // Filament type service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Filament.IFilamentTypeService, Farm.Web.Api.Services.Filament.FilamentTypeService>();
 // Filament repository
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Filament.IFilamentTypeRepository, Farm.Web.Api.Repositories.Filament.FilamentTypeRepository>();
+// Slicer profiles repository & service (refactor target)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.IProfilesRepository, Farm.Web.Api.Repositories.Slicing.ProfilesRepository>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfilesService, Farm.Web.Api.Services.Slicing.ProfilesService>();
+// Slicers registry repository
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
+// Slicers registry service (business logic)
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.Web.Api.Services.Slicing.SlicersService>();
+// Queue repository & service (refactor: Controllers -> Services)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Queue.IQueueRepository, Farm.Web.Api.Repositories.Queue.EfQueueRepository>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Queue.IQueueService, Farm.Web.Api.Services.Queue.QueueService>();
+// G-code repository (new)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Gcode.IGcodeRepository, Farm.Web.Api.Repositories.Gcode.EfGcodeRepository>();
 // Model service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
 // Moonraker diagnostics service (scaffolded)
@@ -114,6 +128,12 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Interfaces.IMoonrakerDiagnostic
 builder.Services.AddSingleton<Farm.Web.Api.Services.IO.IFileSystem, Farm.Web.Api.Services.IO.SystemFileSystem>();
 // Model repository (for service -> persistence abstraction)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Model.IModelRepository, Farm.Web.Api.Repositories.Model.EfModelRepository>();
+// System log service (refactor: Controllers -> Services)
+builder.Services.AddScoped<Farm.Web.Api.Services.SystemLogs.ISystemLogService, Farm.Web.Api.Services.SystemLogs.SystemLogService>();
+// Printer capabilities service (Phase 2 refactor)
+builder.Services.AddScoped<Farm.Web.Api.Services.PrinterCapabilities.IPrinterCapabilitiesService, Farm.Web.Api.Services.PrinterCapabilities.PrinterCapabilitiesService>();
+// Printers service (incremental refactor helper)
+builder.Services.AddScoped<Farm.Web.Api.Services.Printers.IPrintersService, Farm.Web.Api.Services.Printers.PrintersService>();
 // Local slicer file storage (explicit registration to ensure IFileSystem is injected)
 builder.Services.AddScoped<Farm.Web.Api.Services.SlicerServices.LocalSlicerFileStorage>();
 builder.Services.AddScoped<Farm.Web.Shared.ISlicerFileStorage>(sp => sp.GetRequiredService<Farm.Web.Api.Services.SlicerServices.LocalSlicerFileStorage>());

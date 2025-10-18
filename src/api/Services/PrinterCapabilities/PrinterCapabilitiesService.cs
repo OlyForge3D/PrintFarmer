@@ -1,0 +1,482 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared;
+using Farm.Web.Api.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
+
+namespace Farm.Web.Api.Services.PrinterCapabilities
+{
+    public class PrinterCapabilitiesService : IPrinterCapabilitiesService
+    {
+        private readonly AppDbContext _db;
+        private readonly IUnifiedLoggingService _logger;
+        private readonly Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService _discovery;
+
+        public PrinterCapabilitiesService(AppDbContext db, IUnifiedLoggingService logger, Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService discovery)
+        {
+            _db = db ?? throw new ArgumentNullException(nameof(db));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
+        }
+
+        public async Task<IReadOnlyList<PrinterCapabilitiesDto>> GetAllAsync(CancellationToken ct = default)
+        {
+            var capabilities = await _db.PrinterCapabilities
+                .Include(c => c.Printer)
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+            return capabilities.Select(cap => new PrinterCapabilitiesDto(
+                Id: cap.Id,
+                PrinterId: cap.PrinterId,
+                PrinterName: cap.Printer?.Name ?? string.Empty,
+                NozzleDiameter: cap.NozzleDiameter,
+                SupportedMaterials: cap.SupportedMaterials,
+                MaxBuildVolumeX: cap.MaxBuildVolumeX,
+                MaxBuildVolumeY: cap.MaxBuildVolumeY,
+                MaxBuildVolumeZ: cap.MaxBuildVolumeZ,
+                HasHeatedBed: cap.HasHeatedBed,
+                HasEnclosure: cap.HasEnclosure,
+                MultiMaterial: cap.MultiMaterial,
+                SupportsAutoLeveling: cap.SupportsAutoLeveling,
+                NumberOfExtruders: cap.NumberOfExtruders,
+                MinHotendTemp: cap.MinHotendTemp,
+                MaxHotendTemp: cap.MaxHotendTemp,
+                MinBedTemp: cap.MinBedTemp,
+                MaxBedTemp: cap.MaxBedTemp,
+                CurrentMaterial: cap.CurrentMaterial,
+                CurrentSpoolId: cap.CurrentSpoolId,
+                IsAvailable: cap.IsAvailable,
+                LastUpdated: cap.LastUpdated
+            )).ToList();
+        }
+
+        public async Task<PrinterCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct = default)
+        {
+            var cap = await _db.PrinterCapabilities
+                .Include(c => c.Printer)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+
+            if (cap == null)
+            {
+                return null;
+            }
+
+            return new PrinterCapabilitiesDto(
+                Id: cap.Id,
+                PrinterId: cap.PrinterId,
+                PrinterName: cap.Printer?.Name ?? string.Empty,
+                NozzleDiameter: cap.NozzleDiameter,
+                SupportedMaterials: cap.SupportedMaterials,
+                MaxBuildVolumeX: cap.MaxBuildVolumeX,
+                MaxBuildVolumeY: cap.MaxBuildVolumeY,
+                MaxBuildVolumeZ: cap.MaxBuildVolumeZ,
+                HasHeatedBed: cap.HasHeatedBed,
+                HasEnclosure: cap.HasEnclosure,
+                MultiMaterial: cap.MultiMaterial,
+                SupportsAutoLeveling: cap.SupportsAutoLeveling,
+                NumberOfExtruders: cap.NumberOfExtruders,
+                MinHotendTemp: cap.MinHotendTemp,
+                MaxHotendTemp: cap.MaxHotendTemp,
+                MinBedTemp: cap.MinBedTemp,
+                MaxBedTemp: cap.MaxBedTemp,
+                CurrentMaterial: cap.CurrentMaterial,
+                CurrentSpoolId: cap.CurrentSpoolId,
+                IsAvailable: cap.IsAvailable,
+                LastUpdated: cap.LastUpdated
+            );
+        }
+
+        public async Task<PrinterCapabilitiesDto?> CreateAsync(CreatePrinterCapabilitiesDto request, CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            var printer = await _db.Printers.FindAsync(new object[] { request.PrinterId }, ct);
+            if (printer == null)
+            {
+                return null;
+            }
+
+            var existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == request.PrinterId, ct);
+            if (existing != null)
+            {
+                return null;
+            }
+
+            Farm.Infrastructure.Domain.PrinterCapabilities capabilities = new()
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = request.PrinterId,
+                NozzleDiameter = request.NozzleDiameter,
+                SupportedMaterials = request.SupportedMaterials,
+                MaxBuildVolumeX = request.MaxBuildVolumeX,
+                MaxBuildVolumeY = request.MaxBuildVolumeY,
+                MaxBuildVolumeZ = request.MaxBuildVolumeZ,
+                HasHeatedBed = request.HasHeatedBed,
+                HasEnclosure = request.HasEnclosure,
+                MultiMaterial = request.MultiMaterial,
+                NumberOfExtruders = request.NumberOfExtruders,
+                MinHotendTemp = request.MinHotendTemp,
+                MaxHotendTemp = request.MaxHotendTemp,
+                MinBedTemp = request.MinBedTemp,
+                MaxBedTemp = request.MaxBedTemp,
+                IsAvailable = true,
+                LastUpdated = DateTime.UtcNow
+            };
+
+            if (!request.MaxBuildVolumeX.HasValue || !request.MaxBuildVolumeY.HasValue || !request.MaxBuildVolumeZ.HasValue ||
+                !request.NozzleDiameter.HasValue || !request.MaxHotendTemp.HasValue)
+            {
+                try
+                {
+                    var defaults = await _discovery.GetModelDefaultCapabilitiesAsync(printer);
+                    if (defaults != null)
+                    {
+                        capabilities.MaxBuildVolumeX ??= defaults.MaxBuildVolumeX;
+                        capabilities.MaxBuildVolumeY ??= defaults.MaxBuildVolumeY;
+                        capabilities.MaxBuildVolumeZ ??= defaults.MaxBuildVolumeZ;
+                        capabilities.NozzleDiameter ??= defaults.NozzleDiameter;
+                        capabilities.MaxHotendTemp ??= defaults.MaxHotendTemp;
+                        capabilities.MaxBedTemp ??= defaults.MaxBedTemp;
+                        capabilities.MinHotendTemp ??= defaults.MinHotendTemp;
+                        capabilities.MinBedTemp ??= defaults.MinBedTemp;
+                        capabilities.SupportedMaterials ??= defaults.SupportedMaterials;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"Failed to apply model defaults for printer {request.PrinterId}: {ex.Message}");
+                }
+            }
+
+            _db.PrinterCapabilities.Add(capabilities);
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(ct);
+
+            return new PrinterCapabilitiesDto(
+                Id: capabilities.Id,
+                PrinterId: capabilities.PrinterId,
+                PrinterName: capabilities.Printer?.Name ?? string.Empty,
+                NozzleDiameter: capabilities.NozzleDiameter,
+                SupportedMaterials: capabilities.SupportedMaterials,
+                MaxBuildVolumeX: capabilities.MaxBuildVolumeX,
+                MaxBuildVolumeY: capabilities.MaxBuildVolumeY,
+                MaxBuildVolumeZ: capabilities.MaxBuildVolumeZ,
+                HasHeatedBed: capabilities.HasHeatedBed,
+                HasEnclosure: capabilities.HasEnclosure,
+                MultiMaterial: capabilities.MultiMaterial,
+                SupportsAutoLeveling: capabilities.SupportsAutoLeveling,
+                NumberOfExtruders: capabilities.NumberOfExtruders,
+                MinHotendTemp: capabilities.MinHotendTemp,
+                MaxHotendTemp: capabilities.MaxHotendTemp,
+                MinBedTemp: capabilities.MinBedTemp,
+                MaxBedTemp: capabilities.MaxBedTemp,
+                CurrentMaterial: capabilities.CurrentMaterial,
+                CurrentSpoolId: capabilities.CurrentSpoolId,
+                IsAvailable: capabilities.IsAvailable,
+                LastUpdated: capabilities.LastUpdated
+            );
+        }
+
+        public async Task<PrinterCapabilitiesDto?> CreateOrUpdateAsync(Guid printerId, UpdatePrinterCapabilitiesDto request, CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            var printer = await _db.Printers.FindAsync(new object[] { printerId }, ct);
+            if (printer == null)
+            {
+                return null;
+            }
+
+            var cap = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            if (cap == null)
+            {
+                cap = new Farm.Infrastructure.Domain.PrinterCapabilities
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = printerId,
+                    NozzleDiameter = request.NozzleDiameter,
+                    SupportedMaterials = request.SupportedMaterials,
+                    MaxBuildVolumeX = request.MaxBuildVolumeX,
+                    MaxBuildVolumeY = request.MaxBuildVolumeY,
+                    MaxBuildVolumeZ = request.MaxBuildVolumeZ,
+                    HasHeatedBed = request.HasHeatedBed,
+                    HasEnclosure = request.HasEnclosure,
+                    MultiMaterial = request.MultiMaterial,
+                    NumberOfExtruders = request.NumberOfExtruders,
+                    MinHotendTemp = request.MinHotendTemp,
+                    MaxHotendTemp = request.MaxHotendTemp,
+                    MinBedTemp = request.MinBedTemp,
+                    MaxBedTemp = request.MaxBedTemp,
+                    IsAvailable = true,
+                    LastUpdated = DateTime.UtcNow
+                };
+
+                _db.PrinterCapabilities.Add(cap);
+            }
+            else
+            {
+                cap.NozzleDiameter = request.NozzleDiameter;
+                cap.SupportedMaterials = request.SupportedMaterials;
+                cap.MaxBuildVolumeX = request.MaxBuildVolumeX;
+                cap.MaxBuildVolumeY = request.MaxBuildVolumeY;
+                cap.MaxBuildVolumeZ = request.MaxBuildVolumeZ;
+                cap.HasHeatedBed = request.HasHeatedBed;
+                cap.HasEnclosure = request.HasEnclosure;
+                cap.MultiMaterial = request.MultiMaterial;
+                cap.NumberOfExtruders = request.NumberOfExtruders;
+                cap.MinHotendTemp = request.MinHotendTemp;
+                cap.MaxHotendTemp = request.MaxHotendTemp;
+                cap.MinBedTemp = request.MinBedTemp;
+                cap.MaxBedTemp = request.MaxBedTemp;
+                cap.LastUpdated = DateTime.UtcNow;
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(cap).Reference(c => c.Printer).LoadAsync(ct);
+
+            return new PrinterCapabilitiesDto(
+            Id: cap.Id,
+            PrinterId: cap.PrinterId,
+            PrinterName: cap.Printer?.Name ?? string.Empty,
+            NozzleDiameter: cap.NozzleDiameter,
+            SupportedMaterials: cap.SupportedMaterials,
+            MaxBuildVolumeX: cap.MaxBuildVolumeX,
+            MaxBuildVolumeY: cap.MaxBuildVolumeY,
+            MaxBuildVolumeZ: cap.MaxBuildVolumeZ,
+            HasHeatedBed: cap.HasHeatedBed,
+            HasEnclosure: cap.HasEnclosure,
+            MultiMaterial: cap.MultiMaterial,
+            SupportsAutoLeveling: cap.SupportsAutoLeveling,
+            NumberOfExtruders: cap.NumberOfExtruders,
+            MinHotendTemp: cap.MinHotendTemp,
+            MaxHotendTemp: cap.MaxHotendTemp,
+            MinBedTemp: cap.MinBedTemp,
+            MaxBedTemp: cap.MaxBedTemp,
+            CurrentMaterial: cap.CurrentMaterial,
+            CurrentSpoolId: cap.CurrentSpoolId,
+            IsAvailable: cap.IsAvailable,
+            LastUpdated: cap.LastUpdated
+        );
+        }
+
+        public async Task<IReadOnlyList<PrinterDto>> GetCompatiblePrintersAsync(Guid gcodeFileId, CancellationToken ct = default)
+        {
+            var gcodeFile = await _db.GcodeFiles.FindAsync(new object[] { gcodeFileId }, ct);
+            if (gcodeFile == null)
+            {
+                return new List<PrinterDto>();
+            }
+
+            var allPrinters = await _db.PrinterCapabilities
+                .Include(c => c.Printer)
+                .Where(c => c.IsAvailable)
+                .ToListAsync(ct);
+
+            var compatible = new List<PrinterDto>();
+            foreach (var cap in allPrinters)
+            {
+                bool isCompatible = true;
+                if (gcodeFile.RequiredNozzleDiameter.HasValue && cap.NozzleDiameter.HasValue && Math.Abs(cap.NozzleDiameter.Value - gcodeFile.RequiredNozzleDiameter.Value) > 0.001)
+                {
+                    isCompatible = false;
+                }
+
+                if (!string.IsNullOrEmpty(gcodeFile.RequiredMaterial) && cap.SupportedMaterials != null && !cap.SupportedMaterials.Contains(gcodeFile.RequiredMaterial))
+                {
+                    isCompatible = false;
+                }
+
+                if (gcodeFile.RequiredBuildVolumeX.HasValue && cap.MaxBuildVolumeX.HasValue && gcodeFile.RequiredBuildVolumeX.Value > cap.MaxBuildVolumeX.Value)
+                {
+                    isCompatible = false;
+                }
+
+                if (gcodeFile.RequiredBuildVolumeY.HasValue && cap.MaxBuildVolumeY.HasValue && gcodeFile.RequiredBuildVolumeY.Value > cap.MaxBuildVolumeY.Value)
+                {
+                    isCompatible = false;
+                }
+
+                if (gcodeFile.RequiredBuildVolumeZ.HasValue && cap.MaxBuildVolumeZ.HasValue && gcodeFile.RequiredBuildVolumeZ.Value > cap.MaxBuildVolumeZ.Value)
+                {
+                    isCompatible = false;
+                }
+
+                if (isCompatible)
+                {
+                    compatible.Add(new PrinterDto(
+                        Id: cap.Printer.Id,
+                        Name: cap.Printer.Name,
+                        ServerUrl: cap.Printer.ServerUrl,
+                        Notes: cap.Printer.Notes,
+                        IsOnline: false,
+                        State: null,
+                        ManufacturerName: cap.Printer.Manufacturer?.Name,
+                        ModelName: cap.Printer.Model?.Name,
+                        Progress: null,
+                        JobName: null,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null,
+                        X: null,
+                        Y: null,
+                        Z: null,
+                        HotendTemp: null,
+                        BedTemp: null,
+                        HotendTarget: null,
+                        BedTarget: null,
+                        Backend: (PrinterBackend)cap.Printer.Backend,
+                        ApiKey: cap.Printer.ApiKey,
+                        OriginalServerUrl: cap.Printer.OriginalServerUrl,
+                        IpAddress: cap.Printer.IpAddress,
+                        SpoolInfo: null
+                    ));
+                }
+            }
+
+            return compatible;
+        }
+
+        public async Task<bool> DeleteAsync(Guid printerId, CancellationToken ct = default)
+        {
+            var cap = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            if (cap == null)
+            {
+                return false;
+            }
+
+            _db.PrinterCapabilities.Remove(cap);
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
+
+        public async Task<(PrinterCapabilitiesDto? result, bool isNew)> DiscoverAsync(Guid printerId, CancellationToken ct = default)
+        {
+            var printer = await _db.Printers
+                .Include(p => p.Model)
+                .Include(p => p.Manufacturer)
+                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            if (printer == null)
+            {
+                return (null, false);
+            }
+
+            var existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            Farm.Infrastructure.Domain.PrinterCapabilities capabilities;
+            bool isNew = false;
+            if (existing != null)
+            {
+                capabilities = await _discovery.RefreshCapabilitiesAsync(existing, printer, ct);
+            }
+            else
+            {
+                var discovered = await _discovery.DiscoverCapabilitiesAsync(printer, ct);
+                if (discovered == null)
+                {
+                    return (null, false);
+                }
+
+                capabilities = discovered;
+                _db.PrinterCapabilities.Add(capabilities);
+                isNew = true;
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(ct);
+
+            var dto = new PrinterCapabilitiesDto(
+                Id: capabilities.Id,
+                PrinterId: capabilities.PrinterId,
+                PrinterName: capabilities.Printer?.Name ?? string.Empty,
+                NozzleDiameter: capabilities.NozzleDiameter,
+                SupportedMaterials: capabilities.SupportedMaterials,
+                MaxBuildVolumeX: capabilities.MaxBuildVolumeX,
+                MaxBuildVolumeY: capabilities.MaxBuildVolumeY,
+                MaxBuildVolumeZ: capabilities.MaxBuildVolumeZ,
+                HasHeatedBed: capabilities.HasHeatedBed,
+                HasEnclosure: capabilities.HasEnclosure,
+                MultiMaterial: capabilities.MultiMaterial,
+                NumberOfExtruders: capabilities.NumberOfExtruders,
+                MinHotendTemp: capabilities.MinHotendTemp,
+                MaxHotendTemp: capabilities.MaxHotendTemp,
+                MinBedTemp: capabilities.MinBedTemp,
+                MaxBedTemp: capabilities.MaxBedTemp,
+                CurrentMaterial: capabilities.CurrentMaterial,
+                CurrentSpoolId: capabilities.CurrentSpoolId,
+                IsAvailable: capabilities.IsAvailable,
+                LastUpdated: capabilities.LastUpdated
+            );
+
+            return (dto, isNew);
+        }
+
+        public async Task<Farm.Web.Api.Services.Interfaces.CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default)
+        {
+            var printer = await _db.Printers
+                .Include(p => p.Model)
+                .Include(p => p.Manufacturer)
+                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            if (printer == null)
+            {
+                return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
+            }
+
+            var cap = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            if (cap == null)
+            {
+                return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
+            }
+
+            var res = await _discovery.ValidateCapabilitiesAsync(cap, printer);
+            return res;
+        }
+
+        public async Task<PrinterCapabilitiesDto?> GetModelDefaultsAsync(Guid printerId, CancellationToken ct = default)
+        {
+            var printer = await _db.Printers
+                .Include(p => p.Model)
+                .Include(p => p.Manufacturer)
+                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            if (printer == null)
+            {
+                return null;
+            }
+
+            var defaults = await _discovery.GetModelDefaultCapabilitiesAsync(printer);
+            if (defaults == null)
+            {
+                return null;
+            }
+
+            return new PrinterCapabilitiesDto(
+                Id: defaults.Id,
+                PrinterId: defaults.PrinterId,
+                PrinterName: printer.Name,
+                NozzleDiameter: defaults.NozzleDiameter,
+                SupportedMaterials: defaults.SupportedMaterials,
+                MaxBuildVolumeX: defaults.MaxBuildVolumeX,
+                MaxBuildVolumeY: defaults.MaxBuildVolumeY,
+                MaxBuildVolumeZ: defaults.MaxBuildVolumeZ,
+                HasHeatedBed: defaults.HasHeatedBed,
+                HasEnclosure: defaults.HasEnclosure,
+                MultiMaterial: defaults.MultiMaterial,
+                NumberOfExtruders: defaults.NumberOfExtruders,
+                MinHotendTemp: defaults.MinHotendTemp,
+                MaxHotendTemp: defaults.MaxHotendTemp,
+                MinBedTemp: defaults.MinBedTemp,
+                MaxBedTemp: defaults.MaxBedTemp,
+                CurrentMaterial: defaults.CurrentMaterial,
+                CurrentSpoolId: defaults.CurrentSpoolId,
+                IsAvailable: defaults.IsAvailable,
+                LastUpdated: defaults.LastUpdated
+            );
+        }
+    }
+}

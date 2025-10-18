@@ -5,6 +5,8 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Farm.Web.Api.Repositories.Gcode;
+using Farm.Web.Api.Repositories.Queue;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -14,7 +16,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-library")]
 [Tags("G-code Library")]
-public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
+public class GcodeLibraryController(IGcodeRepository gcodeRepo, IQueueRepository queueRepo, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all G-code files in the library
@@ -30,39 +32,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
     {
         try
         {
-            IQueryable<GcodeFile> query = db.GcodeFiles
-                .Include(g => g.SourcePrinter)
-                .Include(g => g.TargetPrinter)
-                .Include(g => g.TargetModel)
-                .AsQueryable();
-
-            // Apply filters
-            if (!string.IsNullOrEmpty(search))
-            {
-                query = query.Where(g => g.OriginalFileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                        g.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                        (g.Description != null && g.Description.Contains(search, StringComparison.OrdinalIgnoreCase)));
-            }
-
-            if (!string.IsNullOrEmpty(material))
-            {
-                query = query.Where(g => g.RequiredMaterial == material);
-            }
-
-            if (nozzleDiameter.HasValue)
-            {
-                double nd = nozzleDiameter.Value;
-                query = query.Where(g => g.RequiredNozzleDiameter != null && Math.Abs(g.RequiredNozzleDiameter.Value - nd) < 0.001);
-            }
-
-            if (targetPrinterId.HasValue)
-            {
-                query = query.Where(g => g.TargetPrinterId == targetPrinterId.Value);
-            }
-
-            List<GcodeFile> files = await query
-                .OrderByDescending(g => g.UploadedAt)
-                .ToListAsync();
+            List<GcodeFile> files = await gcodeRepo.QueryLibraryAsync(search, material, nozzleDiameter, targetPrinterId, CancellationToken.None);
 
             return Ok(files.Select(file => new GcodeFileDto(
                 Id: file.Id,
@@ -113,11 +83,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
     {
         try
         {
-            GcodeFile? file = await db.GcodeFiles
-                .Include(g => g.SourcePrinter)
-                .Include(g => g.TargetPrinter)
-                .Include(g => g.TargetModel)
-                .FirstOrDefaultAsync(g => g.Id == id);
+            GcodeFile? file = await gcodeRepo.GetByIdWithIncludesAsync(id, CancellationToken.None);
 
             if (file is null)
             {
@@ -198,7 +164,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             }
 
             // Check for duplicate
-            GcodeFile? existing = await db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash);
+            GcodeFile? existing = await gcodeRepo.FindByHashAsync(hash, CancellationToken.None);
             if (existing is not null)
             {
                 return Conflict($"File already exists in library: {existing.DisplayName}");
@@ -210,7 +176,6 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             _ = Directory.CreateDirectory(libraryRootFull);
 
             // Save file
-            // Extension is validated above to be .gcode; avoid using tainted filename-derived values
             string fileName = $"{Guid.NewGuid()}.gcode";
             string filePathFull = Path.GetFullPath(Path.Combine(libraryRootFull, fileName));
             if (!filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal))
@@ -252,46 +217,41 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
                 UpdatedAt = DateTime.UtcNow
             };
 
-            _ = db.GcodeFiles.Add(gcodeFile);
-            _ = await db.SaveChangesAsync();
+            await gcodeRepo.AddAsync(gcodeFile, CancellationToken.None);
+            await gcodeRepo.SaveChangesAsync(CancellationToken.None);
 
-            // Load related entities for response
-            await db.Entry(gcodeFile)
-                .Reference(g => g.TargetPrinter)
-                .LoadAsync();
-            await db.Entry(gcodeFile)
-                .Reference(g => g.TargetModel)
-                .LoadAsync();
+            // Load related entities via repo
+            GcodeFile? saved = await gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, CancellationToken.None);
 
             return CreatedAtAction(nameof(GetFileAsync), new { id = gcodeFile.Id }, new GcodeFileDto(
-                Id: gcodeFile.Id,
-                OriginalFileName: gcodeFile.OriginalFileName,
-                DisplayName: gcodeFile.DisplayName,
-                FileSizeBytes: gcodeFile.FileSizeBytes,
-                UploadedAt: gcodeFile.UploadedAt,
-                Source: (GcodeSourceDto)(int)gcodeFile.Source,
-                SourcePrinterId: gcodeFile.SourcePrinterId,
-                SourcePrinterName: gcodeFile.SourcePrinter?.Name,
-                OriginalPrinterPath: gcodeFile.OriginalPrinterPath,
-                LastSeenOnPrinter: gcodeFile.LastSeenOnPrinter,
-                Description: gcodeFile.Description,
-                Tags: gcodeFile.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
-                RequiredNozzleDiameter: gcodeFile.RequiredNozzleDiameter,
-                RequiredMaterial: gcodeFile.RequiredMaterial,
-                CompatibleMaterials: gcodeFile.CompatibleMaterials,
-                EstimatedPrintTimeMinutes: gcodeFile.EstimatedPrintTimeMinutes,
-                EstimatedFilamentLengthMm: gcodeFile.EstimatedFilamentLengthMm,
-                EstimatedFilamentWeightG: gcodeFile.EstimatedFilamentWeightG,
-                RequiredBuildVolumeX: gcodeFile.RequiredBuildVolumeX,
-                RequiredBuildVolumeY: gcodeFile.RequiredBuildVolumeY,
-                RequiredBuildVolumeZ: gcodeFile.RequiredBuildVolumeZ,
-                TargetPrinterId: gcodeFile.TargetPrinterId,
-                TargetPrinterName: gcodeFile.TargetPrinter?.Name,
-                TargetModelId: gcodeFile.TargetModelId,
-                TargetModelName: gcodeFile.TargetModel?.Name,
-                SlicerName: gcodeFile.SlicerName,
-                SlicerVersion: gcodeFile.SlicerVersion,
-                HasThumbnail: !string.IsNullOrEmpty(gcodeFile.ThumbnailPath)
+                Id: saved!.Id,
+                OriginalFileName: saved.OriginalFileName,
+                DisplayName: saved.DisplayName,
+                FileSizeBytes: saved.FileSizeBytes,
+                UploadedAt: saved.UploadedAt,
+                Source: (GcodeSourceDto)(int)saved.Source,
+                SourcePrinterId: saved.SourcePrinterId,
+                SourcePrinterName: saved.SourcePrinter?.Name,
+                OriginalPrinterPath: saved.OriginalPrinterPath,
+                LastSeenOnPrinter: saved.LastSeenOnPrinter,
+                Description: saved.Description,
+                Tags: saved.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
+                RequiredNozzleDiameter: saved.RequiredNozzleDiameter,
+                RequiredMaterial: saved.RequiredMaterial,
+                CompatibleMaterials: saved.CompatibleMaterials,
+                EstimatedPrintTimeMinutes: saved.EstimatedPrintTimeMinutes,
+                EstimatedFilamentLengthMm: saved.EstimatedFilamentLengthMm,
+                EstimatedFilamentWeightG: saved.EstimatedFilamentWeightG,
+                RequiredBuildVolumeX: saved.RequiredBuildVolumeX,
+                RequiredBuildVolumeY: saved.RequiredBuildVolumeY,
+                RequiredBuildVolumeZ: saved.RequiredBuildVolumeZ,
+                TargetPrinterId: saved.TargetPrinterId,
+                TargetPrinterName: saved.TargetPrinter?.Name,
+                TargetModelId: saved.TargetModelId,
+                TargetModelName: saved.TargetModel?.Name,
+                SlicerName: saved.SlicerName,
+                SlicerVersion: saved.SlicerVersion,
+                HasThumbnail: !string.IsNullOrEmpty(saved.ThumbnailPath)
             ));
         }
         catch (Exception ex)
@@ -317,11 +277,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             {
                 return BadRequest("Request body is required");
             }
-            GcodeFile? file = await db.GcodeFiles
-                .Include(g => g.SourcePrinter)
-                .Include(g => g.TargetPrinter)
-                .Include(g => g.TargetModel)
-                .FirstOrDefaultAsync(g => g.Id == id);
+            GcodeFile? file = await gcodeRepo.GetByIdWithIncludesAsync(id, CancellationToken.None);
 
             if (file == null)
             {
@@ -362,54 +318,49 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             if (request.TargetPrinterId.HasValue)
             {
                 file.TargetPrinterId = request.TargetPrinterId.Value;
-                // Load the printer for response
-                await db.Entry(file)
-                    .Reference(g => g.TargetPrinter)
-                    .LoadAsync();
             }
 
             if (request.TargetModelId.HasValue)
             {
                 file.TargetModelId = request.TargetModelId.Value;
-                // Load the model for response
-                await db.Entry(file)
-                    .Reference(g => g.TargetModel)
-                    .LoadAsync();
             }
 
             file.UpdatedAt = DateTime.UtcNow;
 
-            _ = await db.SaveChangesAsync();
+            await gcodeRepo.SaveChangesAsync(CancellationToken.None);
+
+            // Reload with includes
+            GcodeFile? saved = await gcodeRepo.GetByIdWithIncludesAsync(id, CancellationToken.None);
 
             return Ok(new GcodeFileDto(
-                Id: file.Id,
-                OriginalFileName: file.OriginalFileName,
-                DisplayName: file.DisplayName,
-                FileSizeBytes: file.FileSizeBytes,
-                UploadedAt: file.UploadedAt,
-                Source: (GcodeSourceDto)(int)file.Source,
-                SourcePrinterId: file.SourcePrinterId,
-                SourcePrinterName: file.SourcePrinter?.Name,
-                OriginalPrinterPath: file.OriginalPrinterPath,
-                LastSeenOnPrinter: file.LastSeenOnPrinter,
-                Description: file.Description,
-                Tags: file.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
-                RequiredNozzleDiameter: file.RequiredNozzleDiameter,
-                RequiredMaterial: file.RequiredMaterial,
-                CompatibleMaterials: file.CompatibleMaterials,
-                EstimatedPrintTimeMinutes: file.EstimatedPrintTimeMinutes,
-                EstimatedFilamentLengthMm: file.EstimatedFilamentLengthMm,
-                EstimatedFilamentWeightG: file.EstimatedFilamentWeightG,
-                RequiredBuildVolumeX: file.RequiredBuildVolumeX,
-                RequiredBuildVolumeY: file.RequiredBuildVolumeY,
-                RequiredBuildVolumeZ: file.RequiredBuildVolumeZ,
-                TargetPrinterId: file.TargetPrinterId,
-                TargetPrinterName: file.TargetPrinter?.Name,
-                TargetModelId: file.TargetModelId,
-                TargetModelName: file.TargetModel?.Name,
-                SlicerName: file.SlicerName,
-                SlicerVersion: file.SlicerVersion,
-                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailPath)
+                Id: saved!.Id,
+                OriginalFileName: saved.OriginalFileName,
+                DisplayName: saved.DisplayName,
+                FileSizeBytes: saved.FileSizeBytes,
+                UploadedAt: saved.UploadedAt,
+                Source: (GcodeSourceDto)(int)saved.Source,
+                SourcePrinterId: saved.SourcePrinterId,
+                SourcePrinterName: saved.SourcePrinter?.Name,
+                OriginalPrinterPath: saved.OriginalPrinterPath,
+                LastSeenOnPrinter: saved.LastSeenOnPrinter,
+                Description: saved.Description,
+                Tags: saved.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
+                RequiredNozzleDiameter: saved.RequiredNozzleDiameter,
+                RequiredMaterial: saved.RequiredMaterial,
+                CompatibleMaterials: saved.CompatibleMaterials,
+                EstimatedPrintTimeMinutes: saved.EstimatedPrintTimeMinutes,
+                EstimatedFilamentLengthMm: saved.EstimatedFilamentLengthMm,
+                EstimatedFilamentWeightG: saved.EstimatedFilamentWeightG,
+                RequiredBuildVolumeX: saved.RequiredBuildVolumeX,
+                RequiredBuildVolumeY: saved.RequiredBuildVolumeY,
+                RequiredBuildVolumeZ: saved.RequiredBuildVolumeZ,
+                TargetPrinterId: saved.TargetPrinterId,
+                TargetPrinterName: saved.TargetPrinter?.Name,
+                TargetModelId: saved.TargetModelId,
+                TargetModelName: saved.TargetModel?.Name,
+                SlicerName: saved.SlicerName,
+                SlicerVersion: saved.SlicerVersion,
+                HasThumbnail: !string.IsNullOrEmpty(saved.ThumbnailPath)
             ));
         }
         catch (Exception ex)
@@ -431,20 +382,14 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
     {
         try
         {
-            GcodeFile? file = await db.GcodeFiles.FindAsync(id);
+            GcodeFile? file = await gcodeRepo.GetByIdWithIncludesAsync(id, CancellationToken.None);
             if (file == null)
             {
                 return NotFound($"G-code file with ID {id} not found");
             }
 
             // Check if file is being used in any queued jobs
-            int activeJobs = await db.PrintJobs
-                .Where(j => j.GcodeFileId == id &&
-                           (j.Status == PrintJobStatus.Queued ||
-                            j.Status == PrintJobStatus.Assigned ||
-                            j.Status == PrintJobStatus.Starting ||
-                            j.Status == PrintJobStatus.Printing))
-                .CountAsync();
+            int activeJobs = await queueRepo.CountActiveJobsUsingGcodeAsync(id, CancellationToken.None);
 
             if (activeJobs > 0)
             {
@@ -472,8 +417,8 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
             }
 #pragma warning restore CA3003
 
-            _ = db.GcodeFiles.Remove(file);
-            _ = await db.SaveChangesAsync();
+            await gcodeRepo.RemoveAsync(file, CancellationToken.None);
+            await gcodeRepo.SaveChangesAsync(CancellationToken.None);
 
             return NoContent();
         }
@@ -495,7 +440,7 @@ public class GcodeLibraryController(AppDbContext db, IWebHostEnvironment env, IU
     {
         try
         {
-            GcodeFile? file = await db.GcodeFiles.FindAsync(id);
+            GcodeFile? file = await gcodeRepo.GetByIdWithIncludesAsync(id, CancellationToken.None);
             if (file == null)
             {
                 return NotFound($"G-code file with ID {id} not found");

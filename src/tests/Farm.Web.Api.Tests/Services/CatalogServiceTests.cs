@@ -22,7 +22,7 @@ namespace Farm.Web.Api.Tests.Services
             // Minimal dependencies: use NullLogger implementations and an in-memory AppDbContext is not required for this test
             var normLogger = new Moq.Mock<Farm.Infrastructure.Normalization.INormalizationEventLogger>();
             var unifiedLogging = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            var mockRepo = new Moq.Mock<Farm.Web.Api.Repositories.Catalog.ICatalogRepository>();
+            var mockRepo = new Moq.Mock<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository>();
 
             var svc = new CatalogService(mockRepo.Object, normLogger.Object, mockCache.Object, unifiedLogging.Object);
             var (list, etag) = await svc.GetManufacturersAsync(CancellationToken.None);

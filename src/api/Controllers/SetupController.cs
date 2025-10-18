@@ -45,7 +45,7 @@ public class SetupController(
     /// </summary>
     [HttpPost("initial-admin")]
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
-        [FromBody] CreateInitialAdminRequest request,
+        [FromBody] Farm.Web.Shared.Contracts.Setup.CreateInitialAdminRequest request,
         CancellationToken ct)
     {
         if (request == null)
@@ -220,13 +220,4 @@ public class SetupController(
 
         return Ok(result);
     }
-}
-
-public class CreateInitialAdminRequest
-{
-    public string Username { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
-    public string? FirstName { get; set; }
-    public string? LastName { get; set; }
 }

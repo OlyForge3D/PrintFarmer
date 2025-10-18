@@ -14,24 +14,22 @@ using Farm.Web.Api.Infrastructure.Filters;
 [RequireSlicerApiKey]
 public class SlicersController : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly IHubContext<SlicerProgressHub> _hubContext;
+    private readonly Farm.Web.Api.Services.Slicing.ISlicersService _service;
 
-    public SlicersController(AppDbContext db, IHubContext<SlicerProgressHub> hubContext)
+    public SlicersController(Farm.Web.Api.Services.Slicing.ISlicersService service)
     {
-        _db = db;
-        _hubContext = hubContext;
+        _service = service ?? throw new ArgumentNullException(nameof(service));
     }
 
     [HttpGet]
     public async Task<IActionResult> ListAsync()
     {
-        var list = await _db.SlicerServices.OrderBy(s => s.Name).ToListAsync();
+        var list = await _service.ListAsync(HttpContext?.RequestAborted ?? CancellationToken.None);
         return Ok(list);
     }
 
     [HttpPost("register")]
-    public async Task<IActionResult> RegisterAsync([FromBody] RegisterSlicerDto dto)
+    public async Task<IActionResult> RegisterAsync([FromBody] Farm.Web.Shared.Contracts.Slicing.RegisterSlicerDto dto)
     {
         var svc = new SlicerService
         {
@@ -53,124 +51,38 @@ public class SlicersController : ControllerBase
         // Simple api key generation - rotate or secure later
         svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
 
-        _db.SlicerServices.Add(svc);
-        await _db.SaveChangesAsync();
-
-        // Broadcast registration event to connected clients
-        try
-        {
-            var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-            await _hubContext.Clients.All.SendAsync("SlicerRegistered", new
-            {
-                id = svc.Id,
-                name = svc.Name,
-                version = svc.Version,
-                host = svc.Host,
-                maxConcurrentJobs = svc.MaxConcurrentJobs,
-                status = svc.Status
-            }, ct);
-        }
-        catch
-        {
-            // Non-fatal: don't fail registration if broadcast fails
-        }
-
-        var location = $"/api/slicers/{svc.Id}";
-        return Created(location, new { id = svc.Id, apiKey = svc.ApiKey });
+        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        var (id, apiKey) = await _service.RegisterAsync(dto, ct);
+        var location = $"/api/slicers/{id}";
+        return Created(location, new { id, apiKey });
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetAsync(Guid id)
     {
-        var svc = await _db.SlicerServices.FindAsync(id);
+        var svc = await _service.GetAsync(id, HttpContext?.RequestAborted ?? CancellationToken.None);
         if (svc == null)
         {
             return NotFound();
         }
-
         return Ok(svc);
     }
 
     [HttpPost("{id}/heartbeat")]
-    public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] HeartbeatDto dto)
+    public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] Farm.Web.Shared.Contracts.Slicing.HeartbeatDto dto)
     {
-        var svc = await _db.SlicerServices.FindAsync(id);
-        if (svc == null)
-        {
-            return NotFound();
-        }
-
-        svc.LastSeen = DateTime.UtcNow;
-        svc.Status = dto.Status ?? svc.Status;
-        if (dto.FreeSlots.HasValue)
-        {
-            // store free slots in Tags JSON for now - refinement later
-            svc.Tags = dto.FreeSlots.Value.ToString();
-        }
-
-        svc.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-
-        // Broadcast heartbeat/status update (best-effort)
-        try
-        {
-            var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-            await _hubContext.Clients.All.SendAsync("SlicerHeartbeat", new
-            {
-                id = svc.Id,
-                status = svc.Status,
-                freeSlots = dto.FreeSlots
-            }, ct);
-        }
-        catch
-        {
-            // ignore
-        }
-
-        return NoContent();
+        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        var ok = await _service.HeartbeatAsync(id, dto, ct);
+        return ok ? NoContent() : NotFound();
     }
 
     [HttpPost("{id}/deregister")]
     public async Task<IActionResult> DeregisterAsync(Guid id)
     {
-        var svc = await _db.SlicerServices.FindAsync(id);
-        if (svc == null)
-        {
-            return NotFound();
-        }
-
-        _db.SlicerServices.Remove(svc);
-        await _db.SaveChangesAsync();
-
-        // Broadcast deregistration event
-        try
-        {
-            var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-            await _hubContext.Clients.All.SendAsync("SlicerDeregistered", new { id = svc.Id }, ct);
-        }
-        catch
-        {
-            // ignore
-        }
-
-        return NoContent();
+        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        var ok = await _service.DeregisterAsync(id, ct);
+        return ok ? NoContent() : NotFound();
     }
 }
 
-public class RegisterSlicerDto
-{
-    public string? Name { get; set; }
-    public int SlicerType { get; set; } = 1; // default to OrcaSlicer
-    public string? Version { get; set; }
-    public string? Host { get; set; }
-    public string? UiManifestUrl { get; set; }
-    public string? CapabilitiesJson { get; set; }
-    public int MaxConcurrentJobs { get; set; } = 1;
-    public string? Tags { get; set; }
-}
-
-public class HeartbeatDto
-{
-    public string? Status { get; set; }
-    public int? FreeSlots { get; set; }
-}
+// DTOs moved to Farm.Web.Shared.Contracts.Slicing.SlicerDtos.cs

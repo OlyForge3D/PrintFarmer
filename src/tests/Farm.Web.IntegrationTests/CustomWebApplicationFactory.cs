@@ -1,5 +1,6 @@
 ﻿using System;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.IntegrationTests
 {
@@ -14,6 +15,16 @@ namespace Farm.Web.IntegrationTests
         public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
         {
             return new CustomWebApplicationFactory();
+        }
+
+        protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureServices(services =>
+            {
+                // Provide a lightweight test orchestrator so integration tests can run without full worker infrastructure.
+                services.AddSingleton<Farm.Web.Shared.ISlicerOrchestrator, TestSlicerOrchestrator>();
+            });
         }
     }
 }

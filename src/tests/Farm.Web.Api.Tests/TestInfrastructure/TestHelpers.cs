@@ -13,10 +13,7 @@ public static class TestHelpers
     /// </summary>
     public static async Task<(Guid ManufacturerId, Guid ModelId)> GetUnknownCatalogIdsAsync(AppDbContext db)
     {
-        if (db == null)
-        {
-            throw new ArgumentNullException(nameof(db));
-        }
+        ArgumentNullException.ThrowIfNull(db);
 
         var unknownManufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
         Guid manufacturerId = unknownManufacturer != null ? unknownManufacturer.Id : Guid.Empty;
@@ -32,5 +29,23 @@ public static class TestHelpers
         }
 
         return (manufacturerId, modelId);
+    }
+
+    /// <summary>
+    /// Create an AppDbContext backed by a SQLite in-memory open connection.
+    /// This provides relational behaviors (FKs, Include/ThenInclude) suitable for tests that rely on SQL semantics.
+    /// Caller should dispose the returned context when done.
+    /// </summary>
+    public static AppDbContext CreateSqliteInMemoryDb()
+    {
+        var connection = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var opts = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        var ctx = new AppDbContext(opts);
+        ctx.Database.EnsureCreated();
+        return ctx;
     }
 }

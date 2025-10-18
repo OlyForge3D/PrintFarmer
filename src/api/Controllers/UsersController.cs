@@ -18,14 +18,12 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/users")]
 [Authorize(Roles = "farm_admin")]
 public class UsersController(
-    AppDbContext db,
+    Farm.Web.Api.Services.Users.IUsersService usersService,
     IAuthenticationService authService,
-    IPasswordHashingService passwordHashingService,
     IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly AppDbContext _db = db;
+    private readonly Farm.Web.Api.Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
-    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
@@ -36,25 +34,7 @@ public class UsersController(
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetUsersAsync(CancellationToken ct)
     {
-        List<UserDto> users = await _db.Users
-            .Include(u => u.UserRoles)
-            .ThenInclude(ur => ur.Role)
-            .AsNoTracking()
-            .Select(u => new UserDto(
-                u.Id,
-                u.Username,
-                u.Email,
-                u.FirstName,
-                u.LastName,
-                u.IsActive,
-                u.EmailConfirmed,
-                u.LastLogin,
-                u.CreatedAt,
-                u.UserRoles.Where(ur => ur.IsActive).Select(ur => ur.Role.Name).ToArray(),
-                new string[0] // Permissions would be calculated from roles
-            ))
-            .ToListAsync(ct);
-
+        var users = await _users.GetUsersAsync(ct);
         return Ok(users);
     }
 
@@ -95,58 +75,17 @@ public class UsersController(
         }
 
         // Check if username or email already exists
-        bool existingUser = await _db.Users
-            .AnyAsync(u => u.Username == request.Username || u.Email == request.Email, ct);
-
-        if (existingUser)
+        try
         {
-            return BadRequest("Username or email is already taken");
+            var createdUser = await _users.CreateUserAsync(request, ct);
+            string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _logger.LogInformation($"User {currentUserId} created new user {createdUser.Id} ({createdUser.Username})");
+            return CreatedAtRoute("GetUserById", new { id = createdUser.Id }, createdUser);
         }
-
-        User user = new()
+        catch (ArgumentException ex)
         {
-            Id = Guid.NewGuid(),
-            Username = request.Username,
-            Email = request.Email,
-            FirstName = request.FirstName,
-            LastName = request.LastName,
-            PasswordHash = _passwordHashingService.HashPassword(request.Password),
-            IsActive = true,
-            EmailConfirmed = false,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _ = _db.Users.Add(user);
-
-        // Assign roles if provided
-        if (request.RoleIds is { Length: > 0 })
-        {
-            foreach (Guid roleId in request.RoleIds)
-            {
-                Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
-                if (role != null)
-                {
-                    _ = _db.UserRoles.Add(new UserRole
-                    {
-                        Id = Guid.NewGuid(),
-                        UserId = user.Id,
-                        RoleId = roleId,
-                        AssignedAt = DateTime.UtcNow,
-                        IsActive = true
-                    });
-                }
-            }
+            return BadRequest(ex.Message);
         }
-
-        _ = await _db.SaveChangesAsync(ct);
-
-        string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation($"User {currentUserId} created new user {user.Id} ({user.Username})");
-
-        // Return the created user with roles and permissions
-        UserDto? createdUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
-        return CreatedAtRoute("GetUserById", new { id = user.Id }, createdUser);
     }
 
     /// <summary>
@@ -161,62 +100,14 @@ public class UsersController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        User? user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
-        if (user == null)
+        var updated = await _users.UpdateUserAsync(id, request, ct);
+        if (updated is null)
         {
             return NotFound();
         }
-
-        // Update basic fields
-        if (!string.IsNullOrWhiteSpace(request.FirstName))
-        {
-            user.FirstName = request.FirstName;
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.LastName))
-        {
-            user.LastName = request.LastName;
-        }
-
-        if (request.IsActive.HasValue)
-        {
-            user.IsActive = request.IsActive.Value;
-        }
-        user.UpdatedAt = DateTime.UtcNow;
-
-        // Update roles if provided
-        if (request.RoleIds != null)
-        {
-            // Remove existing roles
-            List<UserRole> existingRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
-            _db.UserRoles.RemoveRange(existingRoles);
-
-            // Add new roles
-            foreach (Guid roleId in request.RoleIds)
-            {
-                Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
-                if (role != null)
-                {
-                    _ = _db.UserRoles.Add(new UserRole
-                    {
-                        Id = Guid.NewGuid(),
-                        UserId = id,
-                        RoleId = roleId,
-                        AssignedAt = DateTime.UtcNow,
-                        IsActive = true
-                    });
-                }
-            }
-        }
-
-        _ = await _db.SaveChangesAsync(ct);
-
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation($"User {currentUserId} updated user {user.Id} ({user.Username})");
-
-        // Return the updated user with roles and permissions
-        UserDto? updatedUser = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
-        return Ok(updatedUser);
+        _logger.LogInformation($"User {currentUserId} updated user {id}");
+        return Ok(updated);
     }
 
     /// <summary>
@@ -234,22 +125,12 @@ public class UsersController(
             return BadRequest("Cannot delete your own account");
         }
 
-        User? user = await _db.Users.FindAsync(new object?[] { id }, cancellationToken: ct);
-        if (user == null)
+        var deleted = await _users.DeleteUserAsync(id, ct);
+        if (!deleted)
         {
             return NotFound();
         }
-
-        // Remove user roles first
-        List<UserRole> userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
-        _db.UserRoles.RemoveRange(userRoles);
-
-        // Remove the user
-        _ = _db.Users.Remove(user);
-        _ = await _db.SaveChangesAsync(ct);
-
-        _logger.LogInformation($"User {currentUserId} deleted user {user.Id} ({user.Username})");
-
+        _logger.LogInformation($"User {currentUserId} deleted user {id}");
         return NoContent();
     }
 
@@ -261,32 +142,7 @@ public class UsersController(
     [HttpGet("roles")]
     public async Task<ActionResult<IEnumerable<RoleDto>>> GetRolesAsync(CancellationToken ct)
     {
-        List<RoleDto> roles = await _db.Roles
-            .Include(r => r.RolePermissions)
-            .ThenInclude(rp => rp.Resource)
-            .Include(r => r.RolePermissions)
-            .ThenInclude(rp => rp.Action)
-            .AsNoTracking()
-            .Select(r => new RoleDto(
-                r.Id,
-                r.Name,
-                r.DisplayName,
-                r.Description,
-                r.IsSystemRole,
-                r.IsActive,
-                r.CreatedAt,
-                r.RolePermissions.Select(rp => new RolePermissionDto(
-                    rp.Id,
-                    rp.RoleId,
-                    rp.ResourceId,
-                    rp.ActionId,
-                    rp.Resource.Name,
-                    rp.Action.Name,
-                    rp.Granted
-                )).ToArray()
-            ))
-            .ToListAsync(ct);
-
+        var roles = await _users.GetRolesAsync(ct);
         return Ok(roles);
     }
 
@@ -305,20 +161,7 @@ public class UsersController(
         [FromQuery] string? email,
         CancellationToken ct)
     {
-        bool? usernameExists = null;
-        bool? emailExists = null;
-
-        if (!string.IsNullOrWhiteSpace(username))
-        {
-            string u = username.Trim();
-            usernameExists = await _db.Users.AnyAsync(x => x.Username == u, ct);
-        }
-        if (!string.IsNullOrWhiteSpace(email))
-        {
-            string e = email.Trim();
-            emailExists = await _db.Users.AnyAsync(x => x.Email == e, ct);
-        }
-
-        return Ok(new UserAvailabilityDto(usernameExists, emailExists));
+        var availability = await _users.CheckAvailabilityAsync(username, email, ct);
+        return Ok(availability);
     }
 }
