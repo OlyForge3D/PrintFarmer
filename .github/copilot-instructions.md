@@ -434,12 +434,14 @@ npm run dev
 - Run `dotnet format` for .NET code and `npm run lint` for React code before committing
 
 **Entity Framework:**
-- Migrations are applied automatically on startup
-- Database safety checks handle missing columns
+- **⚠️ CRITICAL: DO NOT CREATE MIGRATIONS** - The project uses `EnsureCreated()` for development
+- Database schema is initialized automatically via `EnsureCreated()` on startup
+- Database safety checks handle missing columns gracefully
 - Multi-provider support: SQLite (default), SQL Server, PostgreSQL, MySQL
 - Provider selection via `DB_PROVIDER` environment variable
 - Connection strings configured in appsettings.json or via environment variables
-- No manual migration commands needed for typical development
+- **Schema changes**: Modify domain models directly; `EnsureCreated()` will rebuild schema on fresh DB
+- **Migration strategy**: Deferred until production readiness; development uses drop/recreate workflow
 
 **SignalR:**
 - Background service disabled during testing environment
