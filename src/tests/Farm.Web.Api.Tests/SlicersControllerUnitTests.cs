@@ -6,6 +6,7 @@ using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Shared.Contracts.Slicing;
 using Farm.Web.Api.Repositories.Slicing;
+using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Api.Services.SlicerServices;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
@@ -44,7 +45,8 @@ namespace Farm.Web.Api.Tests
             var mockHub = CreateMockHub(out var clientProxy);
 
             var repo = new EfSlicersRepository(db);
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var workerRepo = new EfWorkerRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object);
             var controller = new SlicersController(service);
 
             var dto = new RegisterSlicerDto
@@ -81,7 +83,8 @@ namespace Farm.Web.Api.Tests
 
             var mockHub = CreateMockHub(out _);
             var repo = new EfSlicersRepository(db);
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var workerRepo = new EfWorkerRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object);
             var controller = new SlicersController(service);
 
             var res = await controller.ListAsync();
@@ -102,7 +105,8 @@ namespace Farm.Web.Api.Tests
 
             var mockHub = CreateMockHub(out var clientProxy);
             var repo = new EfSlicersRepository(db);
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var workerRepo = new EfWorkerRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object);
             var controller = new SlicersController(service);
 
             var hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
@@ -131,7 +135,8 @@ namespace Farm.Web.Api.Tests
 
             var mockHub = CreateMockHub(out var clientProxy);
             var repo = new EfSlicersRepository(db);
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, mockHub.Object);
+            var workerRepo = new EfWorkerRepository(db);
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object);
             var controller = new SlicersController(service);
 
             var res = await controller.DeregisterAsync(id);

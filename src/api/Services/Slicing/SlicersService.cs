@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Repositories.Slicing;
+using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Shared.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Microsoft.AspNetCore.SignalR;
 
@@ -13,11 +15,13 @@ namespace Farm.Web.Api.Services.Slicing
     public class SlicersService : ISlicersService
     {
         private readonly ISlicersRepository _repo;
+        private readonly IWorkerRepository _workerRepo;
         private readonly IHubContext<SlicerHub> _hub;
 
-        public SlicersService(ISlicersRepository repo, IHubContext<SlicerHub> hub)
+        public SlicersService(ISlicersRepository repo, IWorkerRepository workerRepo, IHubContext<SlicerHub> hub)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+            _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
         }
 
@@ -49,6 +53,42 @@ namespace Farm.Web.Api.Services.Slicing
 
             await _repo.AddAsync(svc, ct);
             await _repo.SaveChangesAsync(ct);
+
+            // Synchronize to Worker table for dispatcher
+            try
+            {
+                var worker = new Worker
+                {
+                    Id = Guid.NewGuid(),
+                    ServiceId = svc.Id.ToString(),
+                    Name = svc.Name,
+                    EndpointUrl = svc.Host ?? string.Empty,
+                    CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
+                    Status = WorkerStatus.Online,
+                    FreeSlots = dto.MaxConcurrentJobs,
+                    TotalSlots = dto.MaxConcurrentJobs,
+                    ActiveJobs = 0,
+                    CompletedJobs = 0,
+                    FailedJobs = 0,
+                    LastHeartbeat = DateTime.UtcNow,
+                    RegisteredAt = DateTime.UtcNow,
+                    OnlineAt = DateTime.UtcNow,
+                    ApiKey = svc.ApiKey,
+                    Version = svc.Version,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    IsDisabled = false
+                };
+
+                await _workerRepo.AddAsync(worker);
+                await _repo.SaveChangesAsync(ct); // Use _repo's SaveChanges since both entities use same DbContext
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail registration if Worker sync fails
+                // In production, you'd want proper logging here
+                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker entity: {ex.Message}");
+            }
 
             // Broadcast registration event (best-effort)
             try
@@ -97,6 +137,33 @@ namespace Farm.Web.Api.Services.Slicing
 
             await _repo.SaveChangesAsync(ct);
 
+            // Synchronize to Worker table for dispatcher
+            try
+            {
+                var worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+                if (worker != null)
+                {
+                    // Update existing worker
+                    worker.Status = MapStatus(dto.Status ?? svc.Status ?? "Online");
+                    worker.FreeSlots = dto.FreeSlots ?? worker.FreeSlots;
+                    worker.LastHeartbeat = DateTime.UtcNow;
+                    worker.UpdatedAt = DateTime.UtcNow;
+
+                    // Calculate active jobs from free slots and total slots
+                    if (dto.FreeSlots.HasValue && worker.TotalSlots > 0)
+                    {
+                        worker.ActiveJobs = Math.Max(0, worker.TotalSlots - dto.FreeSlots.Value);
+                    }
+
+                    await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail heartbeat if Worker sync fails
+                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker heartbeat: {ex.Message}");
+            }
+
             try
             {
                 await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerHeartbeat, new
@@ -116,6 +183,22 @@ namespace Farm.Web.Api.Services.Slicing
             return true;
         }
 
+        /// <summary>
+        /// Map SlicerService status to Worker status constants
+        /// </summary>
+        private static string MapStatus(string slicerStatus)
+        {
+            return slicerStatus switch
+            {
+                "Online" => WorkerStatus.Online,
+                "Busy" => WorkerStatus.Busy,
+                "Draining" => WorkerStatus.Draining,
+                "Offline" => WorkerStatus.Offline,
+                "Error" => WorkerStatus.Error,
+                _ => WorkerStatus.Online
+            };
+        }
+
         public async Task<bool> DeregisterAsync(Guid id, CancellationToken ct)
         {
             var svc = await _repo.GetByIdAsync(id, ct);
@@ -126,6 +209,24 @@ namespace Farm.Web.Api.Services.Slicing
 
             await _repo.RemoveAsync(svc, ct);
             await _repo.SaveChangesAsync(ct);
+
+            // Synchronize to Worker table - mark as offline or remove
+            try
+            {
+                var worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+                if (worker != null)
+                {
+                    worker.Status = WorkerStatus.Offline;
+                    worker.OfflineAt = DateTime.UtcNow;
+                    worker.UpdatedAt = DateTime.UtcNow;
+                    await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail deregistration if Worker sync fails
+                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker deregistration: {ex.Message}");
+            }
 
             try
             {
