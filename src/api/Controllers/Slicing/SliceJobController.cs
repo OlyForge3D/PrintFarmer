@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Web.Api.DTOs.Slicing;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Slicing;
+using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Shared.Contracts.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -24,6 +25,7 @@ public class SliceJobController : ControllerBase
     private readonly ILogger<SliceJobController> _logger;
     private readonly IHostEnvironment _env;
     private readonly ISlicerProfileRepository _profileRepository;
+    private readonly IArtifactsService _artifactsService;
 
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
 
@@ -33,6 +35,7 @@ public class SliceJobController : ControllerBase
         ILogger<SliceJobController> logger,
         IHostEnvironment env,
         ISlicerProfileRepository profileRepository,
+        IArtifactsService artifactsService,
         Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
@@ -40,11 +43,12 @@ public class SliceJobController : ControllerBase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
+        _artifactsService = artifactsService ?? throw new ArgumentNullException(nameof(artifactsService));
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
     }
 
     /// <summary>
-    /// Validates capability JSON string. Ensures JSON array, size <= 32, distinct, simple slugs (a-z0-9-/_).
+    /// Validates capability JSON string. Ensures JSON array; size &lt;= 32; distinct; simple lowercase slugs.
     /// Returns sanitized canonical list (lower-case) or error message.
     /// </summary>
     public static bool TryValidateCapabilities(string? capabilitiesJson, out string[] capabilities, out string? error)
@@ -104,11 +108,6 @@ public class SliceJobController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> SubmitJobAsync([FromBody] SubmitSliceJobRequest request)
     {
-        if (request == null)
-        {
-            return BadRequest("Request body is required");
-        }
-
         if (request == null)
         {
             return BadRequest("Request body is required");
@@ -346,7 +345,7 @@ public class SliceJobController : ControllerBase
     /// <returns>List of queued jobs</returns>
     [HttpGet("queue")]
     [ProducesResponseType(typeof(List<SliceJobStatusResponse>), StatusCodes.Status200OK)]
-    [Authorize(Policy="CanViewSliceQueue")] // Restrict queue visibility via policy
+    [Authorize(Policy = "CanViewSliceQueue")] // Restrict queue visibility via policy
     public async Task<IActionResult> GetQueueAsync([FromQuery] int limit = 100)
     {
         IReadOnlyList<SliceJob> jobs = await _jobRepository.GetQueuedJobsAsync(limit);
@@ -370,55 +369,145 @@ public class SliceJobController : ControllerBase
         return Ok(response);
     }
 
-        /// <summary>
-        /// Claim the next available job from the queue (worker pull model)
-        /// </summary>
-        /// <param name="request">Claim request with worker ID and capabilities</param>
-        /// <returns>Claimed job details or 204 if no jobs available</returns>
-        [HttpPost("claim")]
-        [ProducesResponseType(typeof(SliceJobStatusResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> ClaimJobAsync([FromBody] ClaimJobRequest request)
+    /// <summary>
+    /// Claim the next available job from the queue (worker pull model)
+    /// </summary>
+    /// <param name="request">Claim request with worker ID and capabilities</param>
+    /// <returns>Claimed job details or 204 if no jobs available</returns>
+    [HttpPost("claim")]
+    [ProducesResponseType(typeof(SliceJobStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ClaimJobAsync([FromBody] ClaimJobRequest request)
+    {
+        if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
         {
-            if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
-            {
-                return BadRequest("Lease duration must be between 30 and 3600 seconds");
-            }
-
-            SliceJob? job = await _jobRepository.ClaimNextJobAsync(
-                request.WorkerId,
-                request.Capabilities,
-                request.LeaseDurationSeconds,
-                HttpContext.RequestAborted);
-
-            if (job == null)
-            {
-                return NoContent(); // No jobs available
-            }
-
-            // Broadcast job started event
-            await _eventService.NotifyJobStartedAsync(job, HttpContext.RequestAborted);
-
-            _logger.LogInformation("Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
-                job.Id, request.WorkerId, job.LeaseExpiresAt);
-
-            SliceJobStatusResponse response = new()
-            {
-                Id = job.Id,
-                Status = job.Status,
-                ProgressPercent = job.ProgressPercent,
-                ProgressMessage = job.ProgressMessage,
-                QueuedAt = job.QueuedAt,
-                StartedAt = job.StartedAt,
-                CompletedAt = job.CompletedAt,
-                ResultFileUrl = job.ResultFileUrl,
-                ErrorMessage = job.ErrorMessage,
-                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-                FilamentUsedGrams = job.FilamentUsedGrams,
-                WorkerId = job.WorkerId
-            };
-
-            return Ok(response);
+            return BadRequest("Lease duration must be between 30 and 3600 seconds");
         }
+
+        SliceJob? job = await _jobRepository.ClaimNextJobAsync(
+            request.WorkerId,
+            request.Capabilities,
+            request.LeaseDurationSeconds,
+            HttpContext.RequestAborted);
+
+        if (job == null)
+        {
+            return NoContent(); // No jobs available
+        }
+
+        // Broadcast job started event
+        await _eventService.NotifyJobStartedAsync(job, HttpContext.RequestAborted);
+
+        _logger.LogInformation("Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
+            job.Id, request.WorkerId, job.LeaseExpiresAt);
+
+        SliceJobStatusResponse response = new()
+        {
+            Id = job.Id,
+            Status = job.Status,
+            ProgressPercent = job.ProgressPercent,
+            ProgressMessage = job.ProgressMessage,
+            QueuedAt = job.QueuedAt,
+            StartedAt = job.StartedAt,
+            CompletedAt = job.CompletedAt,
+            ResultFileUrl = job.ResultFileUrl,
+            ErrorMessage = job.ErrorMessage,
+            EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+            FilamentUsedGrams = job.FilamentUsedGrams,
+            WorkerId = job.WorkerId
+        };
+
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Mark a processing slice job as completed and associate produced artifacts.
+    /// </summary>
+    /// <param name="id">Slice job identifier</param>
+    /// <param name="request">Completion details (primary artifact + optional additional artifact IDs)</param>
+    [HttpPost("{id}/complete")]
+    [ProducesResponseType(typeof(CompleteSliceJobResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CompleteJobAsync(Guid id, [FromBody] CompleteSliceJobRequest request)
+    {
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
+
+        var job = await _jobRepository.GetByIdAsync(id);
+        if (job == null)
+        {
+            return NotFound($"Job {id} not found");
+        }
+
+        if (job.Status != SliceJobStatus.Processing)
+        {
+            return BadRequest($"Cannot complete job in status {job.Status}. Must be Processing.");
+        }
+
+        // Fetch primary artifact
+        var primary = await _artifactsService.GetAsync(request.PrimaryArtifactId, HttpContext.RequestAborted);
+        if (primary == null)
+        {
+            return BadRequest($"Primary artifact {request.PrimaryArtifactId} not found");
+        }
+        if (primary.JobId != job.Id)
+        {
+            return BadRequest("Primary artifact job mismatch");
+        }
+
+        // Validate additional artifacts if provided
+        var allArtifactIds = new List<Guid> { primary.Id };
+        if (request.AdditionalArtifactIds != null)
+        {
+            foreach (var aid in request.AdditionalArtifactIds.Distinct())
+            {
+                var extra = await _artifactsService.GetAsync(aid, HttpContext.RequestAborted);
+                if (extra == null)
+                {
+                    return BadRequest($"Artifact {aid} not found");
+                }
+                if (extra.JobId != job.Id)
+                {
+                    return BadRequest($"Artifact {aid} does not belong to job {job.Id}");
+                }
+                allArtifactIds.Add(aid);
+            }
+        }
+
+        // Derive stable URL from stored relative path
+        string resultUrl = $"/artifacts/{primary.RelativePath}";
+
+        await _jobRepository.MarkCompletedAsync(
+            job.Id,
+            resultUrl,
+            request.EstimatedPrintTimeSeconds,
+            request.FilamentUsedGrams,
+            HttpContext.RequestAborted);
+        await _jobRepository.SaveChangesAsync(HttpContext.RequestAborted);
+
+        // Reload updated job for broadcasting
+        var updated = await _jobRepository.GetByIdAsync(job.Id, HttpContext.RequestAborted);
+        if (updated != null)
+        {
+            await _eventService.NotifyJobCompletedAsync(updated, HttpContext.RequestAborted);
+        }
+
+        var response = new CompleteSliceJobResponse
+        {
+            JobId = job.Id,
+            Status = SliceJobStatus.Completed,
+            CompletedAt = updated?.CompletedAt,
+            ResultFileUrl = resultUrl,
+            ArtifactIds = allArtifactIds.ToArray(),
+            EstimatedPrintTimeSeconds = request.EstimatedPrintTimeSeconds,
+            FilamentUsedGrams = request.FilamentUsedGrams
+        };
+
+        _logger.LogInformation("Job {JobId} completed with {ArtifactCount} artifacts", job.Id, allArtifactIds.Count);
+        return Ok(response);
+    }
 }

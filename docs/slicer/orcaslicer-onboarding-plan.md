@@ -13,8 +13,8 @@ This document contains a phased implementation plan to onboard OrcaSlicer as a s
 | Phase 0: Preparations | ✅ Complete | 100% | Branch created, structure validated |
 | Phase 1: Registry & Discovery API | ⏳ Not Started | 0% | Worker registration system |
 | **Phase 2: Job API & Dispatching** | **✅ Complete** | **100%** | **Production-ready with full observability** |
-| Phase 3: Worker Registration | ⏳ Not Started | 0% | Integrate worker with registry |
-| Phase 4: Job Processing & Artifacts | ⏳ Not Started | 0% | End-to-end worker processing |
+| Phase 3: Worker Registration | ✅ Complete | 100% | Registry + heartbeat + worker sync (SlicersService→Worker) |
+| Phase 4: Local Artifact Storage & Job Completion | 🚧 In Progress | 10% | End-to-end processing + filesystem artifact persistence |
 | Phase 5: UI Integration | ⏳ Not Started | 0% | Admin UI and embedding |
 | Phase 6: Profile Import/Export | ⏳ Not Started | 0% | Orca JSON handling |
 | Phase 7: Hardening & Polish | ⏳ Not Started | 0% | Operational excellence |
@@ -137,23 +137,124 @@ Update History
 - 2025-10-19: Completed hardening: Prometheus export, configurable retry, worker pull model, stale filtering
 - 2025-10-19: All tests passing, production-ready
 
-## Phase 3 — Worker Registration (Integrate with existing worker)
-Goal: Wire orcaslicer-worker to register and heartbeat with the new registry.
+## Phase 3 — Worker Registration (✅ COMPLETE)
+Goal: Worker self-registration, heartbeat capacity updates, and unified dispatcher visibility.
 
-Tasks
-- [ ] Implement registration client in `src/orcaslicer-worker/Program.cs`:
-  - On startup, POST `/api/slicers/register` with capabilities, receive service id + token
-  - Store token locally (ephemeral) and use for subsequent API calls
-- [ ] Implement periodic heartbeat POST `/api/slicers/{id}/heartbeat` with free-slot/capacity data
-- [ ] Implement graceful deregister on SIGTERM
-- [ ] Optionally: support config `SLICER_REGISTRY_URL` and `SLICER_SERVICE_NAME`
-- [ ] Add health & readiness interplay: if worker lacks orca binary, mark orca_binary check as unhealthy but still register (if `ALLOW_STUB` true)
+Delivered
+- [x] `SlicersService` implements register/heartbeat/deregister endpoints
+- [x] Worker synchronization: creation/update/offline mapping to `Worker` entity
+- [x] Heartbeat propagates `FreeSlots`, derives `ActiveJobs`, maps status → `WorkerStatus`
+- [x] SignalR hub broadcasts: `SlicerRegistered`, `SlicerHeartbeat`, `SlicerDeregistered`
+- [x] Unit tests: registration, heartbeat, deregistration sync (see `SlicersServiceWorkerSyncTests`)
+- [x] Integration scaffold deferred (Prometheus MeterProvider requirement) — to re-enable post telemetry test host configuration
 
-Acceptance criteria
-- Orca worker registers successfully and appears in UI/registry
-- Worker sends capacity updates and deregisters on shutdown
+Acceptance Criteria (Met)
+- Workers appear immediately in dispatcher queries (`EfWorkerRepository`)
+- Heartbeats adjust load metrics without stale-tracking regressions
+- Deregistration marks worker Offline preserving historical metrics
 
-Estimated effort: 1–2 dev days
+Follow-ups
+- [ ] Add draining workflow (graceful capacity reduction before offline)
+- [ ] Re-enable full integration test once test host wires `MeterProvider`
+
+## Phase 4 — Local Artifact Storage & Job Completion (🚧 In Progress)
+Goal: Persist slicing outputs (G-code, previews, logs) on the user's own hardware (no cloud dependency) and finalize job lifecycle with robust integrity metadata.
+
+Design Principles
+1. 100% local-first: artifacts stored under a configurable root (default `artifacts/` adjacent to `wwwroot`).
+2. Content-address hinting: include SHA-256 hash for integrity & optional dedup later.
+3. Streaming friendly: avoid buffering large uploads fully in memory.
+4. Separation of concerns: metadata in DB, bytes on disk; never store large blobs in RDBMS.
+5. Stable public URL pattern for UI consumption: `/artifacts/{yyyy}/{MM}/{dd}/{artifactId}/{originalName}` (served as static files or minimal passthrough).
+
+New Domain Model (Artifact)
+| Field | Type | Notes |
+|-------|------|-------|
+| Id | Guid | Primary key |
+| JobId | Guid | Links to slice job (future: foreign key) |
+| WorkerId | Guid? | Producing worker (optional for legacy jobs) |
+| FileName | string | Original client / slicer provided name |
+| RelativePath | string | Path under Root (for relocation) |
+| ContentType | string | `text/plain`, `application/gcode`, `image/png` |
+| SizeBytes | long | For UI progress & cleanup policies |
+| Sha256 | string | Hex; computed server-side |
+| Kind | string | `gcode`, `thumbnail`, `preview`, `log` |
+| CreatedAt | DateTime | Stored UTC |
+
+Configuration
+```jsonc
+"ArtifactStorage": {
+  "RootPath": "artifacts",        // relative or absolute
+  "MaxFileSizeBytes": 104857600,   // 100MB default guard
+  "AllowedKinds": "gcode,thumbnail,preview,log"
+}
+```
+
+Service Contract (ArtifactsService)
+- UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind) → ArtifactDto
+- GetAsync(Guid id)
+- ListByJobAsync(Guid jobId)
+- StreamAsync(Guid id) (optional passthrough for auth policies)
+
+API Endpoints
+- `POST /api/artifacts` (multipart/form-data)
+  - Fields: jobId, kind (enum), workerId (optional), file
+  - Validates size, kind, content type, extension (e.g. `.gcode`, `.png`)
+  - Returns ArtifactResponse with metadata + URL
+- `GET /api/artifacts/{id}` — metadata
+- `GET /api/artifacts/job/{jobId}` — list artifacts for job
+- `GET /api/artifacts/{id}/download` — file stream (if not served directly by static hosting)
+
+Security & Integrity
+- Reject path traversal (`file.FileName` sanitized; never trust client path segments).
+- Compute SHA-256 to allow future dedup & integrity checks.
+- Enforce max size; return 413 if exceeded.
+- Optional API key / user auth based on job ownership for download.
+
+Local Filesystem Layout
+```
+<RootPath>/
+  2025/
+    10/
+      19/
+        <artifact-guid>/
+          original-name.gcode
+          preview-1.png
+```
+
+Job Completion Flow Update
+1. Worker finishes slicing → produces G-code + thumbnails.
+2. Worker POSTs artifacts (or sends presigned-like metadata; MVP: direct upload to API).
+3. Worker POSTs `/api/slice/{id}/complete` with artifact IDs + summary metrics.
+4. API transitions job status to Completed; broadcasts SignalR event with artifact URLs.
+
+Testing Strategy (Phase 4)
+- Unit: path sanitizer, hash calculator, size validator.
+- Integration: upload + metadata persistence + disk existence; completion endpoint associates artifact.
+- Edge: oversize file, unsupported kind, duplicate filename within same artifact folder.
+
+Metrics (to add)
+- Counter: `artifacts_uploaded_total` (tags: kind)
+- Histogram: `artifact_upload_bytes` (distribution)
+- Gauge: `artifact_storage_total_bytes` (periodic scan; optional post-phase)
+
+Future Enhancements
+- Periodic re-hash verification task.
+- Compression for large textual logs.
+- Automatic thumbnail derivation registry.
+- Cleanup policy (LRU or age-based) with dry-run mode.
+
+Current Progress (10%)
+- Entity spec finalized (above).
+- Service & controller scaffolding pending.
+- Will add DB entity + repository next.
+
+Acceptance Criteria (Planned)
+- Upload endpoint stores file + metadata and returns stable URL.
+- Completion endpoint updates job status and links artifacts.
+- Files accessible locally without cloud dependencies.
+
+Estimated Effort Remaining: 2–3 dev days (foundational), +1 day hardening.
 
 ## Phase 4 — Worker Job Processing & Artifact Uploads
 Goal: Ensure the worker processes jobs, writes artifacts to object storage, and posts results.

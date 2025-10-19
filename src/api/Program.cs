@@ -79,6 +79,10 @@ builder.Services.AddAutoMapper(typeof(Program).Assembly);
 // Register import parser & processor services (parser implementation moved to Farm.Importing)
 builder.Services.AddScoped<Farm.Importing.Services.Import.IImportParserService, Farm.Importing.Services.Import.ImportParserService>();
 
+// Artifact storage settings & service (Phase 4)
+builder.Services.Configure<ArtifactStorageSettings>(builder.Configuration.GetSection(ArtifactStorageSettings.SectionName));
+builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
+
 // Adapters bridging API services to the importing project's adapter interfaces
 builder.Services.AddScoped<Farm.Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Farm.Web.Api.Services.Adapters.PrinterCapabilityDiscoveryAdapter>();
 builder.Services.AddScoped<Farm.Importing.Services.Adapters.IDefaultCatalogAdapter, Farm.Web.Api.Services.Adapters.DefaultCatalogAdapter>();

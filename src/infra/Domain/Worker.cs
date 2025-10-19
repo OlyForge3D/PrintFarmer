@@ -121,6 +121,16 @@ public class Worker
     /// Reason for disabling (if applicable)
     /// </summary>
     public string? DisabledReason { get; set; }
+
+    /// <summary>
+    /// Total number of artifacts (gcode, previews, logs) produced by this worker. Incremented on job completion.
+    /// </summary>
+    public int ArtifactsProduced { get; set; }
+
+    /// <summary>
+    /// Aggregate bytes written for produced artifacts (for capacity planning & monitoring).
+    /// </summary>
+    public long ArtifactBytesProduced { get; set; }
 }
 
 /// <summary>

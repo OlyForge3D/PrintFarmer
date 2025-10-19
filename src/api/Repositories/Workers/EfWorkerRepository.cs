@@ -25,17 +25,16 @@ public class EfWorkerRepository : IWorkerRepository
 
     public async Task<Worker?> GetByIdAsync(Guid id)
     {
-        return await _context.Workers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(w => w.Id == id);
+        // Return tracked entity (needed for update scenarios such as heartbeat/status changes)
+        // Callers that need a read-only instance should project or detach manually.
+        return await _context.Workers.FirstOrDefaultAsync(w => w.Id == id);
     }
 
     public async Task<Worker?> GetByServiceIdAsync(string serviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceId);
-        return await _context.Workers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(w => w.ServiceId == serviceId);
+        // Return tracked entity so callers (e.g., SlicersService heartbeat sync) can mutate and persist.
+        return await _context.Workers.FirstOrDefaultAsync(w => w.ServiceId == serviceId);
     }
 
     public async Task<IReadOnlyList<Worker>> GetAllAsync(int limit = 100, int offset = 0)

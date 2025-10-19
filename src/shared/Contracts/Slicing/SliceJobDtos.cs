@@ -153,3 +153,67 @@ public class SliceJobStatusResponse
     /// </summary>
     public Guid? WorkerId { get; set; }
 }
+
+/// <summary>
+/// Request to mark a slice job as completed and associate produced artifacts.
+/// </summary>
+public class CompleteSliceJobRequest
+{
+    /// <summary>
+    /// Primary G-code artifact identifier (required). This artifact's URL becomes the job's ResultFileUrl.
+    /// </summary>
+    [Required]
+    public Guid PrimaryArtifactId { get; set; }
+
+    /// <summary>
+    /// Optional additional artifact identifiers (thumbnails, previews, logs) related to this job.
+    /// </summary>
+    public Guid[]? AdditionalArtifactIds { get; set; }
+
+    /// <summary>
+    /// Estimated print time in seconds produced by the slicer (optional).
+    /// </summary>
+    public int? EstimatedPrintTimeSeconds { get; set; }
+
+    /// <summary>
+    /// Estimated filament usage in grams (optional).
+    /// </summary>
+    public decimal? FilamentUsedGrams { get; set; }
+}
+
+/// <summary>
+/// Response after successful job completion.
+/// </summary>
+public class CompleteSliceJobResponse
+{
+    /// <summary>
+    /// Job identifier.
+    /// </summary>
+    public Guid JobId { get; set; }
+
+    /// <summary>
+    /// Final status ("Completed").
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When the job was marked completed.
+    /// </summary>
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>
+    /// Canonical URL to the primary G-code artifact.
+    /// </summary>
+    public string? ResultFileUrl { get; set; }
+
+    /// <summary>
+    /// All artifact identifiers associated with this completion (primary + additional).
+    /// </summary>
+    public Guid[] ArtifactIds { get; set; } = Array.Empty<Guid>();
+
+    /// <summary>
+    /// Optional slicer-generated metrics.
+    /// </summary>
+    public int? EstimatedPrintTimeSeconds { get; set; }
+    public decimal? FilamentUsedGrams { get; set; }
+}
