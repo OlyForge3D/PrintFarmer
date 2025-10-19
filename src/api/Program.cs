@@ -115,6 +115,10 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfilesService, Farm.
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.Web.Api.Services.Slicing.SlicersService>();
+// Slice job repository (distributed slicing queue)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository, Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository>();
+// Slice job event service (SignalR notifications for job lifecycle)
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISliceJobEventService, Farm.Web.Api.Services.Slicing.SliceJobEventService>();
 // Queue repository & service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Queue.IQueueRepository, Farm.Web.Api.Repositories.Queue.EfQueueRepository>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Queue.IJobQueueService, Farm.Web.Api.Services.Queue.JobQueueService>();

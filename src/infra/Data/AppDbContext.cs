@@ -30,6 +30,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SlicerProfile> SlicerProfiles => Set<SlicerProfile>();
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
+    public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -523,6 +524,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(s => s.Name);
             b.HasIndex(s => s.SlicerType);
             b.HasIndex(s => s.Status);
+        });
+
+        // SliceJob Entity Configuration
+        modelBuilder.Entity<SliceJob>(b =>
+        {
+            b.HasKey(j => j.Id);
+            b.Property(j => j.UserId).IsRequired();
+            b.Property(j => j.ModelFileUrl).IsRequired().HasMaxLength(2048);
+            b.Property(j => j.ModelFileName).IsRequired().HasMaxLength(512);
+            b.Property(j => j.SlicerEngine).IsRequired();
+            b.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
+            b.Property(j => j.RequiredCapabilitiesJson).HasColumnType("TEXT");
+            b.Property(j => j.Status).IsRequired().HasMaxLength(50);
+            b.Property(j => j.Priority).IsRequired();
+            b.Property(j => j.QueuedAt).IsRequired();
+            b.Property(j => j.ResultFileUrl).HasMaxLength(2048);
+            b.Property(j => j.ErrorMessage).HasColumnType("TEXT");
+            b.Property(j => j.ProgressMessage).HasMaxLength(512);
+            b.Property(j => j.CreatedAt).IsRequired();
+            b.Property(j => j.UpdatedAt).IsRequired();
+
+            // Indexes for efficient querying
+            b.HasIndex(j => j.UserId);
+            b.HasIndex(j => j.PrinterId);
+            b.HasIndex(j => j.Status);
+            b.HasIndex(j => j.QueuedAt);
+            b.HasIndex(j => new { j.Status, j.Priority, j.QueuedAt }); // For queue processing
+            b.HasIndex(j => j.WorkerId);
         });
 
         modelBuilder.Entity<PasswordPolicyEntity>(b =>
