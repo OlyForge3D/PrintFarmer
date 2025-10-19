@@ -51,6 +51,12 @@ const navigation: NavigationItem[] = [
     requiredPermission: { resource: 'models', action: 'read' }
   },
   {
+    name: 'Slice Jobs',
+    href: '/jobs',
+    icon: Layers,
+    requiredPermission: { resource: 'models', action: 'read' }
+  },
+  {
     name: 'G-code Harvest',
     href: '/harvest',
     icon: Cog,
@@ -73,6 +79,7 @@ const navigation: NavigationItem[] = [
     requiredRole: 'farm_admin',
     children: [
       { name: 'Printers', href: '/admin/printers', icon: Printer },
+      { name: 'Workers', href: '/admin/workers', icon: Cog },
       { name: 'Catalog', href: '/catalog', icon: Layers },
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Spools', href: '/spools', icon: Box },
