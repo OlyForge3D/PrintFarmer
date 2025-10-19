@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.DTOs.Slicing;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared.Contracts.Slicing;
@@ -24,18 +25,72 @@ public class SliceJobController : ControllerBase
     private readonly IHostEnvironment _env;
     private readonly ISlicerProfileRepository _profileRepository;
 
+    private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
+
     public SliceJobController(
         ISliceJobRepository jobRepository,
         ISliceJobEventService eventService,
         ILogger<SliceJobController> logger,
         IHostEnvironment env,
-        ISlicerProfileRepository profileRepository)
+        ISlicerProfileRepository profileRepository,
+        Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
+        _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
+    }
+
+    /// <summary>
+    /// Validates capability JSON string. Ensures JSON array, size <= 32, distinct, simple slugs (a-z0-9-/_).
+    /// Returns sanitized canonical list (lower-case) or error message.
+    /// </summary>
+    public static bool TryValidateCapabilities(string? capabilitiesJson, out string[] capabilities, out string? error)
+    {
+        capabilities = Array.Empty<string>();
+        error = null;
+        if (string.IsNullOrWhiteSpace(capabilitiesJson))
+        {
+            return true; // empty allowed
+        }
+        try
+        {
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(capabilitiesJson);
+            if (parsed == null)
+            {
+                error = "Capabilities must be a JSON string array.";
+                return false;
+            }
+            if (parsed.Length > 32)
+            {
+                error = "Too many capabilities (max 32).";
+                return false;
+            }
+            var canonical = parsed
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c.Trim().ToLowerInvariant())
+                .ToArray();
+            if (canonical.Length != canonical.Distinct(StringComparer.Ordinal).Count())
+            {
+                error = "Duplicate capabilities are not allowed.";
+                return false;
+            }
+            var invalid = canonical.Where(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
+            if (invalid.Count > 0)
+            {
+                error = $"Invalid capability slug(s): {string.Join(", ", invalid)}";
+                return false;
+            }
+            capabilities = canonical;
+            return true;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            error = $"Invalid capabilities JSON: {ex.Message}";
+            return false;
+        }
     }
 
     /// <summary>
@@ -112,6 +167,19 @@ public class SliceJobController : ControllerBase
             }
         }
 
+        // Rate limit per authenticated user (or test user fallback)
+        var rateResult = await _rateLimitService.CheckSliceJobSubmitLimitAsync(userId, HttpContext.RequestAborted);
+        if (!rateResult.IsAllowed)
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, rateResult.Message ?? "Too many slice job submissions. Please retry later.");
+        }
+
+        // Capabilities validation (optional requirement)
+        if (!TryValidateCapabilities(request.RequiredCapabilitiesJson, out var capabilityList, out var capabilityError))
+        {
+            return BadRequest(capabilityError);
+        }
+
         // Create new job
         SliceJob job = new()
         {
@@ -123,7 +191,7 @@ public class SliceJobController : ControllerBase
             SlicerEngine = referencedProfile != null ? (int)referencedProfile.SlicerType : request.SlicerEngine,
             SlicerProfileJson = referencedProfile?.RawJson ?? request.SlicerProfileJson ?? "{}",
             SlicerProfileId = referencedProfile?.Id,
-            RequiredCapabilitiesJson = request.RequiredCapabilitiesJson ?? "[]",
+            RequiredCapabilitiesJson = capabilityList.Length == 0 ? "[]" : System.Text.Json.JsonSerializer.Serialize(capabilityList),
             Status = SliceJobStatus.Queued,
             Priority = request.Priority,
             QueuedAt = DateTime.UtcNow,
@@ -152,6 +220,7 @@ public class SliceJobController : ControllerBase
             QueuePosition = queuePosition
         };
 
+        await _rateLimitService.RecordSliceJobSubmitAttemptAsync(userId, HttpContext.RequestAborted);
         return Accepted(response);
     }
 
@@ -277,6 +346,7 @@ public class SliceJobController : ControllerBase
     /// <returns>List of queued jobs</returns>
     [HttpGet("queue")]
     [ProducesResponseType(typeof(List<SliceJobStatusResponse>), StatusCodes.Status200OK)]
+    [Authorize(Policy="CanViewSliceQueue")] // Restrict queue visibility via policy
     public async Task<IActionResult> GetQueueAsync([FromQuery] int limit = 100)
     {
         IReadOnlyList<SliceJob> jobs = await _jobRepository.GetQueuedJobsAsync(limit);
@@ -299,4 +369,56 @@ public class SliceJobController : ControllerBase
 
         return Ok(response);
     }
+
+        /// <summary>
+        /// Claim the next available job from the queue (worker pull model)
+        /// </summary>
+        /// <param name="request">Claim request with worker ID and capabilities</param>
+        /// <returns>Claimed job details or 204 if no jobs available</returns>
+        [HttpPost("claim")]
+        [ProducesResponseType(typeof(SliceJobStatusResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ClaimJobAsync([FromBody] ClaimJobRequest request)
+        {
+            if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
+            {
+                return BadRequest("Lease duration must be between 30 and 3600 seconds");
+            }
+
+            SliceJob? job = await _jobRepository.ClaimNextJobAsync(
+                request.WorkerId,
+                request.Capabilities,
+                request.LeaseDurationSeconds,
+                HttpContext.RequestAborted);
+
+            if (job == null)
+            {
+                return NoContent(); // No jobs available
+            }
+
+            // Broadcast job started event
+            await _eventService.NotifyJobStartedAsync(job, HttpContext.RequestAborted);
+
+            _logger.LogInformation("Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
+                job.Id, request.WorkerId, job.LeaseExpiresAt);
+
+            SliceJobStatusResponse response = new()
+            {
+                Id = job.Id,
+                Status = job.Status,
+                ProgressPercent = job.ProgressPercent,
+                ProgressMessage = job.ProgressMessage,
+                QueuedAt = job.QueuedAt,
+                StartedAt = job.StartedAt,
+                CompletedAt = job.CompletedAt,
+                ResultFileUrl = job.ResultFileUrl,
+                ErrorMessage = job.ErrorMessage,
+                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+                FilamentUsedGrams = job.FilamentUsedGrams,
+                WorkerId = job.WorkerId
+            };
+
+            return Ok(response);
+        }
 }

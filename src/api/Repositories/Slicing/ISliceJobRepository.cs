@@ -61,6 +61,17 @@ public interface ISliceJobRepository
     /// </summary>
     Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default);
 
+        /// <summary>
+        /// Atomically claim the next available queued job matching capabilities (worker pull model)
+        /// Sets status to Processing, assigns workerId, and sets ClaimedAt timestamp with lease expiration
+        /// </summary>
+        /// <param name="workerId">Worker claiming the job</param>
+        /// <param name="capabilities">Optional capabilities filter (null means accept any job)</param>
+        /// <param name="leaseDurationSeconds">Lease duration in seconds</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Claimed job or null if no matching job available</returns>
+        Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
+
     /// <summary>
     /// Save changes to the database
     /// </summary>

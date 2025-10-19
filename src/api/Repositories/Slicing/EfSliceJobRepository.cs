@@ -160,6 +160,50 @@ public class EfSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
     }
 
+        public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
+        {
+            var now = DateTime.UtcNow;
+            var leaseExpiration = now.AddSeconds(leaseDurationSeconds);
+
+            // Query for queued jobs or jobs with expired leases
+            IQueryable<SliceJob> query = _db.SliceJobs
+                .Where(j => j.Status == SliceJobStatus.Queued || 
+                           (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
+                .OrderBy(j => j.Priority)
+                .ThenBy(j => j.QueuedAt);
+
+            // Filter by capabilities if specified
+            if (capabilities != null && capabilities.Length > 0)
+            {
+                // Jobs with null/empty RequiredCapabilitiesJson match any worker
+                // Otherwise, check if job capabilities are a subset of worker capabilities
+                query = query.Where(j => 
+                    string.IsNullOrEmpty(j.RequiredCapabilitiesJson) ||
+                    capabilities.Any(cap => j.RequiredCapabilitiesJson!.Contains($"\"{cap}\"", StringComparison.OrdinalIgnoreCase)));
+            }
+
+            // Get first available job
+            var job = await query.FirstOrDefaultAsync(ct);
+            if (job == null)
+            {
+                return null;
+            }
+
+            // Atomically claim the job
+            job.Status = SliceJobStatus.Processing;
+            job.WorkerId = workerId;
+            job.ClaimedAt = now;
+            job.LeaseExpiresAt = leaseExpiration;
+            if (job.StartedAt == null)
+            {
+                job.StartedAt = now;
+            }
+            job.UpdatedAt = now;
+
+            await SaveChangesAsync(ct);
+            return job;
+        }
+
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
         await _db.SaveChangesAsync(ct);

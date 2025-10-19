@@ -223,6 +223,15 @@ public static class ServiceCollectionExtensions
         });
         services.AddSingleton<Farm.Web.Api.Services.RateLimiting.IRateLimitService, Farm.Web.Api.Services.RateLimiting.InMemoryRateLimitService>();
 
+            // Job dispatch retry options
+            services.AddSingleton(sp =>
+            {
+                var cfg = sp.GetRequiredService<IConfiguration>();
+                var opts = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+                cfg.GetSection("JobDispatchRetry").Bind(opts);
+                return opts;
+            });
+
         // Startup tracking
         // Register StartupStatus as the implementation for IStartupStatus
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();

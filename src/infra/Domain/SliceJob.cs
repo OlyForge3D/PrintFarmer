@@ -125,6 +125,17 @@ public class SliceJob
     /// </summary>
     public Guid? WorkerId { get; set; }
 
+        /// <summary>
+        /// When the job was claimed by a worker (pull model)
+        /// </summary>
+        public DateTime? ClaimedAt { get; set; }
+
+        /// <summary>
+        /// When the job lease expires (pull model with timeout)
+        /// If worker doesn't complete by this time, job can be reclaimed by another worker
+        /// </summary>
+        public DateTime? LeaseExpiresAt { get; set; }
+
     /// <summary>
     /// Timestamp when this record was created
     /// </summary>

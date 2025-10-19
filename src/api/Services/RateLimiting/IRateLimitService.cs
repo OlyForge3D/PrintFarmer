@@ -7,6 +7,10 @@ public interface IRateLimitService
     
     Task<RateLimitResult> CheckEmailConfirmationLimitAsync(string email, CancellationToken ct = default);
     Task RecordEmailConfirmationAttemptAsync(string email, CancellationToken ct = default);
+
+    // Slice job submission limits (per user ID)
+    Task<RateLimitResult> CheckSliceJobSubmitLimitAsync(Guid userId, CancellationToken ct = default);
+    Task RecordSliceJobSubmitAttemptAsync(Guid userId, CancellationToken ct = default);
 }
 
 public record RateLimitResult(

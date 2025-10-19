@@ -358,6 +358,9 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
             _ = metrics.AddConsoleExporter();
         }
 
+            // Add Prometheus exporter for /metrics endpoint
+            _ = metrics.AddPrometheusExporter();
+
         // Add OTLP exporter for metrics
         string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
         if (!string.IsNullOrEmpty(otlpEndpoint))
@@ -501,6 +504,11 @@ builder.Services.AddAuthorization(options =>
     // Historical policy name used across controllers. Keep an alias so existing
     // controllers using [Authorize(Policy = "farm_admin")] continue to work.
     options.AddPolicy("farm_admin", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.RequireRole("farm_admin");
+    });
+    options.AddPolicy("CanViewSliceQueue", policy =>
     {
         _ = policy.RequireAuthenticatedUser();
         _ = policy.RequireRole("farm_admin");
@@ -658,6 +666,9 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 // Expose Slicer progress hub for slicer registry and progress events
 app.MapHub<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>("/hubs/slicers");
+
+// Prometheus metrics endpoint
+app.MapPrometheusScrapingEndpoint();
 
 // Health checks
 // Capture host environment and resolve startup status from the root service provider (app.Services)
