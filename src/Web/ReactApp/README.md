@@ -1,69 +1,153 @@
-# React + TypeScript + Vite
+# PrintFarmer React Application
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the React TypeScript frontend for PrintFarmer, a dashboard for managing multiple 3D printers. Built with React 18, TypeScript, Vite, and Tailwind CSS.
 
-Currently, two official plugins are available:
+## Quick Start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+# Install dependencies
+npm install
 
-## Expanding the ESLint configuration
+# Start development server
+npm run dev
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+# Build for production
+npm run build
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+# Run tests
+npm test
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Lint code
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Documentation
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- **[UI Components Guide](./UI_COMPONENTS_GUIDE.md)** - Comprehensive guide to shared UI components (Button, Alert, FormField, Input, Select, ProgressBar) with usage examples
+- **[Color System Guide](./COLOR_SYSTEM_GUIDE.md)** - PrintFarmer design token system and accessibility guidelines
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Technology Stack
+
+- **React 18** - Modern React with hooks and concurrent features
+- **TypeScript** - Type-safe JavaScript
+- **Vite** - Fast build tool with HMR (Hot Module Replacement)
+- **Tailwind CSS** - Utility-first CSS with custom PrintFarmer design tokens
+- **React Query** - Server state management
+- **SignalR** - Real-time communication with API
+- **React Router** - Client-side routing
+- **Vitest** - Unit testing with React Testing Library
+
+## Project Structure
+
 ```
+src/
+├── components/        # React components
+│   └── ui/           # Shared UI component library
+├── contexts/         # React contexts (Auth, Theme, etc.)
+├── pages/            # Page components
+├── services/         # API clients and services
+├── types/            # TypeScript type definitions
+├── utils/            # Utility functions
+├── test/             # Test files
+└── styles/           # Global styles and theme
+```
+
+## Development Guidelines
+
+### Using Shared Components
+
+Always use shared components from `components/ui/` for consistency:
+
+```tsx
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
+import { FormField } from '@/components/ui/FormField';
+import { Input } from '@/components/ui/Input';
+
+function MyForm() {
+  return (
+    <form>
+      <FormField label="Email" required>
+        <Input type="email" value={email} onChange={handleChange} />
+      </FormField>
+      
+      <Button variant="primary" type="submit">
+        Submit
+      </Button>
+    </form>
+  );
+}
+```
+
+See [UI_COMPONENTS_GUIDE.md](./UI_COMPONENTS_GUIDE.md) for complete component documentation.
+
+### Design System
+
+PrintFarmer uses a comprehensive color token system with `pf-*` prefixed classes:
+
+```tsx
+// ✅ DO: Use design tokens
+<div className="bg-pf-panel text-pf-text-primary border border-pf-border">
+  <h2 className="text-pf-text-primary">Title</h2>
+  <p className="text-pf-text-secondary">Description</p>
+</div>
+
+// ❌ DON'T: Use raw Tailwind colors
+<div className="bg-white text-gray-900 border border-gray-300">
+  <h2 className="text-gray-900">Title</h2>
+  <p className="text-gray-600">Description</p>
+</div>
+```
+
+See [COLOR_SYSTEM_GUIDE.md](./COLOR_SYSTEM_GUIDE.md) for complete color token reference.
+
+### Code Style
+
+- **TypeScript**: Strict mode enabled with comprehensive type checking
+- **ESLint**: Configured for React + TypeScript best practices
+- **Prettier**: (Future) Automatic code formatting
+
+### Testing
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm test -- --watch
+
+# Run tests with coverage
+npm test -- --coverage
+```
+
+Tests use Vitest and React Testing Library. See `src/test/` for examples.
+
+## API Integration
+
+The React app communicates with the ASP.NET Core API backend:
+
+- **API Base URL**: `http://localhost:5245`
+- **SignalR Hub**: `/hubs/printers`
+- **REST Endpoints**: `/api/printers`, `/api/catalog`, etc.
+
+See `src/services/` for API client implementations.
+
+## Deployment
+
+```bash
+# Build for production
+npm run build
+
+# Preview production build locally
+npm run preview
+```
+
+The production build outputs to `dist/` and is served by the ASP.NET Core backend.
+
+## Contributing
+
+See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for development guidelines.
+
+## Migration from Blazor
+
+This React application is the replacement for the legacy Blazor WebAssembly client. See [REACT_MIGRATION_README.md](../../../REACT_MIGRATION_README.md) for migration details and status.

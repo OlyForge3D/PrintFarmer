@@ -46,6 +46,14 @@ public class SliceJob
     public string? SlicerProfileJson { get; set; }
 
     /// <summary>
+    /// Optional reference to a stored SlicerProfile entity used for this job.
+    /// When provided, SlicerProfileJson is populated from the profile's RawJson snapshot at submit time
+    /// to ensure immutability if the profile later changes.
+    /// </summary>
+    public Guid? SlicerProfileId { get; set; }
+    public SlicerProfile? SlicerProfile { get; set; }
+
+    /// <summary>
     /// Required capabilities for this job (JSON array)
     /// Example: ["orcaslicer", "multi-material", "variable-layer-height"]
     /// Workers must match these capabilities to claim the job

@@ -158,8 +158,15 @@ public class JobDispatcherService : IJobDispatcherService
 
     private Worker? SelectBestWorker(IReadOnlyList<Worker> workers, SliceJob job)
     {
-        if (workers.Count == 0) return null;
-        if (workers.Count == 1) return workers[0];
+        if (workers.Count == 0)
+        {
+            return null;
+        }
+
+        if (workers.Count == 1)
+        {
+            return workers[0];
+        }
 
         // Scoring algorithm:
         // - More free slots = better
@@ -248,7 +255,7 @@ public class JobDispatcherService : IJobDispatcherService
         try
         {
             HttpClient client = _httpClientFactory.CreateClient();
-            
+
             // Build job request payload
             var payload = new
             {

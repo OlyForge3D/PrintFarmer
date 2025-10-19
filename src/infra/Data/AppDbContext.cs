@@ -485,6 +485,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(p => p.Quality).HasConversion<int>();
             b.Property(p => p.Material).IsRequired().HasMaxLength(64);
             b.Property(p => p.AdvancedSettings).HasColumnType("TEXT");
+            b.Property(p => p.RawJson).HasColumnType("TEXT");
+            b.Property(p => p.MetadataJson).HasColumnType("TEXT");
+            b.Property(p => p.Hash).HasMaxLength(64);
+            b.Property(p => p.IsSystem).HasDefaultValue(false);
 
             // Foreign Keys
             b.HasOne(p => p.PrinterModel)
@@ -509,6 +513,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.IsDefault);
             b.HasIndex(p => p.IsPublic);
             b.HasIndex(p => p.CreatedByUserId);
+            b.HasIndex(p => p.Hash).IsUnique();
+            b.HasIndex(p => p.IsSystem);
         });
 
         // Slicer Service (Registry) Entity Configuration
@@ -536,6 +542,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(j => j.ModelFileName).IsRequired().HasMaxLength(512);
             b.Property(j => j.SlicerEngine).IsRequired();
             b.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
+            b.Property(j => j.SlicerProfileId);
             b.Property(j => j.RequiredCapabilitiesJson).HasColumnType("TEXT");
             b.Property(j => j.Status).IsRequired().HasMaxLength(50);
             b.Property(j => j.Priority).IsRequired();
@@ -553,6 +560,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(j => j.QueuedAt);
             b.HasIndex(j => new { j.Status, j.Priority, j.QueuedAt }); // For queue processing
             b.HasIndex(j => j.WorkerId);
+            b.HasIndex(j => j.SlicerProfileId);
+
+            // Foreign key to SlicerProfile (optional reference). If profile deleted later we retain immutable snapshot JSON.
+            b.HasOne(j => j.SlicerProfile)
+                .WithMany()
+                .HasForeignKey(j => j.SlicerProfileId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Worker Entity Configuration

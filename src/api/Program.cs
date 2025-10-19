@@ -111,6 +111,10 @@ builder.Services.AddScoped<Farm.Web.Api.Repositories.Filament.IFilamentTypeRepos
 // Slicer profiles repository & service (refactor target)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.IProfilesRepository, Farm.Web.Api.Repositories.Slicing.ProfilesRepository>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfilesService, Farm.Web.Api.Services.Slicing.ProfilesService>();
+// Advanced slicer profile repository (hash + raw/metadata JSON import support)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicerProfileRepository, Farm.Web.Api.Repositories.Slicing.EfSlicerProfileRepository>();
+// Profile parsing/sanitization service (extract metadata + compute hash)
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileParsingService, Farm.Web.Api.Services.Slicing.ProfileParsingService>();
 // Slicers registry repository
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)

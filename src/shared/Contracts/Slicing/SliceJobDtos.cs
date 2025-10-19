@@ -43,6 +43,15 @@ public class SubmitSliceJobRequest
     public string? SlicerProfileJson { get; set; }
 
     /// <summary>
+    /// Optional reference to a stored slicer profile. If provided the API will
+    /// resolve the profile, copy its RawJson snapshot into SlicerProfileJson for
+    /// immutable processing, and record the SlicerProfileId on the SliceJob.
+    /// Either SlicerProfileId or SlicerProfileJson may be supplied. If both are
+    /// set the referenced profile takes precedence.
+    /// </summary>
+    public Guid? SlicerProfileId { get; set; }
+
+    /// <summary>
     /// Required capabilities (JSON array of strings)
     /// </summary>
     public string? RequiredCapabilitiesJson { get; set; }

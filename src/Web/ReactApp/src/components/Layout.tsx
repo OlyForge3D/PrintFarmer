@@ -54,7 +54,11 @@ const navigation: NavigationItem[] = [
     name: 'Slice Jobs',
     href: '/jobs',
     icon: Layers,
-    requiredPermission: { resource: 'models', action: 'read' }
+    requiredPermission: { resource: 'models', action: 'read' },
+    children: [
+      { name: 'Queue', href: '/jobs', icon: Layers },
+      { name: 'New Job', href: '/jobs/new', icon: FileText }
+    ]
   },
   {
     name: 'G-code Harvest',
@@ -88,6 +92,13 @@ const navigation: NavigationItem[] = [
       { name: 'Slicer Dry Run', href: '/admin/slicer/dry-run', icon: FileText },
       { name: 'Slicer Job Status', href: '/admin/slicer/job-status', icon: FileText }
     ]
+  },
+  // Direct access (admin-only) to the new Slicer Profiles management page
+  {
+    name: 'Slicer Profiles',
+    href: '/slicer-profiles',
+    icon: FileText,
+    requiredRole: 'farm_admin'
   },
 ];
 

@@ -74,7 +74,7 @@ public class EfWorkerRepository : IWorkerRepository
     public async Task<IReadOnlyList<Worker>> GetWorkersByCapabilitiesAsync(string[] requiredCapabilities, int limit = 100)
     {
         ArgumentNullException.ThrowIfNull(requiredCapabilities);
-        
+
         if (requiredCapabilities.Length == 0)
         {
             return await GetAvailableWorkersAsync(limit);
@@ -93,7 +93,10 @@ public class EfWorkerRepository : IWorkerRepository
                 try
                 {
                     string[]? workerCapabilities = JsonSerializer.Deserialize<string[]>(w.CapabilitiesJson);
-                    if (workerCapabilities == null) return false;
+                    if (workerCapabilities == null)
+                    {
+                        return false;
+                    }
 
                     // Check if worker has all required capabilities
                     return requiredCapabilities.All(required =>
@@ -115,7 +118,7 @@ public class EfWorkerRepository : IWorkerRepository
     public async Task<IReadOnlyList<Worker>> GetStaleWorkersAsync(TimeSpan heartbeatTimeout)
     {
         DateTime cutoffTime = DateTime.UtcNow - heartbeatTimeout;
-        
+
         return await _context.Workers
             .AsNoTracking()
             .Where(w => w.Status == WorkerStatus.Online && w.LastHeartbeat < cutoffTime)
@@ -125,7 +128,7 @@ public class EfWorkerRepository : IWorkerRepository
     public async Task UpdateStatusAsync(Guid id, string status)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(status);
-        
+
         Worker? worker = await _context.Workers.FindAsync(id);
         if (worker != null)
         {
@@ -208,7 +211,7 @@ public class EfWorkerRepository : IWorkerRepository
             else
             {
                 // Alpha = 0.2 for smoothing
-                worker.AverageProcessingTimeSeconds = 
+                worker.AverageProcessingTimeSeconds =
                     (0.2 * processingTimeSeconds) + (0.8 * worker.AverageProcessingTimeSeconds.Value);
             }
 
@@ -223,7 +226,7 @@ public class EfWorkerRepository : IWorkerRepository
     public async Task DisableWorkerAsync(Guid id, string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        
+
         Worker? worker = await _context.Workers.FindAsync(id);
         if (worker != null)
         {

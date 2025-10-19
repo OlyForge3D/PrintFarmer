@@ -8,6 +8,8 @@ export interface SubmitSliceJobRequest {
   modelFileName: string;
   slicerEngine: number;
   slicerProfileJson: string;
+  // Optional reference to a stored slicer profile (takes precedence over slicerProfileJson if provided)
+  slicerProfileId?: string;
   requiredCapabilitiesJson: string;
   priority?: number;
 }

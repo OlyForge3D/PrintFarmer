@@ -20,17 +20,20 @@ public class SliceJobController : ControllerBase
     private readonly ISliceJobEventService _eventService;
     private readonly ILogger<SliceJobController> _logger;
     private readonly IHostEnvironment _env;
+    private readonly ISlicerProfileRepository _profileRepository;
 
     public SliceJobController(
         ISliceJobRepository jobRepository,
         ISliceJobEventService eventService,
         ILogger<SliceJobController> logger,
-        IHostEnvironment env)
+        IHostEnvironment env,
+        ISlicerProfileRepository profileRepository)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _env = env ?? throw new ArgumentNullException(nameof(env));
+        _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
     }
 
     /// <summary>
@@ -49,7 +52,7 @@ public class SliceJobController : ControllerBase
             return BadRequest("Request body is required");
         }
 
-                if (request == null)
+        if (request == null)
         {
             return BadRequest("Request body is required");
         }
@@ -83,6 +86,30 @@ public class SliceJobController : ControllerBase
             return BadRequest("Model file name is required");
         }
 
+        // Resolve profile if provided (profile takes precedence over raw JSON string)
+        SlicerProfile? referencedProfile = null;
+        if (request.SlicerProfileId.HasValue)
+        {
+            referencedProfile = await _profileRepository.GetByIdAsync(request.SlicerProfileId.Value, HttpContext.RequestAborted);
+            if (referencedProfile == null)
+            {
+                return BadRequest($"Slicer profile {request.SlicerProfileId.Value} not found");
+            }
+        }
+
+        // If no explicit profile supplied but JSON absent, attempt default profile for engine
+        if (referencedProfile == null && string.IsNullOrWhiteSpace(request.SlicerProfileJson))
+        {
+            try
+            {
+                referencedProfile = await _profileRepository.GetDefaultAsync((Farm.Infrastructure.Domain.SlicerType)request.SlicerEngine, null, HttpContext.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to resolve default slicer profile; continuing with empty profile JSON");
+            }
+        }
+
         // Create new job
         SliceJob job = new()
         {
@@ -91,8 +118,9 @@ public class SliceJobController : ControllerBase
             PrinterId = request.PrinterId,
             ModelFileUrl = request.ModelFileUrl,
             ModelFileName = request.ModelFileName,
-            SlicerEngine = request.SlicerEngine,
-            SlicerProfileJson = request.SlicerProfileJson ?? "{}",
+            SlicerEngine = referencedProfile != null ? (int)referencedProfile.SlicerType : request.SlicerEngine,
+            SlicerProfileJson = referencedProfile?.RawJson ?? request.SlicerProfileJson ?? "{}",
+            SlicerProfileId = referencedProfile?.Id,
             RequiredCapabilitiesJson = request.RequiredCapabilitiesJson ?? "[]",
             Status = SliceJobStatus.Queued,
             Priority = request.Priority,

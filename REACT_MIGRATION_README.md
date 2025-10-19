@@ -119,6 +119,18 @@ This repository contains the comprehensive plan for migrating PrintFarmer from B
 - **Real-time:** SignalR hubs for printer status and progress
 - **File Handling:** Multi-part uploads with progress tracking
 
+### Design System & Component Library
+- **Shared Components:** Standardized UI component library (`components/ui/`)
+  - Button, Alert, FormField, Input, Select, ProgressBar
+  - Consistent variants, sizing, and accessibility
+  - See `src/Web/ReactApp/UI_COMPONENTS_GUIDE.md` for documentation
+- **Color Tokens:** PrintFarmer design system with `pf-*` classes
+  - Theme-aware CSS custom properties for light/dark mode
+  - WCAG 2.1 AA accessibility compliance
+  - See `src/Web/ReactApp/COLOR_SYSTEM_GUIDE.md` for color reference
+- **Typography:** Consistent text hierarchy and semantic styling
+- **Accessibility:** ARIA labels, focus management, keyboard navigation
+
 ### User Management System
 ```typescript
 interface User {

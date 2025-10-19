@@ -310,8 +310,25 @@ public class SlicerProfile
     public string Material { get; set; } = "PLA";
     public ProfileQuality Quality { get; set; } = ProfileQuality.Standard;
     public string? AdvancedSettings { get; set; } // JSON object with additional slicer-specific settings
+    /// <summary>
+    /// Raw slicer profile JSON as imported from OrcaSlicer / PrusaSlicer (sanitized but otherwise unchanged).
+    /// </summary>
+    public string? RawJson { get; set; }
+    /// <summary>
+    /// Extracted metadata summary (layerHeight, nozzleDiameter, filamentMaterial, infillPercentage, slicerVersion, profileType, estimatedPrintTimeSeconds etc.)
+    /// Stored as a flat JSON object for quick querying / display.
+    /// </summary>
+    public string? MetadataJson { get; set; }
+    /// <summary>
+    /// Stable hash (e.g. SHA256) of RawJson used for deduplication and quick matching on import.
+    /// </summary>
+    public string? Hash { get; set; }
     public bool IsDefault { get; set; }
     public bool IsPublic { get; set; } = true; // Can be used by other users
+    /// <summary>
+    /// Indicates profile shipped by system seeding (immutable for regular users).
+    /// </summary>
+    public bool IsSystem { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
     public DateTime CreatedAt { get; set; }

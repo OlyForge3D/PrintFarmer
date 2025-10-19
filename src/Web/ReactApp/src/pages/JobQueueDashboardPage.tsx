@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import { sliceJobService, SliceJobStatusResponse, SliceJobStatus } from '@/services/sliceJobService';
+import { PageTemplate } from '@/components/PageTemplate';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 
 export default function JobQueueDashboardPage() {
   const [jobs, setJobs] = useState<SliceJobStatusResponse[]>([]);
@@ -10,9 +14,9 @@ export default function JobQueueDashboardPage() {
 
   useEffect(() => {
     loadJobs();
-    // Refresh every 5 seconds
     const interval = setInterval(loadJobs, 5000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const loadJobs = async () => {
@@ -56,50 +60,28 @@ export default function JobQueueDashboardPage() {
     setFilter('all');
   };
 
-  if (loading) {
-    return (
-      <div className="container mx-auto p-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-lg">Loading jobs...</div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Slice Job Queue</h1>
-        <div className="flex space-x-2">
-          <button
-            onClick={handleViewQueue}
-            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-          >
-            View Full Queue
-          </button>
-          <button
-            onClick={loadJobs}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Refresh
-          </button>
-        </div>
+    <PageTemplate
+      title="Slice Job Queue"
+      subtitle={showQueue ? 'Viewing full queue (all jobs).' : 'Your slice jobs and progress.'}
+      maxWidth="max-w-6xl"
+    >
+      {loading && <div className="h-32 flex items-center justify-center text-sm">Loading jobs…</div>}
+      {!loading && error && <Alert type="error">{error}</Alert>}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <Button variant="success" onClick={() => { window.location.href = '/jobs/new'; }}>New Job</Button>
+        <Button variant="secondary" onClick={handleViewQueue}>View Full Queue</Button>
+        <Button variant="primary" onClick={loadJobs}>Refresh</Button>
       </div>
-
-      {error && (
-        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
-          {error}
-        </div>
-      )}
 
       {/* Filter tabs */}
-      <div className="mb-4 flex space-x-2 overflow-x-auto">
+      <div className="mb-4 flex flex-wrap gap-2 overflow-x-auto">
         <button
           onClick={() => {
             setFilter('all');
             setShowQueue(false);
           }}
-          className={`px-4 py-2 rounded whitespace-nowrap ${filter === 'all' && !showQueue ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+          className={`px-4 py-2 rounded whitespace-nowrap text-sm ${filter === 'all' && !showQueue ? 'bg-pf-accent text-white' : 'bg-pf-bg-1 text-pf-text-primary'}`}
         >
           My Jobs
         </button>
@@ -110,7 +92,7 @@ export default function JobQueueDashboardPage() {
               setFilter(status);
               setShowQueue(false);
             }}
-            className={`px-4 py-2 rounded whitespace-nowrap ${filter === status ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+            className={`px-4 py-2 rounded whitespace-nowrap text-sm ${filter === status ? 'bg-pf-accent text-white' : 'bg-pf-bg-1 text-pf-text-primary'}`}
           >
             {status}
           </button>
@@ -119,8 +101,8 @@ export default function JobQueueDashboardPage() {
 
       {/* Jobs list */}
       <div className="space-y-4">
-        {jobs.map(job => (
-          <div key={job.id} className="bg-white rounded-lg shadow p-6">
+        {!loading && jobs.map(job => (
+          <div key={job.id} className="bg-pf-panel rounded-lg shadow p-6 border border-pf-border">
             <div className="flex justify-between items-start mb-4">
               <div className="flex-1">
                 <div className="flex items-center space-x-3 mb-2">
@@ -130,18 +112,18 @@ export default function JobQueueDashboardPage() {
                   </span>
                 </div>
                 {job.progressMessage && (
-                  <p className="text-gray-600 mb-2">{job.progressMessage}</p>
+                  <p className="text-pf-text-secondary mb-2">{job.progressMessage}</p>
                 )}
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-pf-text-muted">
                   Queued: {new Date(job.queuedAt).toLocaleString()}
                 </div>
                 {job.startedAt && (
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm text-pf-text-muted">
                     Started: {new Date(job.startedAt).toLocaleString()}
                   </div>
                 )}
                 {job.completedAt && (
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm text-pf-text-muted">
                     Completed: {new Date(job.completedAt).toLocaleString()}
                   </div>
                 )}
@@ -149,12 +131,7 @@ export default function JobQueueDashboardPage() {
               
               <div className="text-right">
                 {(job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing) && (
-                  <button
-                    onClick={() => handleCancelJob(job.id)}
-                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                  >
-                    Cancel
-                  </button>
+                  <Button variant="danger" onClick={() => handleCancelJob(job.id)}>Cancel</Button>
                 )}
               </div>
             </div>
@@ -162,34 +139,26 @@ export default function JobQueueDashboardPage() {
             {/* Progress bar for processing jobs */}
             {job.status === SliceJobStatus.Processing && (
               <div className="mb-4">
-                <div className="flex justify-between text-sm text-gray-600 mb-1">
-                  <span>Progress: {job.progressPercent}%</span>
-                  {job.startedAt && (
-                    <span>
-                      ETA: {sliceJobService.getEstimatedTimeRemaining(job) || 'Calculating...'}
-                    </span>
-                  )}
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${job.progressPercent}%` }}
-                  />
-                </div>
+                <ProgressBar
+                  value={job.progressPercent}
+                  label={job.startedAt ? `ETA: ${sliceJobService.getEstimatedTimeRemaining(job) || 'Calculating…'}` : 'Processing'}
+                  size="sm"
+                  color="blue"
+                />
               </div>
             )}
 
             {/* Job details */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-pf-border">
               {job.workerId && (
                 <div>
-                  <div className="text-xs text-gray-500">Worker</div>
+                  <div className="text-xs text-pf-text-muted">Worker</div>
                   <div className="text-sm font-medium">{job.workerId.substring(0, 8)}</div>
                 </div>
               )}
               {job.estimatedPrintTimeSeconds !== undefined && (
                 <div>
-                  <div className="text-xs text-gray-500">Est. Print Time</div>
+                  <div className="text-xs text-pf-text-muted">Est. Print Time</div>
                   <div className="text-sm font-medium">
                     {sliceJobService.formatPrintTime(job.estimatedPrintTimeSeconds)}
                   </div>
@@ -197,7 +166,7 @@ export default function JobQueueDashboardPage() {
               )}
               {job.filamentUsedGrams !== undefined && (
                 <div>
-                  <div className="text-xs text-gray-500">Filament</div>
+                  <div className="text-xs text-pf-text-muted">Filament</div>
                   <div className="text-sm font-medium">
                     {sliceJobService.formatFilamentUsed(job.filamentUsedGrams)}
                   </div>
@@ -205,12 +174,12 @@ export default function JobQueueDashboardPage() {
               )}
               {job.resultFileUrl && (
                 <div>
-                  <div className="text-xs text-gray-500">Result</div>
+                  <div className="text-xs text-pf-text-muted">Result</div>
                   <a
                     href={job.resultFileUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                    className="text-sm font-medium text-pf-link hover:text-pf-accent"
                   >
                     Download G-code
                   </a>
@@ -220,20 +189,20 @@ export default function JobQueueDashboardPage() {
 
             {/* Error message */}
             {job.status === SliceJobStatus.Failed && job.errorMessage && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
-                <div className="text-xs text-gray-500 mb-1">Error</div>
-                <div className="text-sm text-red-700">{job.errorMessage}</div>
+              <div className="mt-4 p-3 bg-pf-error-bg border border-pf-error-border rounded">
+                <div className="text-xs text-pf-text-muted mb-1">Error</div>
+                <div className="text-sm text-pf-error-text">{job.errorMessage}</div>
               </div>
             )}
           </div>
         ))}
 
-        {jobs.length === 0 && (
-          <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
+        {!loading && jobs.length === 0 && (
+          <div className="bg-pf-panel rounded-lg shadow p-12 text-center text-pf-text-muted border border-pf-border">
             No jobs found
           </div>
         )}
       </div>
-    </div>
+    </PageTemplate>
   );
 }
