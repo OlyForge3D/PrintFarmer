@@ -238,4 +238,23 @@ public class EfUsersRepository : IUsersRepository
         await _db.SaveChangesAsync(ct);
         return true;
     }
+
+    public async Task CreatePasswordResetTokenAsync(PasswordResetToken token, CancellationToken ct = default)
+    {
+        _ = _db.PasswordResetTokens.Add(token);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public Task<PasswordResetToken?> GetPasswordResetTokenAsync(string token, CancellationToken ct = default)
+    {
+        return _db.PasswordResetTokens
+            .Include(prt => prt.User)
+            .FirstOrDefaultAsync(prt => prt.Token == token, ct);
+    }
+
+    public Task<User?> GetByEmailConfirmationTokenAsync(string token, CancellationToken ct = default)
+    {
+        return _db.Users
+            .FirstOrDefaultAsync(u => u.EmailConfirmationToken == token, ct);
+    }
 }

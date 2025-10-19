@@ -35,4 +35,11 @@ public interface IUsersRepository
     Task<List<string>> GetActiveRoleNamesAsync(Guid userId, CancellationToken ct = default);
     Task<List<(string Resource, string Action)>> GetGrantedPermissionsAsync(Guid userId, CancellationToken ct = default);
     Task<bool> UpdatePasswordAsync(Guid userId, string currentPassword, string newPasswordHash, CancellationToken ct = default);
+
+    // Password reset methods
+    Task CreatePasswordResetTokenAsync(PasswordResetToken token, CancellationToken ct = default);
+    Task<PasswordResetToken?> GetPasswordResetTokenAsync(string token, CancellationToken ct = default);
+
+    // Email confirmation methods
+    Task<User?> GetByEmailConfirmationTokenAsync(string token, CancellationToken ct = default);
 }

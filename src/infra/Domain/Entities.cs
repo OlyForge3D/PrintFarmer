@@ -495,6 +495,34 @@ public class UserRole
     public bool IsActive { get; set; } = true;
 }
 
+public class RefreshToken
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public string Token { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public bool IsRevoked { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevokedByIp { get; set; }
+    public string? ReplacedByToken { get; set; } // Token that replaced this one during refresh
+    public string CreatedByIp { get; set; } = string.Empty;
+}
+
+public class PasswordResetToken
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public string Token { get; set; } = string.Empty; // URL-safe token (base64 or GUID)
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; } // Typically 1 hour expiration
+    public bool IsUsed { get; set; }
+    public DateTime? UsedAt { get; set; }
+    public string? UsedByIp { get; set; }
+}
+
 public class SystemLog
 {
     public int Id { get; set; }

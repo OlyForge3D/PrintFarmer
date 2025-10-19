@@ -2,8 +2,17 @@
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+
+using LoginRequest = Farm.Web.Shared.Contracts.Auth.LoginRequest;
+using RegisterRequest = Farm.Web.Shared.Contracts.Auth.RegisterRequest;
+using UserDto = Farm.Web.Shared.Contracts.Auth.UserDto;
+using ChangePasswordRequest = Farm.Web.Shared.Contracts.Auth.ChangePasswordRequest;
+using ForgotPasswordRequest = Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest;
+using ResetPasswordRequest = Farm.Web.Shared.Contracts.Auth.ResetPasswordRequest;
+using ConfirmEmailRequest = Farm.Web.Shared.ConfirmEmailRequest;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -19,12 +28,12 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
+        if (string.IsNullOrWhiteSpace(request.UsernameOrEmail) || string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest(new AuthenticationResult(false, Error: "Username and password are required"));
+            return BadRequest(new AuthenticationResult(false, Error: "Username/Email and password are required"));
         }
 
-        AuthenticationResult result = await _authService.AuthenticateAsync(request.Username, request.Password);
+        AuthenticationResult result = await _authService.AuthenticateAsync(request.UsernameOrEmail, request.Password);
 
         if (result.Success)
         {
@@ -51,7 +60,16 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
             return BadRequest(new AuthenticationResult(false, Error: "Password must be at least 6 characters long"));
         }
 
-        AuthenticationResult result = await _authService.RegisterAsync(request);
+        // Map the new DTO to the old service DTO
+        var serviceRequest = new Farm.Web.Shared.RegisterRequest(
+            request.Username,
+            request.Email,
+            request.Password,
+            request.FirstName,
+            request.LastName
+        );
+
+        AuthenticationResult result = await _authService.RegisterAsync(serviceRequest);
 
         // If registration succeeded but user is not active, inform user that admin approval is required
         if (result.Success && result.User is { IsActive: false })
@@ -104,11 +122,27 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
             return Unauthorized();
         }
 
-        UserDto? user = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
-        if (user == null)
+        Farm.Web.Shared.UserDto? serviceUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+        if (serviceUser == null)
         {
             return NotFound();
         }
+
+        // Map from service UserDto to contracts UserDto
+        var user = new UserDto
+        {
+            Id = serviceUser.Id,
+            Username = serviceUser.Username,
+            Email = serviceUser.Email,
+            FirstName = serviceUser.FirstName,
+            LastName = serviceUser.LastName,
+            IsActive = serviceUser.IsActive,
+            EmailConfirmed = serviceUser.EmailConfirmed,
+            LastLogin = serviceUser.LastLogin,
+            CreatedAt = serviceUser.CreatedAt,
+            Roles = serviceUser.Roles?.ToList() ?? new List<string>(),
+            Permissions = serviceUser.Permissions?.ToList() ?? new List<string>()
+        };
 
         return Ok(user);
     }
@@ -143,27 +177,189 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         return Ok(new { message = "Password changed successfully" });
     }
 
-    // TODO: Implement these endpoints when email service is available
-    /*
     [HttpPost("forgot-password")]
-    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ForgotPasswordResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ForgotPasswordResponse>> ForgotPasswordAsync([FromBody] ForgotPasswordRequest request)
     {
-        // Implementation for password reset email
-        return Ok(new { message = "Password reset email sent if account exists" });
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            return BadRequest(new ForgotPasswordResponse
+            {
+                Success = false,
+                Message = "Email is required"
+            });
+        }
+
+        try
+        {
+            await _authService.InitiatePasswordResetAsync(request.Email, HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            // Always return success message to prevent email enumeration
+            return Ok(new ForgotPasswordResponse
+            {
+                Success = true,
+                Message = "If an account with that email exists, a password reset link has been sent"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing forgot password request");
+            // Return generic success message even on error to prevent email enumeration
+            return Ok(new ForgotPasswordResponse
+            {
+                Success = true,
+                Message = "If an account with that email exists, a password reset link has been sent"
+            });
+        }
     }
 
     [HttpPost("reset-password")]
-    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ResetPasswordResponse>> ResetPasswordAsync([FromBody] ResetPasswordRequest request)
     {
-        // Implementation for password reset
-        return Ok(new { message = "Password reset successfully" });
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.Token) ||
+            string.IsNullOrWhiteSpace(request.Email) ||
+            string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            return BadRequest(new ResetPasswordResponse
+            {
+                Success = false,
+                Message = "Token, email, and new password are required"
+            });
+        }
+
+        if (request.NewPassword.Length < 6)
+        {
+            return BadRequest(new ResetPasswordResponse
+            {
+                Success = false,
+                Message = "Password must be at least 6 characters long"
+            });
+        }
+
+        try
+        {
+            bool success = await _authService.ResetPasswordAsync(
+                request.Token,
+                request.Email,
+                request.NewPassword,
+                HttpContext.Connection.RemoteIpAddress?.ToString()
+            );
+
+            if (success)
+            {
+                return Ok(new ResetPasswordResponse
+                {
+                    Success = true,
+                    Message = "Password has been reset successfully"
+                });
+            }
+
+            return BadRequest(new ResetPasswordResponse
+            {
+                Success = false,
+                Message = "Invalid or expired password reset token"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting password");
+            return BadRequest(new ResetPasswordResponse
+            {
+                Success = false,
+                Message = "An error occurred while resetting your password"
+            });
+        }
     }
 
     [HttpPost("confirm-email")]
-    public async Task<IActionResult> ConfirmEmail([FromBody] ConfirmEmailRequest request)
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ConfirmEmailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ConfirmEmailResponse), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ConfirmEmailResponse>> ConfirmEmailAsync([FromBody] ConfirmEmailRequest request)
     {
-        // Implementation for email confirmation
-        return Ok(new { message = "Email confirmed successfully" });
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.Token))
+        {
+            return BadRequest(new ConfirmEmailResponse(false, "Confirmation token is required"));
+        }
+
+        try
+        {
+            bool success = await _authService.ConfirmEmailAsync(request.Token);
+
+            if (success)
+            {
+                return Ok(new ConfirmEmailResponse(true, "Email address confirmed successfully. You can now log in."));
+            }
+
+            return BadRequest(new ConfirmEmailResponse(false, "Invalid or expired email confirmation token"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error confirming email");
+            return BadRequest(new ConfirmEmailResponse(false, "An error occurred while confirming your email address"));
+        }
     }
-    */
+
+    [HttpPost("resend-confirmation")]
+    [Authorize]
+    [ProducesResponseType(typeof(ResendConfirmationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResendConfirmationResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ResendConfirmationResponse>> ResendEmailConfirmationAsync()
+    {
+        try
+        {
+            // Get user ID from authenticated claims
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out Guid userId))
+            {
+                return BadRequest(new ResendConfirmationResponse(false, "Invalid user authentication"));
+            }
+
+            var userDto = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+            if (userDto == null)
+            {
+                return NotFound();
+            }
+
+            if (userDto.EmailConfirmed)
+            {
+                return Ok(new ResendConfirmationResponse(true, "Email address is already confirmed"));
+            }
+
+            // Get the actual User entity to pass to SendEmailConfirmationAsync
+            var user = await _authService.GetUserByEmailAsync(userDto.Email);
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            bool success = await _authService.SendEmailConfirmationAsync(user);
+
+            if (success)
+            {
+                return Ok(new ResendConfirmationResponse(true, "Confirmation email has been sent"));
+            }
+
+            return BadRequest(new ResendConfirmationResponse(false, "Failed to send confirmation email. Please try again later."));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resending email confirmation");
+            return BadRequest(new ResendConfirmationResponse(false, "An error occurred while sending the confirmation email"));
+        }
+    }
 }
+
+public record ConfirmEmailResponse(bool Success, string Message);
+public record ResendConfirmationResponse(bool Success, string Message);

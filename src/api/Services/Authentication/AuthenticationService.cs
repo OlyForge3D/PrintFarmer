@@ -13,12 +13,19 @@ public class AuthenticationService(
     IUsersRepository usersRepository,
     IPasswordHashingService passwordHashing,
     IConfiguration configuration,
-    IUnifiedLoggingService logger) : IAuthenticationService
+    IUnifiedLoggingService logger,
+    Farm.Web.Api.Services.Email.IEmailService emailService,
+    Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService) : IAuthenticationService
 {
+    private const string PasswordResetPath = "/reset-password";
+    private const string EmailConfirmationPath = "/confirm-email";
+    
     private readonly IUsersRepository _usersRepository = usersRepository;
     private readonly IPasswordHashingService _passwordHashing = passwordHashing;
     private readonly IConfiguration _configuration = configuration;
     private readonly IUnifiedLoggingService _logger = logger;
+    private readonly Farm.Web.Api.Services.Email.IEmailService _emailService = emailService;
+    private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService = rateLimitService;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {
@@ -245,10 +252,254 @@ public class AuthenticationService(
         return await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
     }
 
-    public Task<bool> SendEmailConfirmationAsync(User user) => Task.FromResult(true);
-    public Task<bool> ConfirmEmailAsync(string token) => Task.FromResult(true);
-    public Task<bool> SendPasswordResetAsync(string email) => Task.FromResult(true);
-    public Task<bool> ResetPasswordAsync(string token, string newPassword) => Task.FromResult(true);
+    public Task<bool> SendEmailConfirmationAsync(User user) => SendEmailConfirmationInternalAsync(user);
+    
+    public Task<bool> ConfirmEmailAsync(string token) => ConfirmEmailInternalAsync(token);
+
+    private async Task<bool> SendEmailConfirmationInternalAsync(User user)
+    {
+        try
+        {
+            // Check rate limiting
+            var rateLimit = await _rateLimitService.CheckEmailConfirmationLimitAsync(user.Email);
+            if (!rateLimit.IsAllowed)
+            {
+                _logger.LogWarning($"Email confirmation rate limit exceeded for {user.Email}", null, new
+                {
+                    UserId = user.Id,
+                    Email = user.Email,
+                    RemainingAttempts = rateLimit.RemainingAttempts
+                });
+                return false;
+            }
+
+            // Record attempt
+            await _rateLimitService.RecordEmailConfirmationAttemptAsync(user.Email);
+
+            // Generate secure random token
+            string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+                .Replace("+", "-")
+                .Replace("/", "_")
+                .Replace("=", "");
+
+            // Update user with confirmation token
+            user.EmailConfirmationToken = token;
+            user.UpdatedAt = DateTime.UtcNow;
+            await _usersRepository.SaveChangesAsync();
+
+            // Build confirmation link
+            string baseUrl = _configuration["Email:BaseUrl"] ?? "http://localhost:3000";
+            string confirmationLink = $"{baseUrl.TrimEnd('/')}{EmailConfirmationPath}?token={Uri.EscapeDataString(token)}";
+
+            bool emailSent = false;
+            try
+            {
+                emailSent = await _emailService.SendEmailConfirmationAsync(user.Email, confirmationLink);
+            }
+            catch (Exception exSend)
+            {
+                _logger.LogWarning(exSend, "Email confirmation send failed - falling back to log only", null, null);
+            }
+
+            _logger.LogInformation($"Email confirmation sent to {user.Email}. EmailSent={emailSent}", null, new
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                ConfirmationLink = confirmationLink,
+                ExpirationHours = 24
+            });
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to send email confirmation for user {user.Id}", null, null);
+            return false;
+        }
+    }
+
+    private async Task<bool> ConfirmEmailInternalAsync(string token)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            User? user = await _usersRepository.GetByEmailConfirmationTokenAsync(token);
+            if (user == null)
+            {
+                _logger.LogWarning($"Email confirmation attempted with invalid token");
+                return false;
+            }
+
+            if (user.EmailConfirmed)
+            {
+                _logger.LogInformation($"Email already confirmed for user {user.Username}");
+                return true; // Already confirmed, consider this success
+            }
+
+            // Confirm the email
+            user.EmailConfirmed = true;
+            user.EmailConfirmationToken = null; // Clear the token
+            user.UpdatedAt = DateTime.UtcNow;
+            await _usersRepository.SaveChangesAsync();
+
+            _logger.LogInformation($"Email confirmed for user {user.Username}", null, new
+            {
+                UserId = user.Id,
+                Email = user.Email
+            });
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Email confirmation failed", null, null);
+            return false;
+        }
+    }
+
+    public async Task<bool> InitiatePasswordResetAsync(string email, string? ipAddress)
+    {
+        try
+        {
+            // Check rate limiting first
+            var rateLimit = await _rateLimitService.CheckPasswordResetLimitAsync(email);
+            if (!rateLimit.IsAllowed)
+            {
+                _logger.LogWarning($"Password reset rate limit exceeded for {email}", null, new
+                {
+                    Email = email,
+                    RemainingAttempts = rateLimit.RemainingAttempts,
+                    RetryAfter = rateLimit.RetryAfter
+                });
+                // Still return true to prevent information leakage
+                return true;
+            }
+
+            User? user = await _usersRepository.GetByEmailAsync(email);
+            if (user == null)
+            {
+                // Don't reveal that the email doesn't exist (security best practice)
+                _logger.LogWarning($"Password reset requested for non-existent email: {email}");
+                // Record attempt even for non-existent emails to prevent enumeration via rate limiting
+                await _rateLimitService.RecordPasswordResetAttemptAsync(email);
+                return true; // Return true to prevent email enumeration
+            }
+
+            // Record the attempt
+            await _rateLimitService.RecordPasswordResetAttemptAsync(email);
+
+            // Generate secure random token
+            string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+                .Replace("+", "-")
+                .Replace("/", "_")
+                .Replace("=", "");
+
+            // Create password reset token entity
+            var resetToken = new PasswordResetToken
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Token = token,
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddHours(1), // 1 hour expiration
+                IsUsed = false
+            };
+
+            await _usersRepository.CreatePasswordResetTokenAsync(resetToken);
+            await _usersRepository.SaveChangesAsync();
+
+            // Build reset link
+            string baseUrl = _configuration["Email:BaseUrl"] ?? "http://localhost:3000";
+            string resetLink = $"{baseUrl.TrimEnd('/')}{PasswordResetPath}?token={Uri.EscapeDataString(token)}&email={Uri.EscapeDataString(user.Email)}";
+
+            bool emailSent = false;
+            try
+            {
+                emailSent = await _emailService.SendPasswordResetAsync(user.Email, resetLink);
+            }
+            catch (Exception exSend)
+            {
+                _logger.LogWarning(exSend, "Password reset email send failed - falling back to log only", null, null);
+            }
+
+            _logger.LogInformation($"Password reset token generated for user {user.Username}. EmailSent={emailSent}", null, new
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                ResetLink = resetLink,
+                ExpirationMinutes = 60
+            });
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error initiating password reset for email: {email}");
+            return false;
+        }
+    }
+
+    public async Task<bool> ResetPasswordAsync(string token, string email, string newPassword, string? ipAddress)
+    {
+        try
+        {
+            // Find user by email
+            User? user = await _usersRepository.GetByEmailAsync(email);
+            if (user == null)
+            {
+                _logger.LogWarning($"Password reset attempted with invalid email: {email}");
+                return false;
+            }
+
+            // Find and validate token
+            var resetToken = await _usersRepository.GetPasswordResetTokenAsync(token);
+            if (resetToken == null || resetToken.UserId != user.Id)
+            {
+                _logger.LogWarning($"Invalid password reset token for user: {user.Username}");
+                return false;
+            }
+
+            // Check if token is expired
+            if (resetToken.ExpiresAt < DateTime.UtcNow)
+            {
+                _logger.LogWarning($"Expired password reset token for user: {user.Username}");
+                return false;
+            }
+
+            // Check if token has already been used
+            if (resetToken.IsUsed)
+            {
+                _logger.LogWarning($"Already used password reset token for user: {user.Username}");
+                return false;
+            }
+
+            // Hash new password
+            string newHash = _passwordHashing.HashPassword(newPassword);
+
+            // Update user password
+            user.PasswordHash = newHash;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            // Mark token as used
+            resetToken.IsUsed = true;
+            resetToken.UsedAt = DateTime.UtcNow;
+            resetToken.UsedByIp = ipAddress;
+
+            await _usersRepository.SaveChangesAsync();
+
+            _logger.LogInformation($"Password successfully reset for user: {user.Username}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting password");
+            return false;
+        }
+    }
 
     private async Task<UserDto?> BuildUserDtoAsync(Guid userId)
     {

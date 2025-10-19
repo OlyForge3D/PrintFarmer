@@ -13,8 +13,8 @@ public interface IAuthenticationService
     Task<string> GenerateJwtTokenAsync(User user);
     Task<bool> SendEmailConfirmationAsync(User user);
     Task<bool> ConfirmEmailAsync(string token);
-    Task<bool> SendPasswordResetAsync(string email);
-    Task<bool> ResetPasswordAsync(string token, string newPassword);
+    Task<bool> InitiatePasswordResetAsync(string email, string? ipAddress);
+    Task<bool> ResetPasswordAsync(string token, string email, string newPassword, string? ipAddress);
     Task<UserDto?> GetUserWithRolesAndPermissionsAsync(Guid userId);
     Task<bool> HasPermissionAsync(Guid userId, string resource, string action);
     Task<User?> GetUserByUsernameAsync(string username);

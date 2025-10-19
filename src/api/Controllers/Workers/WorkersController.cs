@@ -2,6 +2,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Shared.Contracts.Workers;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -13,6 +14,7 @@ namespace Farm.Web.Api.Controllers.Workers;
 [ApiController]
 [Route("api/workers")]
 [Tags("Workers")]
+[Authorize] // All endpoints require authentication
 public class WorkersController : ControllerBase
 {
     private readonly IWorkerRepository _workerRepository;
@@ -100,6 +102,7 @@ public class WorkersController : ControllerBase
     /// <param name="request">Disable reason</param>
     /// <returns>No content on success</returns>
     [HttpPost("{id}/disable")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: disable worker
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -130,6 +133,7 @@ public class WorkersController : ControllerBase
     /// <param name="id">Worker ID</param>
     /// <returns>No content on success</returns>
     [HttpPost("{id}/enable")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: enable worker
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> EnableWorkerAsync(Guid id)
@@ -154,6 +158,7 @@ public class WorkersController : ControllerBase
     /// <param name="id">Worker ID</param>
     /// <returns>No content on success</returns>
     [HttpDelete("{id}")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: delete worker
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteWorkerAsync(Guid id)

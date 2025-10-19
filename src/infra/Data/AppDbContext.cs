@@ -40,6 +40,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Domain.Action> Actions => Set<Domain.Action>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<PasswordPolicyEntity> PasswordPolicies => Set<PasswordPolicyEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -446,6 +448,47 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(ur => new { ur.UserId, ur.RoleId }).IsUnique();
             b.HasIndex(ur => ur.IsActive);
             b.HasIndex(ur => ur.ExpiresAt);
+        });
+
+        // RefreshToken Entity Configuration
+        modelBuilder.Entity<RefreshToken>(b =>
+        {
+            b.HasKey(rt => rt.Id);
+            b.Property(rt => rt.Token).IsRequired().HasMaxLength(512);
+            b.Property(rt => rt.CreatedByIp).IsRequired().HasMaxLength(45);
+            b.Property(rt => rt.RevokedByIp).HasMaxLength(45);
+            b.Property(rt => rt.ReplacedByToken).HasMaxLength(512);
+
+            // Foreign Key
+            b.HasOne(rt => rt.User)
+                .WithMany()
+                .HasForeignKey(rt => rt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes
+            b.HasIndex(rt => rt.Token).IsUnique();
+            b.HasIndex(rt => rt.UserId);
+            b.HasIndex(rt => rt.ExpiresAt);
+            b.HasIndex(rt => rt.IsRevoked);
+        });
+
+        modelBuilder.Entity<PasswordResetToken>(b =>
+        {
+            b.HasKey(prt => prt.Id);
+            b.Property(prt => prt.Token).IsRequired().HasMaxLength(256);
+            b.Property(prt => prt.UsedByIp).HasMaxLength(45);
+
+            // Foreign Key
+            b.HasOne(prt => prt.User)
+                .WithMany()
+                .HasForeignKey(prt => prt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes
+            b.HasIndex(prt => prt.Token).IsUnique();
+            b.HasIndex(prt => prt.UserId);
+            b.HasIndex(prt => prt.ExpiresAt);
+            b.HasIndex(prt => prt.IsUsed);
         });
 
         // Model3D Entity Configuration

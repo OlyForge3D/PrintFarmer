@@ -614,6 +614,130 @@ USE_HTTPS_REDIRECT=true
 - Linux containers recommended
 - Docker Desktop configuration important
 
+## Email (Mailjet) Configuration
+
+PrintFarmer can send transactional emails (password reset, email confirmation). In Docker production deployments you typically enable the `mailjet` provider. For development or staging without real delivery you can leave the provider as `console` which logs the payload only.
+
+### 1. Provider Selection
+
+```
+Email__Provider=mailjet   # mailjet | console
+Email__Enabled=true       # ensure email features are active
+```
+
+Use `console` for local / test environments to avoid consuming Mailjet quota.
+
+### 2. Required Environment Variables
+
+Place these in your `.env.monolithic` or `.env.microservices` file (or export prior to non-interactive deploy). Double underscores (`__`) map hierarchical configuration into .NET options binding.
+
+```
+# Core sender identity
+Email__Enabled=true
+Email__Provider=mailjet
+Email__FromAddress=noreply@yourdomain.com
+Email__FromName=PrintFarmer
+Email__BaseUrl=https://yourdomain.com    # Public HTTPS origin used in email links
+
+# Mailjet credentials (do NOT commit real values)
+Email__Mailjet__ApiKey=${MAILJET_API_KEY}
+Email__Mailjet__ApiSecret=${MAILJET_API_SECRET}
+Email__Mailjet__Sandbox=false            # true = accept but do not send
+```
+
+You may export secrets separately (recommended):
+
+```
+export MAILJET_API_KEY="pk_live_xxxxxxxxx"
+export MAILJET_API_SECRET="sk_live_yyyyyyyy"
+```
+
+### 3. Docker Compose Inline Example (Microservices `api` service)
+
+```yaml
+services:
+   api:
+      environment:
+         Email__Enabled: "true"
+         Email__Provider: "mailjet"
+         Email__FromAddress: "noreply@yourdomain.com"
+         Email__FromName: "PrintFarmer"
+         Email__BaseUrl: "https://yourdomain.com"
+         Email__Mailjet__ApiKey: "${MAILJET_API_KEY}"
+         Email__Mailjet__ApiSecret: "${MAILJET_API_SECRET}"
+         Email__Mailjet__Sandbox: "false"
+```
+
+### 4. Optional Rate Limiting Overrides
+
+Defaults are sane; override only if needed:
+
+```
+RateLimiting__PasswordReset__MaxPerHour=5
+RateLimiting__PasswordReset__MaxPerDay=20
+RateLimiting__EmailConfirmation__MaxPerHour=5
+RateLimiting__EmailConfirmation__MaxPerDay=20
+```
+
+### 5. Sandbox vs Live
+
+| Mode    | `Email__Mailjet__Sandbox` | Behavior                            |
+|---------|---------------------------|-------------------------------------|
+| Sandbox | true                      | Payload accepted, not delivered     |
+| Live    | false                     | Emails sent to recipients           |
+
+Always set to `false` before real user onboarding.
+
+### 6. Verifying Deployment
+
+After bringing containers up:
+
+```
+curl -X POST "http://localhost:8080/api/auth/forgot-password" \
+   -H 'Content-Type: application/json' \
+   -d '{"email":"testuser@yourdomain.com"}'
+
+docker compose logs -f api | grep -i mailjet
+```
+
+Successful Mailjet send example:
+```
+Mailjet email sent to testuser@yourdomain.com. Status=200
+```
+
+Missing key fallback:
+```
+Mailjet API keys missing. Email logged only.
+```
+
+### 7. Common Pitfalls
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Missing API keys | Fallback logging only | Set `Email__Mailjet__ApiKey` / `Email__Mailjet__ApiSecret` |
+| Wrong `Email__BaseUrl` | Broken links | Point to public HTTPS origin |
+| Sandbox left enabled | No real emails | Set `Email__Mailjet__Sandbox=false` |
+| Provider still console | No delivery | Set `Email__Provider=mailjet` |
+
+### 8. Security Recommendations
+
+* Use Docker secrets or orchestrator secret injection for API keys (avoid plain text in version control)
+* Rotate Mailjet keys periodically (e.g. every 90 days)
+* Configure SPF/DKIM for the `FromAddress` domain to reduce spam filtering
+* Restrict access to logs containing email payloads in production
+
+### 9. Local / Test Mode
+
+Leave provider as console:
+```
+Email__Provider=console
+```
+Trigger flows (password reset / email confirmation) and observe structured log output without external calls.
+
+### 10. Example `.env.mailjet.example`
+
+See the generated `env.mailjet.example` file at repo root for a ready-to-copy reference.
+
 ## Next Steps
 
 - **Local Development:** See [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) for development setup

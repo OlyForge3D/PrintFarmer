@@ -5,6 +5,7 @@ using Farm.Web.Shared;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Slicing;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +14,7 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
+[Authorize] // All endpoints require authentication
 public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Services.Slicing.IProfilesService profilesService) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -20,6 +22,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
 
     // --- Phase 6: Import new slicer profile JSON (dedup + metadata extraction) ---
     [HttpPost("import")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile import
     [ProducesResponseType(typeof(SlicerProfileExtendedDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(SlicerProfileExtendedDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -153,6 +156,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
 
     // Export raw JSON for a profile
     [HttpGet("{id:guid}/export")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile export
     [ProducesResponseType(typeof(SlicerProfileExportDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ExportProfileAsync(Guid id, [FromServices] ISlicerProfileRepository repo, CancellationToken ct)
@@ -194,6 +198,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
 
     // Set profile as default (global or user scope)
     [HttpPost("{id:guid}/set-default")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: set default profile
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetDefaultProfileAsync(Guid id, [FromServices] ISlicerProfileRepository repo, CancellationToken ct)
@@ -240,6 +245,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     }
 
     [HttpPost]
+    [Authorize(Policy = "farm_admin")] // Admin-only: create profile
     [ProducesResponseType(typeof(SlicerProfileResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateProfileAsync([FromBody] CreateSlicerProfileDto? request)
@@ -306,6 +312,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: delete profile
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteProfileAsync(Guid id)

@@ -194,6 +194,35 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IPasswordHashingService, PasswordHashingService>();
         _ = services.AddScoped<IAuthenticationService, AuthenticationService>();
 
+        // Email (MVP)
+        services.AddSingleton<Farm.Web.Api.Services.Email.IEmailTemplateRenderer, Farm.Web.Api.Services.Email.EmailTemplateRenderer>();
+        services.AddSingleton(sp =>
+        {
+            var cfg = sp.GetRequiredService<IConfiguration>();
+            var opts = new Farm.Web.Api.Services.Email.EmailOptions();
+            cfg.GetSection("Email").Bind(opts);
+            return opts;
+        });
+        services.AddScoped<Farm.Web.Api.Services.Email.IEmailService>(sp =>
+        {
+            var logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            var opts = sp.GetRequiredService<Farm.Web.Api.Services.Email.EmailOptions>();
+            var renderer = sp.GetRequiredService<Farm.Web.Api.Services.Email.IEmailTemplateRenderer>();
+            return opts.Provider?.Equals("mailjet", StringComparison.OrdinalIgnoreCase) == true
+                ? new Farm.Web.Api.Services.Email.MailjetEmailService(logger, opts, renderer)
+                : new Farm.Web.Api.Services.Email.ConsoleEmailService(logger, renderer);
+        });
+
+        // Rate Limiting
+        services.AddSingleton(sp =>
+        {
+            var cfg = sp.GetRequiredService<IConfiguration>();
+            var opts = new Farm.Web.Api.Services.RateLimiting.RateLimitOptions();
+            cfg.GetSection("RateLimiting").Bind(opts);
+            return opts;
+        });
+        services.AddSingleton<Farm.Web.Api.Services.RateLimiting.IRateLimitService, Farm.Web.Api.Services.RateLimiting.InMemoryRateLimitService>();
+
         // Startup tracking
         // Register StartupStatus as the implementation for IStartupStatus
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();

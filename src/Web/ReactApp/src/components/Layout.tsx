@@ -1,5 +1,6 @@
 import { LoginModal } from '@/components/auth/LoginModal';
 import { RegisterModal } from '@/components/auth/RegisterModal';
+import { EmailConfirmationBanner } from '@/components/EmailConfirmationBanner';
 import { BuildInfo } from '@/components/BuildInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -573,6 +574,7 @@ export function Layout() {
 
         {/* Main content area */}
         <main className="flex-1 overflow-y-auto">
+          <EmailConfirmationBanner />
           <div className="p-6">
             <Outlet />
           </div>

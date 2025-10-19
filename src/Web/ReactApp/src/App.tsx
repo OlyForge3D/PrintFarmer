@@ -34,6 +34,9 @@ import RegistrationPendingPage from '@/pages/RegistrationPendingPage';
 import { HarvestedFilesLibrary } from './pages/HarvestedFilesLibrary';
 import { Toaster } from 'sonner';
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import { ConfirmEmailPage } from './pages/ConfirmEmailPage';
 import { useAuth } from '@/contexts/AuthHooks';
 import './App.css';
 
@@ -88,6 +91,9 @@ function AuthenticatedAppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/confirm-email" element={<ConfirmEmailPage />} />
       <Route path="/registration-pending" element={<RegistrationPendingPage />} />
       <Route path="/*" element={<Layout />}>
         <Route index element={<PrinterDashboard />} />

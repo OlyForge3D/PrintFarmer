@@ -173,6 +173,122 @@ cp .env.template .env.monolithic
 # Edit .env.monolithic with your settings
 ```
 
+### Email (Mailjet) Configuration
+
+PrintFarmer supports transactional email (password reset, email confirmation) via a pluggable provider system. For production you can enable **Mailjet**; for development the `console` provider simply logs email payloads.
+
+#### 1. Choose Provider
+
+Set the provider to `mailjet` (default in production) or keep `console` for non-sending development environments:
+
+```bash
+# .env (Docker) or shell export (local)
+Email__Provider=mailjet          # mailjet | console
+```
+
+#### 2. Obtain Mailjet API Keys
+
+1. Create a free Mailjet account: https://www.mailjet.com/
+2. Navigate to: Account > API Keys
+3. Copy your public (API Key) and private (Secret Key)
+
+#### 3. Required Environment Variables
+
+Use **double underscores** (`__`) to map hierarchical configuration keys to .NET options (Docker / container friendly):
+
+```bash
+Email__Enabled=true
+Email__Provider=mailjet
+Email__FromAddress=noreply@yourdomain.com
+Email__FromName=PrintFarmer
+Email__BaseUrl=https://yourdomain.com
+Email__Mailjet__ApiKey=YOUR_MAILJET_API_KEY
+Email__Mailjet__ApiSecret=YOUR_MAILJET_SECRET_KEY
+Email__Mailjet__Sandbox=false        # true = do not actually send (test mode)
+```
+
+If you are using Docker Compose, place these in your `.env` file or inline under the `environment:` section for the `api` service:
+
+```yaml
+services:
+	api:
+		environment:
+			Email__Enabled: "true"
+			Email__Provider: "mailjet"
+			Email__FromAddress: "noreply@yourdomain.com"
+			Email__FromName: "PrintFarmer"
+			Email__BaseUrl: "https://yourdomain.com"
+			Email__Mailjet__ApiKey: "${MAILJET_API_KEY}"
+			Email__Mailjet__ApiSecret: "${MAILJET_API_SECRET}"
+			Email__Mailjet__Sandbox: "false"
+```
+
+Then supply secrets securely (never commit them):
+
+```bash
+export MAILJET_API_KEY="pk_live_xxxxxxxxx"
+export MAILJET_API_SECRET="sk_live_yyyyyyyy"
+```
+
+#### 4. Production vs Sandbox
+
+| Mode | Setting | Behavior |
+|------|---------|----------|
+| Sandbox | `Email__Mailjet__Sandbox=true` | Mailjet accepts payload but does not deliver emails |
+| Live | `Email__Mailjet__Sandbox=false` | Emails are sent to recipients |
+
+Always disable sandbox (`false`) once you are ready for real user notifications.
+
+#### 5. Verifying Configuration
+
+After deploying with Mailjet enabled:
+
+```bash
+# Trigger a password reset (does not reveal user existence)
+curl -X POST "https://yourdomain.com/api/auth/forgot-password" \
+	-H 'Content-Type: application/json' \
+	-d '{"email":"testuser@yourdomain.com"}'
+
+# Check API logs for dispatch
+docker compose logs -f api | grep EMAIL
+```
+
+On success you should see a log line similar to:
+```
+Mailjet email sent to testuser@yourdomain.com. Status=200
+```
+
+If keys are missing you will see a fallback log entry:
+```
+Mailjet API keys missing. Email logged only.
+```
+
+#### 6. Common Pitfalls
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Missing keys | Fallback logging only | Set `Email__Mailjet__ApiKey` / `Email__Mailjet__ApiSecret` |
+| Wrong base URL | Broken links in emails | Set `Email__BaseUrl` to public HTTPS origin |
+| Sandbox left on | No real emails sent | Set `Email__Mailjet__Sandbox=false` |
+| Provider still console | Emails not delivered | Set `Email__Provider=mailjet` |
+
+#### 7. Security Recommendations
+
+* Use secrets manager or Docker Swarm/K8s secret injection for API keys (avoid plain `.env` in production).
+* Rotate Mailjet keys periodically (every 90 days).
+* Monitor send rate & failures in Mailjet dashboard for early detection of abuse.
+* Consider SPF/DKIM alignment for `FromAddress` domain to reduce spam filtering.
+
+#### 8. Quick Local Test (Console Provider)
+
+Leave provider as `console` locally:
+```bash
+Email__Provider=console
+```
+Trigger a password reset and observe a structured log containing the email body (no external call). This speeds up development without consuming Mailjet quota.
+
+---
+
 ### Distributed Slicing Flags
 
 Add these to enable slicer workers (microservices or monolithic with profiles):

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, LogIn } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
@@ -116,6 +117,16 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <Link
+              to="/forgot-password"
+              className="text-pf-accent hover:text-pf-accent-hover font-medium"
+              onClick={onClose}
+            >
+              Forgot password?
+            </Link>
           </div>
 
           <div className="flex items-center justify-between pt-4">

@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared.Contracts.Slicing;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +15,7 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slice")]
 [Tags("Slice Jobs")]
+[Authorize] // All endpoints require authentication
 public class SliceJobController : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository;

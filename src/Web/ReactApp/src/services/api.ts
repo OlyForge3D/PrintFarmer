@@ -39,9 +39,12 @@ import {
   UpdatePrinterDto,
   UserDto,
   DiscoveredGcodeFileDto,
-  GcodeHarvestResultDto
-  ,
-  BulkImportResponse
+  GcodeHarvestResultDto,
+  BulkImportResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse
 } from '@/types/api';
 import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';
@@ -136,6 +139,15 @@ export class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
+        // Handle 401 Unauthorized - clear token and redirect to login
+        if (error.response?.status === 401) {
+          localStorage.removeItem('auth-token');
+          // Only redirect if not already on auth pages
+          if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+            window.location.href = '/login';
+          }
+        }
+        
         const apiError: ApiError = {
           message: error.message,
           statusCode: error.response?.status || 500,
@@ -774,6 +786,42 @@ export class ApiClient {
 
   async logout(): Promise<void> {
     await this.client.post('/auth/logout');
+  }
+
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      '/auth/forgot-password',
+      { email }
+    );
+    return response.data;
+  }
+
+  async resetPassword(
+    token: string,
+    email: string,
+    newPassword: string,
+    confirmPassword: string
+  ): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      '/auth/reset-password',
+      { token, email, newPassword, confirmPassword }
+    );
+    return response.data;
+  }
+
+  async confirmEmail(token: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      '/auth/confirm-email',
+      { token }
+    );
+    return response.data;
+  }
+
+  async resendEmailConfirmation(): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      '/auth/resend-confirmation'
+    );
+    return response.data;
   }
 
   // ============ Generic request method ============
