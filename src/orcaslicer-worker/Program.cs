@@ -59,12 +59,14 @@ public static class Program
         // HTTP clients
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
         _ = builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
+        _ = builder.Services.AddHttpClient<SlicerRegistrationClient>(); // registration client
 
         // Worker services (shared core + engine specific)
         _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
         _ = builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
         _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+        _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
 
 
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
@@ -74,6 +76,7 @@ public static class Program
         // Background services (shared graceful shutdown + queue consumer derived)
         _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
         _ = builder.Services.AddHostedService<QueueConsumerService>(); // derived
+        _ = builder.Services.AddHostedService<RegistrationBackgroundService>(); // registration & heartbeat
 
         // Health checks
         _ = builder.Services.AddHealthChecks()
