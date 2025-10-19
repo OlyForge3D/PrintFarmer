@@ -15,4 +15,9 @@ public interface IArtifactsService
     /// Resolve full filesystem path for an artifact (returns null if not found).
     /// </summary>
     Task<(Farm.Infrastructure.Domain.Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Persist a text payload as an artifact of the specified kind. Useful for inline log completion data.
+    /// </summary>
+    Task<Farm.Infrastructure.Domain.Artifact> UploadTextAsync(string content, string fileName, Guid jobId, Guid? workerId, string kind, CancellationToken ct);
 }

@@ -179,6 +179,12 @@ public class CompleteSliceJobRequest
     /// Estimated filament usage in grams (optional).
     /// </summary>
     public decimal? FilamentUsedGrams { get; set; }
+
+    /// <summary>
+    /// Optional raw slicer log text. If provided and no separate log artifact was uploaded, the API will persist it
+    /// as a 'log' artifact named 'slicer-log.txt' and include its ID in the completion response.
+    /// </summary>
+    public string? LogText { get; set; }
 }
 
 /// <summary>
@@ -216,4 +222,9 @@ public class CompleteSliceJobResponse
     /// </summary>
     public int? EstimatedPrintTimeSeconds { get; set; }
     public decimal? FilamentUsedGrams { get; set; }
+
+    /// <summary>
+    /// If a log text payload was provided and converted into an artifact, this contains that artifact's ID; otherwise null.
+    /// </summary>
+    public Guid? LogArtifactId { get; set; }
 }

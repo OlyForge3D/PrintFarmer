@@ -91,6 +91,67 @@ public class ArtifactsService : IArtifactsService
         return artifact;
     }
 
+    public async Task<Artifact> UploadTextAsync(string content, string fileName, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
+    {
+        if (content == null) content = string.Empty;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        if (bytes.Length == 0) throw new InvalidOperationException("Empty content not allowed.");
+        if (bytes.Length > _settings.MaxFileSizeBytes) throw new InvalidOperationException("Content exceeds maximum size.");
+        if (!IsAllowedKind(kind)) throw new InvalidOperationException("Unsupported artifact kind.");
+
+        string sanitized = SanitizeFileName(string.IsNullOrWhiteSpace(fileName) ? "artifact.txt" : fileName);
+        string root = ResolveRootPath();
+        DateTime now = DateTime.UtcNow;
+        string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
+        Directory.CreateDirectory(folder);
+        Guid artifactId = Guid.NewGuid();
+        string targetFileName = artifactId.ToString() + "-" + sanitized;
+        string fullPath = Path.Combine(folder, targetFileName);
+
+        string sha256;
+        await using (var target = File.Create(fullPath))
+        using (var hasher = SHA256.Create())
+        {
+            // Write and hash
+            hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            await target.WriteAsync(bytes.AsMemory(0, bytes.Length), ct);
+            hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+            sha256 = Convert.ToHexString(hasher.Hash!);
+        }
+
+        var relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+        var artifact = new Artifact
+        {
+            Id = artifactId,
+            JobId = jobId,
+            WorkerId = workerId,
+            Kind = kind,
+            FileName = sanitized,
+            RelativePath = relativePath,
+            ContentType = "text/plain",
+            SizeBytes = bytes.Length,
+            Sha256 = sha256,
+            CreatedAt = now
+        };
+
+        _db.Set<Artifact>().Add(artifact);
+        await _db.SaveChangesAsync(ct);
+        _metrics.RecordUpload(bytes.Length);
+
+        if (workerId.HasValue)
+        {
+            var worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
+            if (worker != null)
+            {
+                worker.ArtifactsProduced++;
+                worker.ArtifactBytesProduced += bytes.Length;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
+        return artifact;
+    }
+
     public async Task<Artifact?> GetAsync(Guid id, CancellationToken ct)
     {
         return await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);

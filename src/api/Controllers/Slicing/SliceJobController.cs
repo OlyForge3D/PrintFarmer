@@ -461,6 +461,7 @@ public class SliceJobController : ControllerBase
 
         // Validate additional artifacts if provided
         var allArtifactIds = new List<Guid> { primary.Id };
+        Guid? logArtifactId = null;
         if (request.AdditionalArtifactIds != null)
         {
             foreach (var aid in request.AdditionalArtifactIds.Distinct())
@@ -478,7 +479,19 @@ public class SliceJobController : ControllerBase
             }
         }
 
-        // Derive stable URL from stored relative path
+        // If inline log provided and no explicit log artifact already referenced, persist it
+        if (!string.IsNullOrWhiteSpace(request.LogText))
+        {
+            bool hasLogArtifactReferenced = request.AdditionalArtifactIds?.Any(aid => aid == primary.Id) == true; // simplistic; actual log detection can be added later
+            if (!hasLogArtifactReferenced)
+            {
+                var logArtifact = await _artifactsService.UploadTextAsync(request.LogText, "slicer-log.txt", job.Id, job.WorkerId, "log", HttpContext.RequestAborted);
+                allArtifactIds.Add(logArtifact.Id);
+                logArtifactId = logArtifact.Id;
+            }
+        }
+
+        // Derive stable URL from stored relative path (primary artifact governs result URL)
         string resultUrl = $"/api/artifacts/{primary.Id}/download";
 
         await _jobRepository.MarkCompletedAsync(
@@ -504,7 +517,8 @@ public class SliceJobController : ControllerBase
             ResultFileUrl = resultUrl,
             ArtifactIds = allArtifactIds.ToArray(),
             EstimatedPrintTimeSeconds = request.EstimatedPrintTimeSeconds,
-            FilamentUsedGrams = request.FilamentUsedGrams
+            FilamentUsedGrams = request.FilamentUsedGrams,
+            LogArtifactId = logArtifactId
         };
 
         _logger.LogInformation("Job {JobId} completed with {ArtifactCount} artifacts", job.Id, allArtifactIds.Count);
