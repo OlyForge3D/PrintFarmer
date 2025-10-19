@@ -2,7 +2,7 @@
 
 Branch: feature/orcaslicer-reimplementation
 
-**Overall Progress: Phase 2 Complete (2/7 phases) - Core Job Dispatching System Production-Ready**
+**Overall Progress: Phases 0, 2, 3 Complete (3/8 total phases incl. Phase 0) – Job Dispatching & Worker Registration Production-Ready; Artifact Storage near completion**
 
 This document contains a phased implementation plan to onboard OrcaSlicer as a self-contained slicer microservice, implement a central registry & job API, and provide optional UI embedding for slicer-published mini-UIs.
 
@@ -11,15 +11,15 @@ This document contains a phased implementation plan to onboard OrcaSlicer as a s
 | Phase | Status | Completion | Notes |
 |-------|--------|------------|-------|
 | Phase 0: Preparations | ✅ Complete | 100% | Branch created, structure validated |
-| Phase 1: Registry & Discovery API | ⏳ Not Started | 0% | Worker registration system |
+| Phase 1: Registry & Discovery API | ⏳ Not Started | 0% | Worker discovery & listing (deferred; partial needs already covered by Phase 3) |
 | **Phase 2: Job API & Dispatching** | **✅ Complete** | **100%** | **Production-ready with full observability** |
 | Phase 3: Worker Registration | ✅ Complete | 100% | Registry + heartbeat + worker sync (SlicersService→Worker) |
-| Phase 4: Local Artifact Storage & Job Completion | 🚧 In Progress | 10% | End-to-end processing + filesystem artifact persistence |
+| Phase 4: Local Artifact Storage & Job Completion | 🚧 Advanced | 85% | Storage, bulk upload, metrics, thresholds done; final job linkage & retention pending |
 | Phase 5: UI Integration | ⏳ Not Started | 0% | Admin UI and embedding |
 | Phase 6: Profile Import/Export | ⏳ Not Started | 0% | Orca JSON handling |
 | Phase 7: Hardening & Polish | ⏳ Not Started | 0% | Operational excellence |
 
-**Current Focus:** Phase 2 completed with comprehensive hardening including Prometheus metrics, configurable retry logic, worker pull model, and full test coverage. Ready to proceed to Phase 3 (Worker Registration) or Phase 4 (Job Processing).
+**Current Focus:** Finalizing Phase 4 (Artifact lifecycle completion + job completion contract) and preparing OrcaSlicer worker adoption of bulk artifact uploads & completion endpoint integration.
 
 Guidelines
 - Work in small PRs from branch `feature/orcaslicer-reimplementation`.
@@ -244,10 +244,45 @@ Future Enhancements
 - Automatic thumbnail derivation registry.
 - Cleanup policy (LRU or age-based) with dry-run mode.
 
-Current Progress (10%)
-- Entity spec finalized (above).
-- Service & controller scaffolding pending.
-- Will add DB entity + repository next.
+Current Progress (85%)
+Implemented & Verified:
+- Artifact entity, persistence, and filesystem layout
+- Single and bulk upload endpoints (`POST /api/artifacts`, `POST /api/artifacts/bulk`)
+- Download & metadata endpoints (`GET /api/artifacts/{id}`, `GET /api/artifacts/{id}/download`, `GET /api/artifacts/job/{jobId}`)
+- Stable URL contract surfaced via controller mapping (with optional `PublicUrl` when static serving enabled)
+- SHA-256 integrity hashing stored with metadata
+- Kind validation with structured 400 response (allowed kinds configurable)
+- Bulk upload: atomic multi-file processing with kind inference (MIME + extension fallback)
+- Metrics instrumentation:
+  - Counter: `artifacts_uploaded_total` (tag: kind)
+  - Histogram: `artifact_upload_bytes`
+  - Gauge: `artifact_storage_total_bytes`
+  - Threshold state gauge + events (warning/critical) for storage utilization
+- Threshold alerting events (single transition semantics) with logging subscription
+- Optional static file hosting for artifacts (disabled by default, configurable `EnableStaticServing`)
+- App configuration block `ArtifactStorage` extended with thresholds & static serving toggles
+- Comprehensive tests (13 passing) covering validation, metrics, thresholds, bulk scenarios
+
+Remaining Work:
+- Link artifacts to slice jobs (associate JobId/WorkerId in completion flow)
+- Implement `/api/slice/{id}/complete` integration returning artifact IDs & final status
+- Add retention / cleanup policy draft (age + size threshold dry-run)
+- Optional dedup (future; leverage SHA-256) & rehash verification background task
+- Formalize security model for download authorization (job ownership / admin roles)
+
+Risk & Considerations:
+- Potential rapid storage growth without retention (mitigate via upcoming cleanup policy)
+- Worker compatibility requires updated completion contract including artifact references
+- Static serving toggle must remain off by default to avoid unintended public exposure
+
+Updated Acceptance Criteria (Implemented items marked ✅; pending items ⏳):
+- ✅ Upload endpoints store file + metadata and return stable (or public when enabled) URL
+- ✅ Bulk upload supports multi-artifact submission with kind inference
+- ✅ Integrity hash recorded for each artifact
+- ✅ Metrics & thresholds exposed for observability/alerting
+- ⏳ Completion endpoint finalizes job status and links artifacts
+- ⏳ Authorization rules for artifact access refined (ownership / RBAC)
+- ⏳ Retention policy documented & initial implementation (dry-run mode)
 
 Acceptance Criteria (Planned)
 - Upload endpoint stores file + metadata and returns stable URL.
@@ -259,15 +294,20 @@ Estimated Effort Remaining: 2–3 dev days (foundational), +1 day hardening.
 ## Phase 4 — Worker Job Processing & Artifact Uploads
 Goal: Ensure the worker processes jobs, writes artifacts to object storage, and posts results.
 
-Tasks
-- [ ] Standardize job result contract: jobId, status, logs, artifactUrls (gcodeUrl, previewUrls), metadata
-- [ ] Worker uploads artifacts to object storage (local disk in dev or S3 in prod) and posts job completion to `/api/slice/{id}/complete`
-- [ ] API validates result and creates GCode resource linking artifacts and metadata
-- [ ] Worker should support progress updates and small incremental log streaming (optional)
-- [ ] Tests: end-to-end with dev object storage and worker stub generating sample gcode/preview files
+Tasks (Updated)
+- [ ] Finalize job completion contract: jobId, status, logs, artifactIds, metrics summary
+- [ ] Worker posts artifacts via bulk endpoint prior to completion (capture returned IDs)
+- [ ] Implement `/api/slice/{id}/complete` linking existing artifacts (no re-upload inline)
+- [ ] Add GCode domain resource or extend SliceJob with Artifact references
+- [ ] Progress updates & incremental log streaming (optional; defer if blocking schedule)
+- [ ] End-to-end tests: enqueue → claim → worker bulk upload → completion → artifact retrieval
+- [ ] Authorization checks: only job owner or admin can list/download associated artifacts (unless static serving public)
 
-Acceptance criteria
-- Completed jobs create GCode resources and artifacts are accessible
+Acceptance criteria (Revised)
+- Completed jobs reference all artifact IDs and expose them via status endpoint
+- Artifact metadata accessible & downloadable (honoring auth/public configuration)
+- No duplicate artifact uploads in completion payload
+- Metrics reflect storage growth and upload distribution
 
 Estimated effort: 2–4 dev days
 
