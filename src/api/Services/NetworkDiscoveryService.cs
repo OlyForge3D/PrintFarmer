@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
-using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
@@ -396,7 +397,7 @@ public partial class NetworkDiscoveryService(
         return discovered;
     }
 
-    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, HashSet<string> existingServerUrls, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, bool autoDetectedNetworks, Action? onExcluded, CancellationToken cancellationToken)
+    private async Task<List<DiscoveredPrinterDto>> ScanNetworkWithProgressAsync(string network, NetworkDiscoverySettingsDto settings, HashSet<string> existingServerUrls, string sessionId, int totalIps, int currentScannedStart, int currentFoundStart, bool autoDetectedNetworks, System.Action? onExcluded, CancellationToken cancellationToken)
     {
         List<DiscoveredPrinterDto> discovered = new();
         int scannedCount = 0;
@@ -618,13 +619,13 @@ public partial class NetworkDiscoveryService(
         {
             // Prefer a fresh async scope so we don't depend on the lifetime of the injected scoped context (especially for background discovery)
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
-            AppDbContext ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            List<string> urls = await ctx.Printers.Select(p => p.ServerUrl).ToListAsync();
-            foreach (string? p in urls)
+            IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+            List<Printer> printers = await printersRepo.GetAllAsync(CancellationToken.None);
+            foreach (Printer? p in printers)
             {
-                if (!string.IsNullOrWhiteSpace(p))
+                if (!string.IsNullOrWhiteSpace(p.ServerUrl))
                 {
-                    _ = existingServerUrls.Add(NormalizeUrl(p));
+                    _ = existingServerUrls.Add(NormalizeUrl(p.ServerUrl));
                 }
             }
         }

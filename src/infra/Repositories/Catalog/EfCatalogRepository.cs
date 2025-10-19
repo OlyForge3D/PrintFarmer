@@ -127,5 +127,27 @@ namespace Farm.Infrastructure.Repositories.Catalog
         {
             return await GetModelByIdAsync(id, ct);
         }
+
+        public async Task<Guid?> GetUnknownManufacturerIdAsync(CancellationToken ct = default)
+        {
+            Manufacturer? unknown = await _db.Manufacturers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.Name == "Unknown", ct);
+            return unknown?.Id;
+        }
+
+        public async Task<Guid?> GetUnknownModelIdAsync(CancellationToken ct = default)
+        {
+            Guid? unknownMfgId = await GetUnknownManufacturerIdAsync(ct);
+            if (!unknownMfgId.HasValue)
+            {
+                return null;
+            }
+
+            PrinterModel? unknownModel = await _db.Models
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.ManufacturerId == unknownMfgId.Value && m.Name == "Unknown Model", ct);
+            return unknownModel?.Id;
+        }
     }
 }

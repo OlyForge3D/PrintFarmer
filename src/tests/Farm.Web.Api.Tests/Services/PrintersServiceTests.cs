@@ -29,10 +29,15 @@ namespace Farm.Web.Api.Tests.Services
             var circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
             var capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
             var defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
+            var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
             var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
             var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
-            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object);
+            // Provide a real AutoMapper instance for mapping dependencies
+            var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            var mapper = mapperConfig.CreateMapper();
+
+            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper);
 
             var printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -55,10 +60,14 @@ namespace Farm.Web.Api.Tests.Services
             var circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
             var capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
             var defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
+            var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
             var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
             var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
-            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object);
+            var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            var mapper = mapperConfig.CreateMapper();
+
+            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper);
 
             var printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 

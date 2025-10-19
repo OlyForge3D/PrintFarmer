@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PrinterCapabilities;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services;
@@ -81,14 +81,15 @@ public class PrinterCapabilityUpdateService(
 
         try
         {
-            _logger.LogDebug($"Getting AppDbContext and IPrinterCapabilityDiscoveryService from DI", null, null);
-            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            _logger.LogDebug($"Getting repositories and services from DI", null, null);
+            IPrinterCapabilitiesRepository capabilitiesRepo = scope.ServiceProvider.GetRequiredService<IPrinterCapabilitiesRepository>();
+            IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
             IPrinterCapabilityDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<IPrinterCapabilityDiscoveryService>();
             _logger.LogDebug($"Successfully got services from DI", null, null);
 
             // Early return if no printers are registered to prevent hanging
             _logger.LogDebug($"Checking printer count", null, null);
-            int printerCount = await context.Printers.CountAsync(cancellationToken);
+            int printerCount = await printersRepo.CountAsync(cancellationToken);
             _logger.LogDebug($"Found {printerCount} registered printers", null, null);
 
             if (printerCount == 0)
@@ -100,13 +101,7 @@ public class PrinterCapabilityUpdateService(
             // Get all printers with capabilities that haven't been updated recently
             _logger.LogDebug($"Querying stale printer capabilities", null, null);
             DateTime staleThreshold = DateTime.UtcNow.AddHours(-2); // Update if older than 2 hours
-            List<Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await context.PrinterCapabilities
-                .Include(c => c.Printer)
-                .ThenInclude(p => p.Model)
-                .Include(c => c.Printer.Manufacturer)
-                .Where(c => c.LastUpdated < staleThreshold && c.IsAvailable)
-                .Take(10) // Limit to 10 printers per update cycle to avoid overload
-                .ToListAsync(cancellationToken);
+            List<Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await capabilitiesRepo.GetStaleCapabilitiesAsync(staleThreshold, 10, cancellationToken);
 
             _logger.LogDebug($"Found {capabilities.Count} stale printer capabilities to update", null, null);
 
@@ -127,18 +122,26 @@ public class PrinterCapabilityUpdateService(
 
                 try
                 {
-                    _ = await discoveryService.RefreshCapabilitiesAsync(capability, capability.Printer, cancellationToken);
-                    _logger.LogDebug($"Updated capabilities for printer {capability.Printer.Name}", null, null);
+                    // Load printer reference with Model and Manufacturer
+                    Printer? printer = await capabilitiesRepo.GetPrinterWithModelAndManufacturerAsync(capability.PrinterId, cancellationToken);
+                    if (printer == null)
+                    {
+                        _logger.LogWarning($"Printer not found for capability {capability.Id}", null, null);
+                        continue;
+                    }
+
+                    _ = await discoveryService.RefreshCapabilitiesAsync(capability, printer, cancellationToken);
+                    _logger.LogDebug($"Updated capabilities for printer {printer.Name}", null, null);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, $"Failed to update capabilities for printer {capability.Printer.Name}", null, null);
+                    _logger.LogWarning(ex, $"Failed to update capabilities for printer", null, null);
                     // Update timestamp even on failure to avoid constant retries
                     capability.LastUpdated = DateTime.UtcNow;
                 }
             }
 
-            _ = await context.SaveChangesAsync(cancellationToken);
+            await capabilitiesRepo.SaveChangesAsync(cancellationToken);
             _logger.LogInformation($"Successfully updated capabilities for {capabilities.Count} printers", null, null);
         }
         catch (Exception ex)

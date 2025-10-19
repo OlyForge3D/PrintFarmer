@@ -27,8 +27,8 @@ public class SystemLogServiceTests
         );
         await db.SaveChangesAsync();
 
-    var repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
-    var svc = new SystemLogService(repo);
+        var repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
+        var svc = new SystemLogService(repo);
         var results = await svc.QueryLogsAsync("c1", "Error", null, null, null, default);
 
         Assert.Single(results);
@@ -47,9 +47,9 @@ public class SystemLogServiceTests
         );
         await db.SaveChangesAsync();
 
-    var repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
-    var svc = new SystemLogService(repo);
-    var results = await svc.QueryAllLogsAsync(null, null, null, null, "ba", default);
+        var repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
+        var svc = new SystemLogService(repo);
+        var results = await svc.QueryAllLogsAsync(null, null, null, null, "ba", default);
 
         Assert.Equal(2, results.Count);
         Assert.Contains(results, r => r.Metadata!.Contains("bar"));

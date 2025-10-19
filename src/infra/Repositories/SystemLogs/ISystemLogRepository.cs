@@ -11,5 +11,6 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
         IAsyncEnumerable<SystemLog> QueryAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata);
         Task<IReadOnlyList<SystemLog>> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct);
         Task AddAsync(SystemLog log, CancellationToken ct);
+        Task<int> DeleteLogsOlderThanAsync(DateTime cutoff, CancellationToken ct);
     }
 }

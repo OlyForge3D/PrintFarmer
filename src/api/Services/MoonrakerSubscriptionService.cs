@@ -2,14 +2,13 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
@@ -162,11 +161,9 @@ public sealed class MoonrakerSubscriptionService(
         // The scope lifetime matches the query and is disposed immediately after.
 #pragma warning disable IDISP013 // Await in using
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
         // Only subscribe to Moonraker-backed printers (Backend == 0)
-        List<Printer> printers = await db.Printers.AsNoTracking()
-            .Where(p => p.Backend == 0)
-            .ToListAsync(ct);
+        List<Printer> printers = await printersRepo.GetByBackendAsync(PrinterBackend.Moonraker, ct);
         foreach (Printer? p in printers)
         {
             _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
@@ -187,9 +184,8 @@ public sealed class MoonrakerSubscriptionService(
 
                 // Find the printer to trigger fallback
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                Printer? printer = await db.Printers.AsNoTracking()
-                    .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+                IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+                Printer? printer = await printersRepo.FindByIdAsync(printerId, ct);
 
                 if (printer != null)
                 {
@@ -351,8 +347,8 @@ public sealed class MoonrakerSubscriptionService(
         try
         {
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Printer? current = await db.Printers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == printerId, ct);
+            IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+            Printer? current = await printersRepo.FindByIdAsync(printerId, ct);
 
             if (current is null)
             {

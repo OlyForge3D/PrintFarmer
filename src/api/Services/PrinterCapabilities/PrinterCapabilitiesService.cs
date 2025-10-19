@@ -3,34 +3,29 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Farm.Web.Api.Services.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.PrinterCapabilities
 {
     public class PrinterCapabilitiesService : IPrinterCapabilitiesService
     {
-        private readonly AppDbContext _db;
+        private readonly IPrinterCapabilitiesRepository _repo;
         private readonly IUnifiedLoggingService _logger;
         private readonly Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService _discovery;
 
-        public PrinterCapabilitiesService(AppDbContext db, IUnifiedLoggingService logger, Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService discovery)
+        public PrinterCapabilitiesService(IPrinterCapabilitiesRepository repo, IUnifiedLoggingService logger, Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService discovery)
         {
-            _db = db ?? throw new ArgumentNullException(nameof(db));
+            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         }
 
         public async Task<IReadOnlyList<PrinterCapabilitiesDto>> GetAllAsync(CancellationToken ct = default)
         {
-            var capabilities = await _db.PrinterCapabilities
-                .Include(c => c.Printer)
-                .AsNoTracking()
-                .ToListAsync(ct);
+            var capabilities = await _repo.GetAllWithPrinterAsync(ct);
 
             return capabilities.Select(cap => new PrinterCapabilitiesDto(
                 Id: cap.Id,
@@ -59,10 +54,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<PrinterCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct = default)
         {
-            var cap = await _db.PrinterCapabilities
-                .Include(c => c.Printer)
-                .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
 
             if (cap == null)
             {
@@ -98,14 +90,14 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            var printer = await _db.Printers.FindAsync(new object[] { request.PrinterId }, ct);
+            var printer = await _repo.FindPrinterAsync(request.PrinterId, ct);
             if (printer == null)
             {
                 return null;
             }
 
-            var existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == request.PrinterId, ct);
-            if (existing != null)
+            var exists = await _repo.ExistsByPrinterIdAsync(request.PrinterId, ct);
+            if (exists)
             {
                 return null;
             }
@@ -156,9 +148,9 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
                 }
             }
 
-            _db.PrinterCapabilities.Add(capabilities);
-            await _db.SaveChangesAsync(ct);
-            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(ct);
+            await _repo.AddAsync(capabilities, ct);
+            await _repo.SaveChangesAsync(ct);
+            await _repo.LoadPrinterReferenceAsync(capabilities, ct);
 
             return new PrinterCapabilitiesDto(
                 Id: capabilities.Id,
@@ -189,13 +181,13 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            var printer = await _db.Printers.FindAsync(new object[] { printerId }, ct);
+            var printer = await _repo.FindPrinterAsync(printerId, ct);
             if (printer == null)
             {
                 return null;
             }
 
-            var cap = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
                 cap = new Farm.Infrastructure.Domain.PrinterCapabilities
@@ -219,7 +211,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
                     LastUpdated = DateTime.UtcNow
                 };
 
-                _db.PrinterCapabilities.Add(cap);
+                await _repo.AddAsync(cap, ct);
             }
             else
             {
@@ -239,8 +231,8 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
                 cap.LastUpdated = DateTime.UtcNow;
             }
 
-            await _db.SaveChangesAsync(ct);
-            await _db.Entry(cap).Reference(c => c.Printer).LoadAsync(ct);
+            await _repo.SaveChangesAsync(ct);
+            await _repo.LoadPrinterReferenceAsync(cap, ct);
 
             return new PrinterCapabilitiesDto(
             Id: cap.Id,
@@ -269,16 +261,13 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<IReadOnlyList<PrinterDto>> GetCompatiblePrintersAsync(Guid gcodeFileId, CancellationToken ct = default)
         {
-            var gcodeFile = await _db.GcodeFiles.FindAsync(new object[] { gcodeFileId }, ct);
+            var gcodeFile = await _repo.FindGcodeFileAsync(gcodeFileId, ct);
             if (gcodeFile == null)
             {
                 return new List<PrinterDto>();
             }
 
-            var allPrinters = await _db.PrinterCapabilities
-                .Include(c => c.Printer)
-                .Where(c => c.IsAvailable)
-                .ToListAsync(ct);
+            var allPrinters = await _repo.GetAvailableWithPrinterAsync(ct);
 
             var compatible = new List<PrinterDto>();
             foreach (var cap in allPrinters)
@@ -346,29 +335,26 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<bool> DeleteAsync(Guid printerId, CancellationToken ct = default)
         {
-            var cap = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
                 return false;
             }
 
-            _db.PrinterCapabilities.Remove(cap);
-            await _db.SaveChangesAsync(ct);
+            await _repo.RemoveAsync(cap, ct);
+            await _repo.SaveChangesAsync(ct);
             return true;
         }
 
         public async Task<(PrinterCapabilitiesDto? result, bool isNew)> DiscoverAsync(Guid printerId, CancellationToken ct = default)
         {
-            var printer = await _db.Printers
-                .Include(p => p.Model)
-                .Include(p => p.Manufacturer)
-                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            var printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
                 return (null, false);
             }
 
-            var existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            var existing = await _repo.GetByPrinterIdAsync(printerId, ct);
             Farm.Infrastructure.Domain.PrinterCapabilities capabilities;
             bool isNew = false;
             if (existing != null)
@@ -384,12 +370,12 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
                 }
 
                 capabilities = discovered;
-                _db.PrinterCapabilities.Add(capabilities);
+                await _repo.AddAsync(capabilities, ct);
                 isNew = true;
             }
 
-            await _db.SaveChangesAsync(ct);
-            await _db.Entry(capabilities).Reference(c => c.Printer).LoadAsync(ct);
+            await _repo.SaveChangesAsync(ct);
+            await _repo.LoadPrinterReferenceAsync(capabilities, ct);
 
             var dto = new PrinterCapabilitiesDto(
                 Id: capabilities.Id,
@@ -419,16 +405,13 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<Farm.Web.Api.Services.Interfaces.CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default)
         {
-            var printer = await _db.Printers
-                .Include(p => p.Model)
-                .Include(p => p.Manufacturer)
-                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            var printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
                 return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
             }
 
-            var cap = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == printerId, ct);
+            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
                 return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
@@ -440,10 +423,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<PrinterCapabilitiesDto?> GetModelDefaultsAsync(Guid printerId, CancellationToken ct = default)
         {
-            var printer = await _db.Printers
-                .Include(p => p.Model)
-                .Include(p => p.Manufacturer)
-                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            var printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
                 return null;

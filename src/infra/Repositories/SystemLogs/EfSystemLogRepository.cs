@@ -22,13 +22,25 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
         {
             IQueryable<SystemLog> query = _db.SystemLogs.AsQueryable();
             if (!string.IsNullOrWhiteSpace(correlationId))
+            {
                 query = query.Where(l => l.CorrelationId == correlationId);
+            }
+
             if (!string.IsNullOrWhiteSpace(level))
+            {
                 query = query.Where(l => l.Level == level);
+            }
+
             if (from.HasValue)
+            {
                 query = query.Where(l => l.Timestamp >= from.Value);
+            }
+
             if (to.HasValue)
+            {
                 query = query.Where(l => l.Timestamp <= to.Value);
+            }
+
             if (!string.IsNullOrWhiteSpace(metadata))
             {
                 string lower = metadata.ToLower();
@@ -45,13 +57,25 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
         {
             IQueryable<SystemLog> query = _db.SystemLogs.AsQueryable();
             if (!string.IsNullOrWhiteSpace(correlationId))
+            {
                 query = query.Where(l => l.CorrelationId == correlationId);
+            }
+
             if (!string.IsNullOrWhiteSpace(level))
+            {
                 query = query.Where(l => l.Level == level);
+            }
+
             if (from.HasValue)
+            {
                 query = query.Where(l => l.Timestamp >= from.Value);
+            }
+
             if (to.HasValue)
+            {
                 query = query.Where(l => l.Timestamp <= to.Value);
+            }
+
             if (!string.IsNullOrWhiteSpace(metadata))
             {
                 string lower = metadata.ToLower();
@@ -65,6 +89,21 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
         {
             _db.SystemLogs.Add(log);
             return _db.SaveChangesAsync(ct);
+        }
+
+        public async Task<int> DeleteLogsOlderThanAsync(DateTime cutoff, CancellationToken ct)
+        {
+            List<SystemLog> oldLogs = await _db.SystemLogs
+                .Where(l => l.Timestamp < cutoff)
+                .ToListAsync(ct);
+
+            if (oldLogs.Count > 0)
+            {
+                _db.SystemLogs.RemoveRange(oldLogs);
+                await _db.SaveChangesAsync(ct);
+            }
+
+            return oldLogs.Count;
         }
     }
 }

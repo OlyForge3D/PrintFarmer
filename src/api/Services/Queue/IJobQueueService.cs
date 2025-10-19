@@ -6,7 +6,7 @@ using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Queue
 {
-    public interface IQueueService
+    public interface IJobQueueService
     {
         Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct);
         Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct);

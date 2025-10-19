@@ -9,12 +9,12 @@ using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Queue
 {
-    public class QueueService : IQueueService
+    public class JobQueueService : IJobQueueService
     {
         private readonly IQueueRepository _repo;
         private readonly IUnifiedLoggingService _logger;
 
-        public QueueService(IQueueRepository repo, IUnifiedLoggingService logger)
+        public JobQueueService(IQueueRepository repo, IUnifiedLoggingService logger)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(logger);
@@ -217,6 +217,83 @@ namespace Farm.Web.Api.Services.Queue
                 QueuePosition = job.QueuePosition,
                 EstimatedPrintTime = job.EstimatedPrintTime,
                 EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                CreatedAt = job.CreatedAt,
+                UpdatedAt = job.UpdatedAt
+            };
+        }
+
+        public async Task<JobQueuePrintJobDto?> UpdateJobAsync(Guid id, UpdatePrintJobStatusDto request, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            var job = await _repo.GetPrintJobByIdAsync(id, ct);
+            if (job == null)
+            {
+                return null;
+            }
+
+            // Update fields if provided
+            if (request.Status.HasValue)
+            {
+                job.Status = (PrintJobStatus)(int)request.Status.Value;
+            }
+
+            if (request.Priority.HasValue)
+            {
+                job.Priority = (int)request.Priority.Value;
+            }
+
+            if (request.AssignedPrinterId.HasValue)
+            {
+                var printer = await _repo.GetAvailablePrintersAsync(ct);
+                // Validate printer exists
+                var found = printer.Find(p => p.Id == request.AssignedPrinterId.Value);
+                if (found == null)
+                {
+                    return null; // caller will translate to BadRequest
+                }
+                job.AssignedPrinterId = request.AssignedPrinterId.Value;
+            }
+
+            if (request.ActualFilamentUsage.HasValue)
+            {
+                job.ActualFilamentUsage = request.ActualFilamentUsage.Value;
+            }
+
+            if (!string.IsNullOrEmpty(request.FailureReason))
+            {
+                job.FailureReason = request.FailureReason;
+            }
+
+            job.UpdatedAt = DateTime.UtcNow;
+
+            await _repo.SaveChangesAsync(ct);
+
+            // Reload printer if assignment changed
+            if (request.AssignedPrinterId.HasValue)
+            {
+                job = await _repo.GetPrintJobByIdAsync(id, ct);
+            }
+
+            return new JobQueuePrintJobDto
+            {
+                Id = job!.Id,
+                GcodeFileId = job.GcodeFileId,
+                GcodeFileName = job.GcodeFile?.DisplayName ?? string.Empty,
+                AssignedPrinterId = job.AssignedPrinterId,
+                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
+                Status = (Farm.Web.Shared.PrintJobStatus?)job.Status,
+                Priority = job.Priority,
+                QueuePosition = job.QueuePosition,
+                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                RequiredMaterialType = job.RequiredMaterialType,
+                EstimatedPrintTime = job.EstimatedPrintTime,
+                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                ActualStartTime = job.ActualStartTime,
+                ActualEndTime = job.ActualEndTime,
+                ActualPrintTime = job.ActualPrintTime,
+                ActualFilamentUsage = job.ActualFilamentUsage,
+                FailureReason = job.FailureReason,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };

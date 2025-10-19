@@ -66,6 +66,24 @@ namespace Farm.Web.Api.Repositories.Gcode
             return _db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash, ct);
         }
 
+        public Task<GcodeFile?> GetByFullPathAsync(string fullPath, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                return Task.FromResult<GcodeFile?>(null);
+            }
+            return _db.GcodeFiles.FirstOrDefaultAsync(g => g.FilePath == fullPath, ct);
+        }
+
+        public async Task<Guid?> GetLatestHarvestOperationIdForPrinterAsync(Guid printerId, CancellationToken ct)
+        {
+            GcodeHarvestOperation? op = await _db.GcodeHarvestOperations
+                .Where(o => o.PrinterId == printerId)
+                .OrderByDescending(o => o.StartedAt)
+                .FirstOrDefaultAsync(ct);
+            return op?.Id;
+        }
+
         public Task AddAsync(GcodeFile file, CancellationToken ct)
         {
             _db.GcodeFiles.Add(file);

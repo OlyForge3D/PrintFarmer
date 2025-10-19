@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Printers;
@@ -35,9 +36,9 @@ public class EfPrintersRepository : IPrintersRepository
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
 
-    public async Task<Dictionary<Guid, PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct)
+    public async Task<Dictionary<Guid, Domain.PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct)
     {
-        IQueryable<PrinterCapabilities> q = _db.PrinterCapabilities.AsNoTracking();
+        IQueryable<Domain.PrinterCapabilities> q = _db.PrinterCapabilities.AsNoTracking();
         if (ids != null && ids.Length > 0)
         {
             q = q.Where(c => ids.Contains(c.PrinterId));
@@ -46,9 +47,9 @@ public class EfPrintersRepository : IPrintersRepository
         return await q.ToDictionaryAsync(c => c.PrinterId, ct);
     }
 
-    public async Task<List<PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct)
+    public async Task<List<Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct)
     {
-        IQueryable<PrinterCapabilities> q = _db.PrinterCapabilities.AsNoTracking();
+        IQueryable<Domain.PrinterCapabilities> q = _db.PrinterCapabilities.AsNoTracking();
         if (ids != null && ids.Length > 0)
         {
             q = q.Where(c => ids.Contains(c.PrinterId));
@@ -57,9 +58,9 @@ public class EfPrintersRepository : IPrintersRepository
         return await q.ToListAsync(ct);
     }
 
-    public async Task<PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct) => await _db.PrinterCapabilities.AsNoTracking().FirstOrDefaultAsync(c => c.PrinterId == id, ct);
+    public async Task<Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct) => await _db.PrinterCapabilities.AsNoTracking().FirstOrDefaultAsync(c => c.PrinterId == id, ct);
 
-    public async Task SaveCapabilitiesAsync(PrinterCapabilities capabilities, CancellationToken ct)
+    public async Task SaveCapabilitiesAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct)
     {
         var existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == capabilities.PrinterId, ct);
         if (existing == null)
@@ -105,5 +106,18 @@ public class EfPrintersRepository : IPrintersRepository
     public async Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct)
     {
         return await _db.Printers.AnyAsync(p => p.Name == name || p.ServerUrl == serverUrl, ct);
+    }
+
+    public async Task<int> CountAsync(CancellationToken ct)
+    {
+        return await _db.Printers.CountAsync(ct);
+    }
+
+    public async Task<List<Printer>> GetByBackendAsync(PrinterBackend backend, CancellationToken ct)
+    {
+        return await _db.Printers
+            .AsNoTracking()
+            .Where(p => p.Backend == (int)backend)
+            .ToListAsync(ct);
     }
 }

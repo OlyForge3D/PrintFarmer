@@ -1,6 +1,4 @@
-﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Microsoft.EntityFrameworkCore;
+﻿using Farm.Infrastructure.Repositories.Catalog;
 
 namespace Farm.Web.Api.Services;
 
@@ -14,9 +12,9 @@ public interface IDefaultCatalogService
     Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync();
 }
 
-public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogService
+public class DefaultCatalogService(ICatalogRepository catalogRepository) : IDefaultCatalogService
 {
-    private readonly AppDbContext _context = context;
+    private readonly ICatalogRepository _catalogRepository = catalogRepository;
     private Guid? _cachedUnknownManufacturerId;
     private Guid? _cachedUnknownModelId;
 
@@ -27,10 +25,14 @@ public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogServic
             return _cachedUnknownManufacturerId.Value;
         }
 
-        Manufacturer? unknown = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown") ?? throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
+        Guid? unknownId = await _catalogRepository.GetUnknownManufacturerIdAsync();
+        if (!unknownId.HasValue)
+        {
+            throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
+        }
 
-        _cachedUnknownManufacturerId = unknown.Id;
-        return unknown.Id;
+        _cachedUnknownManufacturerId = unknownId.Value;
+        return unknownId.Value;
     }
 
     public async Task<Guid> GetUnknownModelIdAsync()
@@ -40,12 +42,14 @@ public class DefaultCatalogService(AppDbContext context) : IDefaultCatalogServic
             return _cachedUnknownModelId.Value;
         }
 
-        Guid unknownMfgId = await GetUnknownManufacturerIdAsync();
-        PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
-            m.ManufacturerId == unknownMfgId && m.Name == "Unknown Model") ?? throw new InvalidOperationException("Unknown Model not found. Ensure database seeding has been completed.");
+        Guid? unknownModelId = await _catalogRepository.GetUnknownModelIdAsync();
+        if (!unknownModelId.HasValue)
+        {
+            throw new InvalidOperationException("Unknown Model not found. Ensure database seeding has been completed.");
+        }
 
-        _cachedUnknownModelId = unknownModel.Id;
-        return unknownModel.Id;
+        _cachedUnknownModelId = unknownModelId.Value;
+        return unknownModelId.Value;
     }
 
     public async Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync()

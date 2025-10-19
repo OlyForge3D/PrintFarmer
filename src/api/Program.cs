@@ -117,9 +117,13 @@ builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository,
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.Web.Api.Services.Slicing.SlicersService>();
 // Queue repository & service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Queue.IQueueRepository, Farm.Web.Api.Repositories.Queue.EfQueueRepository>();
-builder.Services.AddScoped<Farm.Web.Api.Services.Queue.IQueueService, Farm.Web.Api.Services.Queue.QueueService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Queue.IJobQueueService, Farm.Web.Api.Services.Queue.JobQueueService>();
 // G-code repository (new)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Gcode.IGcodeRepository, Farm.Web.Api.Repositories.Gcode.EfGcodeRepository>();
+// G-code library service (controller -> service refactor)
+builder.Services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeLibraryService, Farm.Web.Api.Services.Gcode.GcodeLibraryService>();
+// G-code files service (file browser, uploads, moves)
+builder.Services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeFilesService, Farm.Web.Api.Services.Gcode.GcodeFilesService>();
 // Model service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
 // Moonraker diagnostics service (scaffolded)
@@ -132,8 +136,12 @@ builder.Services.AddScoped<Farm.Web.Api.Repositories.Model.IModelRepository, Far
 builder.Services.AddScoped<Farm.Web.Api.Services.SystemLogs.ISystemLogService, Farm.Web.Api.Services.SystemLogs.SystemLogService>();
 // Printer capabilities service (Phase 2 refactor)
 builder.Services.AddScoped<Farm.Web.Api.Services.PrinterCapabilities.IPrinterCapabilitiesService, Farm.Web.Api.Services.PrinterCapabilities.PrinterCapabilitiesService>();
+// Setup service (initial app configuration)
+builder.Services.AddScoped<Farm.Web.Api.Services.Setup.ISetupService, Farm.Web.Api.Services.Setup.SetupService>();
 // Printers service (incremental refactor helper)
 builder.Services.AddScoped<Farm.Web.Api.Services.Printers.IPrintersService, Farm.Web.Api.Services.Printers.PrintersService>();
+// Slicing submission service (slicing job orchestration)
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicingSubmissionService, Farm.Web.Api.Services.Slicing.SlicingSubmissionService>();
 // Local slicer file storage (explicit registration to ensure IFileSystem is injected)
 builder.Services.AddScoped<Farm.Web.Api.Services.SlicerServices.LocalSlicerFileStorage>();
 builder.Services.AddScoped<Farm.Web.Shared.ISlicerFileStorage>(sp => sp.GetRequiredService<Farm.Web.Api.Services.SlicerServices.LocalSlicerFileStorage>());

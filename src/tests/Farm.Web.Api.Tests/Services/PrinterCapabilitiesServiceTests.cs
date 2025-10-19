@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Web.Api.Services.PrinterCapabilities;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -45,11 +46,9 @@ namespace Farm.Web.Api.Tests.Services
 
             var discoveryMock = new Moq.Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
             var loggerMock = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            var repo = new EfPrinterCapabilitiesRepository(db);
 
-            var svc = new PrinterCapabilitiesService(db, loggerMock.Object, discoveryMock.Object);
-            // Reflection: ensure the service holds the same AppDbContext instance we created
-            var svcDbField = typeof(PrinterCapabilitiesService).GetField("_db", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var svcDbInstance = svcDbField?.GetValue(svc);
+            var svc = new PrinterCapabilitiesService(repo, loggerMock.Object, discoveryMock.Object);
             var dto = await svc.GetByPrinterIdAsync(printer.Id);
             Assert.NotNull(dto);
             Assert.Equal(printer.Id, dto!.PrinterId);
@@ -69,8 +68,9 @@ namespace Farm.Web.Api.Tests.Services
 
             var discoveryMock = new Moq.Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
             var loggerMock = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            var repo = new EfPrinterCapabilitiesRepository(db);
 
-            var svc = new PrinterCapabilitiesService(db, loggerMock.Object, discoveryMock.Object);
+            var svc = new PrinterCapabilitiesService(repo, loggerMock.Object, discoveryMock.Object);
 
             var req = new CreatePrinterCapabilitiesDto(printer.Id);
 

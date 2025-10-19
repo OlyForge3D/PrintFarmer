@@ -28,9 +28,9 @@ namespace Farm.Web.Api.Controllers;
 public class GcodeFilesController(
     IWebHostEnvironment env,
     IUnifiedLoggingService logger,
-    AppDbContext db,
     IGcodeUploadSettings uploadSettings,
-    IGcodeUploadQuotaService quotaService
+    IGcodeUploadQuotaService quotaService,
+    Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
@@ -122,7 +122,7 @@ public class GcodeFilesController(
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
-    public ActionResult<GcodeFileListResponse> List(
+    public async Task<ActionResult<GcodeFileListResponse>> ListAsync(
     [FromQuery] string? path = "/",
     [FromQuery] string? sortBy = "name",
     [FromQuery] string? sortOrder = "asc",
@@ -135,136 +135,13 @@ public class GcodeFilesController(
     {
         try
         {
-            if (page < 1)
-            {
-                page = 1;
-            }
-            if (pageSize < 1)
-            {
-                pageSize = 1;
-            }
-            if (pageSize > 500)
-            {
-                pageSize = 500; // hard cap to avoid huge payloads
-            }
-            (string _, string? requestedDirFullPath, string? virtualPathNormalized) = ResolveAndValidatePath(path);
-            if (!Directory.Exists(requestedDirFullPath))
-            {
-                return NotFound($"Directory '{virtualPathNormalized}' not found");
-            }
-
-            // Gather directory & file entries (only immediate children)
-            System.IO.DirectoryInfo dirInfo = new(requestedDirFullPath);
-            List<GcodeFileEntryDto> entries = new();
-
-            // Directories
-            foreach (System.IO.DirectoryInfo dir in dirInfo.EnumerateDirectories())
-            {
-                if (dir.Name.StartsWith('.'))
-                {
-                    continue; // skip hidden
-                }
-                if (!IsMatch(dir.Name, search))
-                {
-                    continue;
-                }
-                string childVirtual = CombineVirtual(virtualPathNormalized, dir.Name);
-                entries.Add(new GcodeFileEntryDto(
-                    Path: childVirtual,
-                    Name: dir.Name,
-                    Size: 0,
-                    ModifiedAt: dir.LastWriteTimeUtc,
-                    IsDirectory: true
-                ));
-            }
-
-            // Files (.gcode + .bgcode)
-            foreach (string? pattern in new[] { "*.gcode", "*.bgcode" })
-            {
-                foreach (System.IO.FileInfo file in dirInfo.EnumerateFiles(pattern))
-                {
-                    if (!IsMatch(file.Name, search))
-                    {
-                        continue;
-                    }
-                    string childVirtual = CombineVirtual(virtualPathNormalized, file.Name);
-
-                    // Attempt to correlate with DB entry for potential future harvest association.
-                    Guid? harvestOpId = null;
-                    try
-                    {
-                        GcodeFile? dbEntry = db.GcodeFiles.FirstOrDefault(g => g.FilePath == file.FullName);
-                        if (dbEntry != null && dbEntry.SourcePrinterId != null)
-                        {
-                            GcodeHarvestOperation? op = db.GcodeHarvestOperations
-                                .Where(o => o.PrinterId == dbEntry.SourcePrinterId)
-                                .OrderByDescending(o => o.StartedAt)
-                                .FirstOrDefault();
-                            harvestOpId = op?.Id;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogDebug($"Non-fatal DB correlation failure for file {file.FullName}: {ex.Message}");
-                    }
-
-                    // If harvestId is specified, only include files with matching HarvestOperationId
-                    if (harvestId.HasValue && harvestOpId != harvestId)
-                    {
-                        continue;
-                    }
-
-                    entries.Add(new GcodeFileEntryDto(
-                        Path: childVirtual,
-                        Name: file.Name,
-                        Size: file.Length,
-                        ModifiedAt: file.LastWriteTimeUtc,
-                        IsDirectory: false,
-                        HarvestOperationId: harvestOpId
-                    ));
-                }
-            }
-
-            // Sorting: normalize once to avoid repeated allocations. Use explicit OrdinalIgnoreCase comparisons.
-            string normalizedSortBy = string.IsNullOrWhiteSpace(sortBy) ? "name" : sortBy.Trim();
-            string normalizedSortOrder = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
-
-            bool orderDesc = normalizedSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase);
-            if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-            else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-            else // default: name
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-
-            int totalFiles = entries.Count(e => !e.IsDirectory);
-            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
-
-            // Apply pagination AFTER computing totals so client can derive total pages.
-            int skip = (page - 1) * pageSize;
-            IReadOnlyList<GcodeFileEntryDto> pagedEntries = skip >= entries.Count ? Array.Empty<GcodeFileEntryDto>() : entries.Skip(skip).Take(pageSize).ToList();
-            int totalItems = entries.Count; // directories + files for pagination context
-            int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
-            return Ok(new GcodeFileListResponse(
-                Files: pagedEntries,
-                TotalFiles: totalFiles,
-                TotalSize: totalSize,
-                Page: page,
-                PageSize: pageSize,
-                TotalPages: totalPages,
-                TotalItems: totalItems));
+            GcodeFileListResponse response = await gcodeFilesService.ListAsync(
+                path, sortBy, sortOrder, search, page, pageSize, harvestId, printerId, HttpContext.RequestAborted);
+            return Ok(response);
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return NotFound(ex.Message);
         }
         catch (Exception ex)
         {
@@ -374,7 +251,7 @@ public class GcodeFilesController(
                 return Problem("Failed to initialize upload", statusCode: 500);
             }
             PersistChunkState(state, logger);
-            string virtualFilePath = CombineVirtual(virtualDir, safeName);
+            string virtualFilePath = virtualDir == "/" ? "/" + safeName : virtualDir.TrimEnd('/') + "/" + safeName;
             return Ok(new ChunkInitResponse(uploadId, safeName, virtualFilePath, 0, req.Size, DefaultChunkSize, hashAlgo));
         }
         catch (Exception ex)
@@ -657,96 +534,27 @@ public class GcodeFilesController(
     [HttpDelete]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
-    public ActionResult Delete([FromBody] DeleteFilesRequest request, [FromQuery] bool recursive = false)
+    public async Task<ActionResult> DeleteAsync([FromBody] DeleteFilesRequest request, [FromQuery] bool recursive = false)
     {
         if (request?.FilePaths == null || request.FilePaths.Count == 0)
         {
             return BadRequest("filePaths is required");
         }
 
-        (string? rootFullPath, string _, string _) = ResolveAndValidatePath("/");
-        int deleted = 0;
-        List<string> deletedFiles = new();
-        List<string> skipped = new();
-        List<string> failed = new();
-        List<string> directoriesRequested = new();
-        // Pre-scan to identify directories (unsupported) but defer decision to allow partial success semantics.
-        foreach (string virtualPath in request.FilePaths)
+        try
         {
-            try
+            bool success = await gcodeFilesService.DeleteFilesAsync(request.FilePaths, recursive, env.WebRootPath, HttpContext.RequestAborted);
+            return Ok(new
             {
-                (string _, string? fullCandidatePath, string _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
-                if (Directory.Exists(fullCandidatePath))
-                {
-                    directoriesRequested.Add(virtualPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug($"Validation failure while pre-scanning delete targets {virtualPath}: {ex.Message}");
-                skipped.Add(virtualPath);
-            }
+                deleted = success ? request.FilePaths.Count : 0,
+                totalRequested = request.FilePaths.Count
+            });
         }
-        if (directoriesRequested.Count == request.FilePaths.Count)
+        catch (Exception ex)
         {
-            // Retain legacy behavior: if ONLY directories were requested treat as a hard failure.
-            return BadRequest($"Cannot delete directories ({string.Join(", ", directoriesRequested)}) – directory deletion is not supported");
+            logger.LogError($"Error deleting G-code files: {ex.Message}");
+            return Problem("Failed to delete files", statusCode: 500);
         }
-        foreach (string virtualPath in request.FilePaths)
-        {
-            try
-            {
-                (string _, string? fullFilePath, string _) = ResolveAndValidatePath(virtualPath, rootFullPathOverride: rootFullPath, treatAsFile: true);
-                if (Directory.Exists(fullFilePath))
-                {
-                    if (recursive)
-                    {
-                        try
-                        {
-                            Directory.Delete(fullFilePath, true);
-                            deleted++;
-                            deletedFiles.Add(virtualPath);
-                        }
-                        catch (Exception exDel)
-                        {
-                            logger.LogWarning($"Failed recursive delete for {virtualPath}: {exDel.Message}");
-                            failed.Add(virtualPath);
-                        }
-                    }
-                    else
-                    {
-                        failed.Add(virtualPath); // directories not supported unless recursive
-                    }
-                }
-                else if (System.IO.File.Exists(fullFilePath))
-                {
-                    System.IO.File.Delete(fullFilePath);
-                    deleted++;
-                    deletedFiles.Add(virtualPath);
-                }
-                else
-                {
-                    skipped.Add(virtualPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning($"Failed to delete file {virtualPath}: {ex.Message}");
-                failed.Add(virtualPath);
-            }
-        }
-        return Ok(new
-        {
-            requested = request.FilePaths,
-            deleted,
-            deletedFiles,
-            skipped,
-            failed = failed.Concat(directoriesRequested).Distinct().ToList(),
-            totalRequested = request.FilePaths.Count,
-            totalSucceeded = deleted,
-            totalSkipped = skipped.Count,
-            totalFailed = failed.Concat(directoriesRequested).Distinct().Count()
-        });
     }
 
     /// <summary>
@@ -757,24 +565,24 @@ public class GcodeFilesController(
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(304)]
     [ProducesResponseType(404)]
-    public ActionResult Download([FromQuery] string path)
+    public async Task<ActionResult> DownloadAsync([FromQuery] string path)
     {
         try
         {
-            (string _, string? fullFilePath, string? virtualNorm) = ResolveAndValidatePath(path, treatAsFile: true);
-            if (!System.IO.File.Exists(fullFilePath))
+            (byte[] bytes, string fileName)? result = await gcodeFilesService.DownloadAsync(path, env.WebRootPath, HttpContext.RequestAborted);
+            if (result == null)
             {
                 return NotFound();
             }
 
+            // ETag and conditional request handling remains in controller
+            // (requires access to Request/Response headers and HTTP context)
+            (string _, string? fullFilePath, string _) = ResolveAndValidatePath(path, treatAsFile: true);
             System.IO.FileInfo info = new(fullFilePath);
             DateTime lastWriteUtc = info.LastWriteTimeUtc;
-            // Allow opting into weak ETags via env var (set GCODE_WEAK_ETAGS=1) so upstream caches can do
-            // semantic equivalence while still letting us change representation details later.
             bool useWeak = Environment.GetEnvironmentVariable("GCODE_WEAK_ETAGS") == "1";
-            string etag = GenerateEtag(info, useWeak); // uniqueness: mtime + size (sufficient for local FS scenarios)
+            string etag = GenerateEtag(info, useWeak);
 
-            // Conditional ETag handling
             RequestHeaders typedHeaders = Request.GetTypedHeaders();
             IList<EntityTagHeaderValue> ifNoneMatch = typedHeaders.IfNoneMatch;
             if (ifNoneMatch != null && ifNoneMatch.Any(t => string.Equals(t.Tag.ToString(), etag, StringComparison.Ordinal)))
@@ -783,12 +591,10 @@ public class GcodeFilesController(
                 Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
                 return StatusCode(StatusCodes.Status304NotModified);
             }
+
             DateTimeOffset? ifModifiedSince = typedHeaders.IfModifiedSince;
             if (ifModifiedSince.HasValue)
             {
-                // Browsers (and HttpClient) serialize Last-Modified with second-level precision (RFC1123).
-                // Our filesystem mtime (ticks) may have higher precision so a direct <= comparison can fail
-                // even though no modification occurred. Allow a 1s tolerance window.
                 DateTime ims = ifModifiedSince.Value.UtcDateTime;
                 if (lastWriteUtc <= ims || (lastWriteUtc - ims) < TimeSpan.FromSeconds(1))
                 {
@@ -803,14 +609,11 @@ public class GcodeFilesController(
 
             if (HttpContext.Request.Method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
             {
-                // Provide accurate Content-Length without sending body (tests assert size now)
                 Response.ContentLength = info.Length;
                 return new StatusCodeResult(200);
             }
 
-            byte[] bytes = System.IO.File.ReadAllBytes(fullFilePath);
-            string fileName = Path.GetFileName(virtualNorm);
-            return File(bytes, "application/octet-stream", fileName);
+            return File(result.Value.bytes, "application/octet-stream", result.Value.fileName);
         }
         catch (Exception ex)
         {
@@ -842,74 +645,24 @@ public class GcodeFilesController(
             return BadRequest($"Invalid file type '{ext}'. Allowed: {string.Join(", ", AllowedExtensions)}");
         }
 
+        // Quota check before writing
+        string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+        if (!quotaService.TryAddUsage(userId, file.Length, out long used, out long limit))
+        {
+            Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
+            Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
+            return StatusCode(StatusCodes.Status429TooManyRequests, $"Daily upload quota exceeded ({used}/{limit} bytes)");
+        }
+
         try
         {
-            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
-            if (!Directory.Exists(targetDirFullPath))
-            {
-                _ = Directory.CreateDirectory(targetDirFullPath);
-            }
-
-            // Sanitize filename (basic) - strip path separators
-            string originalName = Path.GetFileName(file.FileName);
-            if (string.IsNullOrWhiteSpace(originalName))
-            {
-                originalName = "upload.gcode";
-            }
-            string safeName = originalName;
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                safeName = safeName.Replace(c, '_');
-            }
-            if (!safeName.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-            {
-                safeName += ext; // enforce extension if somehow dropped
-            }
-
-            string destinationPath = Path.Combine(targetDirFullPath, safeName);
-            // Prevent escape (re-evaluate after combine) and enforce directory root
-            string fullTarget = Path.GetFullPath(destinationPath);
-            if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
-            {
-                return BadRequest("Unsafe target path");
-            }
-
-            // Collision handling: append (1), (2), ... before extension
-            if (System.IO.File.Exists(fullTarget))
-            {
-                string baseName = Path.GetFileNameWithoutExtension(safeName);
-                int counter = 1;
-                string candidate;
-                do
-                {
-                    candidate = baseName + " (" + counter++ + ")" + ext;
-                    fullTarget = Path.GetFullPath(Path.Combine(targetDirFullPath, candidate));
-                } while (System.IO.File.Exists(fullTarget));
-                safeName = Path.GetFileName(fullTarget);
-            }
-
-            // Quota check before writing
-            string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-            if (!quotaService.TryAddUsage(userId, file.Length, out long used, out long limit))
-            {
-                Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
-                Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
-                return StatusCode(StatusCodes.Status429TooManyRequests, $"Daily upload quota exceeded ({used}/{limit} bytes)");
-            }
-            await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await file.CopyToAsync(fs);
-
-            System.IO.FileInfo info = new(fullTarget);
-            string virtualFilePath = CombineVirtual(virtualDir, safeName);
-            GcodeFileEntryDto dto = new(
-                Path: virtualFilePath,
-                Name: safeName,
-                Size: info.Length,
-                ModifiedAt: info.LastWriteTimeUtc,
-                IsDirectory: false
-            );
-            // 201 Created with Location header (use listing endpoint path param representation)
-            return Created($"/api/gcode-files?path={Uri.EscapeDataString(virtualDir)}", dto);
+            GcodeFileEntryDto dto = await gcodeFilesService.UploadAsync(
+                path, file, uploadSettings, quotaService, env.WebRootPath, HttpContext.RequestAborted);
+            return Created($"/api/gcode-files?path={Uri.EscapeDataString(Path.GetDirectoryName(dto.Path) ?? "/")}", dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
@@ -934,57 +687,12 @@ public class GcodeFilesController(
         {
             return BadRequest("At least one file is required");
         }
-        List<GcodeFileEntryDto> created = new();
-        List<MultiUploadFailure> failed = new();
+
         try
         {
-            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path);
-            if (!Directory.Exists(targetDirFullPath))
-            {
-                _ = Directory.CreateDirectory(targetDirFullPath);
-            }
-            foreach (IFormFile? f in files)
-            {
-                try
-                {
-                    if (f == null || f.Length == 0)
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), "Empty file"));
-                        continue;
-                    }
-                    string ext = Path.GetExtension(f.FileName) ?? string.Empty;
-                    if (!AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f.FileName), $"Invalid file type '{ext}'"));
-                        continue;
-                    }
-                    // Quota per file (aggregate effect). If exceeds, mark failed.
-                    string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-                    if (!quotaService.TryAddUsage(userId, f.Length, out long used, out long limit))
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f.FileName), $"Quota exceeded ({used}/{limit})"));
-                        continue;
-                    }
-                    (string? fullTarget, string? safeName) = await SaveUploadedFileAsync(f, targetDirFullPath);
-                    System.IO.FileInfo info = new(fullTarget);
-                    string virtualFilePath = CombineVirtual(virtualDir, safeName);
-                    created.Add(new GcodeFileEntryDto(
-                        Path: virtualFilePath,
-                        Name: safeName,
-                        Size: info.Length,
-                        ModifiedAt: info.LastWriteTimeUtc,
-                        IsDirectory: false
-                    ));
-                }
-                catch (Exception exFile)
-                {
-                    logger.LogWarning($"Failed to save uploaded file {f?.FileName}: {exFile.Message}");
-                    failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), exFile.Message));
-                }
-            }
-            MultiUploadResponse response = new(created, failed, created.Count, failed.Count);
-            // 201 Created referencing directory listing location
-            return Created($"/api/gcode-files?path={Uri.EscapeDataString(virtualDir)}", response);
+            MultiUploadResponse response = await gcodeFilesService.UploadMultipleAsync(
+                path, files, uploadSettings, quotaService, env.WebRootPath, HttpContext.RequestAborted);
+            return Created($"/api/gcode-files?path={Uri.EscapeDataString(path ?? "/")}", response);
         }
         catch (Exception ex)
         {
@@ -1003,41 +711,28 @@ public class GcodeFilesController(
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Directory name validated (invalid chars, separators removed) and combined under validated parent path; GetFullPath+StartsWith used prior to Directory.Exists.")]
-    public ActionResult<GcodeFileEntryDto> MakeDirectory([FromQuery] string? path = "/", [FromQuery] string? name = null)
+    public async Task<ActionResult<GcodeFileEntryDto>> MakeDirectoryAsync([FromQuery] string? path = "/", [FromQuery] string? name = null)
     {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return BadRequest("name is required");
-        }
-        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\n') || name.Contains('\r'))
-        {
-            return BadRequest("Invalid directory name");
-        }
         try
         {
-            (_, string? parentDirFullPath, string? virtualParent) = ResolveAndValidatePath(path);
-            if (!Directory.Exists(parentDirFullPath))
-            {
-                return NotFound("Parent directory does not exist");
-            }
-            string newDirFullPath = Path.GetFullPath(Path.Combine(parentDirFullPath, name));
-            if (!newDirFullPath.StartsWith(parentDirFullPath, StringComparison.Ordinal))
-            {
-                return BadRequest("Unsafe directory target");
-            }
-            if (Directory.Exists(newDirFullPath))
-            {
-                return Conflict("Directory already exists");
-            }
-            _ = Directory.CreateDirectory(newDirFullPath);
-            GcodeFileEntryDto dto = new(
-                Path: CombineVirtual(virtualParent, name),
-                Name: name,
-                Size: 0,
-                ModifiedAt: Directory.GetLastWriteTimeUtc(newDirFullPath),
-                IsDirectory: true
-            );
-            return Created($"/api/gcode-files?path={Uri.EscapeDataString(virtualParent)}", dto);
+            GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, env.WebRootPath, HttpContext.RequestAborted);
+            return Created($"/api/gcode-files?path={Uri.EscapeDataString(Path.GetDirectoryName(dto.Path) ?? "/")}", dto);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
+        {
+            return Conflict(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
@@ -1049,9 +744,6 @@ public class GcodeFilesController(
     // ------------------------------------------------------------
     // Helper models & utilities
     // ------------------------------------------------------------
-    private static bool IsMatch(string name, string? search)
-        => string.IsNullOrWhiteSpace(search) || name.Contains(search, StringComparison.OrdinalIgnoreCase);
-
     private (string rootFullPath, string resolvedFullPath, string virtualNormalized) ResolveAndValidatePath(
         string? virtualPath,
         string? rootFullPathOverride = null,
@@ -1101,65 +793,10 @@ public class GcodeFilesController(
         }
     }
 
-    private static string CombineVirtual(string baseVirtual, string childName)
-    {
-        if (baseVirtual == "/")
-        {
-            return "/" + childName;
-        }
-        return baseVirtual.TrimEnd('/') + "/" + childName;
-    }
     private static string GenerateEtag(System.IO.FileInfo info, bool weak = false)
     {
         string core = $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}";
         return weak ? $"W/\"{core}\"" : $"\"{core}\"";
-    }
-
-    private static string SafeOriginalName(string? name)
-        => string.IsNullOrWhiteSpace(name) ? "(unnamed)" : Path.GetFileName(name);
-
-    private static async Task<(string fullTargetPath, string safeName)> SaveUploadedFileAsync(IFormFile file, string targetDirFullPath)
-    {
-        string ext = Path.GetExtension(file.FileName) ?? string.Empty;
-        string originalName = Path.GetFileName(file.FileName);
-        if (string.IsNullOrWhiteSpace(originalName))
-        {
-            originalName = "upload" + ext;
-        }
-        string safeName = originalName;
-        foreach (char c in Path.GetInvalidFileNameChars())
-        {
-            safeName = safeName.Replace(c, '_');
-        }
-        if (!safeName.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-        {
-            safeName += ext;
-        }
-        string destinationPath = Path.Combine(targetDirFullPath, safeName);
-        string fullTarget = Path.GetFullPath(destinationPath);
-        if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Unsafe target path");
-        }
-        if (System.IO.File.Exists(fullTarget))
-        {
-            string baseName = Path.GetFileNameWithoutExtension(safeName);
-            int counter = 1;
-            string candidate = baseName + " (" + counter + ")" + ext;
-            // CA3003: Path validated and generated by server logic, not user input
-            do
-            {
-#pragma warning disable CA3003 // Review code for file path injection vulnerabilities
-                fullTarget = Path.GetFullPath(Path.Combine(targetDirFullPath, candidate));
-#pragma warning restore CA3003
-                counter++;
-                candidate = baseName + " (" + counter + ")" + ext;
-            } while (System.IO.File.Exists(fullTarget));
-            safeName = Path.GetFileName(fullTarget);
-        }
-        await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        await file.CopyToAsync(fs);
-        return (fullTarget, safeName);
     }
 
     private static void PersistChunkState(ChunkUploadState state, IUnifiedLoggingService logger)
@@ -1208,11 +845,11 @@ public class GcodeFilesController(
     // ---------------- Settings & Move endpoints ----------------
     [HttpGet("settings")]
     [ProducesResponseType(typeof(GcodeUploadSettingsResponse), 200)]
-    public ActionResult<GcodeUploadSettingsResponse> GetSettings()
+    public async Task<ActionResult<GcodeUploadSettingsResponse>> GetSettingsAsync()
     {
         string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-        _ = quotaService.TryAddUsage(userId, 0, out long used, out long limit); // peek usage
-        return Ok(new GcodeUploadSettingsResponse(AllowedExtensions, limit, used));
+        var resp = await gcodeFilesService.GetSettingsAsync(userId, uploadSettings, quotaService, CancellationToken.None);
+        return Ok(resp);
     }
 
 
@@ -1234,50 +871,32 @@ public class GcodeFilesController(
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
-    public IActionResult Move([FromBody] MoveRequestDto request)
+    public async Task<IActionResult> MoveAsync([FromBody] MoveRequestDto request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.SourcePath) || string.IsNullOrWhiteSpace(request.DestinationPath))
         {
             return BadRequest("sourcePath and destinationPath required");
         }
+
         try
         {
-            (string? root, string? sourceFull, _) = ResolveAndValidatePath(request.SourcePath, treatAsFile: true);
-            (_, string? destFull, string? destVirtual) = ResolveAndValidatePath(request.DestinationPath, rootFullPathOverride: root, treatAsFile: true);
-            if (!System.IO.File.Exists(sourceFull) && !Directory.Exists(sourceFull))
+            (bool ok, string virtualPath, bool isDirectory) = await gcodeFilesService.MoveAsync(
+                request.SourcePath, request.DestinationPath, request.Overwrite, env.WebRootPath, HttpContext.RequestAborted);
+            if (!ok)
             {
                 return NotFound("Source not found");
             }
-            bool isDirectory = Directory.Exists(sourceFull);
-            bool destExistsFile = System.IO.File.Exists(destFull);
-            bool destExistsDir = Directory.Exists(destFull);
-            if ((destExistsFile || destExistsDir) && !request.Overwrite)
+
+            return Ok(new { path = virtualPath, isDirectory });
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (ex.Message.Contains("already exists"))
             {
-                return Conflict("Destination already exists");
+                return Conflict(ex.Message);
             }
-            if (destExistsFile)
-            {
-                System.IO.File.Delete(destFull);
-            }
-            if (destExistsDir && !isDirectory)
-            {
-                return Conflict("Destination directory exists");
-            }
-            if (isDirectory)
-            {
-                // Use Directory.Move (cannot overwrite) -> implement manual copy+delete if overwrite needed
-                if (destExistsDir)
-                {
-                    return Conflict("Destination directory exists (cannot overwrite)");
-                }
-                Directory.Move(sourceFull, destFull);
-            }
-            else
-            {
-                _ = Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
-                System.IO.File.Move(sourceFull, destFull, overwrite: request.Overwrite);
-            }
-            return Ok(new { path = destVirtual, isDirectory });
+
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {

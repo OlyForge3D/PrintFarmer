@@ -1,11 +1,9 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
 
@@ -15,24 +13,25 @@ namespace Farm.Web.Api.Controllers.Slicing;
 public class SlicingSubmissionController : ControllerBase
 {
     private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
-    private readonly ISlicerFileStorage _fileStorage;
+    private readonly ISlicingSubmissionService _submissionService;
     private readonly IUnifiedLoggingService _logger;
-    private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
-    private readonly AppDbContext _context;
 
-    public SlicingSubmissionController(ISlicerFileStorage fileStorage, IUnifiedLoggingService logger, IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator, IHostEnvironment env, AppDbContext context)
+    public SlicingSubmissionController(
+        ISlicingSubmissionService submissionService,
+        IUnifiedLoggingService logger,
+        IConfiguration cfg,
+        Infrastructure.Temp.ITempPathProvider tempPathProvider,
+        IHostEnvironment env)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(tempPathProvider);
-        _fileStorage = fileStorage;
+        _submissionService = submissionService ?? throw new ArgumentNullException(nameof(submissionService));
         _logger = logger;
+        _env = env ?? throw new ArgumentNullException(nameof(env));
         // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
         string tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
         _ = Directory.CreateDirectory(tempRoot);
-        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _env = env ?? throw new ArgumentNullException(nameof(env));
-        _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
     [HttpPost("slice")]
@@ -121,91 +120,30 @@ public class SlicingSubmissionController : ControllerBase
             return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
         }
 
-        try
+        // Determine authenticated user. In test environment allow a deterministic fallback user id
+        Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+        if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
         {
-            string fileKey = $"models/{Guid.NewGuid()}/{modelFile.FileName}";
-            string modelFileUrl;
-            await using (Stream stream = modelFile.OpenReadStream())
-            {
-                modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, stream, "application/octet-stream");
-            }
-
-            // Determine authenticated user. In test environment allow a deterministic fallback user id
-            Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
-            if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
-            {
-                if (_env.IsEnvironment("Testing"))
-                {
-                    // Provide a stable test user id for integration tests that don't include auth
-                    userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-                }
-                else
-                {
-                    return Unauthorized("Authenticated user is required to submit slicing jobs");
-                }
-            }
-
-            SlicingJobRequest request = new()
-            {
-                UserId = userId,
-                PrinterId = printerGuid,
-                ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
-                ModelFileName = modelFile.FileName,
-                SlicerEngine = Enum.Parse<Farm.Web.Shared.SlicerEngineType>(slicerEngine, true),
-                SlicerProfile = profile!
-            };
-
-            SlicingJobResponse response = await _orchestrator.SubmitJobAsync(request);
-
-            // Build a SliceResultDto to include richer metadata for tests and client consumption
-            SliceResultDto sliceResult = new()
-            {
-                JobId = response.JobId.ToString(),
-                Status = response.Status.ToString(),
-                Progress = 0,
-                PrintTime = 0,
-                FilamentUsed = 0,
-                LayerCount = 0,
-                GcodeUrl = string.Empty,
-                Metadata = new SliceMetadataDto
-                {
-                    SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                    ProfileUsed = profile!.Quality + " - " + profile.Material,
-                    EstimatedCost = 0
-                }
-            };
-
-            // In Testing environment register the job in the in-memory SlicingJobStore as Queued
             if (_env.IsEnvironment("Testing"))
             {
-                string jobId = response.JobId.ToString();
-                sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode"; // placeholder path; actual file will be created by the worker
-                sliceResult.Status = SlicingJobStatus.Queued.ToString();
-                sliceResult.Progress = 0;
-
-                SlicingJobDto storeJob = new()
-                {
-                    JobId = jobId,
-                    Status = SlicingJobStatus.Queued,
-                    Progress = 0,
-                    SlicerEngine = slicerEngine,
-                    PrinterId = printerGuid,
-                    ModelFilePath = modelFileUrl,
-                    GcodeFilePath = null,
-                    Profile = profile,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                _ = SlicingJobStore.Add(storeJob);
+                // Provide a stable test user id for integration tests that don't include auth
+                userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
             }
+            else
+            {
+                return Unauthorized("Authenticated user is required to submit slicing jobs");
+            }
+        }
 
-            return Accepted(sliceResult);
-        }
-        catch (Exception ex)
+        SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobAsync(
+            modelFile, slicerEngine, printerGuid, profile!, userId, HttpContext.RequestAborted);
+
+        if (!result.Success)
         {
-            _logger.LogError(ex, $"Failed to enqueue slicing job: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
+            return StatusCode(StatusCodes.Status500InternalServerError, result.Error);
         }
+
+        return Accepted(result.Result);
     }
 
     [HttpPost("slice-model/{modelId}")]
@@ -219,20 +157,6 @@ public class SlicingSubmissionController : ControllerBase
         [FromForm(Name = "profile")] string? profileRaw,
         [FromForm(Name = "priority")] string? priorityRaw)
     {
-        // Find the uploaded model
-        Model3D? model = await _context.Models3D.FirstOrDefaultAsync(m => m.Id == modelId);
-        if (model == null)
-        {
-            return NotFound($"Model with ID {modelId} not found");
-        }
-
-        // Validate that the model file exists on disk
-        if (!System.IO.File.Exists(model.FilePath))
-        {
-            _logger.LogError($"Model file not found on disk: {model.FilePath} for model {modelId}");
-            return NotFound("Model file not found on disk");
-        }
-
         // Validate parameters
         if (string.IsNullOrWhiteSpace(slicerEngine) || !AllowedEngines.Contains(slicerEngine))
         {
@@ -269,91 +193,33 @@ public class SlicingSubmissionController : ControllerBase
             return BadRequest($"Invalid slicer engine: {slicerEngine}. Supported engines: {string.Join(", ", Enum.GetNames<SlicerEngineType>())}");
         }
 
-        try
+        // Determine authenticated user
+        Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+        if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
         {
-            // Upload the model file to the slicer storage
-            string fileKey = $"models/{Guid.NewGuid()}/{model.OriginalFileName}";
-            string modelFileUrl;
-            using (FileStream fileStream = new(model.FilePath, FileMode.Open, FileAccess.Read))
-            {
-                modelFileUrl = await _fileStorage.UploadFileAsync(fileKey, fileStream, "application/octet-stream");
-            }
-
-            // Determine authenticated user
-            Claim? subClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
-            if (subClaim == null || !Guid.TryParse(subClaim.Value, out Guid userId) || userId == Guid.Empty)
-            {
-                if (_env.IsEnvironment("Testing"))
-                {
-                    userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-                }
-                else
-                {
-                    return Unauthorized("Authenticated user is required to submit slicing jobs");
-                }
-            }
-
-            SlicingJobRequest request = new()
-            {
-                UserId = userId,
-                PrinterId = printerGuid,
-                ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
-                ModelFileName = model.OriginalFileName,
-                SlicerEngine = Enum.Parse<Farm.Web.Shared.SlicerEngineType>(slicerEngine, true),
-                SlicerProfile = profile!
-            };
-
-            SlicingJobResponse response = await _orchestrator.SubmitJobAsync(request);
-
-            SliceResultDto sliceResult = new()
-            {
-                JobId = response.JobId.ToString(),
-                Status = response.Status.ToString(),
-                Progress = 0,
-                PrintTime = 0,
-                FilamentUsed = 0,
-                LayerCount = 0,
-                GcodeUrl = string.Empty,
-                Metadata = new SliceMetadataDto
-                {
-                    SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase) ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                    ProfileUsed = profile!.Quality + " - " + profile.Material,
-                    EstimatedCost = 0
-                }
-            };
-
-            // In Testing environment register the job in the in-memory SlicingJobStore as Queued
             if (_env.IsEnvironment("Testing"))
             {
-                string jobId = response.JobId.ToString();
-                sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode";
-                sliceResult.Status = SlicingJobStatus.Queued.ToString();
-                sliceResult.Progress = 0;
-
-                SlicingJobDto storeJob = new()
-                {
-                    JobId = jobId,
-                    Status = SlicingJobStatus.Queued,
-                    Progress = 0,
-                    SlicerEngine = slicerEngine,
-                    PrinterId = printerGuid,
-                    ModelFilePath = modelFileUrl,
-                    GcodeFilePath = null,
-                    Profile = profile,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                _ = SlicingJobStore.Add(storeJob);
+                userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
             }
-
-            _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.OriginalFileName})");
-
-            return Accepted(sliceResult);
+            else
+            {
+                return Unauthorized("Authenticated user is required to submit slicing jobs");
+            }
         }
-        catch (Exception ex)
+
+        SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobFromModelAsync(
+            modelId, slicerEngine, printerGuid, profile!, userId, HttpContext.RequestAborted);
+
+        if (!result.Success)
         {
-            _logger.LogError(ex, $"Failed to enqueue slicing job for uploaded model {modelId}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start slicing job");
+            // Check if it's a not found error
+            if (result.Error != null && result.Error.Contains("not found"))
+            {
+                return NotFound(result.Error);
+            }
+            return StatusCode(StatusCodes.Status500InternalServerError, result.Error);
         }
+
+        return Accepted(result.Result);
     }
 }

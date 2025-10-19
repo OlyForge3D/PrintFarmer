@@ -1,10 +1,10 @@
 ﻿using System.Text.RegularExpressions;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PrinterCapabilities;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
@@ -12,12 +12,12 @@ namespace Farm.Web.Api.Services;
 /// Service for automatically discovering printer capabilities from various sources
 /// </summary>
 public class PrinterCapabilityDiscoveryService(
-    AppDbContext context,
+    IPrintersRepository printersRepository,
     IMoonrakerClient moonrakerClient,
     IPrusaLinkClient prusaClient,
     IUnifiedLoggingService logger) : IPrinterCapabilityDiscoveryService
 {
-    private readonly AppDbContext _context = context;
+    private readonly IPrintersRepository _printersRepository = printersRepository;
     private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
     private readonly IPrusaLinkClient _prusaClient = prusaClient;
     private readonly IUnifiedLoggingService _logger = logger;
@@ -103,9 +103,7 @@ public class PrinterCapabilityDiscoveryService(
         try
         {
             // Load printer model for validation
-            Printer? printerWithModel = await _context.Printers
-                .Include(p => p.Model)
-                .FirstOrDefaultAsync(p => p.Id == printer.Id);
+            Printer? printerWithModel = await _printersRepository.FindByIdWithIncludesAsync(printer.Id, CancellationToken.None);
 
             if (printerWithModel?.Model != null)
             {
@@ -181,10 +179,7 @@ public class PrinterCapabilityDiscoveryService(
 
         try
         {
-            Printer? printerWithModel = await _context.Printers
-                .Include(p => p.Model)
-                .Include(p => p.Manufacturer)
-                .FirstOrDefaultAsync(p => p.Id == printer.Id);
+            Printer? printerWithModel = await _printersRepository.FindByIdWithIncludesAsync(printer.Id, CancellationToken.None);
 
             if (printerWithModel?.Model == null)
             {

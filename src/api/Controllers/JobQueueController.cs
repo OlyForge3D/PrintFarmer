@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/job-queue")]
 [Tags("Print Job Queue")]
-public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository printersRepo, IUnifiedLoggingService logger) : ControllerBase
+public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService queueService, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all jobs in the queue
@@ -27,30 +27,8 @@ public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository 
     {
         try
         {
-            List<PrintJob> jobs = await queueRepo.GetAllPrintJobsAsync(CancellationToken.None) ?? new List<PrintJob>();
-
-            return Ok(jobs.Select(job => new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.OriginalFileName ?? string.Empty,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            }));
+            var dtos = await queueService.GetQueueOverviewAsync(CancellationToken.None);
+            return Ok(dtos);
         }
         catch (Exception ex)
         {
@@ -75,91 +53,13 @@ public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository 
         }
         try
         {
-            // Validate the gcode file exists
-            GcodeFile? gcodeFile = await queueRepo.GetGcodeFileAsync(request.GcodeFileId, CancellationToken.None);
-            if (gcodeFile == null)
+            var added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
+            if (added == null)
             {
-                return NotFound($"G-code file with ID {request.GcodeFileId} not found");
+                return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
             }
 
-            // Create the job
-            PrintJob job = new()
-            {
-                Id = Guid.NewGuid(),
-                Name = gcodeFile.OriginalFileName,
-                GcodeFileId = request.GcodeFileId,
-                AssignedPrinterId = request.AssignedPrinterId,
-                Status = PrintJobStatus.Queued,
-                Priority = (int)request.Priority,
-                RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-                RequiredMaterialType = request.RequiredMaterialType,
-                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue ?
-                    TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value) : null,
-                EstimatedFilamentUsage = gcodeFile.EstimatedFilamentLengthMm,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                QueuedAt = DateTime.UtcNow
-            };
-
-            // Set queue position (global queued jobs)
-            int maxPosition = await queueRepo.GetNextGlobalQueuePositionAsync(CancellationToken.None);
-            job.QueuePosition = maxPosition;
-
-            await queueRepo.AddPrintJobAsync(job, CancellationToken.None);
-            await queueRepo.SaveChangesAsync(CancellationToken.None);
-
-            // Load related entities for response via repo-loaded entities
-            PrintJob? saved = await queueRepo.GetPrintJobByIdAsync(job.Id, CancellationToken.None);
-
-            if (saved == null)
-            {
-                // This should not happen immediately after save, but guard for analysis
-                return CreatedAtAction(nameof(GetJobAsync), new { id = job.Id }, new JobQueuePrintJobDto
-                {
-                    Id = job.Id,
-                    GcodeFileId = job.GcodeFileId,
-                    GcodeFileName = job.Name,
-                    AssignedPrinterId = job.AssignedPrinterId,
-                    AssignedPrinterName = string.Empty,
-                    Status = (PrintJobStatus?)job.Status,
-                    Priority = job.Priority,
-                    QueuePosition = job.QueuePosition,
-                    RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                    RequiredMaterialType = job.RequiredMaterialType,
-                    EstimatedPrintTime = job.EstimatedPrintTime,
-                    EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                    ActualStartTime = job.ActualStartTime,
-                    ActualEndTime = job.ActualEndTime,
-                    ActualPrintTime = job.ActualPrintTime,
-                    ActualFilamentUsage = job.ActualFilamentUsage,
-                    FailureReason = job.FailureReason,
-                    CreatedAt = job.CreatedAt,
-                    UpdatedAt = job.UpdatedAt
-                });
-            }
-
-            return CreatedAtAction(nameof(GetJobAsync), new { id = job.Id }, new JobQueuePrintJobDto
-            {
-                Id = saved.Id,
-                GcodeFileId = saved.GcodeFileId,
-                GcodeFileName = saved.GcodeFile?.OriginalFileName ?? string.Empty,
-                AssignedPrinterId = saved.AssignedPrinterId,
-                AssignedPrinterName = saved.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)saved.Status,
-                Priority = saved.Priority,
-                QueuePosition = saved.QueuePosition,
-                RequiredNozzleDiameter = saved.RequiredNozzleDiameter,
-                RequiredMaterialType = saved.RequiredMaterialType,
-                EstimatedPrintTime = saved.EstimatedPrintTime,
-                EstimatedFilamentUsage = saved.EstimatedFilamentUsage,
-                ActualStartTime = saved.ActualStartTime,
-                ActualEndTime = saved.ActualEndTime,
-                ActualPrintTime = saved.ActualPrintTime,
-                ActualFilamentUsage = saved.ActualFilamentUsage,
-                FailureReason = saved.FailureReason,
-                CreatedAt = saved.CreatedAt,
-                UpdatedAt = saved.UpdatedAt
-            });
+            return CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
         }
         catch (Exception ex)
         {
@@ -179,35 +79,13 @@ public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository 
     {
         try
         {
-            PrintJob? job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
-
-            if (job == null)
+            var dto = await queueService.GetJobAsync(id, CancellationToken.None);
+            if (dto == null)
             {
                 return NotFound($"Print job with ID {id} not found");
             }
 
-            return Ok(new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.OriginalFileName ?? string.Empty,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)(int)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            });
+            return Ok(dto);
         }
         catch (Exception ex)
         {
@@ -232,77 +110,14 @@ public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository 
         }
         try
         {
-            PrintJob? job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
-
-            if (job == null)
+            var updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);
+            if (updated == null)
             {
-                return NotFound($"Print job with ID {id} not found");
+                // Service returns null for not found or invalid assignment; translate to proper HTTP
+                return NotFound($"Print job with ID {id} not found or invalid printer assignment");
             }
 
-            // Update fields if provided
-            if (request.Status.HasValue)
-            {
-                job.Status = (PrintJobStatus)(int)request.Status.Value;
-            }
-
-            if (request.Priority.HasValue)
-            {
-                job.Priority = (int)request.Priority.Value;
-            }
-
-            if (request.AssignedPrinterId.HasValue)
-            {
-                // Validate printer exists
-                Printer? printer = await printersRepo.FindByIdAsync(request.AssignedPrinterId.Value, CancellationToken.None);
-                if (printer == null)
-                {
-                    return BadRequest($"Printer with ID {request.AssignedPrinterId} not found");
-                }
-                job.AssignedPrinterId = request.AssignedPrinterId.Value;
-            }
-
-            if (request.ActualFilamentUsage.HasValue)
-            {
-                job.ActualFilamentUsage = request.ActualFilamentUsage.Value;
-            }
-
-            if (!string.IsNullOrEmpty(request.FailureReason))
-            {
-                job.FailureReason = request.FailureReason;
-            }
-
-            job.UpdatedAt = DateTime.UtcNow;
-
-            await queueRepo.SaveChangesAsync(CancellationToken.None);
-
-            // Reload printer if assignment changed
-            if (request.AssignedPrinterId.HasValue)
-            {
-                job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
-            }
-
-            return Ok(new JobQueuePrintJobDto
-            {
-                Id = job!.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.OriginalFileName ?? string.Empty,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)(int)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            });
+            return Ok(updated);
         }
         catch (Exception ex)
         {
@@ -323,20 +138,11 @@ public class JobQueueController(IQueueRepository queueRepo, IPrintersRepository 
     {
         try
         {
-            PrintJob? job = await queueRepo.GetPrintJobByIdAsync(id, CancellationToken.None);
-            if (job == null)
+            var ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
+            if (!ok)
             {
-                return NotFound($"Print job with ID {id} not found");
+                return BadRequest("Cannot delete the job (not found or currently printing)");
             }
-
-            // Can only delete queued or failed jobs
-            if (job.Status == PrintJobStatus.Printing || job.Status == PrintJobStatus.Starting)
-            {
-                return BadRequest("Cannot delete a job that is currently printing");
-            }
-
-            await queueRepo.RemovePrintJobAsync(job, CancellationToken.None);
-            await queueRepo.SaveChangesAsync(CancellationToken.None);
 
             return NoContent();
         }
