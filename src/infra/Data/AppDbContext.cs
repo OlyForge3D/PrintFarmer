@@ -31,6 +31,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
     public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
+    public DbSet<Worker> Workers => Set<Worker>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -552,6 +553,32 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(j => j.QueuedAt);
             b.HasIndex(j => new { j.Status, j.Priority, j.QueuedAt }); // For queue processing
             b.HasIndex(j => j.WorkerId);
+        });
+
+        // Worker Entity Configuration
+        modelBuilder.Entity<Worker>(b =>
+        {
+            b.HasKey(w => w.Id);
+            b.Property(w => w.ServiceId).IsRequired().HasMaxLength(256);
+            b.Property(w => w.Name).IsRequired().HasMaxLength(256);
+            b.Property(w => w.EndpointUrl).IsRequired().HasMaxLength(2048);
+            b.Property(w => w.CapabilitiesJson).HasColumnType("TEXT");
+            b.Property(w => w.Status).IsRequired().HasMaxLength(50);
+            b.Property(w => w.FreeSlots).IsRequired();
+            b.Property(w => w.TotalSlots).IsRequired();
+            b.Property(w => w.RegisteredAt).IsRequired();
+            b.Property(w => w.ApiKey).HasMaxLength(512);
+            b.Property(w => w.Version).HasMaxLength(50);
+            b.Property(w => w.MetadataJson).HasColumnType("TEXT");
+            b.Property(w => w.CreatedAt).IsRequired();
+            b.Property(w => w.UpdatedAt).IsRequired();
+            b.Property(w => w.DisabledReason).HasMaxLength(1024);
+
+            // Indexes for efficient querying
+            b.HasIndex(w => w.ServiceId).IsUnique();
+            b.HasIndex(w => w.Status);
+            b.HasIndex(w => w.LastHeartbeat);
+            b.HasIndex(w => new { w.Status, w.FreeSlots }); // For worker selection
         });
 
         modelBuilder.Entity<PasswordPolicyEntity>(b =>

@@ -1,0 +1,210 @@
+using System.Text.Json;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Repositories.Workers;
+using Farm.Web.Shared.Contracts.Workers;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Web.Api.Controllers.Workers;
+
+/// <summary>
+/// Controller for managing worker nodes in the distributed slicing system
+/// </summary>
+[ApiController]
+[Route("api/workers")]
+[Tags("Workers")]
+public class WorkersController : ControllerBase
+{
+    private readonly IWorkerRepository _workerRepository;
+    private readonly ILogger<WorkersController> _logger;
+
+    public WorkersController(
+        IWorkerRepository workerRepository,
+        ILogger<WorkersController> logger)
+    {
+        _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Get all workers
+    /// </summary>
+    /// <param name="limit">Maximum number of workers to return</param>
+    /// <param name="offset">Number of workers to skip</param>
+    /// <returns>List of workers</returns>
+    [HttpGet]
+    [ProducesResponseType(typeof(List<WorkerResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAllWorkersAsync([FromQuery] int limit = 100, [FromQuery] int offset = 0)
+    {
+        IReadOnlyList<Worker> workers = await _workerRepository.GetAllAsync(limit, offset);
+
+        List<WorkerResponse> response = workers.Select(MapToResponse).ToList();
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Get worker by ID
+    /// </summary>
+    /// <param name="id">Worker ID</param>
+    /// <returns>Worker details</returns>
+    [HttpGet("{id}")]
+    [ProducesResponseType(typeof(WorkerResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetWorkerByIdAsync(Guid id)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker == null)
+        {
+            return NotFound($"Worker {id} not found");
+        }
+
+        WorkerResponse response = MapToResponse(worker);
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Get workers by status
+    /// </summary>
+    /// <param name="status">Worker status (Online, Offline, Busy, Error, Draining)</param>
+    /// <param name="limit">Maximum number of workers to return</param>
+    /// <returns>List of workers with specified status</returns>
+    [HttpGet("by-status/{status}")]
+    [ProducesResponseType(typeof(List<WorkerResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetWorkersByStatusAsync(string status, [FromQuery] int limit = 100)
+    {
+        IReadOnlyList<Worker> workers = await _workerRepository.GetByStatusAsync(status, limit, 0);
+
+        List<WorkerResponse> response = workers.Select(MapToResponse).ToList();
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Get available workers (online with free slots)
+    /// </summary>
+    /// <param name="limit">Maximum number of workers to return</param>
+    /// <returns>List of available workers</returns>
+    [HttpGet("available")]
+    [ProducesResponseType(typeof(List<WorkerResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAvailableWorkersAsync([FromQuery] int limit = 100)
+    {
+        IReadOnlyList<Worker> workers = await _workerRepository.GetAvailableWorkersAsync(limit);
+
+        List<WorkerResponse> response = workers.Select(MapToResponse).ToList();
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Disable a worker (admin operation)
+    /// </summary>
+    /// <param name="id">Worker ID</param>
+    /// <param name="request">Disable reason</param>
+    /// <returns>No content on success</returns>
+    [HttpPost("{id}/disable")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DisableWorkerAsync(Guid id, [FromBody] DisableWorkerRequest request)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker == null)
+        {
+            return NotFound($"Worker {id} not found");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Reason))
+        {
+            return BadRequest("Reason is required");
+        }
+
+        await _workerRepository.DisableWorkerAsync(id, request.Reason);
+        await _workerRepository.SaveChangesAsync();
+
+        _logger.LogInformation("Worker {WorkerId} ({WorkerName}) disabled: {Reason}", id, worker.Name, request.Reason);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Enable a worker (admin operation)
+    /// </summary>
+    /// <param name="id">Worker ID</param>
+    /// <returns>No content on success</returns>
+    [HttpPost("{id}/enable")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> EnableWorkerAsync(Guid id)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker == null)
+        {
+            return NotFound($"Worker {id} not found");
+        }
+
+        await _workerRepository.EnableWorkerAsync(id);
+        await _workerRepository.SaveChangesAsync();
+
+        _logger.LogInformation("Worker {WorkerId} ({WorkerName}) enabled", id, worker.Name);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Delete a worker (admin operation)
+    /// </summary>
+    /// <param name="id">Worker ID</param>
+    /// <returns>No content on success</returns>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteWorkerAsync(Guid id)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker == null)
+        {
+            return NotFound($"Worker {id} not found");
+        }
+
+        await _workerRepository.DeleteAsync(id);
+        await _workerRepository.SaveChangesAsync();
+
+        _logger.LogInformation("Worker {WorkerId} ({WorkerName}) deleted", id, worker.Name);
+
+        return NoContent();
+    }
+
+    private static WorkerResponse MapToResponse(Worker worker)
+    {
+        string[]? capabilities = null;
+        try
+        {
+            capabilities = JsonSerializer.Deserialize<string[]>(worker.CapabilitiesJson);
+        }
+        catch
+        {
+            // Ignore parsing errors
+        }
+
+        return new WorkerResponse
+        {
+            Id = worker.Id,
+            ServiceId = worker.ServiceId,
+            Name = worker.Name,
+            EndpointUrl = worker.EndpointUrl,
+            Capabilities = capabilities ?? Array.Empty<string>(),
+            Status = worker.Status,
+            FreeSlots = worker.FreeSlots,
+            TotalSlots = worker.TotalSlots,
+            ActiveJobs = worker.ActiveJobs,
+            CompletedJobs = worker.CompletedJobs,
+            FailedJobs = worker.FailedJobs,
+            AverageProcessingTimeSeconds = worker.AverageProcessingTimeSeconds,
+            LastHeartbeat = worker.LastHeartbeat,
+            RegisteredAt = worker.RegisteredAt,
+            OnlineAt = worker.OnlineAt,
+            OfflineAt = worker.OfflineAt,
+            Version = worker.Version,
+            IsDisabled = worker.IsDisabled,
+            DisabledReason = worker.DisabledReason
+        };
+    }
+}

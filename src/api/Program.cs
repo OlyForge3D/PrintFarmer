@@ -119,6 +119,10 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.W
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository, Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository>();
 // Slice job event service (SignalR notifications for job lifecycle)
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISliceJobEventService, Farm.Web.Api.Services.Slicing.SliceJobEventService>();
+// Worker repository (worker pool management)
+builder.Services.AddScoped<Farm.Web.Api.Repositories.Workers.IWorkerRepository, Farm.Web.Api.Repositories.Workers.EfWorkerRepository>();
+// Job dispatcher service (capability-based job assignment)
+builder.Services.AddScoped<Farm.Web.Api.Services.JobDispatch.IJobDispatcherService, Farm.Web.Api.Services.JobDispatch.JobDispatcherService>();
 // Queue repository & service (refactor: Controllers -> Services)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Queue.IQueueRepository, Farm.Web.Api.Repositories.Queue.EfQueueRepository>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Queue.IJobQueueService, Farm.Web.Api.Services.Queue.JobQueueService>();
@@ -401,6 +405,10 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
     // SpaDevServerWatcher is implemented as a BackgroundService; register it as a hosted service
     _ = builder.Services.AddHostedService<SpaDevServerWatcher>();
 }
+
+// Register background services for distributed slicing
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.WorkerHealthMonitorService>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobDispatchingService>();
 
 // Add JWT Authentication
 builder.Services.AddAuthentication("Bearer")
