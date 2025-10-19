@@ -1,9 +1,11 @@
 using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.DTOs.Artifacts;
 using Farm.Web.Api.Services.Artifacts;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,14 +17,20 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize] // All endpoints require authentication
 public class ArtifactsController : ControllerBase
 {
     private readonly IArtifactsService _service;
+    private readonly Farm.Web.Api.Repositories.Slicing.ISliceJobRepository _jobRepository;
 
     private readonly Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> _settings;
-    public ArtifactsController(IArtifactsService service, Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> settings)
+    public ArtifactsController(
+        IArtifactsService service,
+        Farm.Web.Api.Repositories.Slicing.ISliceJobRepository jobRepository,
+        Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> settings)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -193,10 +201,19 @@ public class ArtifactsController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(ArtifactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
         var a = await _service.GetAsync(id, ct);
-        return a == null ? NotFound() : Ok(Map(a));
+        if (a == null) return NotFound();
+        
+        // Authorization: only job owner or admin can access
+        if (!await CanAccessArtifactAsync(a.JobId, ct))
+        {
+            return Forbid();
+        }
+        
+        return Ok(Map(a));
     }
 
     /// <summary>
@@ -213,8 +230,15 @@ public class ArtifactsController : ControllerBase
     /// </remarks>
     [HttpGet("job/{jobId:guid}")]
     [ProducesResponseType(typeof(ArtifactDto[]), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> ListByJobAsync(Guid jobId, CancellationToken ct)
     {
+        // Authorization: only job owner or admin can list
+        if (!await CanAccessArtifactAsync(jobId, ct))
+        {
+            return Forbid();
+        }
+        
         var list = await _service.ListByJobAsync(jobId, ct);
         return Ok(list.Select(Map));
     }
@@ -241,14 +265,45 @@ public class ArtifactsController : ControllerBase
     [HttpGet("{id:guid}/download")]
     [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> DownloadAsync(Guid id, CancellationToken ct)
     {
         var result = await _service.GetWithPathAsync(id, ct);
         if (result == null) return NotFound();
         var (artifact, fullPath) = result.Value;
+        
+        // Authorization: only job owner or admin can download
+        if (!await CanAccessArtifactAsync(artifact.JobId, ct))
+        {
+            return Forbid();
+        }
+        
         if (!System.IO.File.Exists(fullPath)) return NotFound(new { error = "file missing" });
         var stream = System.IO.File.OpenRead(fullPath);
         return File(stream, artifact.ContentType ?? "application/octet-stream", artifact.FileName);
+    }
+
+    /// <summary>
+    /// Check if current user can access artifacts for the given job.
+    /// Returns true if user owns the job or has admin role.
+    /// </summary>
+    private async Task<bool> CanAccessArtifactAsync(Guid jobId, CancellationToken ct)
+    {
+        // Admin can access any artifact
+        if (User.IsInRole("farm_admin"))
+        {
+            return true;
+        }
+
+        // Check if user owns the job
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            return false;
+        }
+
+        var job = await _jobRepository.GetByIdAsync(jobId, ct);
+        return job != null && job.UserId == userId;
     }
 
     private ArtifactDto Map(Farm.Infrastructure.Domain.Artifact a)

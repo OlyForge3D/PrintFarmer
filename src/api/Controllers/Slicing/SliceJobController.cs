@@ -26,6 +26,7 @@ public class SliceJobController : ControllerBase
     private readonly IHostEnvironment _env;
     private readonly ISlicerProfileRepository _profileRepository;
     private readonly IArtifactsService _artifactsService;
+    private readonly Farm.Web.Api.Services.Slicing.SliceJobMetrics _metrics;
 
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
 
@@ -36,7 +37,8 @@ public class SliceJobController : ControllerBase
         IHostEnvironment env,
         ISlicerProfileRepository profileRepository,
         IArtifactsService artifactsService,
-        Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService)
+        Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
+        Farm.Web.Api.Services.Slicing.SliceJobMetrics metrics)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
@@ -45,6 +47,7 @@ public class SliceJobController : ControllerBase
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _artifactsService = artifactsService ?? throw new ArgumentNullException(nameof(artifactsService));
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
+        _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
     }
 
     /// <summary>
@@ -528,6 +531,15 @@ public class SliceJobController : ControllerBase
         }
 
         _logger.LogInformation("Job {JobId} completed with {ArtifactCount} artifacts", job.Id, allArtifactIds.Count);
+        
+        // Record completion metrics
+        bool hasLog = logArtifactId.HasValue || (request.AdditionalArtifactIds?.Any(aid =>
+        {
+            var a = _artifactsService.GetAsync(aid, HttpContext.RequestAborted).Result;
+            return a?.Kind == "log";
+        }) ?? false);
+        _metrics.RecordJobCompletion(allArtifactIds.Count, hasLog);
+
         return Ok(response);
     }
 }

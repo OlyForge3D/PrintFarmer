@@ -84,6 +84,9 @@ builder.Services.Configure<ArtifactStorageSettings>(builder.Configuration.GetSec
 builder.Services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
 
+// Slicing metrics
+builder.Services.AddSingleton<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
+
 // Adapters bridging API services to the importing project's adapter interfaces
 builder.Services.AddScoped<Farm.Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Farm.Web.Api.Services.Adapters.PrinterCapabilityDiscoveryAdapter>();
 builder.Services.AddScoped<Farm.Importing.Services.Adapters.IDefaultCatalogAdapter, Farm.Web.Api.Services.Adapters.DefaultCatalogAdapter>();
@@ -356,6 +359,7 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
                .AddHttpClientInstrumentation()
                .AddRuntimeInstrumentation()
                .AddMeter("PrintFarmer.Artifacts")
+               .AddMeter("PrintFarmer.Slicing")
                .AddMeter("PrintFarmer.API");
 
         // Add console exporter for development
