@@ -664,7 +664,9 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
-// Expose Slicer progress hub for slicer registry and progress events
+// Slicer registry events hub (worker registration, heartbeat, deregistration)
+app.MapHub<SlicerHub>("/hubs/slicer-registry");
+// Slicer progress hub for job processing progress events
 app.MapHub<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>("/hubs/slicers");
 
 // Prometheus metrics endpoint

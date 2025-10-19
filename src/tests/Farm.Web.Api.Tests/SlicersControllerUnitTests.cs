@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Shared.Contracts.Slicing;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.SlicerServices;
@@ -22,7 +23,7 @@ namespace Farm.Web.Api.Tests
             return TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
         }
 
-        private static Mock<IHubContext<SlicerProgressHub>> CreateMockHub(out Mock<IClientProxy> clientProxy)
+        private static Mock<IHubContext<SlicerHub>> CreateMockHub(out Mock<IClientProxy> clientProxy)
         {
             clientProxy = new Mock<IClientProxy>();
             clientProxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<CancellationToken>()))
@@ -31,7 +32,7 @@ namespace Farm.Web.Api.Tests
             var clients = new Mock<IHubClients>();
             clients.Setup(c => c.All).Returns(clientProxy.Object);
 
-            var hubContext = new Mock<IHubContext<SlicerProgressHub>>();
+            var hubContext = new Mock<IHubContext<SlicerHub>>();
             hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
             return hubContext;
         }

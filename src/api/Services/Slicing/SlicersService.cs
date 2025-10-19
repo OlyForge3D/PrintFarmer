@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Shared.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Microsoft.AspNetCore.SignalR;
@@ -12,9 +13,9 @@ namespace Farm.Web.Api.Services.Slicing
     public class SlicersService : ISlicersService
     {
         private readonly ISlicersRepository _repo;
-        private readonly IHubContext<Services.SlicerServices.SlicerProgressHub> _hub;
+        private readonly IHubContext<SlicerHub> _hub;
 
-        public SlicersService(ISlicersRepository repo, IHubContext<Services.SlicerServices.SlicerProgressHub> hub)
+        public SlicersService(ISlicersRepository repo, IHubContext<SlicerHub> hub)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -52,14 +53,17 @@ namespace Farm.Web.Api.Services.Slicing
             // Broadcast registration event (best-effort)
             try
             {
-                await _hub.Clients.All.SendAsync("SlicerRegistered", new
+                await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerRegistered, new
                 {
                     id = svc.Id,
                     name = svc.Name,
+                    slicerType = svc.SlicerType,
                     version = svc.Version,
                     host = svc.Host,
+                    capabilitiesJson = svc.CapabilitiesJson,
                     maxConcurrentJobs = svc.MaxConcurrentJobs,
-                    status = svc.Status
+                    status = svc.Status,
+                    lastSeen = svc.LastSeen
                 }, ct);
             }
             catch
@@ -95,11 +99,13 @@ namespace Farm.Web.Api.Services.Slicing
 
             try
             {
-                await _hub.Clients.All.SendAsync("SlicerHeartbeat", new
+                await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerHeartbeat, new
                 {
                     id = svc.Id,
+                    name = svc.Name,
                     status = svc.Status,
-                    freeSlots = dto.FreeSlots
+                    freeSlots = dto.FreeSlots,
+                    lastSeen = svc.LastSeen
                 }, ct);
             }
             catch
@@ -123,7 +129,7 @@ namespace Farm.Web.Api.Services.Slicing
 
             try
             {
-                await _hub.Clients.All.SendAsync("SlicerDeregistered", new { id = svc.Id }, ct);
+                await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerDeregistered, new { id = svc.Id, name = svc.Name }, ct);
             }
             catch
             {
