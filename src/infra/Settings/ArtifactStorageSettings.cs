@@ -47,4 +47,28 @@ public sealed class ArtifactStorageSettings
     /// Default: true.
     /// </summary>
     public bool EnableStorageAlerts { get; set; } = true;
+
+    /// <summary>
+    /// Maximum age in days for artifacts before they become eligible for cleanup.
+    /// Null or zero disables age-based cleanup. Default: 90 days.
+    /// </summary>
+    public int? MaxAgeDays { get; set; } = 90;
+
+    /// <summary>
+    /// Maximum total storage in bytes before oldest artifacts are cleaned up.
+    /// Null or zero disables size-based cleanup. Default: 10GB.
+    /// </summary>
+    public long? MaxTotalBytes { get; set; } = 10L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// When true, cleanup service only logs what would be deleted without actually deleting.
+    /// Default: true (safe default for new deployments).
+    /// </summary>
+    public bool EnableCleanupDryRun { get; set; } = true;
+
+    /// <summary>
+    /// Interval in hours between cleanup service scans.
+    /// Default: 24 hours (daily cleanup).
+    /// </summary>
+    public int CleanupIntervalHours { get; set; } = 24;
 }

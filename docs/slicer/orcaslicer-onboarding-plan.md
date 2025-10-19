@@ -14,7 +14,7 @@ This document contains a phased implementation plan to onboard OrcaSlicer as a s
 | Phase 1: Registry & Discovery API | ⏳ Not Started | 0% | Worker discovery & listing (deferred; partial needs already covered by Phase 3) |
 | **Phase 2: Job API & Dispatching** | **✅ Complete** | **100%** | **Production-ready with full observability** |
 | Phase 3: Worker Registration | ✅ Complete | 100% | Registry + heartbeat + worker sync (SlicersService→Worker) |
-| Phase 4: Local Artifact Storage & Job Completion | 🚧 Advanced | 85% | Storage, bulk upload, metrics, thresholds done; final job linkage & retention pending |
+| Phase 4: Local Artifact Storage & Job Completion | ✅ Complete | 100% | Storage, upload, metrics, thresholds, completion linkage, authorization, retention policy all implemented |
 | Phase 5: UI Integration | ⏳ Not Started | 0% | Admin UI and embedding |
 | Phase 6: Profile Import/Export | ⏳ Not Started | 0% | Orca JSON handling |
 | Phase 7: Hardening & Polish | ⏳ Not Started | 0% | Operational excellence |
@@ -238,56 +238,50 @@ Metrics (to add)
 - Histogram: `artifact_upload_bytes` (distribution)
 - Gauge: `artifact_storage_total_bytes` (periodic scan; optional post-phase)
 
-Future Enhancements
+Future Enhancements (Deferred to Phase 7)
 - Periodic re-hash verification task.
 - Compression for large textual logs.
 - Automatic thumbnail derivation registry.
-- Cleanup policy (LRU or age-based) with dry-run mode.
+- Deduplication detection leveraging SHA-256.
 
-Current Progress (85%)
+Current Progress (100% - Phase 4 Complete ✅)
 Implemented & Verified:
-- Artifact entity, persistence, and filesystem layout
-- Single and bulk upload endpoints (`POST /api/artifacts`, `POST /api/artifacts/bulk`)
-- Download & metadata endpoints (`GET /api/artifacts/{id}`, `GET /api/artifacts/{id}/download`, `GET /api/artifacts/job/{jobId}`)
-- Stable URL contract surfaced via controller mapping (with optional `PublicUrl` when static serving enabled)
-- SHA-256 integrity hashing stored with metadata
-- Kind validation with structured 400 response (allowed kinds configurable)
-- Bulk upload: atomic multi-file processing with kind inference (MIME + extension fallback)
-- Metrics instrumentation:
+- ✅ Artifact entity, persistence, and filesystem layout
+- ✅ Single and bulk upload endpoints (`POST /api/artifacts`, `POST /api/artifacts/bulk`)
+- ✅ Download & metadata endpoints (`GET /api/artifacts/{id}`, `GET /api/artifacts/{id}/download`, `GET /api/artifacts/job/{jobId}`)
+- ✅ Stable URL contract surfaced via controller mapping (with optional `PublicUrl` when static serving enabled)
+- ✅ SHA-256 integrity hashing stored with metadata
+- ✅ Kind validation with structured 400 response (allowed kinds configurable)
+- ✅ Bulk upload: atomic multi-file processing with kind inference (MIME + extension fallback)
+- ✅ Inline log text upload (`UploadTextAsync` for completion endpoint log data)
+- ✅ Job completion artifact linkage (domain fields: `ArtifactIdsCsv`, `ArtifactsCount`, `ArtifactsTotalBytes`)
+- ✅ Completion endpoint integration (`CompleteJobAsync` with artifact summary response)
+- ✅ Artifact metrics instrumentation:
   - Counter: `artifacts_uploaded_total` (tag: kind)
   - Histogram: `artifact_upload_bytes`
   - Gauge: `artifact_storage_total_bytes`
   - Threshold state gauge + events (warning/critical) for storage utilization
-- Threshold alerting events (single transition semantics) with logging subscription
-- Optional static file hosting for artifacts (disabled by default, configurable `EnableStaticServing`)
-- App configuration block `ArtifactStorage` extended with thresholds & static serving toggles
-- Comprehensive tests (13 passing) covering validation, metrics, thresholds, bulk scenarios
+- ✅ Completion metrics instrumentation:
+  - Counter: `jobs_completed_total`
+  - Counter: `jobs_completed_with_log_total`
+  - Histogram: `artifacts_per_job`
+- ✅ Threshold alerting events (single transition semantics) with logging subscription
+- ✅ Authorization: job ownership / admin role checks on artifact access (`ArtifactsController`)
+- ✅ Retention policy configuration (`MaxAgeDays`, `MaxTotalBytes`, `EnableCleanupDryRun`, `CleanupIntervalHours`)
+- ✅ Cleanup service with dry-run mode (`ArtifactCleanupService` + background hosted service)
+- ✅ Optional static file hosting for artifacts (disabled by default, configurable `EnableStaticServing`)
+- ✅ App configuration block `ArtifactStorage` extended with thresholds, retention, and static serving toggles
+- ✅ Comprehensive test coverage (17 tests: 13 artifact + 4 completion tests, all passing)
 
-Remaining Work:
-- Link artifacts to slice jobs (associate JobId/WorkerId in completion flow)
-- Implement `/api/slice/{id}/complete` integration returning artifact IDs & final status
-- Add retention / cleanup policy draft (age + size threshold dry-run)
-- Optional dedup (future; leverage SHA-256) & rehash verification background task
-- Formalize security model for download authorization (job ownership / admin roles)
-
-Risk & Considerations:
-- Potential rapid storage growth without retention (mitigate via upcoming cleanup policy)
-- Worker compatibility requires updated completion contract including artifact references
-- Static serving toggle must remain off by default to avoid unintended public exposure
-
-Updated Acceptance Criteria (Implemented items marked ✅; pending items ⏳):
+Acceptance Criteria (All Complete ✅):
 - ✅ Upload endpoints store file + metadata and return stable (or public when enabled) URL
 - ✅ Bulk upload supports multi-artifact submission with kind inference
 - ✅ Integrity hash recorded for each artifact
 - ✅ Metrics & thresholds exposed for observability/alerting
-- ⏳ Completion endpoint finalizes job status and links artifacts
-- ⏳ Authorization rules for artifact access refined (ownership / RBAC)
-- ⏳ Retention policy documented & initial implementation (dry-run mode)
+- ✅ Completion endpoint finalizes job status and links artifacts
+- ✅ Authorization rules for artifact access enforce ownership / RBAC
+- ✅ Retention policy implemented with dry-run mode (age + size thresholds)
 
-Acceptance Criteria (Planned)
-- Upload endpoint stores file + metadata and returns stable URL.
-- Completion endpoint updates job status and links artifacts.
-- Files accessible locally without cloud dependencies.
 
 Estimated Effort Remaining: 2–3 dev days (foundational), +1 day hardening.
 

@@ -83,6 +83,8 @@ builder.Services.AddScoped<Farm.Importing.Services.Import.IImportParserService, 
 builder.Services.Configure<ArtifactStorageSettings>(builder.Configuration.GetSection(ArtifactStorageSettings.SectionName));
 builder.Services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactCleanupService, Farm.Web.Api.Services.Artifacts.ArtifactCleanupService>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Artifacts.ArtifactCleanupHostedService>();
 
 // Slicing metrics
 builder.Services.AddSingleton<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
