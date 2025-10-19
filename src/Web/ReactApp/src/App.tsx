@@ -26,6 +26,7 @@ import WorkerManagementPage from '@/pages/WorkerManagementPage';
 import JobQueueDashboardPage from '@/pages/JobQueueDashboardPage';
 import NewSliceJobPage from '@/pages/NewSliceJobPage';
 import SlicerProfilesPage from '@/pages/SlicerProfilesPage';
+import { SlicerRegistryPage } from '@/pages/SlicerRegistryPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
@@ -178,6 +179,14 @@ function AuthenticatedAppRoutes() {
           element={
             <ProtectedRoute requiredRole="farm_admin">
               <WorkerManagementPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/slicer-registry"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <SlicerRegistryPage />
             </ProtectedRoute>
           }
         />
