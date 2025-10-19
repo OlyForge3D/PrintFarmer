@@ -494,9 +494,10 @@ public class SliceJobController : ControllerBase
         // Derive stable URL from stored relative path (primary artifact governs result URL)
         string resultUrl = $"/api/artifacts/{primary.Id}/download";
 
-        await _jobRepository.MarkCompletedAsync(
+        await _jobRepository.MarkCompletedWithArtifactsAsync(
             job.Id,
             resultUrl,
+            allArtifactIds,
             request.EstimatedPrintTimeSeconds,
             request.FilamentUsedGrams,
             HttpContext.RequestAborted);
@@ -520,6 +521,11 @@ public class SliceJobController : ControllerBase
             FilamentUsedGrams = request.FilamentUsedGrams,
             LogArtifactId = logArtifactId
         };
+        if (updated != null)
+        {
+            response.ArtifactsCount = updated.ArtifactsCount;
+            response.ArtifactsTotalBytes = updated.ArtifactsTotalBytes;
+        }
 
         _logger.LogInformation("Job {JobId} completed with {ArtifactCount} artifacts", job.Id, allArtifactIds.Count);
         return Ok(response);

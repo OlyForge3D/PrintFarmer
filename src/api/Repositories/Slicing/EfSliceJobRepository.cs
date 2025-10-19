@@ -133,6 +133,35 @@ public class EfSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
     }
 
+    public async Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
+    {
+        var job = await GetByIdAsync(jobId, ct);
+        if (job == null) return;
+
+        var ids = artifactIds?.Distinct().ToArray() ?? Array.Empty<Guid>();
+        job.Status = SliceJobStatus.Completed;
+        job.CompletedAt = DateTime.UtcNow;
+        job.ResultFileUrl = resultFileUrl;
+        job.ProgressPercent = 100;
+        job.ProgressMessage = "Completed successfully";
+        job.EstimatedPrintTimeSeconds = estimatedPrintTimeSeconds;
+        job.FilamentUsedGrams = filamentUsedGrams;
+        job.ArtifactIdsCsv = ids.Length > 0 ? string.Join(',', ids) : null;
+        // Aggregate bytes from artifacts table
+        if (ids.Length > 0)
+        {
+            long totalBytes = await _db.Artifacts.Where(a => ids.Contains(a.Id)).SumAsync(a => (long)a.SizeBytes, ct);
+            job.ArtifactsTotalBytes = totalBytes;
+            job.ArtifactsCount = ids.Length;
+        }
+        else
+        {
+            job.ArtifactsTotalBytes = 0;
+            job.ArtifactsCount = 0;
+        }
+        job.UpdatedAt = DateTime.UtcNow;
+    }
+
     public async Task MarkFailedAsync(Guid jobId, string errorMessage, CancellationToken ct = default)
     {
         var job = await GetByIdAsync(jobId, ct);

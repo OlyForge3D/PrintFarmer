@@ -145,6 +145,22 @@ public class SliceJob
     /// Timestamp when this record was last updated
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Comma-separated list of artifact IDs associated with this job at completion (primary + additional + log).
+    /// Stored for quick lookup without join; canonical source remains the Artifacts table.
+    /// </summary>
+    public string? ArtifactIdsCsv { get; set; }
+
+    /// <summary>
+    /// Total number of artifacts produced for this job (snapshot at completion).
+    /// </summary>
+    public int? ArtifactsCount { get; set; }
+
+    /// <summary>
+    /// Aggregate size in bytes of all artifacts for this job (snapshot at completion).
+    /// </summary>
+    public long? ArtifactsTotalBytes { get; set; }
 }
 
 /// <summary>

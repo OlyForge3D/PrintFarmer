@@ -227,4 +227,14 @@ public class CompleteSliceJobResponse
     /// If a log text payload was provided and converted into an artifact, this contains that artifact's ID; otherwise null.
     /// </summary>
     public Guid? LogArtifactId { get; set; }
+
+    /// <summary>
+    /// Total artifact count snapshot at completion.
+    /// </summary>
+    public int? ArtifactsCount { get; set; }
+
+    /// <summary>
+    /// Aggregate bytes of all artifacts at completion.
+    /// </summary>
+    public long? ArtifactsTotalBytes { get; set; }
 }

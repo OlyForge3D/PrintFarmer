@@ -50,6 +50,10 @@ public interface ISliceJobRepository
     /// Mark job as completed with result
     /// </summary>
     Task MarkCompletedAsync(Guid jobId, string resultFileUrl, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default);
+    /// <summary>
+    /// Mark job completed with artifact associations and summary aggregation.
+    /// </summary>
+    Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default);
 
     /// <summary>
     /// Mark job as failed with error message
