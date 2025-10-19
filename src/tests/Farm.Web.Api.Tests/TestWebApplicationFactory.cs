@@ -365,6 +365,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     .RequireAuthenticatedUser()
                     .Build();
             });
+
+            // Prometheus scraping endpoint guarded in Program for tests; no MeterProvider needed here.
             // Allow tests to opt into using EF Core's InMemory provider instead of SQLite.
             // This is useful to isolate tests from SQLite file/in-memory semantics when
             // table creation timing causes flakiness. Enable with TEST_USE_EF_INMEMORY=true.

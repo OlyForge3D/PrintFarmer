@@ -32,6 +32,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
     public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
     public DbSet<Worker> Workers => Set<Worker>();
+    // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
+    public DbSet<Artifact> Artifacts => Set<Artifact>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -610,6 +612,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(j => j.SlicerProfileId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Artifact Entity Configuration
+        modelBuilder.Entity<Artifact>(b =>
+        {
+            b.HasKey(a => a.Id);
+            b.Property(a => a.JobId).IsRequired();
+            b.Property(a => a.Kind).IsRequired().HasMaxLength(64);
+            b.Property(a => a.FileName).IsRequired().HasMaxLength(256);
+            b.Property(a => a.RelativePath).IsRequired().HasMaxLength(1024);
+            b.Property(a => a.ContentType).IsRequired().HasMaxLength(128);
+            b.Property(a => a.SizeBytes).IsRequired();
+            b.Property(a => a.Sha256).IsRequired().HasMaxLength(64);
+            b.Property(a => a.CreatedAt).IsRequired();
+
+            // Helpful indexes for lookup & listing
+            b.HasIndex(a => a.JobId);
+            b.HasIndex(a => a.WorkerId);
+            b.HasIndex(a => a.CreatedAt);
+            b.HasIndex(a => new { a.JobId, a.Kind });
         });
 
         // Worker Entity Configuration

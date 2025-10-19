@@ -479,7 +479,7 @@ public class SliceJobController : ControllerBase
         }
 
         // Derive stable URL from stored relative path
-        string resultUrl = $"/artifacts/{primary.RelativePath}";
+        string resultUrl = $"/api/artifacts/{primary.Id}/download";
 
         await _jobRepository.MarkCompletedAsync(
             job.Id,

@@ -22,4 +22,29 @@ public sealed class ArtifactStorageSettings
     /// Comma-separated list of allowed kinds (e.g. "gcode,thumbnail,preview,log").
     /// </summary>
     public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log";
+
+    /// <summary>
+    /// Enable static file serving for artifacts at /artifacts/* URLs.
+    /// When enabled, artifacts can be accessed directly without API authentication.
+    /// Default: false (use API download endpoint only).
+    /// </summary>
+    public bool EnableStaticServing { get; set; } = false;
+
+    /// <summary>
+    /// Storage warning threshold in bytes (default 5GB).
+    /// When total storage exceeds this, a warning event is logged.
+    /// </summary>
+    public long StorageWarningThresholdBytes { get; set; } = 5L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Storage critical threshold in bytes (default 10GB).
+    /// When total storage exceeds this, a critical event is logged and metrics flag is set.
+    /// </summary>
+    public long StorageCriticalThresholdBytes { get; set; } = 10L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Enable storage threshold monitoring and alerting.
+    /// Default: true.
+    /// </summary>
+    public bool EnableStorageAlerts { get; set; } = true;
 }

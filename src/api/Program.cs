@@ -81,6 +81,7 @@ builder.Services.AddScoped<Farm.Importing.Services.Import.IImportParserService, 
 
 // Artifact storage settings & service (Phase 4)
 builder.Services.Configure<ArtifactStorageSettings>(builder.Configuration.GetSection(ArtifactStorageSettings.SectionName));
+builder.Services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
 
 // Adapters bridging API services to the importing project's adapter interfaces
@@ -354,7 +355,8 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
         _ = metrics.AddAspNetCoreInstrumentation()
                .AddHttpClientInstrumentation()
                .AddRuntimeInstrumentation()
-               .AddMeter("PrintFarmer.*");
+               .AddMeter("PrintFarmer.Artifacts")
+               .AddMeter("PrintFarmer.API");
 
         // Add console exporter for development
         if (builder.Environment.IsDevelopment())
@@ -590,6 +592,41 @@ catch
     // If capture fails, leave captured variables null and fall back to app-level resolution later.
 }
 
+// Configure artifact storage metrics thresholds and alerts
+try
+{
+    var artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+    var artifactMetrics = app.Services.GetRequiredService<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
+    
+    if (artifactSettings.EnableStorageAlerts)
+    {
+        artifactMetrics.SetThresholds(artifactSettings.StorageWarningThresholdBytes, artifactSettings.StorageCriticalThresholdBytes);
+        
+        // Subscribe to threshold events for logging
+        artifactMetrics.ThresholdExceeded += (sender, e) =>
+        {
+            var logger = app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+            var levelStr = e.Level switch
+            {
+                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Warning => "WARNING",
+                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Critical => "CRITICAL",
+                _ => "UNKNOWN"
+            };
+            
+            logger?.LogWarning(
+                "[ArtifactStorage] {Level} threshold exceeded: {CurrentGB:F2} GB (Warning: {WarningGB:F2} GB, Critical: {CriticalGB:F2} GB)",
+                levelStr,
+                e.CurrentBytes / (1024.0 * 1024 * 1024),
+                e.WarningThreshold / (1024.0 * 1024 * 1024),
+                e.CriticalThreshold / (1024.0 * 1024 * 1024));
+        };
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact storage thresholds");
+}
+
 // NOTE: Settings initialization from environment variables is performed
 // during database initialization in ProgramHelpers.InitializeDatabaseAsync
 // to ensure the database schema exists before any SettingsService queries run.
@@ -673,8 +710,18 @@ app.MapHub<SlicerHub>("/hubs/slicer-registry");
 // Slicer progress hub for job processing progress events
 app.MapHub<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>("/hubs/slicers");
 
-// Prometheus metrics endpoint
-app.MapPrometheusScrapingEndpoint();
+// Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
+try
+{
+    if (app.Services.GetService<OpenTelemetry.Metrics.MeterProvider>() != null)
+    {
+        app.MapPrometheusScrapingEndpoint();
+    }
+}
+catch
+{
+    // In minimal test environments MeterProvider may be absent; skip exposing metrics
+}
 
 // Health checks
 // Capture host environment and resolve startup status from the root service provider (app.Services)
@@ -887,6 +934,43 @@ if (isMonolithicDeployment)
     {
         app.Logger.LogWarning("[Startup][SPA] Skipping SPA static file pipeline: WebRootPath missing or directory not found: {WebRootPath}", staticRoot);
     }
+}
+
+// Configure static file serving for artifacts if enabled
+try
+{
+    var artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+    if (artifactSettings.EnableStaticServing)
+    {
+        var artifactPath = Path.IsPathRooted(artifactSettings.RootPath)
+            ? artifactSettings.RootPath
+            : Path.Combine(app.Environment.ContentRootPath, artifactSettings.RootPath);
+
+        if (Directory.Exists(artifactPath))
+        {
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(artifactPath),
+                RequestPath = "/artifacts",
+                OnPrepareResponse = ctx =>
+                {
+                    // Cache artifacts for 1 hour (they are immutable once created)
+                    ctx.Context.Response.Headers.Append("Cache-Control", "public, max-age=3600");
+                },
+                ServeUnknownFileTypes = true,
+                DefaultContentType = "application/octet-stream"
+            });
+            app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
+        }
+        else
+        {
+            app.Logger.LogWarning("[Startup] Artifact static serving enabled but path does not exist: {Path}", artifactPath);
+        }
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact static file serving");
 }
 
 // Initialize database (ensures schema exists before resolving SettingsService)

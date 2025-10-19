@@ -24,11 +24,13 @@ public class ArtifactsService : IArtifactsService
     private readonly ArtifactStorageSettings _settings;
     private static readonly Regex FileNameSafeRegex = new("[^a-zA-Z0-9._-]+", RegexOptions.Compiled);
 
-    public ArtifactsService(IWebHostEnvironment env, Farm.Infrastructure.Data.AppDbContext db, IOptions<ArtifactStorageSettings> opts)
+    private readonly ArtifactsMetrics _metrics;
+    public ArtifactsService(IWebHostEnvironment env, Farm.Infrastructure.Data.AppDbContext db, IOptions<ArtifactStorageSettings> opts, ArtifactsMetrics metrics)
     {
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
+        _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
     }
 
     public async Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
@@ -72,6 +74,7 @@ public class ArtifactsService : IArtifactsService
 
         _db.Set<Artifact>().Add(artifact);
         await _db.SaveChangesAsync(ct);
+        _metrics.RecordUpload(file.Length);
 
         // Increment worker artifact counters if available
         if (workerId.HasValue)
@@ -96,6 +99,15 @@ public class ArtifactsService : IArtifactsService
     public async Task<IReadOnlyList<Artifact>> ListByJobAsync(Guid jobId, CancellationToken ct)
     {
         return await _db.Set<Artifact>().Where(a => a.JobId == jobId).OrderByDescending(a => a.CreatedAt).ToListAsync(ct);
+    }
+
+    public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
+    {
+        var artifact = await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);
+        if (artifact == null) return null;
+        string root = ResolveRootPath();
+        string fullPath = Path.Combine(root, artifact.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+        return (artifact, fullPath);
     }
 
     private string ResolveRootPath()
