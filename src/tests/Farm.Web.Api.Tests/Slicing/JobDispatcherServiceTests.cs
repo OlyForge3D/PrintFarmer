@@ -4,33 +4,48 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Infrastructure.Telemetry;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
 public class JobDispatcherServiceTests
 {
-    private class StubSliceJobRepository : ISliceJobRepository
+    public class StubSliceJobRepository : ISliceJobRepository
     {
         public List<SliceJob> Jobs { get; } = new();
         public Task AddAsync(SliceJob job, CancellationToken ct = default) { Jobs.Add(job); return Task.CompletedTask; }
         public Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult<SliceJob?>(Jobs.Find(j => j.Id == id));
-        public Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs); 
+        public Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs);
         public Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.FindAll(j => j.Status == status));
         public Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
         {
             var queued = Jobs.FindAll(j => j.Status == SliceJobStatus.Queued);
-            if (limit.HasValue) queued = queued.GetRange(0, Math.Min(limit.Value, queued.Count));
+            if (limit.HasValue)
+            {
+                queued = queued.GetRange(0, Math.Min(limit.Value, queued.Count));
+            }
+
             return Task.FromResult((IReadOnlyList<SliceJob>)queued);
+        }
+        public Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default)
+        {
+            var list = Jobs.FindAll(j => j.WorkerId == workerId);
+            return Task.FromResult((IReadOnlyList<SliceJob>)list);
         }
         public Task UpdateStatusAsync(Guid id, string status, string? progressMessage = null, int? progressPercent = null, CancellationToken ct = default)
         {
-            var job = Jobs.Find(j => j.Id == id); if (job != null) job.Status = status; return Task.CompletedTask;
+            var job = Jobs.Find(j => j.Id == id);
+            if (job != null)
+            {
+                job.Status = status;
+            }
+
+            return Task.CompletedTask;
         }
         public Task MarkStartedAsync(Guid id, Guid workerId, CancellationToken ct = default) { var job = Jobs.Find(j => j.Id == id); if (job != null) { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.StartedAt = DateTime.UtcNow; } return Task.CompletedTask; }
         public Task MarkCompletedAsync(Guid id, string resultFileUrl, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default) { return Task.CompletedTask; }
@@ -40,7 +55,8 @@ public class JobDispatcherServiceTests
         public Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
         {
             var job = Jobs.Find(j => j.Status == SliceJobStatus.Queued);
-            if (job != null) { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
+            if (job != null)
+            { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
             return Task.FromResult(job);
         }
         public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -71,9 +87,13 @@ public class JobDispatcherServiceTests
                     bool ok = true;
                     foreach (var req in requiredCapabilities)
                     {
-                        if (!Array.Exists(caps, c => string.Equals(c, req, StringComparison.OrdinalIgnoreCase))) { ok = false; break; }
+                        if (!Array.Exists(caps, c => string.Equals(c, req, StringComparison.OrdinalIgnoreCase)))
+                        { ok = false; break; }
                     }
-                    if (ok) matching.Add(w);
+                    if (ok)
+                    {
+                        matching.Add(w);
+                    }
                 }
                 catch { }
             }
@@ -122,8 +142,8 @@ public class JobDispatcherServiceTests
         var evtService = new StubSliceJobEventService();
         var logger = new StubLogger();
         var httpFactory = new DefaultHttpClientFactory();
-            var retryOptions = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
-            var dispatcher = new JobDispatcherService(jobRepo, workerRepo, evtService, logger, httpFactory, retryOptions);
+        var retryOptions = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+        var dispatcher = new JobDispatcherService(jobRepo, workerRepo, evtService, logger, httpFactory, retryOptions);
 
         // Workers: one with required capability 'orcaslicer', one without
         var workerWithCap = new Worker

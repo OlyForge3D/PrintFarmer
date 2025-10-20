@@ -1,15 +1,15 @@
 using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Xunit;
-using Farm.Web.Shared.Contracts.Slicing;
-using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
@@ -36,7 +36,8 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         var hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
         var profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISlicerProfileRepository>();
         var rateLimit = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.RateLimiting.IRateLimitService>();
-        var controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit)
+        var metrics = new Farm.Web.Api.Services.Slicing.SliceJobMetrics();
+        var controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

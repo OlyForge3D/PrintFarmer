@@ -125,6 +125,12 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfilesService, Farm.
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicerProfileRepository, Farm.Web.Api.Repositories.Slicing.EfSlicerProfileRepository>();
 // Profile parsing/sanitization service (extract metadata + compute hash)
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileParsingService, Farm.Web.Api.Services.Slicing.ProfileParsingService>();
+// OrcaSlicer bundle parsing service (Phase 6)
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleParsingService, Farm.Web.Api.Services.Slicing.OrcaBundleParsingService>();
+// OrcaSlicer preset mapping service (Phase 6) - maps bundle presets to catalog entities
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaPresetMappingService, Farm.Web.Api.Services.Slicing.OrcaPresetMappingService>();
+// OrcaSlicer bundle export service (Phase 6) - exports PrintFarmer profiles to Orca format
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleExportService, Farm.Web.Api.Services.Slicing.OrcaBundleExportService>();
 // Slicers registry repository
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)
@@ -221,7 +227,7 @@ builder.Services.AddSwaggerGen(options =>
     {
         options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
     }
-    
+
     // Add JWT Bearer authentication to Swagger UI
     options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
@@ -232,7 +238,7 @@ builder.Services.AddSwaggerGen(options =>
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
         Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token in the text input below.\n\nExample: \"abc123xyz\""
     });
-    
+
     options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
     {
         {
@@ -247,7 +253,7 @@ builder.Services.AddSwaggerGen(options =>
             Array.Empty<string>()
         }
     });
-    
+
     options.SchemaFilter<Farm.Web.Api.Infrastructure.Swagger.ExampleSchemaFilter>();
     options.OperationFilter<Farm.Web.Api.Infrastructure.Swagger.ExampleOperationFilter>();
 });
@@ -370,8 +376,8 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
             _ = metrics.AddConsoleExporter();
         }
 
-            // Add Prometheus exporter for /metrics endpoint
-            _ = metrics.AddPrometheusExporter();
+        // Add Prometheus exporter for /metrics endpoint
+        _ = metrics.AddPrometheusExporter();
 
         // Add OTLP exporter for metrics
         string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
@@ -603,11 +609,11 @@ try
 {
     var artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
     var artifactMetrics = app.Services.GetRequiredService<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
-    
+
     if (artifactSettings.EnableStorageAlerts)
     {
         artifactMetrics.SetThresholds(artifactSettings.StorageWarningThresholdBytes, artifactSettings.StorageCriticalThresholdBytes);
-        
+
         // Subscribe to threshold events for logging
         artifactMetrics.ThresholdExceeded += (sender, e) =>
         {
@@ -618,7 +624,7 @@ try
                 Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Critical => "CRITICAL",
                 _ => "UNKNOWN"
             };
-            
+
             logger?.LogWarning(
                 "[ArtifactStorage] {Level} threshold exceeded: {CurrentGB:F2} GB (Warning: {WarningGB:F2} GB, Critical: {CriticalGB:F2} GB)",
                 levelStr,

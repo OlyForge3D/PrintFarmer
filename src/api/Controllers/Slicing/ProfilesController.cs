@@ -1,10 +1,10 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Slicing;
-using System.Text.Json;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -401,5 +401,93 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
             new() { LayerHeight = 0.2, InfillPercentage = 20, PrintSpeed = 50, NozzleTemperature = 210, BedTemperature = 60, Supports = false, Material = "PLA", Quality = "standard" },
             new() { LayerHeight = 0.15, InfillPercentage = 25, PrintSpeed = 40, NozzleTemperature = 210, BedTemperature = 60, Supports = true, Material = "PLA", Quality = "fine" }
         };
+    }
+
+    // --- Phase 6: OrcaSlicer bundle import/preview endpoint ---
+    /// <summary>
+    /// Parse and preview an OrcaSlicer config bundle without persisting. Returns structured preview of all detected presets.
+    /// </summary>
+    /// <param name="request">Bundle JSON payload</param>
+    /// <param name="orcaParsingService">OrcaSlicer bundle parsing service</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Preview DTO with printers, filaments, and process presets</returns>
+    [HttpPost("import/orca/preview")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile bundle import
+    [ProducesResponseType(typeof(OrcaBundlePreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult PreviewOrcaBundle(
+        [FromBody] ImportOrcaBundleDto? request,
+        [FromServices] IOrcaBundleParsingService orcaParsingService,
+        CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.BundleJson))
+        {
+            return BadRequest("BundleJson is required");
+        }
+
+        try
+        {
+            // Validate bundle format
+            if (!orcaParsingService.IsValidOrcaBundle(request.BundleJson))
+            {
+                return BadRequest("Invalid OrcaSlicer bundle format. Expected JSON object with printer/filament/process sections.");
+            }
+
+            // Parse and return preview
+            OrcaBundlePreviewDto preview = orcaParsingService.ParseBundle(request.BundleJson);
+
+            _logger.LogInformation(
+                $"OrcaSlicer bundle preview: {preview.Printers.Count} printers, {preview.Filaments.Count} filaments, {preview.Processes.Count} processes");
+
+            return Ok(preview);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogWarning(ex, "Invalid OrcaSlicer bundle format");
+            return BadRequest(new { error = "Invalid bundle format", detail = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to preview OrcaSlicer bundle");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to parse bundle");
+        }
+    }
+
+    /// <summary>
+    /// Export PrintFarmer profiles to OrcaSlicer config bundle JSON format.
+    /// </summary>
+    /// <param name="request">Export configuration (optional filters for printers/filaments)</param>
+    /// <param name="exportService">OrcaSlicer bundle export service</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Valid OrcaSlicer config bundle JSON string</returns>
+    [HttpPost("export/orca")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile export
+    [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Produces("application/json")]
+    public async Task<IActionResult> ExportOrcaBundleAsync(
+        [FromBody] ExportOrcaBundleRequest? request,
+        [FromServices] IOrcaBundleExportService exportService,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Use default request if not provided
+            request ??= new ExportOrcaBundleRequest();
+
+            // Generate bundle JSON
+            string bundleJson = await exportService.ExportBundleAsync(request);
+
+            _logger.LogInformation(
+                $"OrcaSlicer bundle exported: {request.PrinterModelIds?.Count ?? 0} printer filters, {request.FilamentTypeIds?.Count ?? 0} filament filters");
+
+            // Return raw JSON with proper content type
+            return Content(bundleJson, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to export OrcaSlicer bundle");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to generate export bundle");
+        }
     }
 }

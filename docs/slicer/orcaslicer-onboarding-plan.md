@@ -16,10 +16,10 @@ This document contains a phased implementation plan to onboard OrcaSlicer as a s
 | Phase 3: Worker Registration | ✅ Complete | 100% | Registry + heartbeat + worker sync (SlicersService→Worker) |
 | Phase 4: Local Artifact Storage & Job Completion | ✅ Complete | 100% | Storage, upload, metrics, thresholds, completion linkage, authorization, retention policy all implemented |
 | Phase 5: UI Integration | ✅ Complete | 100% | Worker selection UI, real-time updates, job status |
-| Phase 6: Profile Import/Export | ⏳ Not Started | 0% | Orca JSON handling |
+| **Phase 6: Profile Import/Export** | **🔄 In Progress** | **89%** | **Parser, preview, mapping, import wizard, export endpoint, enhanced registry UI, integration + E2E tests complete; seeding remaining** |
 | Phase 7: Hardening & Polish | ⏳ Not Started | 0% | Operational excellence |
 
-**Current Focus:** Phase 5 complete. Moving to Phase 6 (Profile Import/Export) for Orca JSON handling and profile management features.
+**Current Focus:** Phase 6 (Profile Import/Export) – 8/9 tasks complete (parser, preview, mapping, import wizard, export endpoint, enhanced registry UI, API integration tests, E2E wizard tests). Remaining: default profile seeding (Task 6).
 
 Guidelines
 - Work in small PRs from branch `feature/orcaslicer-reimplementation`.
@@ -401,20 +401,58 @@ Acceptance criteria
 Estimated effort: 3–5 dev days
 
 ## Phase 6 — Profile import/export, seeding & admin UX
-Goal: Seed built-in Orca profiles, allow user import of custom Orca JSON files and map profiles to registered printers.
+Goal: Seed built-in Orca profiles, allow user import/export of Orca JSON bundles, and provide enhanced administrative UX.
 
-Tasks
-- [ ] Implement Orca JSON parser in API (parse, normalize, return preview)
-- [ ] POST `/api/profiles/import/orca` — preview parsed profiles and suggested mappings to registered printers
-- [ ] UI import wizard to map parsed printer/filament/process presets to registered printers or create new ones
-- [ ] Seeder job to seed official Orca built-in profiles into DB as read-only
-- [ ] Exporter to generate Orca JSON or 3MF from canonical profiles
-- [ ] Tests & sample profile suite
+**Status**: 🔄 **IN PROGRESS** (89% complete – 8/9 tasks done)
 
-Acceptance criteria
+### Completed Tasks ✅ (Oct 19 2025)
+- [x] **Task 1**: Orca JSON parser (multi-section, metadata extraction, validation)
+- [x] **Task 2**: Preview endpoint `POST /api/slicer/profiles/import/orca/preview`
+- [x] **Task 3**: Mapping logic (fuzzy matching, confidence scoring)
+- [x] **Task 4**: React import wizard UI (`OrcaImportWizard.tsx` multi-step flow)
+- [x] **Task 5**: Export endpoint `POST /api/slicer/profiles/export/orca` returning canonical Orca bundle JSON
+- [x] **Task 7**: Enhanced profile registry UI (search, filter by engine/quality/source, Orca import/export quick actions)
+- [x] **Task 8**: API integration tests (round‑trip bundle verification, export validity, preview parsing robustness)
+- [x] **Task 9**: E2E wizard test suite (19 passing tests covering upload, preview, selection, import, completion flow)
+
+### Remaining Task 🔄
+- [ ] **Task 6**: Default profile seeding (Bambu Lab X1C/P1S, Prusa MK4/Mini+, common filament/process presets) – development-only seeder with idempotent safety
+
+### Implementation Details (Updated)
+
+**Backend Components** (Expanded):
+- `OrcaBundleParsingService` – Robust section parsing (printers/filaments/processes) with tolerant numeric parsing & metadata block
+- `OrcaBundleExportService` – Generates canonical Orca bundle JSON (printer, filament, process arrays + metadata)
+- `OrcaPresetMappingService` – Weighted fuzzy matching (name/manufacturer/build volume/nozzle) with confidence categories
+- `ProfilesController` – Preview + export endpoints (admin‑guarded)
+- DTOs updated: `ExportOrcaBundleRequest`, `ImportOrcaBundleRequest`, match result contracts
+
+**Frontend Components** (Expanded):
+- `OrcaImportWizard.tsx` – Upload → preview → selective import → completion summary
+- `SlicerProfilesPage.tsx` – Added search & filters (engine, quality, source) + Orca import/export quick actions
+- `orcaProfilesService.ts` – `previewBundle()`, `importBundle()`, `exportBundle()` methods
+- Type definitions aligned: `OrcaBundlePreview`, match/result interfaces
+
+**Testing (Current)**:
+- Integration: `OrcaBundlePreviewTests.cs`, `OrcaBundleIntegrationTests.cs`, `OrcaMappingAccuracyTests.cs` (parsing, mapping heuristics, export round‑trip)
+- E2E: `OrcaImportWizard.test.tsx` – 19 tests (file upload, error handling, preset selection, import success/failure, completion recycle flow)
+- All new Phase 6 test suites passing locally (React + API) except legacy unrelated failing API tests (known pre-existing state)
+
+### Acceptance Criteria (Original)
 - Built-in profiles seeded and import UI works for uploaded Orca JSON
 
-Estimated effort: 3–6 dev days
+### Revised Acceptance Criteria (Comprehensive)
+- ✅ Orca JSON parser handles multi-preset bundles (printer[], filament[], process[])
+- ✅ Preview endpoint returns parsed bundle with metadata
+- ✅ Mapping service provides confidence scores for fuzzy matching
+- ✅ React wizard allows file upload, preview, selection, and import
+- ✅ Export endpoint generates valid Orca bundle from PrintFarmer profiles
+- ⏳ Default profiles seeded in development environment (pending)
+- ✅ Profile registry UI enhanced with filtering, search, import/export actions
+- ✅ Round-trip import/export validated with integration tests
+- ✅ E2E tests cover full wizard flow
+
+Estimated effort: 3–6 dev days (≈5.5 days spent; ~0.5–1 day remaining for seeding + minor polish)
 
 ## Phase 7 — Hardening & operational polish
 - [ ] Add auth (per-service tokens, rotation), RBAC for admin UIs
@@ -486,6 +524,9 @@ To achieve a fully functional slicing pipeline:
 ---
 
 Update log
+- **2025-10-19**: Phase 6 Tasks 5, 7, 8, 9 COMPLETE (export endpoint, enhanced registry UI, integration tests, E2E wizard tests). Progress now 89%; only seeding remains.
+- **2025-10-19**: E2E wizard test suite added (19 passing tests) + integration tests for preview/export/mapping.
+- **2025-01-09**: Phase 6 Tasks 1-4 COMPLETE (parser, preview, mapping, wizard UI). 44% overall progress. Next: Export endpoint.
 - 2025-10-19: Phase 2 marked COMPLETE with comprehensive hardening (retry, metrics, pull model, tests)
 - 2025-10-19: Added overall progress summary and recommended next steps
 - 2025-10-12: Created and committed initial plan. Branch: `feature/orcaslicer-reimplementation`.

@@ -1,11 +1,11 @@
 using System;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Xunit;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Tests.Artifacts
 {
@@ -23,7 +23,8 @@ namespace Farm.Web.Api.Tests.Artifacts
             using var scope = _factory.Services.CreateScope();
             var svc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
             var opts = Options.Create(new Farm.Infrastructure.Settings.ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
-            var controller = new Farm.Web.Api.Controllers.ArtifactsController(svc, opts);
+            var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+            var controller = new Farm.Web.Api.Controllers.ArtifactsController(svc, jobRepo, opts);
             var file = new TestFormFile(System.Text.Encoding.UTF8.GetBytes("dummy"), "a.txt", "text/plain");
             var result = await controller.UploadAsync(Guid.NewGuid(), "invalid-kind", null, file, default);
             result.Should().BeOfType<BadRequestObjectResult>();

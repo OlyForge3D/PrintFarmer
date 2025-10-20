@@ -34,7 +34,9 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         using var scope = _factory.Services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         var settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail,log" });
-        var controller = new ArtifactsController(service, settings);
+        // Provide stub slice job repository + settings to satisfy new controller signature
+        var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        var controller = new ArtifactsController(service, jobRepo, settings);
 
         var jobId = Guid.NewGuid();
         var workerId = Guid.NewGuid();
@@ -65,7 +67,8 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         using var scope = _factory.Services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         var settings = Options.Create(new ArtifactStorageSettings());
-        var controller = new ArtifactsController(service, settings);
+        var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        var controller = new ArtifactsController(service, jobRepo, settings);
 
         var files = new FormFileCollection();
 
@@ -83,7 +86,8 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         using var scope = _factory.Services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         var settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
-        var controller = new ArtifactsController(service, settings);
+        var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        var controller = new ArtifactsController(service, jobRepo, settings);
 
         var jobId = Guid.NewGuid();
         var files = new FormFileCollection
