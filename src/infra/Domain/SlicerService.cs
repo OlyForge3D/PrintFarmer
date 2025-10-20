@@ -28,6 +28,8 @@ public class SlicerService
 
     public string? ApiKey { get; set; }
 
+    public DateTime? ApiKeyRotatedAt { get; set; } // Track last rotation for auditing
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

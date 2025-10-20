@@ -14,5 +14,6 @@ namespace Farm.Web.Api.Services.Slicing
         Task<SlicerService?> GetAsync(Guid id, CancellationToken ct);
         Task<bool> HeartbeatAsync(Guid id, HeartbeatDto dto, CancellationToken ct);
         Task<bool> DeregisterAsync(Guid id, CancellationToken ct);
+        Task<string?> RotateApiKeyAsync(Guid id, CancellationToken ct);
     }
 }

@@ -59,4 +59,10 @@ public static class SlicerHubEvents
     /// Payload: { id: Guid, name: string }
     /// </summary>
     public const string SlicerDeregistered = "SlicerDeregistered";
+
+    /// <summary>
+    /// Event name for when a slicer service rotates its API key
+    /// Payload: { id: Guid, name: string, rotatedAt: DateTime }
+    /// </summary>
+    public const string SlicerApiKeyRotated = "SlicerApiKeyRotated";
 }

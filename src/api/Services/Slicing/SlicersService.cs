@@ -239,5 +239,56 @@ namespace Farm.Web.Api.Services.Slicing
 
             return true;
         }
+
+        public async Task<string?> RotateApiKeyAsync(Guid id, CancellationToken ct)
+        {
+            var svc = await _repo.GetByIdAsync(id, ct);
+            if (svc == null)
+            {
+                return null;
+            }
+
+            // Generate new API key
+            var newApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
+            svc.ApiKey = newApiKey;
+            svc.ApiKeyRotatedAt = DateTime.UtcNow;
+            svc.UpdatedAt = DateTime.UtcNow;
+
+            await _repo.SaveChangesAsync(ct);
+
+            // Synchronize to Worker table
+            try
+            {
+                var worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+                if (worker != null)
+                {
+                    worker.ApiKey = newApiKey;
+                    worker.UpdatedAt = DateTime.UtcNow;
+                    await _repo.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail rotation if Worker sync fails
+                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker API key rotation: {ex.Message}");
+            }
+
+            // Broadcast rotation event (best-effort)
+            try
+            {
+                await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerApiKeyRotated, new
+                {
+                    id = svc.Id,
+                    name = svc.Name,
+                    rotatedAt = svc.ApiKeyRotatedAt
+                }, ct);
+            }
+            catch
+            {
+                // ignore broadcasting failures
+            }
+
+            return newApiKey;
+        }
     }
 }

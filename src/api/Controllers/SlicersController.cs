@@ -11,6 +11,7 @@ using Farm.Web.Api.Infrastructure.Filters;
 
 [ApiController]
 [Route("api/[controller]")]
+// Registration and list use static key, all others use per-service key
 [RequireSlicerApiKey]
 public class SlicersController : ControllerBase
 {
@@ -21,12 +22,15 @@ public class SlicersController : ControllerBase
         _service = service ?? throw new ArgumentNullException(nameof(service));
     }
 
+
     [HttpGet]
     public async Task<IActionResult> ListAsync()
     {
         var list = await _service.ListAsync(HttpContext?.RequestAborted ?? CancellationToken.None);
         return Ok(list);
     }
+
+    // Registration uses static key
 
     [HttpPost("register")]
     public async Task<IActionResult> RegisterAsync([FromBody] Farm.Web.Shared.Contracts.Slicing.RegisterSlicerDto dto)
@@ -57,7 +61,9 @@ public class SlicersController : ControllerBase
         return Created(location, new { id, apiKey });
     }
 
+
     [HttpGet("{id}")]
+    [RequireSlicerServiceApiKey]
     public async Task<IActionResult> GetAsync(Guid id)
     {
         var svc = await _service.GetAsync(id, HttpContext?.RequestAborted ?? CancellationToken.None);
@@ -68,7 +74,9 @@ public class SlicersController : ControllerBase
         return Ok(svc);
     }
 
+
     [HttpPost("{id}/heartbeat")]
+    [RequireSlicerServiceApiKey]
     public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] Farm.Web.Shared.Contracts.Slicing.HeartbeatDto dto)
     {
         var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
@@ -76,12 +84,27 @@ public class SlicersController : ControllerBase
         return ok ? NoContent() : NotFound();
     }
 
+
     [HttpPost("{id}/deregister")]
+    [RequireSlicerServiceApiKey]
     public async Task<IActionResult> DeregisterAsync(Guid id)
     {
         var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         var ok = await _service.DeregisterAsync(id, ct);
         return ok ? NoContent() : NotFound();
+    }
+
+    [HttpPost("{id}/rotate-key")]
+    [RequireSlicerServiceApiKey]
+    public async Task<IActionResult> RotateApiKeyAsync(Guid id)
+    {
+        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        var newApiKey = await _service.RotateApiKeyAsync(id, ct);
+        if (newApiKey == null)
+        {
+            return NotFound();
+        }
+        return Ok(new { id, apiKey = newApiKey });
     }
 }
 
