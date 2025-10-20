@@ -32,6 +32,11 @@ public interface ISliceJobRepository
     Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Get active jobs assigned to a specific worker
+    /// </summary>
+    Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default);
+
+    /// <summary>
     /// Get queued jobs ordered by priority and queue time
     /// </summary>
     Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default);

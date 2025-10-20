@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Repositories.Workers;
+using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Shared.Contracts.Workers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,13 +19,16 @@ namespace Farm.Web.Api.Controllers.Workers;
 public class WorkersController : ControllerBase
 {
     private readonly IWorkerRepository _workerRepository;
+    private readonly ISliceJobRepository _jobRepository;
     private readonly ILogger<WorkersController> _logger;
 
     public WorkersController(
         IWorkerRepository workerRepository,
+        ISliceJobRepository jobRepository,
         ILogger<WorkersController> logger)
     {
         _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -92,6 +96,38 @@ public class WorkersController : ControllerBase
         IReadOnlyList<Worker> workers = await _workerRepository.GetAvailableWorkersAsync(limit);
 
         List<WorkerResponse> response = workers.Select(MapToResponse).ToList();
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Get active jobs assigned to a specific worker
+    /// </summary>
+    /// <param name="id">Worker ID</param>
+    /// <returns>List of active jobs for the worker</returns>
+    [HttpGet("{id}/jobs")]
+    [ProducesResponseType(typeof(List<WorkerJobResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetWorkerJobsAsync(Guid id)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker == null)
+        {
+            return NotFound($"Worker {id} not found");
+        }
+
+        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetJobsByWorkerIdAsync(id);
+
+        List<WorkerJobResponse> response = jobs.Select(job => new WorkerJobResponse
+        {
+            JobId = job.Id,
+            ModelFileName = job.ModelFileName,
+            Status = job.Status,
+            ProgressPercent = job.ProgressPercent,
+            ProgressMessage = job.ProgressMessage,
+            StartedAt = job.StartedAt,
+            Priority = job.Priority
+        }).ToList();
+
         return Ok(response);
     }
 

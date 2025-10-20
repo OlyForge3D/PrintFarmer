@@ -64,6 +64,14 @@ public class EfSliceJobRepository : ISliceJobRepository
         return await query.ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default)
+    {
+        return await _db.SliceJobs
+            .Where(j => j.WorkerId == workerId && j.Status == SliceJobStatus.Processing)
+            .OrderByDescending(j => j.StartedAt)
+            .ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
     {
         var query = _db.SliceJobs

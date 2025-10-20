@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import slicerProfilesService, { SlicerProfileListItem } from '@/services/slicerProfilesService';
+import workersService from '@/services/workersService';
+import { WorkerResponse } from '@/types/worker';
+import { hasRequiredCapabilities } from '@/types/worker';
+import * as signalR from '@microsoft/signalr';
 // Lightweight model DTO interface for picker (subset of Model3DDto)
 interface ModelListItem {
   id: string;
@@ -17,6 +21,7 @@ import { Alert } from '@/components/ui/Alert';
 import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { WorkerSelector } from '@/components/WorkerSelector';
 import { Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthHooks';
 
@@ -43,6 +48,59 @@ export const NewSliceJobPage: React.FC = () => {
   const [priority, setPriority] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | undefined>(undefined);
+
+  // Fetch available workers
+  const { data: availableWorkers = [], isLoading: loadingWorkers } = useQuery<WorkerResponse[], Error>({
+    queryKey: ['workers-available'],
+    queryFn: () => workersService.getAvailableWorkers(),
+    staleTime: 10_000,
+    refetchInterval: 15_000, // Auto-refresh every 15 seconds
+  });
+
+  // Filter workers by required capabilities
+  const filteredWorkers = React.useMemo(() => {
+    if (parsedCapabilities.length === 0) {
+      return availableWorkers;
+    }
+    return availableWorkers.filter(worker => hasRequiredCapabilities(worker, parsedCapabilities));
+  }, [availableWorkers, parsedCapabilities]);
+
+  // Connect to SlicerHub for real-time worker updates
+  useEffect(() => {
+    const hubConnection = new signalR.HubConnectionBuilder()
+      .withUrl('/hubs/slicer-registry')
+      .withAutomaticReconnect()
+      .build();
+
+    // Handle slicer registered event
+    hubConnection.on('SlicerRegistered', () => {
+      qc.invalidateQueries({ queryKey: ['workers-available'] });
+    });
+
+    // Handle slicer heartbeat event
+    hubConnection.on('SlicerHeartbeat', () => {
+      qc.invalidateQueries({ queryKey: ['workers-available'] });
+    });
+
+    // Handle slicer deregistered event
+    hubConnection.on('SlicerDeregistered', () => {
+      qc.invalidateQueries({ queryKey: ['workers-available'] });
+    });
+
+    hubConnection
+      .start()
+      .then(() => {
+        console.log('Connected to SlicerHub for real-time worker updates');
+      })
+      .catch(err => {
+        console.error('Failed to connect to SlicerHub:', err);
+      });
+
+    return () => {
+      hubConnection.stop();
+    };
+  }, [qc]);
 
   // Restore persisted selections
   useEffect(() => {
@@ -402,6 +460,24 @@ export const NewSliceJobPage: React.FC = () => {
           {!capabilitiesError && parsedCapabilities.length > 0 && (
             <div className="text-xs text-pf-success">Parsed {parsedCapabilities.length} capability{parsedCapabilities.length === 1 ? '' : 'ies'}.</div>
           )}
+        </FormField>
+
+        <FormField
+          label="Available Workers"
+          helper={
+            parsedCapabilities.length > 0
+              ? `${filteredWorkers.length} of ${availableWorkers.length} workers match your capabilities`
+              : 'All available workers shown. Add capabilities above to filter.'
+          }
+        >
+          <WorkerSelector
+            workers={filteredWorkers}
+            selectedWorkerId={selectedWorkerId}
+            onWorkerSelect={setSelectedWorkerId}
+            loading={loadingWorkers}
+            showCapabilities={true}
+            highlightAvailable={true}
+          />
         </FormField>
 
         {error && <Alert type="error">{error}</Alert>}

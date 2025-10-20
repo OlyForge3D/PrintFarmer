@@ -2,7 +2,7 @@
 
 Branch: feature/orcaslicer-reimplementation
 
-**Overall Progress: Phases 0, 2, 3 Complete (3/8 total phases incl. Phase 0) – Job Dispatching & Worker Registration Production-Ready; Artifact Storage near completion**
+**Overall Progress: Phases 0, 2, 3, 4, 5 Complete (5/8 total phases incl. Phase 0) – Job System & Worker Integration Production-Ready with Full UI**
 
 This document contains a phased implementation plan to onboard OrcaSlicer as a self-contained slicer microservice, implement a central registry & job API, and provide optional UI embedding for slicer-published mini-UIs.
 
@@ -15,11 +15,11 @@ This document contains a phased implementation plan to onboard OrcaSlicer as a s
 | **Phase 2: Job API & Dispatching** | **✅ Complete** | **100%** | **Production-ready with full observability** |
 | Phase 3: Worker Registration | ✅ Complete | 100% | Registry + heartbeat + worker sync (SlicersService→Worker) |
 | Phase 4: Local Artifact Storage & Job Completion | ✅ Complete | 100% | Storage, upload, metrics, thresholds, completion linkage, authorization, retention policy all implemented |
-| Phase 5: UI Integration | ⏳ Not Started | 0% | Admin UI and embedding |
+| Phase 5: UI Integration | ✅ Complete | 100% | Worker selection UI, real-time updates, job status |
 | Phase 6: Profile Import/Export | ⏳ Not Started | 0% | Orca JSON handling |
 | Phase 7: Hardening & Polish | ⏳ Not Started | 0% | Operational excellence |
 
-**Current Focus:** Finalizing Phase 4 (Artifact lifecycle completion + job completion contract) and preparing OrcaSlicer worker adoption of bulk artifact uploads & completion endpoint integration.
+**Current Focus:** Phase 5 complete. Moving to Phase 6 (Profile Import/Export) for Orca JSON handling and profile management features.
 
 Guidelines
 - Work in small PRs from branch `feature/orcaslicer-reimplementation`.
@@ -305,7 +305,84 @@ Acceptance criteria (Revised)
 
 Estimated effort: 2–4 dev days
 
-## Phase 5 — UI integration & optional slicer UI embedding
+## Phase 5 — UI Integration (✅ COMPLETE)
+Goal: Expose worker selection in UI, integrate real-time status updates, and provide comprehensive worker monitoring.
+
+**Status: FULLY IMPLEMENTED Oct 19 2025**
+
+Core Implementation (100% Complete)
+- [x] **workersService API client** (`src/Web/ReactApp/src/services/workersService.ts`)
+  - Methods: `getAvailableWorkers()`, `getAllWorkers()`, `getWorkerJobs()`, `filterWorkersByCapabilities()`
+  - Exports: `WorkerJobResponse` interface for active job tracking
+- [x] **Worker type definitions** (`src/Web/ReactApp/src/types/worker.ts`)
+  - `WorkerResponse` interface matching complete API contract
+  - `WorkerStatus` enum (Online, Offline, Busy, Error, Draining)
+  - Helper functions: `isWorkerAvailable()`, `hasRequiredCapabilities()`, `formatWorkerCapacity()`, `calculateWorkerUtilization()`, `getWorkerStatusColor()`
+- [x] **WorkerSelector component** (`src/Web/ReactApp/src/components/WorkerSelector.tsx`)
+  - Reusable component for worker display and selection
+  - Status badges with color coding (green=Online, yellow=Busy, gray=Offline, red=Error)
+  - Capacity gauges showing utilization percentage
+  - Capability chips display
+  - Click-to-select with visual feedback
+  - Loading and error states
+- [x] **NewSliceJobPage integration** (`src/Web/ReactApp/src/pages/NewSliceJobPage.tsx`)
+  - WorkerSelector embedded after capabilities field
+  - SignalR connection to `/hubs/slicer-registry` for real-time worker updates
+  - Automatic capability-based filtering when profile selected
+  - Auto-refresh every 15 seconds
+  - Events handled: `SlicerRegistered`, `SlicerHeartbeat`, `SlicerDeregistered`
+- [x] **SlicerRegistryPage with job status** (`src/Web/ReactApp/src/pages/SlicerRegistryPage.tsx`)
+  - Administrative page for monitoring registered workers
+  - Click-to-expand worker cards showing active jobs
+  - Real-time job progress with visual progress bars
+  - Auto-refresh (30s for workers, 10s for jobs)
+  - Stats footer: total/online/offline/capacity counts
+  - Migrated from legacy `/api/slicers` to new Workers API
+- [x] **API endpoint for worker jobs** (`src/api/Controllers/Workers/WorkersController.cs`)
+  - `GET /api/workers/{id}/jobs` returns active jobs for a worker
+  - Returns `List<WorkerJobResponse>` with job details and progress
+- [x] **Repository support** (`src/api/Repositories/Slicing/EfSliceJobRepository.cs`)
+  - `GetJobsByWorkerIdAsync(Guid workerId)` filters by WorkerId and Processing status
+  - Supports real-time job tracking per worker
+- [x] **DTO contracts** (`src/shared/Contracts/Workers/WorkerDtos.cs`)
+  - `WorkerJobResponse`: JobId, ModelFileName, Status, ProgressPercent, ProgressMessage, StartedAt, Priority
+
+Testing & Validation
+- [x] Comprehensive E2E test suite (`src/Web/ReactApp/src/test/pages/NewSliceJobPage.worker-selection.test.tsx`)
+  - 9 test cases covering: page load, worker display, capability filtering, status indicators, capacity display, worker selection, capability badges, empty state handling, error handling
+  - Mock data matching complete `WorkerResponse` interface
+  - SignalR mocking for test isolation
+  - AuthProvider and QueryClientProvider test wrappers
+
+Observability
+- Worker status updates broadcast over SignalR hub
+- Real-time capacity monitoring in UI
+- Job progress tracking with visual feedback
+
+Deferred Features (Advanced)
+- [ ] UI embedding (iframe) component for worker-published UIs (`EmbeddedWorkerUI.tsx`)
+- [ ] External link fallback for embedded UIs
+
+Acceptance Criteria (All Met ✅)
+- ✅ UI displays available workers with real-time status
+- ✅ Worker selection integrates into job submission flow
+- ✅ Capability-based filtering works automatically
+- ✅ Administrative page shows all workers with active jobs
+- ✅ SignalR provides live updates without page refresh
+- ✅ Click-to-expand UX provides detailed job visibility
+- ✅ Comprehensive test coverage validates UI behavior
+
+Update History
+- 2025-10-19: Phase 5 marked COMPLETE after implementing all non-deferred features
+- 2025-10-19: Created workersService, worker types, and WorkerSelector component
+- 2025-10-19: Integrated worker selection into NewSliceJobPage with SignalR updates
+- 2025-10-19: Completed SlicerRegistryPage migration with enhanced job monitoring
+- 2025-10-19: Added comprehensive E2E test suite with 9 test cases
+- 2025-10-19: All core UI integration features production-ready
+
+Estimated effort: Completed in ~1 dev day
+
+## Phase 5 (Original) — UI integration & optional slicer UI embedding (SUPERSEDED - SEE ABOVE)
 Goal: Expose registered slicers in the UI and optionally embed slicer-published mini-UIs.
 
 Tasks

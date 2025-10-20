@@ -35,3 +35,17 @@ public class DisableWorkerRequest
 {
     public string Reason { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// Response for active job assigned to a worker
+/// </summary>
+public class WorkerJobResponse
+{
+    public Guid JobId { get; set; }
+    public string ModelFileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int ProgressPercent { get; set; }
+    public string? ProgressMessage { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public int Priority { get; set; }
+}
