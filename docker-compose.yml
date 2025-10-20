@@ -119,6 +119,8 @@ services:
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
+      - Worker__MaxConcurrentJobs=1
+      - Worker__MaxMemoryMb=1024
     volumes:
       - orcaslicer_temp:/app/temp
       - gcode_storage:/app/gcode
@@ -133,6 +135,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      nofile: 1024
+    pids_limit: 128
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   # PrusaSlicer Worker for distributed slicing
   prusaslicer-worker:
@@ -150,6 +170,8 @@ services:
       - Worker__WorkingDirectory=/app/temp
       - Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
       - Worker__WorkerId=prusaslicer-worker-1
+      - Worker__MaxConcurrentJobs=1
+      - Worker__MaxMemoryMb=1024
     volumes:
       - prusaslicer_temp:/app/temp
       - gcode_storage:/app/gcode
@@ -164,6 +186,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s  # PrusaSlicer takes longer to install
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      nofile: 1024
+    pids_limit: 128
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   # Optional: Load balancer for production
   nginx-proxy:

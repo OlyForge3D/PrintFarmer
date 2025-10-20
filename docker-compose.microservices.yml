@@ -106,6 +106,8 @@ services:
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__QueueName=orcaslicer-jobs
       - Logging__LogLevel__Default=Information
+      - Worker__MaxConcurrentJobs=1
+      - Worker__MaxMemoryMb=1024
     volumes:
       - orcaslicer_temp:/app/temp
       - gcode_storage:/app/gcode
@@ -120,6 +122,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      nofile: 1024
+    pids_limit: 128
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   # PrusaSlicer Worker - Distributed slicing microservice
   prusaslicer-worker:
@@ -145,6 +165,8 @@ services:
       - Worker__QueueName=prusaslicer-jobs
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Farm.PrusaSlicer.Worker=Debug
+      - Worker__MaxConcurrentJobs=1
+      - Worker__MaxMemoryMb=1024
     volumes:
       - prusaslicer_temp:/app/temp
       - gcode_storage:/app/gcode
@@ -159,6 +181,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s  # PrusaSlicer binary installation takes longer
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      nofile: 1024
+    pids_limit: 128
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   # React Frontend
   frontend:

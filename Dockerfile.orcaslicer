@@ -148,7 +148,9 @@ ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
 LABEL component="orcaslicer-worker" \
     orcaslicer.version="${ORCASLICER_VERSION}" \
-    description="Dedicated OrcaSlicer worker container"
+    description="Dedicated OrcaSlicer worker container" \
+    security.sandbox="true" \
+    org.opencontainers.image.source="https://github.com/jpapiez/PrintFarmer"
 USER root
 WORKDIR /app
 
@@ -167,11 +169,32 @@ COPY --from=orcaassets /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --from=orcaassets /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
 
 USER sliceruser
-COPY --from=build /app/publish .
+# Copy published .NET worker bits (already trimmed via publish) and ensure ownership
+COPY --chown=sliceruser:sliceruser --from=build /app/publish .
 
-ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer \
+# Harden runtime via env toggles; disable diagnostics pipe & set invariant globalization
+ENV DOTNET_EnableDiagnostics=0 \
+    COMPlus_EnableDiagnostics=0 \
+    Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer \
     Worker__WorkingDirectory=/app/temp \
-    Worker__StorageEndpoint=http://api:5245
+    Worker__StorageEndpoint=http://api:5245 \
+    Worker__MaxMemoryMb=1024 \
+    Worker__MaxConcurrentJobs=1
+
+# Mark working/temp directories writable, keep rest read-only when run with 'read_only: true' in compose
+RUN mkdir -p /app/temp /app/logs /app/cache && \
+    chmod 700 /app/temp && chmod 700 /app/logs && chmod 700 /app/cache
 
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
+
+# Recommended runtime (compose) security options (documented in WORKER_SANDBOXING.md):
+#   read_only: true
+#   cap_drop: ["ALL"]
+#   security_opt:
+#     - no-new-privileges:true
+#   tmpfs:
+#     - /tmp:rw,noexec,nosuid,size=64m
+#   pids_limit: 128
+#   ulimits:
+#     nofile: 1024
