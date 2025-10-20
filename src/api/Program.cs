@@ -133,6 +133,9 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaPresetMappingServi
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleExportService, Farm.Web.Api.Services.Slicing.OrcaBundleExportService>();
 // Orca default profile seeder (Phase 6 Task 6)
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaDefaultProfileSeeder, Farm.Web.Api.Services.Slicing.OrcaDefaultProfileSeeder>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileDuplicateFilter, Farm.Web.Api.Services.Slicing.ProfileDuplicateFilter>();
+// Hosted service to trigger Orca default profile seeding after DB initialization & during app startup
+builder.Services.AddHostedService<Farm.Web.Api.Services.Slicing.OrcaDefaultProfileSeedingHostedService>();
 // Slicers registry repository
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)
@@ -1005,39 +1008,26 @@ catch (Exception ex)
 }
 
 // Initialize database (ensures schema exists before resolving SettingsService)
-// Delegate initialization to ProgramHelpers to keep Program.cs minimal and avoid nested blocks (addresses S1199)
-if (!app.Environment.IsEnvironment("Testing"))
+// Always run in all environments including Testing so integration tests have schema & seed data available.
+try
 {
-    try
-    {
-        await ProgramHelpers.InitializeDatabaseAsync(app);
-    }
-    catch (Exception ex)
-    {
-        try
-        {
-            var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-            if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
-            {
-#pragma warning disable CA1303
-                Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");
-                Console.WriteLine(ex.ToString());
-#pragma warning restore CA1303
-            }
-        }
-        catch { }
-        throw;
-    }
+    await ProgramHelpers.InitializeDatabaseAsync(app);
 }
-else
+catch (Exception ex)
 {
+    // Emit diagnostic details in Testing environment but still surface the failure to the test host.
     try
     {
+        if (app.Environment.IsEnvironment("Testing") || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        {
 #pragma warning disable CA1303
-        Console.WriteLine("Program.cs: Skipping InitializeDatabaseAsync because environment is Testing");
+            Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");
+            Console.WriteLine(ex.ToString());
 #pragma warning restore CA1303
+        }
     }
     catch { }
+    throw;
 }
 
 // In test environments the test host (WebApplicationFactory/TestServer) manages the server lifecycle.
@@ -1048,14 +1038,22 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 else
 {
-    // Signal that the app would have run in non-test environments. Keep the task completed for top-level return.
+    // For integration tests we still need the server pipeline configured so TestServer can dispatch requests.
+    // Start the app without blocking the test host.
     try
     {
+        await app.StartAsync();
 #pragma warning disable CA1303
-        Console.WriteLine("Program.cs: Skipping app.RunAsync() because environment is Testing");
+        Console.WriteLine("Program.cs: Started app for Testing environment (non-blocking StartAsync)");
 #pragma warning restore CA1303
     }
-    catch { }
+    catch (Exception ex)
+    {
+#pragma warning disable CA1303
+        Console.WriteLine("Program.cs: StartAsync failed in Testing environment: " + ex.Message);
+#pragma warning restore CA1303
+        throw;
+    }
 }
 
 // Expose Program for WebApplicationFactory in tests

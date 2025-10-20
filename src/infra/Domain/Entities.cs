@@ -58,8 +58,11 @@ public class Manufacturer
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public ICollection<PrinterModel> Models { get; } = new List<PrinterModel>();
+    public bool IsActive { get; set; } = true;
 }
 
+// Explicit table mapping to ensure EF Core creates the expected "Models" table during test initialization.
+[Table("Models")]
 public class PrinterModel
 {
     public Guid Id { get; set; }
@@ -84,6 +87,7 @@ public class PrinterModel
     public int? MaxBedTemp { get; set; } = 120;
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
     public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();
+    public bool IsActive { get; set; } = true;
 }
 
 public class FilamentType
@@ -94,6 +98,7 @@ public class FilamentType
     public double? DefaultBedTemp { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public ICollection<PrinterModelFilamentType> PrinterModels { get; } = new List<PrinterModelFilamentType>();
+    public bool IsActive { get; set; } = true;
 }
 
 public class PrinterModelFilamentType

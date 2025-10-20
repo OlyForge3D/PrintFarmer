@@ -196,7 +196,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
 
         var exportRequest = new ExportOrcaBundleRequest
         {
-            PrinterModelIds = new[] { printerModelIds[0].ToString() },
+            PrinterModelIds = new[] { printerModelIds[0] },
             IncludeProcessProfiles = false,
             IncludeMetadata = false
         };
@@ -228,7 +228,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
 
         var exportRequest = new ExportOrcaBundleRequest
         {
-            FilamentTypeIds = new[] { filamentTypeIds[0].ToString(), filamentTypeIds[1].ToString() },
+            FilamentTypeIds = new[] { filamentTypeIds[0], filamentTypeIds[1] },
             IncludeProcessProfiles = false,
             IncludeMetadata = false
         };
@@ -383,17 +383,17 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             Id = Guid.NewGuid(),
             Name = "X1 Carbon",
             ManufacturerId = manufacturer.Id,
-            BedWidth = 256,
-            BedDepth = 256,
-            MaxPrintHeight = 256,
-            NozzleDiameter = 0.4,
+            MaxX = 256,
+            MaxY = 256,
+            MaxZ = 256,
+            DefaultNozzleDiameter = 0.4,
             MaxBedTemp = 120,
             MaxHotendTemp = 300,
             IsActive = true
         };
 
         db.Manufacturers.Add(manufacturer);
-        db.PrinterModels.Add(printerModel);
+        db.Models.Add(printerModel);
         await db.SaveChangesAsync();
     }
 
@@ -408,24 +408,18 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             {
                 Id = Guid.NewGuid(),
                 Name = "PLA",
-                Material = "PLA",
-                Density = 1.24,
                 IsActive = true
             },
             new FilamentType
             {
                 Id = Guid.NewGuid(),
                 Name = "PETG",
-                Material = "PETG",
-                Density = 1.27,
                 IsActive = true
             },
             new FilamentType
             {
                 Id = Guid.NewGuid(),
                 Name = "ABS",
-                Material = "ABS",
-                Density = 1.05,
                 IsActive = true
             }
         };
@@ -453,10 +447,10 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 Id = Guid.NewGuid(),
                 Name = "Printer A",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 220,
-                BedDepth = 220,
-                MaxPrintHeight = 250,
-                NozzleDiameter = 0.4,
+                MaxX = 220,
+                MaxY = 220,
+                MaxZ = 250,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -464,16 +458,16 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 Id = Guid.NewGuid(),
                 Name = "Printer B",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 300,
-                BedDepth = 300,
-                MaxPrintHeight = 400,
-                NozzleDiameter = 0.6,
+                MaxX = 300,
+                MaxY = 300,
+                MaxZ = 400,
+                DefaultNozzleDiameter = 0.6,
                 IsActive = true
             }
         };
 
         db.Manufacturers.Add(manufacturer);
-        db.PrinterModels.AddRange(models);
+        db.Models.AddRange(models);
         await db.SaveChangesAsync();
 
         return models.Select(m => m.Id).ToArray();
@@ -486,9 +480,9 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
 
         var filamentTypes = new[]
         {
-            new FilamentType { Id = Guid.NewGuid(), Name = "PLA", Material = "PLA", Density = 1.24, IsActive = true },
-            new FilamentType { Id = Guid.NewGuid(), Name = "PETG", Material = "PETG", Density = 1.27, IsActive = true },
-            new FilamentType { Id = Guid.NewGuid(), Name = "ABS", Material = "ABS", Density = 1.05, IsActive = true }
+            new FilamentType { Id = Guid.NewGuid(), Name = "PLA", IsActive = true },
+            new FilamentType { Id = Guid.NewGuid(), Name = "PETG", IsActive = true },
+            new FilamentType { Id = Guid.NewGuid(), Name = "ABS", IsActive = true }
         };
 
         db.FilamentTypes.AddRange(filamentTypes);
@@ -590,3 +584,5 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         """;
     }
 }
+
+#pragma warning restore 0618

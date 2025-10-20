@@ -41,7 +41,7 @@ public class OrcaDefaultProfileSeederTests : IClassFixture<CustomWebApplicationF
                 .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer)
                 .CountAsync();
 
-            initialCount.Should().BeGreaterThanOrEqualTo(9, "expected seeded Fine/Standard/Draft profiles for X1 Carbon (PLA,PETG) and MK4 (PLA)");
+            initialCount.Should().BeGreaterThanOrEqualTo(12, "expected seeded Fine/Standard/Draft profiles for X1 Carbon (PLA,PETG) and MK4 (PLA,PETG)");
 
             // Attempt second run (should no-op)
             var seeder = scope.ServiceProvider.GetRequiredService<IOrcaDefaultProfileSeeder>();

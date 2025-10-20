@@ -382,10 +382,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "X1 Carbon",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 256,
-                BedDepth = 256,
-                MaxPrintHeight = 256,
-                NozzleDiameter = 0.4,
+                MaxX = 256,
+                MaxY = 256,
+                MaxZ = 256,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -393,16 +393,16 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "P1P",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 256,
-                BedDepth = 256,
-                MaxPrintHeight = 256,
-                NozzleDiameter = 0.4,
+                MaxX = 256,
+                MaxY = 256,
+                MaxZ = 256,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             }
         };
 
         db.Manufacturers.Add(manufacturer);
-        db.PrinterModels.AddRange(printerModels);
+        db.Models.AddRange(printerModels);
         await db.SaveChangesAsync();
     }
 
@@ -425,10 +425,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "Original Prusa MK4",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 250,
-                BedDepth = 210,
-                MaxPrintHeight = 220,
-                NozzleDiameter = 0.4,
+                MaxX = 250,
+                MaxY = 210,
+                MaxZ = 220,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -436,16 +436,16 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "Original Prusa MK3S+",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 250,
-                BedDepth = 210,
-                MaxPrintHeight = 210,
-                NozzleDiameter = 0.4,
+                MaxX = 250,
+                MaxY = 210,
+                MaxZ = 210,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             }
         };
 
         db.Manufacturers.Add(manufacturer);
-        db.PrinterModels.AddRange(printerModels);
+        db.Models.AddRange(printerModels);
         await db.SaveChangesAsync();
     }
 
@@ -468,10 +468,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "Small Printer",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 180,
-                BedDepth = 180,
-                MaxPrintHeight = 180,
-                NozzleDiameter = 0.4,
+                MaxX = 180,
+                MaxY = 180,
+                MaxZ = 180,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -479,16 +479,16 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "Medium Printer",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 250,
-                BedDepth = 250,
-                MaxPrintHeight = 250,
-                NozzleDiameter = 0.4,
+                MaxX = 250,
+                MaxY = 250,
+                MaxZ = 250,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             }
         };
 
         db.Manufacturers.Add(manufacturer);
-        db.PrinterModels.AddRange(printerModels);
+        db.Models.AddRange(printerModels);
         await db.SaveChangesAsync();
     }
 
@@ -511,10 +511,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "0.4mm Printer",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 220,
-                BedDepth = 220,
-                MaxPrintHeight = 250,
-                NozzleDiameter = 0.4,
+                MaxX = 220,
+                MaxY = 220,
+                MaxZ = 250,
+                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -522,10 +522,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "0.6mm Printer",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 220,
-                BedDepth = 220,
-                MaxPrintHeight = 250,
-                NozzleDiameter = 0.6,
+                MaxX = 220,
+                MaxY = 220,
+                MaxZ = 250,
+                DefaultNozzleDiameter = 0.6,
                 IsActive = true
             },
             new PrinterModel
@@ -533,16 +533,16 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
                 Id = Guid.NewGuid(),
                 Name = "0.8mm Printer",
                 ManufacturerId = manufacturer.Id,
-                BedWidth = 220,
-                BedDepth = 220,
-                MaxPrintHeight = 250,
-                NozzleDiameter = 0.8,
+                MaxX = 220,
+                MaxY = 220,
+                MaxZ = 250,
+                DefaultNozzleDiameter = 0.8,
                 IsActive = true
             }
         };
 
         db.Manufacturers.Add(manufacturer);
-        db.PrinterModels.AddRange(printerModels);
+        db.Models.AddRange(printerModels);
         await db.SaveChangesAsync();
     }
 }

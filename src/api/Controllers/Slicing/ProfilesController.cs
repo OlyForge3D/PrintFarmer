@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Linq;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
@@ -489,5 +490,35 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
             _logger.LogError(ex, "Failed to export OrcaSlicer bundle");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to generate export bundle");
         }
+    }
+
+    // Lightweight listing of system-seeded OrcaSlicer profiles for UI verification
+    // Returns minimal list item DTOs (Id, Name, Material, Quality, LayerHeight, Infill, Hash flags)
+    [HttpGet("system/orca")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile inspection
+    [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListSystemOrcaProfilesAsync([FromServices] AppDbContext db, CancellationToken ct)
+    {
+        var profiles = await db.SlicerProfiles
+            .AsNoTracking()
+            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer)
+            .OrderBy(p => p.Name)
+            .Select(p => new SlicerProfileListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                SlicerType = p.SlicerType.ToString(),
+                Material = p.Material,
+                Quality = p.Quality.ToString(),
+                LayerHeight = p.LayerHeight,
+                InfillPercentage = p.InfillPercentage,
+                IsDefault = p.IsDefault,
+                IsSystem = p.IsSystem,
+                IsPublic = p.IsPublic,
+                Hash = p.Hash ?? string.Empty
+            })
+            .ToListAsync(ct);
+
+        return Ok(profiles);
     }
 }
