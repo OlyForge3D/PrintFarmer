@@ -131,6 +131,8 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleParsingServi
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaPresetMappingService, Farm.Web.Api.Services.Slicing.OrcaPresetMappingService>();
 // OrcaSlicer bundle export service (Phase 6) - exports PrintFarmer profiles to Orca format
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleExportService, Farm.Web.Api.Services.Slicing.OrcaBundleExportService>();
+// Orca default profile seeder (Phase 6 Task 6)
+builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaDefaultProfileSeeder, Farm.Web.Api.Services.Slicing.OrcaDefaultProfileSeeder>();
 // Slicers registry repository
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)
@@ -820,6 +822,23 @@ app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 // Final log just before entering host run loop (diagnostic)
 app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");
+
+// Phase 6: Seed default Orca profiles (development only, idempotent)
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var seeder = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Slicing.IOrcaDefaultProfileSeeder>();
+        if (seeder != null)
+        {
+            await seeder.SeedAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "[Startup] Orca default profile seeding failed - continuing startup.");
+    }
+}
 
 // Database info endpoint (dev or DEBUG_DB_INFO=true) with migration status integration.
 app.MapGet("/api/debug/db-info", async (AppDbContext db,
