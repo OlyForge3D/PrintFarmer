@@ -34,6 +34,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return hub;
         }
 
+        private static SlicerServiceMetrics CreateMetrics() => new SlicerServiceMetrics();
+
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
@@ -41,7 +43,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var slicerRepo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var mockHub = CreateMockHub(out var clientProxy);
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object);
+            var metrics = CreateMetrics();
+            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics);
 
             var dto = new RegisterSlicerDto
             {
@@ -86,7 +89,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var slicerRepo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var mockHub = CreateMockHub(out var clientProxy);
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object);
+            var metrics = CreateMetrics();
+            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics);
 
             var dto = new RegisterSlicerDto
             {
@@ -127,7 +131,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var slicerRepo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var mockHub = CreateMockHub(out var clientProxy);
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object);
+            var metrics = CreateMetrics();
+            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics);
 
             var dto = new RegisterSlicerDto
             {

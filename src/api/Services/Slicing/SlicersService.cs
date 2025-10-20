@@ -17,12 +17,69 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly ISlicersRepository _repo;
         private readonly IWorkerRepository _workerRepo;
         private readonly IHubContext<SlicerHub> _hub;
+        private readonly SlicerServiceMetrics _metrics;
 
-        public SlicersService(ISlicersRepository repo, IWorkerRepository workerRepo, IHubContext<SlicerHub> hub)
+        public SlicersService(
+            ISlicersRepository repo,
+            IWorkerRepository workerRepo,
+            IHubContext<SlicerHub> hub,
+            SlicerServiceMetrics metrics)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
+            _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
+
+            // Set up observable capacity metrics
+            _metrics.SetCapacityProviders(
+                getTotalCapacity: () => GetTotalCapacitySync(),
+                getAvailableCapacity: () => GetAvailableCapacitySync(),
+                getActiveJobs: () => GetActiveJobsSync());
+        }
+
+        private int GetTotalCapacitySync()
+        {
+            try
+            {
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
+                var services = _repo.ListAsync(CancellationToken.None).GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+                return services.Sum(s => s.MaxConcurrentJobs);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private int GetAvailableCapacitySync()
+        {
+            try
+            {
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
+                var workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+                return workers.Sum(w => w.FreeSlots);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private int GetActiveJobsSync()
+        {
+            try
+            {
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
+                var workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+                return workers.Sum(w => w.ActiveJobs);
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         public async Task<IReadOnlyList<SlicerService>> ListAsync(CancellationToken ct)
@@ -90,6 +147,9 @@ namespace Farm.Web.Api.Services.Slicing
                 System.Diagnostics.Debug.WriteLine($"Failed to sync Worker entity: {ex.Message}");
             }
 
+            // Record metrics
+            _metrics.RecordServiceRegistration(GetSlicerTypeName(svc.SlicerType), svc.Id.ToString());
+
             // Broadcast registration event (best-effort)
             try
             {
@@ -114,6 +174,18 @@ namespace Farm.Web.Api.Services.Slicing
             return (svc.Id, svc.ApiKey ?? string.Empty);
         }
 
+        private static string GetSlicerTypeName(int slicerType)
+        {
+            return slicerType switch
+            {
+                0 => "PrusaSlicer",
+                1 => "OrcaSlicer",
+                2 => "Cura",
+                3 => "SuperSlicer",
+                _ => "Unknown"
+            };
+        }
+
         public async Task<SlicerService?> GetAsync(Guid id, CancellationToken ct)
         {
             return await _repo.GetByIdAsync(id, ct);
@@ -121,6 +193,7 @@ namespace Farm.Web.Api.Services.Slicing
 
         public async Task<bool> HeartbeatAsync(Guid id, HeartbeatDto dto, CancellationToken ct)
         {
+            var startTime = DateTime.UtcNow;
             var svc = await _repo.GetByIdAsync(id, ct);
             if (svc == null)
             {
@@ -137,6 +210,7 @@ namespace Farm.Web.Api.Services.Slicing
 
             await _repo.SaveChangesAsync(ct);
 
+            int? totalSlots = null;
             // Synchronize to Worker table for dispatcher
             try
             {
@@ -155,6 +229,7 @@ namespace Farm.Web.Api.Services.Slicing
                         worker.ActiveJobs = Math.Max(0, worker.TotalSlots - dto.FreeSlots.Value);
                     }
 
+                    totalSlots = worker.TotalSlots;
                     await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext
                 }
             }
@@ -163,6 +238,16 @@ namespace Farm.Web.Api.Services.Slicing
                 // Log but don't fail heartbeat if Worker sync fails
                 System.Diagnostics.Debug.WriteLine($"Failed to sync Worker heartbeat: {ex.Message}");
             }
+
+            // Record heartbeat metrics
+            var latencyMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _metrics.RecordServiceHeartbeat(
+                GetSlicerTypeName(svc.SlicerType),
+                id.ToString(),
+                success: true,
+                latencyMs,
+                dto.FreeSlots,
+                totalSlots);
 
             try
             {
@@ -207,6 +292,8 @@ namespace Farm.Web.Api.Services.Slicing
                 return false;
             }
 
+            var slicerTypeName = GetSlicerTypeName(svc.SlicerType);
+
             await _repo.RemoveAsync(svc, ct);
             await _repo.SaveChangesAsync(ct);
 
@@ -228,6 +315,9 @@ namespace Farm.Web.Api.Services.Slicing
                 System.Diagnostics.Debug.WriteLine($"Failed to sync Worker deregistration: {ex.Message}");
             }
 
+            // Record metrics
+            _metrics.RecordServiceDeregistration(slicerTypeName, id.ToString(), "normal");
+
             try
             {
                 await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerDeregistered, new { id = svc.Id, name = svc.Name }, ct);
@@ -240,13 +330,15 @@ namespace Farm.Web.Api.Services.Slicing
             return true;
         }
 
-        public async Task<string?> RotateApiKeyAsync(Guid id, CancellationToken ct)
+        public async Task<string?> RotateApiKeyAsync(Guid id, CancellationToken ct, bool isAdminForced = false)
         {
             var svc = await _repo.GetByIdAsync(id, ct);
             if (svc == null)
             {
                 return null;
             }
+
+            var slicerTypeName = GetSlicerTypeName(svc.SlicerType);
 
             // Generate new API key
             var newApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
@@ -272,6 +364,9 @@ namespace Farm.Web.Api.Services.Slicing
                 // Log but don't fail rotation if Worker sync fails
                 System.Diagnostics.Debug.WriteLine($"Failed to sync Worker API key rotation: {ex.Message}");
             }
+
+            // Record metrics
+            _metrics.RecordApiKeyRotation(slicerTypeName, id.ToString(), success: true, isAdminForced);
 
             // Broadcast rotation event (best-effort)
             try

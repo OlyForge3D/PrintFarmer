@@ -42,7 +42,7 @@ public class SlicerManagementController : ControllerBase
     {
         _logger.LogWarning("Admin forcing API key rotation for slicer service {ServiceId}", id);
         var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var newApiKey = await _service.RotateApiKeyAsync(id, ct);
+        var newApiKey = await _service.RotateApiKeyAsync(id, ct, isAdminForced: true);
         if (newApiKey == null)
         {
             return NotFound();
