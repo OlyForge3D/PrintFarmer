@@ -28,6 +28,14 @@ namespace Farm.Infrastructure.Settings
         [SettingDisplay(Name = "Max Retry Count", Description = "Maximum number of retries for failed jobs.", InputType = SettingInputType.Number)]
         [JsonPropertyName("maxRetryCount")]
         public int MaxRetryCount { get; set; } = 3;
+
+        [SettingDisplay(Name = "Max Concurrent Jobs", Description = "Upper bound of simultaneous slice jobs per worker enforced by the orchestrator.", InputType = SettingInputType.Number)]
+        [JsonPropertyName("maxConcurrentJobs")]
+        public int MaxConcurrentJobs { get; set; } = 1;
+
+        [SettingDisplay(Name = "Max Memory (MB)", Description = "Advisory memory ceiling for slice job admission. Future versions will use this for predictive scheduling.", InputType = SettingInputType.Number)]
+        [JsonPropertyName("maxMemoryMb")]
+        public int MaxMemoryMb { get; set; } = 1024;
     }
 
     // Use TempTargets from AppSettings.cs (sealed class)

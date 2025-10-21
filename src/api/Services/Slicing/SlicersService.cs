@@ -19,16 +19,20 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
 
+        private readonly Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> _slicerSettings;
+
         public SlicersService(
             ISlicersRepository repo,
             IWorkerRepository workerRepo,
             IHubContext<SlicerHub> hub,
-            SlicerServiceMetrics metrics)
+            SlicerServiceMetrics metrics,
+            Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> slicerSettings)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
             _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
+            _slicerSettings = slicerSettings ?? throw new ArgumentNullException(nameof(slicerSettings));
 
             // Set up observable capacity metrics
             _metrics.SetCapacityProviders(
@@ -98,7 +102,7 @@ namespace Farm.Web.Api.Services.Slicing
                 Host = dto.Host,
                 UiManifestUrl = dto.UiManifestUrl,
                 CapabilitiesJson = dto.CapabilitiesJson,
-                MaxConcurrentJobs = dto.MaxConcurrentJobs,
+                MaxConcurrentJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)), // enforce global upper bound
                 Status = "Online",
                 LastSeen = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
@@ -122,8 +126,8 @@ namespace Farm.Web.Api.Services.Slicing
                     EndpointUrl = svc.Host ?? string.Empty,
                     CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
                     Status = WorkerStatus.Online,
-                    FreeSlots = dto.MaxConcurrentJobs,
-                    TotalSlots = dto.MaxConcurrentJobs,
+                    FreeSlots = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
+                    TotalSlots = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
                     ActiveJobs = 0,
                     CompletedJobs = 0,
                     FailedJobs = 0,
@@ -161,7 +165,7 @@ namespace Farm.Web.Api.Services.Slicing
                     version = svc.Version,
                     host = svc.Host,
                     capabilitiesJson = svc.CapabilitiesJson,
-                    maxConcurrentJobs = svc.MaxConcurrentJobs,
+                    maxConcurrentJobs = Math.Min(svc.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
                     status = svc.Status,
                     lastSeen = svc.LastSeen
                 }, ct);

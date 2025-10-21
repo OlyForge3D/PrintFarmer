@@ -89,6 +89,8 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Artifacts.ArtifactCleanu
 // Slicing metrics
 builder.Services.AddSingleton<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
 builder.Services.AddSingleton<Farm.Web.Api.Services.Slicing.SlicerServiceMetrics>();
+// Bind slicer settings (already decorated with [AppSetting])
+builder.Services.Configure<Farm.Infrastructure.Settings.SlicerSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.SlicerSettings.SectionName));
 
 // Adapters bridging API services to the importing project's adapter interfaces
 builder.Services.AddScoped<Farm.Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Farm.Web.Api.Services.Adapters.PrinterCapabilityDiscoveryAdapter>();

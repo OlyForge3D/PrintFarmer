@@ -57,12 +57,33 @@ deploy:
 
 ## Overriding Defaults
 
-You can override concurrency and memory advisory limits per worker using environment variables:
+You can override concurrency and memory advisory limits globally via application settings or per-worker using environment variables.
+
+### Global Settings (Preferred)
+
+Configure via `appsettings.json` or the Settings UI (Slicer section):
+
+```json
+{
+  "Slicer": {
+    "MaxConcurrentJobs": 2,
+    "MaxMemoryMb": 2048
+  }
+}
+```
+
+These settings are hot-reloadable and apply across all workers. The orchestrator enforces these as upper bounds during worker registration.
+
+### Per-Worker Environment Variables
+
+Override limits for individual worker containers:
 
 ```bash
 Worker__MaxConcurrentJobs=2
 Worker__MaxMemoryMb=2048
 ```
+
+**Note**: The orchestrator will enforce the lower of (worker-requested, global-setting) to prevent resource abuse.
 
 To relax sandboxing (not recommended), remove or adjust:
 

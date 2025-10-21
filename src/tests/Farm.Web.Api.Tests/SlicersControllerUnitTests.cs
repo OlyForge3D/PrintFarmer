@@ -43,6 +43,18 @@ namespace Farm.Web.Api.Tests
             return new Farm.Web.Api.Services.Slicing.SlicerServiceMetrics();
         }
 
+        private static Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> CreateMockSlicerSettings()
+        {
+            var settings = new Farm.Infrastructure.Settings.SlicerSettings
+            {
+                MaxConcurrentJobs = 10, // High enough not to interfere with tests
+                MaxMemoryMb = 4096
+            };
+            var mock = new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>>();
+            mock.Setup(m => m.CurrentValue).Returns(settings);
+            return mock.Object;
+        }
+
         [Fact]
         public async Task RegisterAsync_CreatesService_And_Broadcasts()
         {
@@ -52,7 +64,8 @@ namespace Farm.Web.Api.Tests
             var repo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var metrics = CreateMetrics();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics, settings);
             var controller = new SlicersController(service);
 
             var dto = new RegisterSlicerDto
@@ -91,7 +104,8 @@ namespace Farm.Web.Api.Tests
             var repo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var metrics = CreateMetrics();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics, settings);
             var controller = new SlicersController(service);
 
             var res = await controller.ListAsync();
@@ -114,7 +128,8 @@ namespace Farm.Web.Api.Tests
             var repo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var metrics = CreateMetrics();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics, settings);
             var controller = new SlicersController(service);
 
             var hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
@@ -145,7 +160,8 @@ namespace Farm.Web.Api.Tests
             var repo = new EfSlicersRepository(db);
             var workerRepo = new EfWorkerRepository(db);
             var metrics = CreateMetrics();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, mockHub.Object, metrics, settings);
             var controller = new SlicersController(service);
 
             var res = await controller.DeregisterAsync(id);

@@ -36,6 +36,18 @@ namespace Farm.Web.Api.Tests.SlicerServices
 
         private static SlicerServiceMetrics CreateMetrics() => new SlicerServiceMetrics();
 
+        private static Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> CreateMockSlicerSettings()
+        {
+            var settings = new Farm.Infrastructure.Settings.SlicerSettings
+            {
+                MaxConcurrentJobs = 10, // High enough not to interfere with tests
+                MaxMemoryMb = 4096
+            };
+            var mock = new Moq.Mock<Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>>();
+            mock.Setup(m => m.CurrentValue).Returns(settings);
+            return mock.Object;
+        }
+
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
@@ -44,7 +56,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var workerRepo = new EfWorkerRepository(db);
             var mockHub = CreateMockHub(out var clientProxy);
             var metrics = CreateMetrics();
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics, settings);
 
             var dto = new RegisterSlicerDto
             {
@@ -90,7 +103,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var workerRepo = new EfWorkerRepository(db);
             var mockHub = CreateMockHub(out var clientProxy);
             var metrics = CreateMetrics();
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics, settings);
 
             var dto = new RegisterSlicerDto
             {
@@ -132,7 +146,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var workerRepo = new EfWorkerRepository(db);
             var mockHub = CreateMockHub(out var clientProxy);
             var metrics = CreateMetrics();
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics);
+            var settings = CreateMockSlicerSettings();
+            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics, settings);
 
             var dto = new RegisterSlicerDto
             {
