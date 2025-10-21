@@ -93,13 +93,14 @@ To relax sandboxing (not recommended), remove or adjust:
 
 ## Extending Hardening
 
-| Enhancement | Description |
-|-------------|-------------|
-| Seccomp profile | Provide a custom seccomp profile to block risky syscalls. Example: `security_opt: ["seccomp:./seccomp-slicer.json"]` |
-| AppArmor profile | Constrain FS & kernel interactions further: `security_opt: ["apparmor:printfarmer-slicer"]` |
-| Distroless runtime | Replace base image with distroless .NET + required GTK libs (future optimization) |
-| Image scanning | Integrate Trivy / Grype scanning in CI for vulnerability detection |
-| Integrity verification | Pin and checksum AppImage / Flatpak assets before extraction |
+| Enhancement | Description | Status |
+|-------------|-------------|--------|
+| Seccomp profile | Provide a custom seccomp profile to block risky syscalls. Example: `security_opt: ["seccomp:./seccomp-slicer.json"]` | Planned |
+| AppArmor profile | Constrain FS & kernel interactions further: `security_opt: ["apparmor:printfarmer-slicer"]` | Planned |
+| Distroless runtime | Replace base image with distroless .NET + required GTK libs (future optimization) | Planned |
+| Image scanning | Integrate Trivy / Grype scanning in CI for vulnerability detection | ✅ **Implemented** - See [SLICER_WORKER_CI_SECURITY.md](./SLICER_WORKER_CI_SECURITY.md) |
+| Image efficiency | Dive layer analysis to detect wasted space and optimize images | ✅ **Implemented** - See [SLICER_WORKER_CI_SECURITY.md](./SLICER_WORKER_CI_SECURITY.md) |
+| Integrity verification | Pin and checksum AppImage / Flatpak assets before extraction | Planned |
 
 ## Operational Monitoring
 
@@ -128,9 +129,12 @@ Combine new metrics (see `SLICER_SERVICE_METRICS.md`) with container stats:
 
 ## References
 
-- Docker Security Best Practices: https://docs.docker.com/develop/security-best-practices/
-- .NET Container Hardening: https://learn.microsoft.com/dotnet/core/docker/building-net-docker-images
-- OCI Image Labels: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+- **CI Security Checks**: [SLICER_WORKER_CI_SECURITY.md](./SLICER_WORKER_CI_SECURITY.md) - Automated Trivy scanning and Dive efficiency analysis
+- **Docker Security Best Practices**: https://docs.docker.com/develop/security-best-practices/
+- **.NET Container Hardening**: https://learn.microsoft.com/dotnet/core/docker/building-net-docker-images
+- **OCI Image Labels**: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+- **Trivy Scanner**: https://aquasecurity.github.io/trivy/
+- **Dive Efficiency Tool**: https://github.com/wagoodman/dive
 
 ---
 **Status:** Initial sandboxing complete. Review periodically as slicer features expand.
