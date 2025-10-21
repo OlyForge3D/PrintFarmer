@@ -114,6 +114,9 @@ builder.Services.AddScoped<Farm.Web.Api.Services.SignalR.ISignalRTestService, Fa
 builder.Services.AddScoped<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService, Farm.Web.Api.Services.PasswordPolicy.PasswordPolicyService>();
 builder.Services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Web.Api.Repositories.PasswordPolicy.PasswordPolicyRepository>();
 
+// Account lockout service (security)
+builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAccountLockoutService, Farm.Web.Api.Services.Authentication.AccountLockoutService>();
+
 // Users service (wraps users repository + auth/password services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Users.IUsersService, Farm.Web.Api.Services.Users.UsersService>();
 

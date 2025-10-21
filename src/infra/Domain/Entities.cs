@@ -434,6 +434,12 @@ public class User
     public DateTime? LastLogin { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    
+    // Account lockout fields
+    public int FailedLoginAttempts { get; set; } = 0;
+    public DateTime? LockoutEnd { get; set; }
+    public DateTime? LastFailedLogin { get; set; }
+    
     public ICollection<UserRole> UserRoles { get; } = new List<UserRole>();
 }
 

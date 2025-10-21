@@ -15,7 +15,8 @@ public class AuthenticationService(
     IConfiguration configuration,
     IUnifiedLoggingService logger,
     Farm.Web.Api.Services.Email.IEmailService emailService,
-    Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService) : IAuthenticationService
+    Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
+    IAccountLockoutService accountLockoutService) : IAuthenticationService
 {
     private const string PasswordResetPath = "/reset-password";
     private const string EmailConfirmationPath = "/confirm-email";
@@ -26,6 +27,7 @@ public class AuthenticationService(
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Web.Api.Services.Email.IEmailService _emailService = emailService;
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService = rateLimitService;
+    private readonly IAccountLockoutService _accountLockoutService = accountLockoutService;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {
@@ -34,19 +36,37 @@ public class AuthenticationService(
             User? user = await _usersRepository.GetByUsernameAsync(username);
             if (user == null)
             {
+                // Record failed attempt even for non-existent users (prevent user enumeration)
+                await _accountLockoutService.RecordFailedLoginByUsernameAsync(username, "unknown", "User not found");
                 _logger.LogWarning($"Authentication failed for username: {username} - user not found", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
+            
+            // Check if account is locked out
+            if (await _accountLockoutService.IsLockedOutAsync(user.Id))
+            {
+                DateTime? lockoutEnd = await _accountLockoutService.GetLockoutEndAsync(user.Id);
+                _logger.LogWarning($"Authentication failed for username: {username} - account locked until {lockoutEnd}", null, null);
+                return new AuthenticationResult(false, Error: $"Account is temporarily locked. Please try again later.");
+            }
+            
             if (!user.IsActive)
             {
                 _logger.LogWarning($"Authentication failed for username: {username} - user is inactive", null, null);
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
+            
             if (!_passwordHashing.VerifyPassword(password, user.PasswordHash))
             {
+                // Record failed login attempt (may trigger lockout)
+                await _accountLockoutService.RecordFailedLoginAsync(user.Id, username, "unknown", "Invalid password");
                 _logger.LogWarning($"Authentication failed for username: {username} - invalid password", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
+            
+            // Successful authentication - reset failed login counter
+            await _accountLockoutService.ResetFailedLoginCountAsync(user.Id);
+            
             user.LastLogin = DateTime.UtcNow;
             user.UpdatedAt = DateTime.UtcNow;
             await _usersRepository.SaveChangesAsync();
