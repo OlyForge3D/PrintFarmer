@@ -12,14 +12,16 @@ public class AccountLockoutService : IAccountLockoutService
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IAuthAuditService _authAuditService;
     private readonly int _maxFailedAttempts;
     private readonly int _lockoutDurationMinutes;
     private readonly int _attemptWindowMinutes;
 
-    public AccountLockoutService(AppDbContext context, IConfiguration configuration)
+    public AccountLockoutService(AppDbContext context, IConfiguration configuration, IAuthAuditService authAuditService)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _authAuditService = authAuditService ?? throw new ArgumentNullException(nameof(authAuditService));
         
         // Read lockout settings from configuration with sensible defaults
         _maxFailedAttempts = int.Parse(_configuration["AccountLockout:MaxFailedAttempts"] ?? "5");
@@ -46,6 +48,10 @@ public class AccountLockoutService : IAccountLockoutService
         {
             user.LockoutEnd = null;
             user.FailedLoginAttempts = 0;
+            
+            // Audit log account unlock (automatic expiration)
+            await _authAuditService.LogAccountUnlockedAsync(user.Id, "Lockout period expired", null);
+            
             await _context.SaveChangesAsync();
         }
 
@@ -88,6 +94,13 @@ public class AccountLockoutService : IAccountLockoutService
         if (user.FailedLoginAttempts >= _maxFailedAttempts)
         {
             user.LockoutEnd = DateTime.UtcNow.AddMinutes(_lockoutDurationMinutes);
+            
+            // Audit log account lockout
+            await _authAuditService.LogAccountLockedAsync(
+                user.Id, 
+                user.FailedLoginAttempts, 
+                TimeSpan.FromMinutes(_lockoutDurationMinutes), 
+                ipAddress);
         }
 
         await _context.SaveChangesAsync();

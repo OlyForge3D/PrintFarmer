@@ -534,6 +534,37 @@ public class PasswordResetToken
     public string? UsedByIp { get; set; }
 }
 
+public class AuthAuditLog
+{
+    public Guid Id { get; set; }
+    public Guid? UserId { get; set; } // Nullable for failed login attempts where user doesn't exist
+    public User? User { get; set; }
+    public AuthEventType EventType { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+    public bool Success { get; set; }
+    public string? FailureReason { get; set; }
+    public string? Metadata { get; set; } // JSON for additional context (e.g., email for forgot password, lockout duration, etc.)
+    public string? CorrelationId { get; set; } // For request tracing
+}
+
+public enum AuthEventType
+{
+    None = 0,
+    Login = 1,
+    LoginFailed = 2,
+    Logout = 3,
+    Register = 4,
+    PasswordChange = 5,
+    PasswordReset = 6,
+    PasswordResetInitiated = 7,
+    AccountLocked = 8,
+    AccountUnlocked = 9,
+    RefreshToken = 10,
+    TokenRevoked = 11
+}
+
 public class SystemLog
 {
     public int Id { get; set; }

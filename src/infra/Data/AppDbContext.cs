@@ -49,6 +49,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<PasswordPolicyEntity> PasswordPolicies => Set<PasswordPolicyEntity>();
     public DbSet<FailedLoginAttempt> FailedLoginAttempts => Set<FailedLoginAttempt>();
+    public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -495,6 +496,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(prt => prt.UserId);
             b.HasIndex(prt => prt.ExpiresAt);
             b.HasIndex(prt => prt.IsUsed);
+        });
+
+        modelBuilder.Entity<AuthAuditLog>(b =>
+        {
+            b.HasKey(aal => aal.Id);
+            b.Property(aal => aal.EventType).IsRequired();
+            b.Property(aal => aal.Timestamp).IsRequired();
+            b.Property(aal => aal.IpAddress).HasMaxLength(45);
+            b.Property(aal => aal.UserAgent).HasMaxLength(512);
+            b.Property(aal => aal.FailureReason).HasMaxLength(512);
+            b.Property(aal => aal.Metadata).HasColumnType("TEXT");
+            b.Property(aal => aal.CorrelationId).HasMaxLength(64);
+
+            // Foreign Key (nullable - for failed logins where user doesn't exist)
+            b.HasOne(aal => aal.User)
+                .WithMany()
+                .HasForeignKey(aal => aal.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for common queries
+            b.HasIndex(aal => aal.UserId);
+            b.HasIndex(aal => aal.EventType);
+            b.HasIndex(aal => aal.Timestamp);
+            b.HasIndex(aal => aal.Success);
+            b.HasIndex(aal => new { aal.UserId, aal.Timestamp }); // Common query pattern
         });
 
         // Model3D Entity Configuration

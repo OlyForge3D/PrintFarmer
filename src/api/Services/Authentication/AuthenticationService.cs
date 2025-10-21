@@ -16,7 +16,8 @@ public class AuthenticationService(
     IUnifiedLoggingService logger,
     Farm.Web.Api.Services.Email.IEmailService emailService,
     Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
-    IAccountLockoutService accountLockoutService) : IAuthenticationService
+    IAccountLockoutService accountLockoutService,
+    IAuthAuditService authAuditService) : IAuthenticationService
 {
     private const string PasswordResetPath = "/reset-password";
     private const string EmailConfirmationPath = "/confirm-email";
@@ -28,6 +29,7 @@ public class AuthenticationService(
     private readonly Farm.Web.Api.Services.Email.IEmailService _emailService = emailService;
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService = rateLimitService;
     private readonly IAccountLockoutService _accountLockoutService = accountLockoutService;
+    private readonly IAuthAuditService _authAuditService = authAuditService;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {
@@ -38,6 +40,7 @@ public class AuthenticationService(
             {
                 // Record failed attempt even for non-existent users (prevent user enumeration)
                 await _accountLockoutService.RecordFailedLoginByUsernameAsync(username, "unknown", "User not found");
+                await _authAuditService.LogLoginFailedAsync(username, "User not found", "unknown", null);
                 _logger.LogWarning($"Authentication failed for username: {username} - user not found", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
@@ -46,12 +49,14 @@ public class AuthenticationService(
             if (await _accountLockoutService.IsLockedOutAsync(user.Id))
             {
                 DateTime? lockoutEnd = await _accountLockoutService.GetLockoutEndAsync(user.Id);
+                await _authAuditService.LogLoginFailedAsync(username, $"Account locked until {lockoutEnd}", "unknown", null);
                 _logger.LogWarning($"Authentication failed for username: {username} - account locked until {lockoutEnd}", null, null);
                 return new AuthenticationResult(false, Error: $"Account is temporarily locked. Please try again later.");
             }
             
             if (!user.IsActive)
             {
+                await _authAuditService.LogLoginFailedAsync(username, "User account is disabled", "unknown", null);
                 _logger.LogWarning($"Authentication failed for username: {username} - user is inactive", null, null);
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
@@ -60,6 +65,7 @@ public class AuthenticationService(
             {
                 // Record failed login attempt (may trigger lockout)
                 await _accountLockoutService.RecordFailedLoginAsync(user.Id, username, "unknown", "Invalid password");
+                await _authAuditService.LogLoginFailedAsync(username, "Invalid password", "unknown", null);
                 _logger.LogWarning($"Authentication failed for username: {username} - invalid password", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
@@ -70,6 +76,10 @@ public class AuthenticationService(
             user.LastLogin = DateTime.UtcNow;
             user.UpdatedAt = DateTime.UtcNow;
             await _usersRepository.SaveChangesAsync();
+            
+            // Audit log successful login
+            await _authAuditService.LogLoginAsync(user.Id, "unknown", null);
+            
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
             _logger.LogInformation($"User {username} authenticated successfully", null, null);
@@ -122,6 +132,10 @@ public class AuthenticationService(
                 await _usersRepository.UpdateUserRolesAsync(user.Id, new[] { defaultRole.Id });
             }
             await _usersRepository.SaveChangesAsync();
+            
+            // Audit log successful registration
+            await _authAuditService.LogRegisterAsync(user.Id, "unknown", null);
+            
             string token = await GenerateJwtTokenAsync(user);
             UserDto? dto = await GetUserWithRolesAndPermissionsAsync(user.Id);
             _logger.LogInformation($"User {request.Username} registered successfully", null, null);
@@ -269,7 +283,15 @@ public class AuthenticationService(
             return false;
         }
         string newHash = _passwordHashing.HashPassword(newPassword);
-        return await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
+        bool success = await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
+        
+        if (success)
+        {
+            // Audit log password change
+            await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
+        }
+        
+        return success;
     }
 
     public Task<bool> SendEmailConfirmationAsync(User user) => SendEmailConfirmationInternalAsync(user);
@@ -406,6 +428,8 @@ public class AuthenticationService(
                 _logger.LogWarning($"Password reset requested for non-existent email: {email}");
                 // Record attempt even for non-existent emails to prevent enumeration via rate limiting
                 await _rateLimitService.RecordPasswordResetAttemptAsync(email);
+                // Audit log the attempt (even for non-existent email)
+                await _authAuditService.LogPasswordResetInitiatedAsync(email, ipAddress, null);
                 return true; // Return true to prevent email enumeration
             }
 
@@ -453,6 +477,9 @@ public class AuthenticationService(
                 ResetLink = resetLink,
                 ExpirationMinutes = 60
             });
+            
+            // Audit log password reset initiation
+            await _authAuditService.LogPasswordResetInitiatedAsync(user.Email, ipAddress, null);
 
             return true;
         }
@@ -510,6 +537,9 @@ public class AuthenticationService(
             resetToken.UsedByIp = ipAddress;
 
             await _usersRepository.SaveChangesAsync();
+            
+            // Audit log successful password reset
+            await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
 
             _logger.LogInformation($"Password successfully reset for user: {user.Username}");
             return true;

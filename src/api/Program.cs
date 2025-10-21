@@ -117,6 +117,9 @@ builder.Services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPol
 // Account lockout service (security)
 builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAccountLockoutService, Farm.Web.Api.Services.Authentication.AccountLockoutService>();
 
+// Authentication audit logging service (security)
+builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAuthAuditService, Farm.Web.Api.Services.Authentication.AuthAuditService>();
+
 // Users service (wraps users repository + auth/password services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Users.IUsersService, Farm.Web.Api.Services.Users.UsersService>();
 

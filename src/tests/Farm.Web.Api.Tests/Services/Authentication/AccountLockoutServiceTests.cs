@@ -4,6 +4,7 @@ using Farm.Web.Api.Services.Authentication;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Authentication;
@@ -13,6 +14,7 @@ public class AccountLockoutServiceTests : IDisposable
     private readonly AppDbContext _context;
     private readonly AccountLockoutService _service;
     private readonly IConfiguration _configuration;
+    private readonly Mock<IAuthAuditService> _mockAuthAuditService;
 
     public AccountLockoutServiceTests()
     {
@@ -32,7 +34,10 @@ public class AccountLockoutServiceTests : IDisposable
             .AddInMemoryCollection(configData)
             .Build();
 
-        _service = new AccountLockoutService(_context, _configuration);
+        // Create mock audit service
+        _mockAuthAuditService = new Mock<IAuthAuditService>();
+
+        _service = new AccountLockoutService(_context, _configuration, _mockAuthAuditService.Object);
     }
 
     public void Dispose()
