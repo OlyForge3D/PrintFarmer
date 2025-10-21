@@ -77,33 +77,59 @@ PrintFarmer is a comprehensive 3D printer farm management system with distribute
 
 **Reference**: docs/slicer/orcaslicer-onboarding-plan.md - Phase 4
 
----
 
-### 🔴 BLOCKER 2: No Worker Status Monitoring in UI
+### ✅ BLOCKER 2: Worker Status Monitoring - COMPLETE
 **Priority**: HIGH  
 **Effort**: 0.5-1 day  
-**Status**: Missing
+**Status**: ✅ 100% COMPLETE
 
-**Problem**: Admins cannot see which workers are online/offline or manage worker capacity.
+**Implementation Summary**: Real-time worker status monitoring with SignalR integration fully implemented.
 
-**Missing Components**:
-1. ❌ SignalR hub `/hubs/slicers` for real-time worker updates
-2. ❌ Admin UI page at `/settings/slicers` for worker management
-3. ❌ Worker status indicators (Online/Offline/Draining)
-4. ❌ Manual enable/disable controls
+**Completed Components**:
+1. ✅ SignalR hub `/hubs/slicers` for real-time worker updates
+   - SlicerHub.cs with event broadcasting
+   - Events: SlicerRegistered, SlicerHeartbeat, SlicerDeregistered, SlicerApiKeyRotated
+   
+2. ✅ Admin UI page at `/settings/workers` for worker management
+   - WorkerManagementPage.tsx with full CRUD operations
+   - Real-time status updates via SignalR
+   - Connection status indicator
+   
+3. ✅ Worker status indicators (Online/Offline/Busy/Draining/Error)
+   - Color-coded status badges
+   - Stale heartbeat warnings
+   - Utilization percentages with progress bars
+   
+4. ✅ Manual enable/disable controls
+   - Disable worker with reason
+   - Enable disabled workers
+   - Delete workers
 
-**Impact**: No visibility into distributed worker health
+**Impact**: ✅ Full visibility into distributed worker health with real-time updates
 
-**Files to Create**:
-- `src/api/Hubs/SlicerHub.cs`
-- `src/Web/ReactApp/src/pages/settings/WorkerManagementPage.tsx`
-- `src/Web/ReactApp/src/services/slicerHubService.ts`
+**Files Implemented**:
+- ✅ `src/api/Hubs/SlicerHub.cs` (already existed)
+- ✅ `src/Web/ReactApp/src/pages/WorkerManagementPage.tsx` (enhanced with SignalR)
+- ✅ `src/Web/ReactApp/src/services/slicerHubService.ts` (new - SignalR client)
 
-**Acceptance Criteria**:
-- ✅ Real-time worker status updates in UI
-- ✅ List shows all registered workers
-- ✅ Admin can enable/disable workers
-- ✅ Capacity (free slots) visible per worker
+**Acceptance Criteria**: ✅ ALL COMPLETE
+- ✅ Real-time worker status updates in UI via SignalR
+- ✅ List shows all registered workers with detailed information
+- ✅ Admin can enable/disable workers with reasons
+- ✅ Capacity (free slots) visible per worker with utilization bars
+- ✅ Connection status indicator shows real-time vs polling mode
+- ✅ Automatic reconnection with exponential backoff
+- ✅ Heartbeat staleness detection and warnings
+
+**Features**:
+- Real-time event handling (register, heartbeat, deregister, key rotation)
+- Automatic SignalR reconnection with retry logic
+- Fallback to 30-second polling if SignalR disconnected
+- Worker statistics (active/completed/failed jobs, avg processing time)
+- Performance metrics (utilization %, slots used)
+- Capability display per worker
+- Filter by status (All, Online, Offline, Busy, Error, Draining)
+- Responsive table layout with hover effects
 
 **Reference**: docs/slicer/orcaslicer-onboarding-plan.md - Phase 1
 

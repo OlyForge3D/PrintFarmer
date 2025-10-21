@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { workerService, WorkerResponse, WorkerStatus } from '@/services/workerService';
+import { slicerHubService, SlicerRegisteredEvent, SlicerHeartbeatEvent, SlicerDeregisteredEvent } from '@/services/slicerHubService';
 
 export default function WorkerManagementPage() {
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
@@ -9,13 +10,73 @@ export default function WorkerManagementPage() {
   const [showDisableDialog, setShowDisableDialog] = useState(false);
   const [disableReason, setDisableReason] = useState('');
   const [filter, setFilter] = useState<'all' | WorkerStatus>('all');
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     loadWorkers();
-    // Refresh every 10 seconds
-    const interval = setInterval(loadWorkers, 10000);
-    return () => clearInterval(interval);
+    
+    // Start SignalR connection
+    startSignalRConnection();
+
+    // Refresh every 30 seconds as fallback (SignalR should provide real-time updates)
+    const interval = setInterval(loadWorkers, 30000);
+    
+    return () => {
+      clearInterval(interval);
+      // Clean up SignalR connection
+      slicerHubService.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reload workers when filter changes
+  useEffect(() => {
+    loadWorkers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  const startSignalRConnection = async () => {
+    try {
+      await slicerHubService.start();
+      setIsConnected(true);
+
+      // Subscribe to worker events
+      slicerHubService.onSlicerRegistered(handleWorkerRegistered);
+      slicerHubService.onSlicerHeartbeat(handleWorkerHeartbeat);
+      slicerHubService.onSlicerDeregistered(handleWorkerDeregistered);
+    } catch (err) {
+      console.error('Failed to connect to SlicerHub:', err);
+      setIsConnected(false);
+    }
+  };
+
+  const handleWorkerRegistered = (event: SlicerRegisteredEvent) => {
+    console.log('Worker registered:', event);
+    // Reload workers to get the new worker
+    loadWorkers();
+  };
+
+  const handleWorkerHeartbeat = (event: SlicerHeartbeatEvent) => {
+    console.log('Worker heartbeat:', event);
+    // Update worker status in real-time
+    setWorkers(prev => prev.map(worker => 
+      worker.id === event.id 
+        ? { 
+            ...worker, 
+            status: event.status, 
+            freeSlots: event.freeSlots, 
+            lastHeartbeat: event.lastSeen,
+            activeJobs: worker.totalSlots - event.freeSlots
+          }
+        : worker
+    ));
+  };
+
+  const handleWorkerDeregistered = (event: SlicerDeregisteredEvent) => {
+    console.log('Worker deregistered:', event);
+    // Remove worker from list
+    setWorkers(prev => prev.filter(worker => worker.id !== event.id));
+  };
 
   const loadWorkers = async () => {
     try {
@@ -100,7 +161,15 @@ export default function WorkerManagementPage() {
   return (
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Worker Management</h1>
+          <div>
+            <h1 className="text-3xl font-bold">Worker Management</h1>
+            <div className="flex items-center gap-2 mt-2">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+              <span className="text-sm text-gray-600">
+                {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
+              </span>
+            </div>
+          </div>
         <button
           onClick={loadWorkers}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
