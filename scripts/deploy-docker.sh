@@ -420,9 +420,11 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 ENABLE_PRUSA_WORKER=${ENABLE_PRUSA_WORKER:-no}
 PRUSA_WORKER_COUNT=${PRUSA_WORKER_COUNT:-0}
 PRUSA_HOST_PORT=${PRUSA_HOST_PORT:-8082}
+PRUSASLICER_VERSION=${PRUSASLICER_VERSION:-2.9.3}
 EOF
 
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
@@ -1317,6 +1319,7 @@ configure_additional() {
     # Default to 'no' to avoid accidental enabling when slicer work is paused
     prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
             prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
         else
             ORCA_WORKER_COUNT=0
@@ -1324,6 +1327,7 @@ configure_additional() {
 
         prompt_yes_no "Enable PrusaSlicer worker(s)?" "no" "ENABLE_PRUSA_WORKER"
         if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
+            prompt_with_default "PrusaSlicer version to deploy:" "${PRUSASLICER_VERSION:-2.9.3}" "PRUSASLICER_VERSION"
             prompt_with_default "Number of PrusaSlicer worker replicas:" "1" "PRUSA_WORKER_COUNT"
         else
             PRUSA_WORKER_COUNT=0
@@ -1425,6 +1429,10 @@ ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ENABLE_PRUSA_WORKER=$ENABLE_PRUSA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
 PRUSA_HOST_PORT=$PRUSA_HOST_PORT
+
+# Slicer Versions
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+PRUSASLICER_VERSION=${PRUSASLICER_VERSION:-2.9.3}
 
 # Spoolman
 SPOOLMAN_ENABLED=$ENABLE_SPOOLMAN

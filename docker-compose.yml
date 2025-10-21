@@ -108,6 +108,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.orcaslicer
+      args:
+        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
+        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
     image: printfarmer-orcaslicer-worker
     profiles:
       - orca
@@ -159,6 +162,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prusaslicer
+      args:
+        ALLOW_STUB: "false"  # Production: require real PrusaSlicer binary
+        PRUSASLICER_VERSION: ${PRUSASLICER_VERSION:-2.9.3}
     image: printfarmer-prusaslicer-worker
     profiles:
       - prusa
