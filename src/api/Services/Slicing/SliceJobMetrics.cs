@@ -13,6 +13,8 @@ public sealed class SliceJobMetrics : IDisposable
     public Counter<long> JobsCompletedTotal { get; }
     public Counter<long> JobsCompletedWithLogTotal { get; }
     public Histogram<int> ArtifactsPerJobHistogram { get; }
+    public Counter<long> JobsTimedOutTotal { get; }
+    public Counter<long> JobRetriesTotal { get; }
 
     public SliceJobMetrics()
     {
@@ -27,6 +29,12 @@ public sealed class SliceJobMetrics : IDisposable
             "printfarmer.slicing.artifacts_per_job",
             unit: "artifacts",
             description: "Number of artifacts associated with completed jobs");
+        JobsTimedOutTotal = _meter.CreateCounter<long>(
+            "printfarmer.slicing.jobs_timed_out_total",
+            description: "Slice jobs that timed out and were handled by the error recovery scanner");
+        JobRetriesTotal = _meter.CreateCounter<long>(
+            "printfarmer.slicing.job_retries_total",
+            description: "Total number of retries performed by the error recovery scanner");
     }
 
     /// <summary>
@@ -42,9 +50,23 @@ public sealed class SliceJobMetrics : IDisposable
         }
     }
 
+    public void RecordJobTimedOut()
+    {
+        JobsTimedOutTotal.Add(1);
+    }
+
+    public void RecordJobRetry()
+    {
+        JobRetriesTotal.Add(1);
+    }
+
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
+
         _meter.Dispose();
         _disposed = true;
     }

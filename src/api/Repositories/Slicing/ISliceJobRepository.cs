@@ -70,16 +70,31 @@ public interface ISliceJobRepository
     /// </summary>
     Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default);
 
-        /// <summary>
-        /// Atomically claim the next available queued job matching capabilities (worker pull model)
-        /// Sets status to Processing, assigns workerId, and sets ClaimedAt timestamp with lease expiration
-        /// </summary>
-        /// <param name="workerId">Worker claiming the job</param>
-        /// <param name="capabilities">Optional capabilities filter (null means accept any job)</param>
-        /// <param name="leaseDurationSeconds">Lease duration in seconds</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Claimed job or null if no matching job available</returns>
-        Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
+    /// <summary>
+    /// Atomically claim the next available queued job matching capabilities (worker pull model)
+    /// Sets status to Processing, assigns workerId, and sets ClaimedAt timestamp with lease expiration
+    /// </summary>
+    /// <param name="workerId">Worker claiming the job</param>
+    /// <param name="capabilities">Optional capabilities filter (null means accept any job)</param>
+    /// <param name="leaseDurationSeconds">Lease duration in seconds</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Claimed job or null if no matching job available</returns>
+    Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
+
+    /// <summary>
+    /// Find jobs that are considered stuck (Processing but lease expired or long-running) and return a paged set.
+    /// </summary>
+    Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Renew the lease for a job (extend LeaseExpiresAt) when a worker heartbeats.
+    /// </summary>
+    Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default);
+
+    /// <summary>
+    /// Increment the retry count, set status back to Queued (or Failed if exceeded) and clear worker assignment.
+    /// </summary>
+    Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default);
 
     /// <summary>
     /// Save changes to the database

@@ -59,6 +59,53 @@ public class JobDispatcherServiceTests
             { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
             return Task.FromResult(job);
         }
+        public Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
+        {
+            var now = DateTime.UtcNow;
+            var stuck = Jobs.FindAll(j => j.Status == SliceJobStatus.Processing && (j.LeaseExpiresAt != null && j.LeaseExpiresAt < now));
+            if (limit.HasValue)
+            {
+                stuck = stuck.GetRange(0, Math.Min(limit.Value, stuck.Count));
+            }
+
+            return Task.FromResult((IReadOnlyList<SliceJob>)stuck);
+        }
+
+        public Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
+        {
+            var j = Jobs.Find(x => x.Id == jobId);
+            if (j != null)
+            {
+                j.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
+        {
+            var j = Jobs.Find(x => x.Id == jobId);
+            if (j == null)
+            {
+                return Task.CompletedTask;
+            }
+
+            j.RetryCount += 1;
+            j.WorkerId = null;
+            j.ClaimedAt = null;
+            j.LeaseExpiresAt = null;
+            if (j.RetryCount > maxRetries)
+            {
+                j.Status = SliceJobStatus.Failed;
+            }
+            else
+            {
+                j.Status = SliceJobStatus.Queued;
+                j.QueuedAt = DateTime.UtcNow;
+            }
+
+            return Task.CompletedTask;
+        }
         public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 

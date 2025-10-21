@@ -247,6 +247,61 @@ public class EfSliceJobRepository : ISliceJobRepository
         return job;
     }
 
+    public async Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
+    {
+        var threshold = DateTime.UtcNow.AddSeconds(-maxAgeSeconds);
+        var query = _db.SliceJobs
+            .Where(j => j.Status == SliceJobStatus.Processing &&
+                        ((j.LeaseExpiresAt != null && j.LeaseExpiresAt < DateTime.UtcNow) || (j.StartedAt != null && j.StartedAt < threshold)))
+            .OrderBy(j => j.StartedAt);
+
+        if (limit.HasValue)
+        {
+            query = (IOrderedQueryable<SliceJob>)query.Take(limit.Value);
+        }
+
+        return await query.ToListAsync(ct);
+    }
+
+    public async Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
+    {
+        var job = await GetByIdAsync(jobId, ct);
+        if (job == null)
+            return;
+
+        job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds);
+        job.UpdatedAt = DateTime.UtcNow;
+        await SaveChangesAsync(ct);
+    }
+
+    public async Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
+    {
+        var job = await GetByIdAsync(jobId, ct);
+        if (job == null)
+            return;
+
+        job.RetryCount += 1;
+        job.WorkerId = null;
+        job.ClaimedAt = null;
+        job.LeaseExpiresAt = null;
+        job.UpdatedAt = DateTime.UtcNow;
+
+        if (job.RetryCount > maxRetries)
+        {
+            job.Status = SliceJobStatus.Failed;
+            job.CompletedAt = DateTime.UtcNow;
+            job.ErrorMessage = $"Job exceeded max retry attempts ({maxRetries}) and was marked Failed.";
+        }
+        else
+        {
+            job.Status = SliceJobStatus.Queued;
+            // bump queuedAt to now so it can be retried fairly
+            job.QueuedAt = DateTime.UtcNow;
+        }
+
+        await SaveChangesAsync(ct);
+    }
+
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
         await _db.SaveChangesAsync(ct);

@@ -472,6 +472,12 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
 // Register background services for distributed slicing
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.WorkerHealthMonitorService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobDispatchingService>();
+// Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
+builder.Services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySettings>(builder.Configuration.GetSection("JobDispatchRetry"));
+// Circuit breaker for worker failure tracking
+builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(builder.Configuration.GetSection("CircuitBreaker"));
+builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
 
 // Add JWT Authentication
 builder.Services.AddAuthentication("Bearer")

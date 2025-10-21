@@ -27,9 +27,9 @@ public class SliceJobController : ControllerBase
     private readonly ISlicerProfileRepository _profileRepository;
     private readonly IArtifactsService _artifactsService;
     private readonly Farm.Web.Api.Services.Slicing.SliceJobMetrics _metrics;
-
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
     private readonly Farm.Web.Api.Services.Workers.IWorkerAuthService _workerAuth;
+    private readonly Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService? _circuitBreaker;
 
     public SliceJobController(
         ISliceJobRepository jobRepository,
@@ -40,7 +40,8 @@ public class SliceJobController : ControllerBase
         IArtifactsService artifactsService,
         Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
         Farm.Web.Api.Services.Slicing.SliceJobMetrics metrics,
-        Farm.Web.Api.Services.Workers.IWorkerAuthService workerAuth)
+        Farm.Web.Api.Services.Workers.IWorkerAuthService workerAuth,
+        Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService? circuitBreaker = null)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
@@ -51,6 +52,7 @@ public class SliceJobController : ControllerBase
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _workerAuth = workerAuth ?? throw new ArgumentNullException(nameof(workerAuth));
+        _circuitBreaker = circuitBreaker;
     }
 
     /// <summary>
@@ -351,6 +353,39 @@ public class SliceJobController : ControllerBase
     }
 
     /// <summary>
+    /// Renew a job lease to extend LeaseExpiresAt while worker is actively processing
+    /// </summary>
+    [HttpPost("{id}/renew")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> RenewLeaseAsync(Guid id, [FromBody] RenewLeaseRequest request)
+    {
+        if (!_workerAuth.IsAuthorized(HttpContext))
+        {
+            return Unauthorized("Worker API key missing or invalid");
+        }
+
+        var job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
+        if (job == null)
+        {
+            return NotFound($"Job {id} not found");
+        }
+
+        // Only allow renewing leases for Processing jobs
+        if (job.Status != SliceJobStatus.Processing)
+        {
+            return BadRequest($"Cannot renew lease for job in status {job.Status}");
+        }
+
+        int duration = request?.LeaseDurationSeconds ?? 300; // default to 300 if not specified
+        await _jobRepository.RenewLeaseAsync(id, duration, HttpContext.RequestAborted);
+        await _jobRepository.SaveChangesAsync(HttpContext.RequestAborted);
+
+        return NoContent();
+    }
+
+    /// <summary>
     /// Get all jobs for the authenticated user
     /// </summary>
     /// <param name="limit">Maximum number of jobs to return</param>
@@ -604,6 +639,13 @@ public class SliceJobController : ControllerBase
             request.FilamentUsedGrams,
             HttpContext.RequestAborted);
         await _jobRepository.SaveChangesAsync(HttpContext.RequestAborted);
+
+        // Record successful completion in circuit breaker
+        if (job.WorkerId.HasValue && job.WorkerId.Value != Guid.Empty && _circuitBreaker != null)
+        {
+            var workerRepo = HttpContext.RequestServices.GetRequiredService<Farm.Web.Api.Repositories.Workers.IWorkerRepository>();
+            await _circuitBreaker.RecordJobSuccessAsync(job.WorkerId.Value, workerRepo, HttpContext.RequestAborted);
+        }
 
         // Reload updated job for broadcasting
         var updated = await _jobRepository.GetByIdAsync(job.Id, HttpContext.RequestAborted);

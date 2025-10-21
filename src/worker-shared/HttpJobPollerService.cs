@@ -133,9 +133,47 @@ public abstract class HttpJobPollerService(
     private async Task HandleJobAsync(DistributedSlicingJob job, HttpClient httpClient, CancellationToken ct)
     {
         var start = DateTime.UtcNow;
+        CancellationTokenSource? localLinkedCts = null;
         try
         {
             using var scope = _serviceProvider.CreateScope();
+
+            // Start a lease-renewal loop to prevent the API from reclaiming the job while we're actively processing.
+            try
+            {
+                localLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                int leaseDurationSeconds = int.Parse(_configuration["Worker:LeaseDurationSeconds"] ?? "300");
+                int renewIntervalSeconds = Math.Max(10, leaseDurationSeconds / 3);
+
+                _ = Task.Run(async () =>
+                {
+                    while (!localLinkedCts.Token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            var renewReq = new Farm.Web.Shared.Contracts.Slicing.RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
+                            var resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
+                            if (!resp.IsSuccessStatusCode)
+                            {
+                                _logger.LogDebug($"Lease renew for job {job.Id} returned {resp.StatusCode}");
+                            }
+                        }
+                        catch (OperationCanceledException) { break; }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, $"Failed to renew lease for job {job.Id}");
+                        }
+
+                        await Task.Delay(TimeSpan.FromSeconds(renewIntervalSeconds), localLinkedCts.Token);
+                    }
+                }, localLinkedCts.Token);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, $"Failed to start lease renew loop for job {job.Id}");
+                localLinkedCts?.Dispose();
+                localLinkedCts = null;
+            }
 
             // Execute the slicing pipeline (downloads STL, runs slicer, generates G-code)
             var result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
@@ -185,6 +223,20 @@ public abstract class HttpJobPollerService(
         }
         finally
         {
+
+            // Stop lease renew task if running by cancelling and disposing localLinkedCts
+            try
+            {
+                if (localLinkedCts != null)
+                {
+#pragma warning disable S3358 // CancellationTokenSource.Cancel() is acceptable here
+                    localLinkedCts.Cancel();
+#pragma warning restore S3358
+                    localLinkedCts.Dispose();
+                }
+            }
+            catch { }
+
             _workerState.DecrementActiveJobs();
         }
     }

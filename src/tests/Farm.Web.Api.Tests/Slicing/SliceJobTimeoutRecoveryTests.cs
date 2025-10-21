@@ -1,0 +1,65 @@
+using System;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Repositories.Slicing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Slicing;
+
+public class SliceJobTimeoutRecoveryTests
+{
+    private AppDbContext CreateInMemoryContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        return new AppDbContext(options);
+    }
+
+    [Fact]
+    public async Task RenewLeaseAsync_ExtendsLease()
+    {
+        await using var db = CreateInMemoryContext();
+        var repo = new Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository(db);
+
+        var job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, ClaimedAt = DateTime.UtcNow, LeaseExpiresAt = DateTime.UtcNow.AddSeconds(10) };
+        await repo.AddAsync(job);
+        await repo.SaveChangesAsync();
+
+        await repo.RenewLeaseAsync(job.Id, 300);
+        await repo.SaveChangesAsync();
+
+        var reloaded = await db.SliceJobs.FindAsync(job.Id);
+        Assert.NotNull(reloaded.LeaseExpiresAt);
+        Assert.True(reloaded.LeaseExpiresAt > DateTime.UtcNow.AddSeconds(200));
+    }
+
+    [Fact]
+    public async Task IncrementRetryAndRequeueAsync_RequeuesOrFails()
+    {
+        await using var db = CreateInMemoryContext();
+        var repo = new Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository(db);
+
+        var job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, RetryCount = 0 };
+        await repo.AddAsync(job);
+        await repo.SaveChangesAsync();
+
+        // First retry should requeue
+        await repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3);
+        var j1 = await db.SliceJobs.FindAsync(job.Id);
+        Assert.Equal(SliceJobStatus.Queued, j1.Status);
+        Assert.Equal(1, j1.RetryCount);
+
+        // Exceed max retries -> marked failed
+        j1.RetryCount = 3;
+        j1.Status = SliceJobStatus.Processing;
+        await repo.SaveChangesAsync();
+
+        await repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3);
+        var j2 = await db.SliceJobs.FindAsync(job.Id);
+        Assert.Equal(SliceJobStatus.Failed, j2.Status);
+    }
+}

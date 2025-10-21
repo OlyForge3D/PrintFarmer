@@ -125,16 +125,16 @@ public class SliceJob
     /// </summary>
     public Guid? WorkerId { get; set; }
 
-        /// <summary>
-        /// When the job was claimed by a worker (pull model)
-        /// </summary>
-        public DateTime? ClaimedAt { get; set; }
+    /// <summary>
+    /// When the job was claimed by a worker (pull model)
+    /// </summary>
+    public DateTime? ClaimedAt { get; set; }
 
-        /// <summary>
-        /// When the job lease expires (pull model with timeout)
-        /// If worker doesn't complete by this time, job can be reclaimed by another worker
-        /// </summary>
-        public DateTime? LeaseExpiresAt { get; set; }
+    /// <summary>
+    /// When the job lease expires (pull model with timeout)
+    /// If worker doesn't complete by this time, job can be reclaimed by another worker
+    /// </summary>
+    public DateTime? LeaseExpiresAt { get; set; }
 
     /// <summary>
     /// Timestamp when this record was created
@@ -161,6 +161,12 @@ public class SliceJob
     /// Aggregate size in bytes of all artifacts for this job (snapshot at completion).
     /// </summary>
     public long? ArtifactsTotalBytes { get; set; }
+
+    /// <summary>
+    /// Number of times this job has been retried after timing out or failing to be processed by a worker.
+    /// Incremented by the error-recovery scanner when re-queueing jobs.
+    /// </summary>
+    public int RetryCount { get; set; }
 }
 
 /// <summary>
