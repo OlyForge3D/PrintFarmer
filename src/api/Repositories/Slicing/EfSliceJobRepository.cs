@@ -144,7 +144,8 @@ public class EfSliceJobRepository : ISliceJobRepository
     public async Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
     {
         var job = await GetByIdAsync(jobId, ct);
-        if (job == null) return;
+        if (job == null)
+            return;
 
         var ids = artifactIds?.Distinct().ToArray() ?? Array.Empty<Guid>();
         job.Status = SliceJobStatus.Completed;
@@ -197,49 +198,54 @@ public class EfSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
     }
 
-        public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
+    public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var leaseExpiration = now.AddSeconds(leaseDurationSeconds);
+
+        // Base query: queued or expired lease
+        IQueryable<SliceJob> baseQuery = _db.SliceJobs
+            .Where(j => j.Status == SliceJobStatus.Queued ||
+                       (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
+            .OrderBy(j => j.Priority)
+            .ThenBy(j => j.QueuedAt);
+
+        SliceJob? job;
+        if (capabilities != null && capabilities.Length > 0)
         {
-            var now = DateTime.UtcNow;
-            var leaseExpiration = now.AddSeconds(leaseDurationSeconds);
-
-            // Query for queued jobs or jobs with expired leases
-            IQueryable<SliceJob> query = _db.SliceJobs
-                .Where(j => j.Status == SliceJobStatus.Queued || 
-                           (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
-                .OrderBy(j => j.Priority)
-                .ThenBy(j => j.QueuedAt);
-
-            // Filter by capabilities if specified
-            if (capabilities != null && capabilities.Length > 0)
+            // Materialize a small candidate set (limit 50) then perform capability matching client-side
+            var candidates = await baseQuery.Take(50).ToListAsync(ct);
+            job = candidates.FirstOrDefault(j =>
+                string.IsNullOrEmpty(j.RequiredCapabilitiesJson) || j.RequiredCapabilitiesJson == "[]" ||
+                capabilities.Any(cap => j.RequiredCapabilitiesJson!.IndexOf($"\"{cap}\"", StringComparison.OrdinalIgnoreCase) >= 0));
+            if (job == null)
             {
-                // Jobs with null/empty RequiredCapabilitiesJson match any worker
-                // Otherwise, check if job capabilities are a subset of worker capabilities
-                query = query.Where(j => 
-                    string.IsNullOrEmpty(j.RequiredCapabilitiesJson) ||
-                    capabilities.Any(cap => j.RequiredCapabilitiesJson!.Contains($"\"{cap}\"", StringComparison.OrdinalIgnoreCase)));
+                return null; // no matching job
             }
-
-            // Get first available job
-            var job = await query.FirstOrDefaultAsync(ct);
+        }
+        else
+        {
+            job = await baseQuery.FirstOrDefaultAsync(ct);
             if (job == null)
             {
                 return null;
             }
-
-            // Atomically claim the job
-            job.Status = SliceJobStatus.Processing;
-            job.WorkerId = workerId;
-            job.ClaimedAt = now;
-            job.LeaseExpiresAt = leaseExpiration;
-            if (job.StartedAt == null)
-            {
-                job.StartedAt = now;
-            }
-            job.UpdatedAt = now;
-
-            await SaveChangesAsync(ct);
-            return job;
         }
+
+        // Atomically claim the job
+        job.Status = SliceJobStatus.Processing;
+        job.WorkerId = workerId;
+        job.ClaimedAt = now;
+        job.LeaseExpiresAt = leaseExpiration;
+        if (job.StartedAt == null)
+        {
+            job.StartedAt = now;
+        }
+        job.UpdatedAt = now;
+
+        await SaveChangesAsync(ct);
+        return job;
+    }
 
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {

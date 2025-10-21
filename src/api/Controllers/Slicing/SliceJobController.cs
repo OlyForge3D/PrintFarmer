@@ -1,9 +1,9 @@
 using System.Security.Claims;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.DTOs.Slicing;
 using Farm.Web.Api.Repositories.Slicing;
-using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Services.Slicing;
+// ClaimJobRequest now lives in shared contracts
 using Farm.Web.Shared.Contracts.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -29,6 +29,7 @@ public class SliceJobController : ControllerBase
     private readonly Farm.Web.Api.Services.Slicing.SliceJobMetrics _metrics;
 
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
+    private readonly Farm.Web.Api.Services.Workers.IWorkerAuthService _workerAuth;
 
     public SliceJobController(
         ISliceJobRepository jobRepository,
@@ -38,7 +39,8 @@ public class SliceJobController : ControllerBase
         ISlicerProfileRepository profileRepository,
         IArtifactsService artifactsService,
         Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
-        Farm.Web.Api.Services.Slicing.SliceJobMetrics metrics)
+        Farm.Web.Api.Services.Slicing.SliceJobMetrics metrics,
+        Farm.Web.Api.Services.Workers.IWorkerAuthService workerAuth)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
@@ -48,6 +50,7 @@ public class SliceJobController : ControllerBase
         _artifactsService = artifactsService ?? throw new ArgumentNullException(nameof(artifactsService));
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
+        _workerAuth = workerAuth ?? throw new ArgumentNullException(nameof(workerAuth));
     }
 
     /// <summary>
@@ -255,10 +258,62 @@ public class SliceJobController : ControllerBase
             ErrorMessage = job.ErrorMessage,
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
-            WorkerId = job.WorkerId
+            WorkerId = job.WorkerId,
+            ModelFileUrl = job.ModelFileUrl,
+            ModelFileName = job.ModelFileName,
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson
         };
 
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Update progress for a processing job (worker endpoint). Emits SignalR JobProgress event.
+    /// </summary>
+    /// <param name="id">Job ID</param>
+    /// <param name="request">Progress payload</param>
+    /// <returns>No content on success</returns>
+    [HttpPost("{id}/progress")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> UpdateProgressAsync(Guid id, [FromBody] SliceJobProgressUpdateRequest request)
+    {
+        if (!_workerAuth.IsAuthorized(HttpContext))
+        {
+            return Unauthorized("Worker API key missing or invalid");
+        }
+        if (request == null)
+        {
+            return BadRequest("Request body required");
+        }
+        if (request.ProgressPercent < 0 || request.ProgressPercent > 100)
+        {
+            return BadRequest("ProgressPercent must be between 0 and 100");
+        }
+        var job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
+        if (job == null)
+        {
+            return NotFound($"Job {id} not found");
+        }
+        if (job.Status != SliceJobStatus.Processing)
+        {
+            return BadRequest($"Cannot update progress for job in status {job.Status}");
+        }
+
+        // Update repository state
+        await _jobRepository.UpdateProgressAsync(id, request.ProgressPercent, request.ProgressMessage ?? string.Empty, HttpContext.RequestAborted);
+        await _jobRepository.SaveChangesAsync(HttpContext.RequestAborted);
+
+        // Reload for broadcasting enriched event
+        var updated = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
+        if (updated != null)
+        {
+            await _eventService.NotifyJobProgressAsync(updated, HttpContext.RequestAborted);
+        }
+        return NoContent();
     }
 
     /// <summary>
@@ -335,7 +390,11 @@ public class SliceJobController : ControllerBase
             ErrorMessage = job.ErrorMessage,
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
-            WorkerId = job.WorkerId
+            WorkerId = job.WorkerId,
+            ModelFileUrl = job.ModelFileUrl,
+            ModelFileName = job.ModelFileName,
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson
         }).ToList();
 
         return Ok(response);
@@ -366,7 +425,11 @@ public class SliceJobController : ControllerBase
             ErrorMessage = job.ErrorMessage,
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
-            WorkerId = job.WorkerId
+            WorkerId = job.WorkerId,
+            ModelFileUrl = job.ModelFileUrl,
+            ModelFileName = job.ModelFileName,
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson
         }).ToList();
 
         return Ok(response);
@@ -383,45 +446,73 @@ public class SliceJobController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ClaimJobAsync([FromBody] ClaimJobRequest request)
     {
-        if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
+        if (!_workerAuth.IsAuthorized(HttpContext))
         {
-            return BadRequest("Lease duration must be between 30 and 3600 seconds");
+            return Unauthorized("Worker API key missing or invalid");
         }
-
-        SliceJob? job = await _jobRepository.ClaimNextJobAsync(
-            request.WorkerId,
-            request.Capabilities,
-            request.LeaseDurationSeconds,
-            HttpContext.RequestAborted);
-
-        if (job == null)
+        try
         {
-            return NoContent(); // No jobs available
+            if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
+            {
+                return BadRequest("Lease duration must be between 30 and 3600 seconds");
+            }
+
+            SliceJob? job = await _jobRepository.ClaimNextJobAsync(
+                request.WorkerId,
+                request.Capabilities,
+                request.LeaseDurationSeconds,
+                HttpContext.RequestAborted);
+
+            if (job == null)
+            {
+                return NoContent(); // No jobs available
+            }
+
+            // Broadcast job started event (do not fail claim if broadcast throws)
+            try
+            {
+                await _eventService.NotifyJobStartedAsync(job, HttpContext.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Claim succeeded but event broadcast failed for job {JobId}", job.Id);
+            }
+
+            _logger.LogInformation("Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
+                job.Id, request.WorkerId, job.LeaseExpiresAt);
+
+            SliceJobStatusResponse response = new()
+            {
+                Id = job.Id,
+                Status = job.Status,
+                ProgressPercent = job.ProgressPercent,
+                ProgressMessage = job.ProgressMessage,
+                QueuedAt = job.QueuedAt,
+                StartedAt = job.StartedAt,
+                CompletedAt = job.CompletedAt,
+                ResultFileUrl = job.ResultFileUrl,
+                ErrorMessage = job.ErrorMessage,
+                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+                FilamentUsedGrams = job.FilamentUsedGrams,
+                WorkerId = job.WorkerId,
+                ModelFileUrl = job.ModelFileUrl,
+                ModelFileName = job.ModelFileName,
+                SlicerEngine = job.SlicerEngine,
+                SlicerProfileJson = job.SlicerProfileJson
+            };
+
+            return Ok(response);
         }
-
-        // Broadcast job started event
-        await _eventService.NotifyJobStartedAsync(job, HttpContext.RequestAborted);
-
-        _logger.LogInformation("Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
-            job.Id, request.WorkerId, job.LeaseExpiresAt);
-
-        SliceJobStatusResponse response = new()
+        catch (Exception ex)
         {
-            Id = job.Id,
-            Status = job.Status,
-            ProgressPercent = job.ProgressPercent,
-            ProgressMessage = job.ProgressMessage,
-            QueuedAt = job.QueuedAt,
-            StartedAt = job.StartedAt,
-            CompletedAt = job.CompletedAt,
-            ResultFileUrl = job.ResultFileUrl,
-            ErrorMessage = job.ErrorMessage,
-            EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-            FilamentUsedGrams = job.FilamentUsedGrams,
-            WorkerId = job.WorkerId
-        };
-
-        return Ok(response);
+            // Surface diagnostic details during Testing environment only
+            if (_env.IsEnvironment("Testing"))
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, $"Claim failure: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            }
+            _logger.LogError(ex, "Unhandled exception in ClaimJobAsync");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Claim failed");
+        }
     }
 
     /// <summary>
@@ -435,11 +526,19 @@ public class SliceJobController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CompleteJobAsync(Guid id, [FromBody] CompleteSliceJobRequest request)
     {
+        if (!_workerAuth.IsAuthorized(HttpContext))
+        {
+            return Unauthorized("Worker API key missing or invalid");
+        }
         if (request == null)
         {
             return BadRequest("Request body required");
         }
 
+        if (!_workerAuth.IsAuthorized(HttpContext))
+        {
+            return Unauthorized("Worker API key missing or invalid");
+        }
         var job = await _jobRepository.GetByIdAsync(id);
         if (job == null)
         {
@@ -531,7 +630,7 @@ public class SliceJobController : ControllerBase
         }
 
         _logger.LogInformation("Job {JobId} completed with {ArtifactCount} artifacts", job.Id, allArtifactIds.Count);
-        
+
         // Record completion metrics
         bool hasLog = logArtifactId.HasValue || (request.AdditionalArtifactIds?.Any(aid =>
         {

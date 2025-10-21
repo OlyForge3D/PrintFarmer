@@ -89,6 +89,9 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Artifacts.ArtifactCleanu
 // Slicing metrics
 builder.Services.AddSingleton<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
 builder.Services.AddSingleton<Farm.Web.Api.Services.Slicing.SlicerServiceMetrics>();
+// Worker authentication settings & service
+builder.Services.Configure<Farm.Web.Api.Services.Workers.WorkerAuthSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.WorkerAuthSettings.SectionName));
+builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerAuthService, Farm.Web.Api.Services.Workers.WorkerAuthService>();
 // Bind slicer settings (already decorated with [AppSetting])
 builder.Services.Configure<Farm.Infrastructure.Settings.SlicerSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.SlicerSettings.SectionName));
 

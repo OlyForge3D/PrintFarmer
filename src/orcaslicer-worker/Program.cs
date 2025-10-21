@@ -4,7 +4,6 @@ using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using StackExchange.Redis;
 
 namespace Farm.OrcaSlicer.Worker;
 
@@ -22,41 +21,8 @@ public static class Program
         _ = builder.Logging.ClearProviders();
         _ = builder.Logging.AddConsole();
 
-        // Redis
-        _ = builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-        {
-            ConfigurationManager configuration = builder.Configuration;
-            string raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
-            if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
-            {
-                raw = raw.TrimEnd(',') + ",abortConnect=false";
-            }
-            try
-            {
-                return ConnectionMultiplexer.Connect(raw);
-            }
-            catch (Exception ex)
-            {
-                // Resolve ILoggerFactory from the factory-provided service provider to avoid
-                // creating a second service provider via BuildServiceProvider(). This
-                // eliminates the ASP0000 diagnostic and ensures singletons are not duplicated.
-                ILoggerFactory loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
-                ILogger? logger = loggerFactory.CreateLogger("OrcaSlicer.Startup");
-                if (logger != null)
-                {
-                    logger.LogWarning(ex, "[startup][redis] Initial Redis connection failed: {Message}", ex.Message);
-                }
-                else
-                {
-                    Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
-                }
-
-                // Fall back to a local connect attempt with a safe default
-                return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
-            }
-        });
-
-        // HTTP clients
+        // HTTP clients (for API communication, artifact upload, and slicing pipeline)
+        _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
         _ = builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
         _ = builder.Services.AddHttpClient<SlicerRegistrationClient>(); // registration client
@@ -82,8 +48,7 @@ public static class Program
         _ = builder.Services.AddHealthChecks()
             .AddCheck<WorkerLivenessHealthCheck>("liveness")
             .AddCheck<WorkerReadinessHealthCheck>("readiness")
-            .AddCheck<OrcaBinaryHealthCheck>("orca_binary")
-            .AddCheck<RedisHealthCheck>("redis");
+            .AddCheck<OrcaBinaryHealthCheck>("orca_binary");
 
         WebApplication app = builder.Build();
 
@@ -115,7 +80,7 @@ public static class Program
 
         _ = app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
+            Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
@@ -134,7 +99,7 @@ public static class Program
 
         _ = app.MapHealthChecks("/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
+            Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
         });
 
         _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new

@@ -1,0 +1,66 @@
+using System;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+using Farm.Web.Shared.Contracts.Slicing;
+using FluentAssertions;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Slicing;
+
+/// <summary>
+/// Tests /api/slice/{id}/progress endpoint updates job state and emits event prerequisites.
+/// </summary>
+public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationFactory>
+{
+    private readonly CustomWebApplicationFactory _factory;
+    public SliceJobProgressEndpointTests(CustomWebApplicationFactory factory) => _factory = factory;
+
+    [Fact(DisplayName = "Progress endpoint updates percent and message for Processing job")]
+    public async Task Progress_Updates_Fields()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Worker-Key", "test-worker-key");
+
+        // Submit job
+        var submitReq = new SubmitSliceJobRequest
+        {
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = "http://example.com/model.stl",
+            ModelFileName = "model.stl",
+            SlicerEngine = 0,
+            SlicerProfileJson = "{}"
+        };
+        var submitResp = await client.PostAsJsonAsync("/api/slice", submitReq);
+        submitResp.IsSuccessStatusCode.Should().BeTrue();
+        var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        submitted.Should().NotBeNull();
+
+        // Claim job
+        var claimReq = new ClaimJobRequest
+        {
+            WorkerId = Guid.NewGuid(),
+            Capabilities = new[] { "orcaslicer" },
+            LeaseDurationSeconds = 120
+        };
+        var claimResp = await client.PostAsJsonAsync("/api/slice/claim", claimReq);
+        claimResp.IsSuccessStatusCode.Should().BeTrue();
+
+        // Progress update
+        var progressReq = new SliceJobProgressUpdateRequest
+        {
+            ProgressPercent = 42,
+            ProgressMessage = "Layer slicing"
+        };
+        var progressResp = await client.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/progress", progressReq);
+        progressResp.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+
+        // Fetch status
+        var statusResp = await client.GetAsync($"/api/slice/{submitted.JobId}");
+        statusResp.IsSuccessStatusCode.Should().BeTrue();
+        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        status.Should().NotBeNull();
+        status!.ProgressPercent.Should().Be(42);
+        status.ProgressMessage.Should().Be("Layer slicing");
+        status.Status.Should().Be("Processing");
+    }
+}

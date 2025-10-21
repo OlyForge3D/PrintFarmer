@@ -148,6 +148,28 @@ export default function JobQueueDashboardPage() {
               </div>
             )}
 
+            {/* Completed job - prominent download section */}
+            {job.status === SliceJobStatus.Completed && job.resultFileUrl && (
+              <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-green-900 dark:text-green-100 mb-1">✓ Slicing Complete</h4>
+                    <p className="text-xs text-green-700 dark:text-green-300">Your G-code is ready to download</p>
+                  </div>
+                  <a
+                    href={job.resultFileUrl}
+                    download
+                    className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors inline-flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download G-code
+                  </a>
+                </div>
+              </div>
+            )}
+
             {/* Job details */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-pf-border">
               {job.workerId && (
@@ -172,17 +194,13 @@ export default function JobQueueDashboardPage() {
                   </div>
                 </div>
               )}
-              {job.resultFileUrl && (
+              {job.artifactsCount !== undefined && job.artifactsCount > 0 && (
                 <div>
-                  <div className="text-xs text-pf-text-muted">Result</div>
-                  <a
-                    href={job.resultFileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-pf-link hover:text-pf-accent"
-                  >
-                    Download G-code
-                  </a>
+                  <div className="text-xs text-pf-text-muted">Artifacts</div>
+                  <div className="text-sm font-medium">
+                    {job.artifactsCount} file{job.artifactsCount !== 1 ? 's' : ''}
+                    {job.artifactsTotalBytes && ` (${sliceJobService.formatFileSize(job.artifactsTotalBytes)})`}
+                  </div>
                 </div>
               )}
             </div>

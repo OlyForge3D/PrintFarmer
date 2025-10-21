@@ -60,6 +60,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Jwt__Key", "PrintFarmerTestSigningKey_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         Environment.SetEnvironmentVariable("Jwt__Issuer", "PrintFarmer");
         Environment.SetEnvironmentVariable("Jwt__Audience", "PrintFarmer");
+        // Worker shared API key for integration tests
+        Environment.SetEnvironmentVariable("WORKER_SHARED_API_KEY", "test-worker-key");
 
         // Initialize mocks
         MockNetworkDiscoveryService = new Mock<INetworkDiscoveryService>();

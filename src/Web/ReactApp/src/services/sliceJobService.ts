@@ -34,6 +34,8 @@ export interface SliceJobStatusResponse {
   estimatedPrintTimeSeconds?: number;
   filamentUsedGrams?: number;
   workerId?: string;
+  artifactsCount?: number;
+  artifactsTotalBytes?: number;
 }
 
 // Job statuses
@@ -187,6 +189,19 @@ export class SliceJobService {
       const hours = Math.floor(seconds / 3600);
       const minutes = Math.round((seconds % 3600) / 60);
       return `${hours}h ${minutes}m`;
+    }
+  }
+
+  /**
+   * Format file size in human-readable format
+   */
+  formatFileSize(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    } else if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    } else {
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
     }
   }
 }

@@ -37,9 +37,12 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         var profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISlicerProfileRepository>();
         var rateLimit = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.RateLimiting.IRateLimitService>();
         var metrics = new Farm.Web.Api.Services.Slicing.SliceJobMetrics();
-        var controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics)
+        var workerAuth = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Workers.IWorkerAuthService>();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
+        var controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
 
         // Create job in Processing state

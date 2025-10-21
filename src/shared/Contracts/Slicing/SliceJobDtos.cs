@@ -152,6 +152,12 @@ public class SliceJobStatusResponse
     /// Worker ID that processed/is processing this job
     /// </summary>
     public Guid? WorkerId { get; set; }
+
+    // Extended fields needed by workers to actually perform slicing (added for BLOCKER 1 bridging)
+    public string ModelFileUrl { get; set; } = string.Empty;
+    public string ModelFileName { get; set; } = string.Empty;
+    public int SlicerEngine { get; set; } // matches SliceJob.SlicerEngine (enum int)
+    public string? SlicerProfileJson { get; set; }
 }
 
 /// <summary>
@@ -185,6 +191,24 @@ public class CompleteSliceJobRequest
     /// as a 'log' artifact named 'slicer-log.txt' and include its ID in the completion response.
     /// </summary>
     public string? LogText { get; set; }
+}
+
+/// <summary>
+/// Request to update in-flight job progress (worker emitted).
+/// </summary>
+public class SliceJobProgressUpdateRequest
+{
+    /// <summary>
+    /// Progress percentage (0-100 inclusive).
+    /// </summary>
+    [Range(0, 100)]
+    public int ProgressPercent { get; set; }
+
+    /// <summary>
+    /// Optional human-readable progress message.
+    /// </summary>
+    [MaxLength(256)]
+    public string? ProgressMessage { get; set; }
 }
 
 /// <summary>

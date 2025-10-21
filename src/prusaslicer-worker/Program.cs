@@ -4,7 +4,6 @@ using Farm.PrusaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using StackExchange.Redis;
 
 namespace Farm.PrusaSlicer.Worker;
 
@@ -23,36 +22,8 @@ public static class Program
         _ = builder.Logging.ClearProviders();
         _ = builder.Logging.AddConsole();
 
-        // Add Redis connection
-        _ = builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
-        {
-            IConfiguration configuration = provider.GetRequiredService<IConfiguration>();
-            string raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
-            if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
-            {
-                raw = raw.TrimEnd(',') + ",abortConnect=false";
-            }
-            try
-            {
-                return ConnectionMultiplexer.Connect(raw);
-            }
-            catch (Exception ex)
-            {
-                ILoggerFactory? loggerFactory = provider.GetService<Microsoft.Extensions.Logging.ILoggerFactory>();
-                ILogger? logger = loggerFactory?.CreateLogger("PrusaSlicer.Startup");
-                if (logger != null)
-                {
-                    logger.LogWarning(ex, "[startup][redis] Initial Redis connection failed: {Message}", ex.Message);
-                }
-                else
-                {
-                    Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
-                }
-                return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
-            }
-        });
-
-        // HTTP clients
+        // HTTP clients (for API communication, artifact upload, and slicing pipeline)
+        _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared progress reporter
         _ = builder.Services.AddHttpClient<PrusaSlicingPipelineService>(); // engine-specific pipeline
 
@@ -73,8 +44,7 @@ public static class Program
         _ = builder.Services.AddHealthChecks()
             .AddCheck<WorkerLivenessHealthCheck>("liveness")
             .AddCheck<WorkerReadinessHealthCheck>("readiness")
-            .AddCheck<PrusaBinaryHealthCheck>("prusa_binary")
-            .AddCheck<RedisHealthCheck>("redis");
+            .AddCheck<PrusaBinaryHealthCheck>("prusa_binary");
 
         WebApplication app = builder.Build();
 
@@ -108,7 +78,7 @@ public static class Program
 
         _ = app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary"),
+            Predicate = c => (c.Name == "readiness" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary"),
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
@@ -127,7 +97,7 @@ public static class Program
 
         _ = app.MapHealthChecks("/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary")
+            Predicate = c => (c.Name == "readiness" || c.Name == "prusa_binary") && (!relaxedReadiness || c.Name != "prusa_binary")
         });
 
         _ = app.MapGet("/", (IPrusaBinaryDetector detector) => Results.Ok(new
