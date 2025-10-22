@@ -20,10 +20,14 @@ namespace Farm.Web.Api.Controllers;
 public class UsersController(
     Farm.Web.Api.Services.Users.IUsersService usersService,
     IAuthenticationService authService,
+    ITokenRevocationService tokenRevocationService,
+    AppDbContext dbContext,
     IUnifiedLoggingService logger) : ControllerBase
 {
     private readonly Farm.Web.Api.Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
+    private readonly ITokenRevocationService _tokenRevocation = tokenRevocationService;
+    private readonly AppDbContext _db = dbContext;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
@@ -164,4 +168,161 @@ public class UsersController(
         var availability = await _users.CheckAvailabilityAsync(username, email, ct);
         return Ok(availability);
     }
+
+    /// <summary>
+    /// Revokes all active sessions for a user, forcing logout from all devices.
+    /// </summary>
+    /// <param name="userId">The ID of the user whose sessions should be revoked</param>
+    /// <param name="request">The revocation request containing the reason</param>
+    /// <param name="ct">Cancellation token</param>
+    [HttpPost("{userId:guid}/revoke-sessions")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RevokeSessionsResult>> RevokeAllSessionsAsync(
+        Guid userId,
+        [FromBody] RevokeSessionsRequest request,
+        CancellationToken ct)
+    {
+        // Get admin user ID from claims
+        var adminUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(adminUserIdClaim) || !Guid.TryParse(adminUserIdClaim, out Guid adminUserId))
+        {
+            _logger.LogWarning("Admin user ID not found in claims");
+            return BadRequest(new { error = "Unable to identify admin user" });
+        }
+
+        // Prevent admin from revoking their own sessions
+        if (userId == adminUserId)
+        {
+            _logger.LogWarning($"Admin {adminUserId} attempted to revoke their own sessions");
+            return BadRequest(new { error = "Admins cannot revoke their own sessions" });
+        }
+
+        // Verify user exists
+        var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
+        if (!userExists)
+        {
+            return NotFound(new { error = $"User {userId} not found" });
+        }
+
+        // Revoke all tokens
+        string ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        int revokedCount = await _tokenRevocation.RevokeAllUserTokensAsync(
+            userId,
+            adminUserId,
+            request.Reason ?? "Revoked by administrator",
+            ipAddress);
+
+        _logger.LogInformation($"Admin {adminUserId} revoked {revokedCount} sessions for user {userId}");
+
+        return Ok(new RevokeSessionsResult
+        {
+            UserId = userId,
+            RevokedCount = revokedCount,
+            RevokedAt = DateTime.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Gets the revocation history for a user.
+    /// </summary>
+    /// <param name="userId">The ID of the user</param>
+    /// <param name="ct">Cancellation token</param>
+    [HttpGet("{userId:guid}/revoked-tokens")]
+    [ProducesResponseType(typeof(IEnumerable<RevokedTokenDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<RevokedTokenDto>>> GetRevokedTokensAsync(
+        Guid userId,
+        CancellationToken ct)
+    {
+        // Verify user exists
+        var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
+        if (!userExists)
+        {
+            return NotFound(new { error = $"User {userId} not found" });
+        }
+
+        var revokedTokens = await _tokenRevocation.GetUserRevokedTokensAsync(userId);
+
+        var dtos = revokedTokens.Select(rt => new RevokedTokenDto
+        {
+            Id = rt.Id,
+            RevokedAt = rt.RevokedAt,
+            Reason = rt.Reason,
+            ExpiresAt = rt.ExpiresAt,
+            IpAddress = rt.IpAddress,
+            RevokedByUserId = rt.RevokedByUserId
+        });
+
+        return Ok(dtos);
+    }
+}
+
+/// <summary>
+/// Request model for revoking user sessions.
+/// </summary>
+public record RevokeSessionsRequest
+{
+    /// <summary>
+    /// The reason for revoking sessions.
+    /// </summary>
+    public string? Reason { get; init; }
+}
+
+/// <summary>
+/// Result of revoking user sessions.
+/// </summary>
+public record RevokeSessionsResult
+{
+    /// <summary>
+    /// The ID of the user whose sessions were revoked.
+    /// </summary>
+    public Guid UserId { get; init; }
+
+    /// <summary>
+    /// The number of sessions revoked.
+    /// </summary>
+    public int RevokedCount { get; init; }
+
+    /// <summary>
+    /// When the revocation occurred.
+    /// </summary>
+    public DateTime RevokedAt { get; init; }
+}
+
+/// <summary>
+/// DTO for revoked token information.
+/// </summary>
+public record RevokedTokenDto
+{
+    /// <summary>
+    /// The unique identifier for the revocation record.
+    /// </summary>
+    public Guid Id { get; init; }
+
+    /// <summary>
+    /// When the token was revoked.
+    /// </summary>
+    public DateTime RevokedAt { get; init; }
+
+    /// <summary>
+    /// The reason for revocation.
+    /// </summary>
+    public string Reason { get; init; } = string.Empty;
+
+    /// <summary>
+    /// When the token expires (original expiration).
+    /// </summary>
+    public DateTime ExpiresAt { get; init; }
+
+    /// <summary>
+    /// The IP address from which revocation was initiated.
+    /// </summary>
+    public string? IpAddress { get; init; }
+
+    /// <summary>
+    /// The ID of the admin who revoked the token.
+    /// </summary>
+    public Guid? RevokedByUserId { get; init; }
 }

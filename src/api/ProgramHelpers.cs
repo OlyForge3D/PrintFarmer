@@ -10,6 +10,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Database;
+using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -182,7 +183,7 @@ namespace Farm.Web.Api
                     catch { }
                     return Task.CompletedTask;
                 },
-                OnTokenValidated = context =>
+                OnTokenValidated = async context =>
                 {
                     string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
                     string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
@@ -196,9 +197,31 @@ namespace Farm.Web.Api
                         {
                             startupLogger?.LogInformation("[JWT][OnTokenValidated] user: {User} roles: {Roles}", sub, roles);
                         }
+
+                        // Check if token has been revoked
+                        string? token = context.SecurityToken?.ToString();
+                        if (!string.IsNullOrEmpty(token))
+                        {
+                            var tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
+                            if (tokenRevocationService != null)
+                            {
+                                bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token);
+                                if (isRevoked)
+                                {
+                                    if (startupUls != null)
+                                    {
+                                        startupUls.LogWarning($"[JWT][OnTokenValidated] Token revoked for user: {sub}");
+                                    }
+                                    else
+                                    {
+                                        startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
+                                    }
+                                    context.Fail("This token has been revoked.");
+                                }
+                            }
+                        }
                     }
                     catch { }
-                    return Task.CompletedTask;
                 },
                 OnChallenge = context =>
                 {

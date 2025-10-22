@@ -50,6 +50,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PasswordPolicyEntity> PasswordPolicies => Set<PasswordPolicyEntity>();
     public DbSet<FailedLoginAttempt> FailedLoginAttempts => Set<FailedLoginAttempt>();
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
+    public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -521,6 +522,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(aal => aal.Timestamp);
             b.HasIndex(aal => aal.Success);
             b.HasIndex(aal => new { aal.UserId, aal.Timestamp }); // Common query pattern
+        });
+
+        modelBuilder.Entity<RevokedToken>(b =>
+        {
+            b.HasKey(rt => rt.Id);
+            b.Property(rt => rt.TokenHash).IsRequired().HasMaxLength(64); // SHA256 hash = 64 hex chars
+            b.Property(rt => rt.Reason).IsRequired().HasMaxLength(512);
+            b.Property(rt => rt.IpAddress).HasMaxLength(45);
+
+            // Foreign Keys
+            b.HasOne(rt => rt.User)
+                .WithMany()
+                .HasForeignKey(rt => rt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(rt => rt.RevokedByUser)
+                .WithMany()
+                .HasForeignKey(rt => rt.RevokedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes for fast token lookup and cleanup
+            b.HasIndex(rt => rt.TokenHash).IsUnique(); // Fast revocation check
+            b.HasIndex(rt => rt.UserId); // Get all revoked tokens for a user
+            b.HasIndex(rt => rt.ExpiresAt); // Cleanup expired revocations
+            b.HasIndex(rt => rt.RevokedAt); // Audit queries
         });
 
         // Model3D Entity Configuration

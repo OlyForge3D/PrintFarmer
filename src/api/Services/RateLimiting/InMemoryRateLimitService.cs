@@ -10,6 +10,8 @@ public class InMemoryRateLimitService : IRateLimitService
     private readonly ConcurrentDictionary<string, List<DateTime>> _passwordResetAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _emailConfirmationAttempts = new();
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();
+    private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
+    private readonly ConcurrentDictionary<string, List<DateTime>> _registerAttempts = new();
 
     public InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger)
     {
@@ -62,6 +64,40 @@ public class InMemoryRateLimitService : IRateLimitService
         return Task.CompletedTask;
     }
 
+    public Task<RateLimitResult> CheckLoginLimitAsync(string ipAddress, CancellationToken ct = default)
+    {
+        int maxPerMinute = _options.Authentication?.MaxLoginAttemptsPerMinute ?? 10;
+        return CheckShortTermLimitAsync(
+            ipAddress,
+            _loginAttempts,
+            maxPerMinute,
+            TimeSpan.FromMinutes(1),
+            "Login");
+    }
+
+    public Task RecordLoginAttemptAsync(string ipAddress, CancellationToken ct = default)
+    {
+        RecordAttempt(ipAddress, _loginAttempts);
+        return Task.CompletedTask;
+    }
+
+    public Task<RateLimitResult> CheckRegisterLimitAsync(string ipAddress, CancellationToken ct = default)
+    {
+        int maxPerMinute = _options.Authentication?.MaxRegisterAttemptsPerMinute ?? 10;
+        return CheckShortTermLimitAsync(
+            ipAddress,
+            _registerAttempts,
+            maxPerMinute,
+            TimeSpan.FromMinutes(1),
+            "Register");
+    }
+
+    public Task RecordRegisterAttemptAsync(string ipAddress, CancellationToken ct = default)
+    {
+        RecordAttempt(ipAddress, _registerAttempts);
+        return Task.CompletedTask;
+    }
+
     private Task<RateLimitResult> CheckLimitAsync(
         string key,
         ConcurrentDictionary<string, List<DateTime>> attempts,
@@ -89,7 +125,7 @@ public class InMemoryRateLimitService : IRateLimitService
             {
                 var oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
                 var retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
-                
+
                 _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey} (hourly)", null, new
                 {
                     Key = normalizedKey,
@@ -109,7 +145,7 @@ public class InMemoryRateLimitService : IRateLimitService
             {
                 var oldestInDay = attemptList.Min();
                 var retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
-                
+
                 _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey} (daily)", null, new
                 {
                     Key = normalizedKey,
@@ -204,5 +240,52 @@ public class InMemoryRateLimitService : IRateLimitService
                 }
                 return existing;
             });
+    }
+
+    private Task<RateLimitResult> CheckShortTermLimitAsync(
+        string key,
+        ConcurrentDictionary<string, List<DateTime>> attempts,
+        int maxAttempts,
+        TimeSpan window,
+        string operation)
+    {
+        var now = DateTime.UtcNow;
+        var normalizedKey = key.ToLowerInvariant();
+
+        if (!attempts.TryGetValue(normalizedKey, out var attemptList))
+        {
+            return Task.FromResult(new RateLimitResult(true, maxAttempts));
+        }
+
+        lock (attemptList)
+        {
+            // Remove old attempts (outside the window)
+            attemptList.RemoveAll(a => (now - a) > window);
+
+            var attemptsInWindow = attemptList.Count;
+
+            if (attemptsInWindow >= maxAttempts)
+            {
+                var oldestInWindow = attemptList.Min();
+                var retryAfter = window - (now - oldestInWindow);
+
+                _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey}", null, new
+                {
+                    Key = normalizedKey,
+                    Operation = operation,
+                    AttemptsInWindow = attemptsInWindow,
+                    MaxAttempts = maxAttempts,
+                    WindowSeconds = (int)window.TotalSeconds
+                });
+
+                return Task.FromResult(new RateLimitResult(
+                    IsAllowed: false,
+                    RemainingAttempts: 0,
+                    RetryAfter: retryAfter,
+                    Message: $"Too many {operation.ToLower()} attempts. Please try again in {(int)retryAfter.TotalSeconds} seconds."));
+            }
+
+            return Task.FromResult(new RateLimitResult(true, maxAttempts - attemptsInWindow));
+        }
     }
 }

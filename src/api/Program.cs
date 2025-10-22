@@ -120,6 +120,12 @@ builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAccountLockoutS
 // Authentication audit logging service (security)
 builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.IAuthAuditService, Farm.Web.Api.Services.Authentication.AuthAuditService>();
 
+// Token revocation service (force logout)
+builder.Services.AddScoped<Farm.Web.Api.Services.Authentication.ITokenRevocationService, Farm.Web.Api.Services.Authentication.TokenRevocationService>();
+
+// Token revocation cleanup background service
+builder.Services.AddHostedService<Farm.Web.Api.Services.Authentication.TokenRevocationCleanupService>();
+
 // Users service (wraps users repository + auth/password services)
 builder.Services.AddScoped<Farm.Web.Api.Services.Users.IUsersService, Farm.Web.Api.Services.Users.UsersService>();
 
@@ -731,6 +737,8 @@ app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDesc
 
 app.UseCors("Default");
 
+// Rate limiting for authentication endpoints
+app.UseMiddleware<Farm.Web.Api.Middleware.AuthenticationRateLimitMiddleware>();
 
 // Authentication and Authorization
 app.UseAuthentication();

@@ -5,6 +5,7 @@ public class RateLimitOptions
     public PasswordResetRateLimitOptions PasswordReset { get; set; } = new();
     public EmailConfirmationRateLimitOptions EmailConfirmation { get; set; } = new();
     public SliceJobRateLimitOptions SliceJobs { get; set; } = new();
+    public AuthenticationRateLimitOptions Authentication { get; set; } = new();
 }
 
 public class PasswordResetRateLimitOptions
@@ -23,4 +24,10 @@ public class SliceJobRateLimitOptions
 {
     public int MaxAttemptsPerHour { get; set; } = 20;
     public int MaxAttemptsPerDay { get; set; } = 200;
+}
+
+public class AuthenticationRateLimitOptions
+{
+    public int MaxLoginAttemptsPerMinute { get; set; } = 10;
+    public int MaxRegisterAttemptsPerMinute { get; set; } = 10;
 }
