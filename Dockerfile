@@ -21,8 +21,11 @@ WORKDIR /src
 
 # Copy project files for dependency restoration
 COPY src/shared/*.csproj ./shared/
+COPY src/infra/*.csproj ./infra/
+COPY src/import/*.csproj ./import/
 COPY src/api/*.csproj ./api/
 COPY Directory.Build.props ./
+COPY global.json ./
 
 # Restore dependencies
 RUN dotnet restore ./api/Farm.Web.Api.csproj
