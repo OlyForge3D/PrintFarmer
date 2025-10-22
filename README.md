@@ -6,21 +6,19 @@
 ![Codecov](https://img.shields.io/codecov/c/github/jpapiez/PrintFarmer)
 ![Scorecard](https://img.shields.io/ossf-scorecard/github.com/jpapiez/PrintFarmer?label=openssf-scorecard)
 ![CodeQL](https://github.com/jpapiez/PrintFarmer/actions/workflows/codeql.yml/badge.svg)
-<!-- SOFT_FREEZE_BADGE_START -->
-![Soft Freeze](https://img.shields.io/badge/soft%20freeze-active-red)
-<!-- SOFT_FREEZE_BADGE_END -->
 
 A React TypeScript dashboard for managing multiple 3D printers.
 
-> NOTE: The repository is currently under a soft freeze for MVP stabilization. See `SOFT_FREEZE.md` for permitted changes and exception process.
+## Documentation
 
 **📋 [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
 **🔧 [Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging  
 **🐳 [Docker Deployment Guide](DOCKER_DEPLOYMENT.md)** - Production containers, scaling, monitoring  
-**🏗️ [Slicer Microservices Architecture](documentation/architecture/slicer-microservices.md)** - Distributed slicing system architecture and ADRs  
-**📡 [Service Interfaces Documentation](INTERFACE_DOCUMENTATION_SUMMARY.md)** - Complete API service interfaces with XML documentation  
-**🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards
-**🧊 Soft Freeze Policy**: See `SOFT_FREEZE.md` (active if `.soft-freeze` file present)
+**🚀 [Production Readiness](PRODUCTION_READINESS.md)** - Current status and feature completion  
+**🏗️ [Slicer Microservices Architecture](documentation/architecture/slicer-microservices.md)** - Distributed slicing system  
+**📡 [Service Interfaces](INTERFACE_DOCUMENTATION_SUMMARY.md)** - Complete API service interfaces  
+**🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards  
+**🔒 [Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
 
 ## Features
 - **Multi-backend Support**: Moonraker and PrusaLink API integration
