@@ -1,6 +1,5 @@
 # PrintFarmer Microservices Architecture with Dual Slicer Workers
 # Supports both OrcaSlicer and PrusaSlicer workers for distributed slicing
-version: '3.8'
 
 services:
   # Redis for job queuing and worker coordination

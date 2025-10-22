@@ -1,5 +1,4 @@
 # Production Security Docker Compose Override
-version: '3.8'
 
 services:
   api:

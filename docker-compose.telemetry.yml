@@ -1,5 +1,4 @@
 # OpenTelemetry Collector Configuration for PrintFarmer
-version: '3.8'
 
 services:
   # OpenTelemetry Collector

@@ -1,5 +1,4 @@
 # Production Monitoring Stack
-version: '3.8'
 
 services:
   # Main application services (from docker-compose.yml)
