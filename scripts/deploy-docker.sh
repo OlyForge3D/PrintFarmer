@@ -22,6 +22,12 @@ for arg in "$@"; do
         --non-interactive|--batch|-b)
             NON_INTERACTIVE=true
             ;;
+        --remove-orphans)
+            COMPOSE_REMOVE_ORPHANS=true
+            ;;
+        --no-remove-orphans)
+            COMPOSE_REMOVE_ORPHANS=false
+            ;;
         --tear-down|--teardown|--clean)
             TEAR_DOWN=true
             ;;
@@ -2111,10 +2117,40 @@ deploy_containers() {
             if echo " ${infra_services[*]} " | grep -q " sqlserver "; then
                 local sql_host_port=${SQLSERVER_PORT:-1433}
                 if nc -z localhost "$sql_host_port" 2>/dev/null; then
-                    print_error "SQL Server host port $sql_host_port is already in use. Can't bind container port."
-                    print_info "If you intended to run a host SQL Server, stop it or change SQLSERVER_PORT in .env.microservices or .deploy-config"
-                    print_info "Diagnostic: sudo lsof -nP -iTCP:$sql_host_port -sTCP:LISTEN"
-                    exit 3
+                    print_warning "SQL Server host port $sql_host_port is already in use. Attempting to identify owner..."
+
+                    # Try to find a container listening on that port
+                    local owner_container
+                    owner_container=$(docker ps --format '{{.Names}} {{.Ports}}' | grep ":${sql_host_port}->" | awk '{print $1}' | head -n1 || true)
+
+                    if [ -n "$owner_container" ]; then
+                        print_info "Port $sql_host_port appears bound by container: $owner_container"
+                        if [ "$NON_INTERACTIVE" = "true" ]; then
+                            if [ "${COMPOSE_REMOVE_ORPHANS:-true}" = "true" ]; then
+                                print_info "Non-interactive: removing container $owner_container"
+                                docker rm -f "$owner_container" || true
+                            else
+                                print_error "Non-interactive and COMPOSE_REMOVE_ORPHANS=false: cannot auto-remove $owner_container. Exiting."
+                                exit 3
+                            fi
+                        else
+                            # Interactive prompt: ask to remove only that container
+                            echo
+                            print_info "Remove container $owner_container that is binding port $sql_host_port? (y/N)"
+                            read -r resp || true
+                            if [[ "$resp" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+                                docker rm -f "$owner_container" || true
+                                print_success "Removed $owner_container"
+                            else
+                                print_error "Please free port $sql_host_port or change SQLSERVER_PORT in your configuration. Aborting."
+                                exit 3
+                            fi
+                        fi
+                    else
+                        print_error "No container owner found for port $sql_host_port; it may be a host process."
+                        print_info "Diagnostic: sudo lsof -nP -iTCP:$sql_host_port -sTCP:LISTEN"
+                        exit 3
+                    fi
                 fi
             fi
 
@@ -2285,6 +2321,64 @@ wait_for_database() {
 
     print_warning "Timeout waiting for database to be healthy after ${timeout}s. Proceeding, but API may log connection errors until DB is ready."
     return 1
+}
+
+
+# List candidate orphan containers for the current compose project
+list_orphan_containers() {
+    # Return containers that are associated with the compose project label but not present in compose ps
+    local project_label
+    project_label=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --format '{{.Name}}' 2>/dev/null | sed 's/\///' | awk -F'_' '{print $1}' | head -n1 || true)
+    # Fallback label
+    project_label=${project_label:-pfarm}
+
+    # Compose-known names
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --format '{{.Name}}' 2>/dev/null | sort > /tmp/compose_names.txt || true
+    # All docker names with compose project label
+    docker ps -a --filter "label=com.docker.compose.project=$project_label" --format '{{.Names}}' | sort > /tmp/docker_names.txt || true
+
+    comm -23 /tmp/docker_names.txt /tmp/compose_names.txt || true
+}
+
+# Prompt to remove listed orphan containers (interactive)
+prompt_remove_orphans() {
+    local orphans
+    orphans=$(list_orphan_containers)
+    if [ -z "$orphans" ]; then
+        return 0
+    fi
+
+    print_warning "Detected potential orphan containers:\n$orphans"
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        if [ "${COMPOSE_REMOVE_ORPHANS:-true}" = "true" ]; then
+            print_info "Non-interactive and COMPOSE_REMOVE_ORPHANS=true: removing orphans"
+            echo "$orphans" | xargs -r docker rm -f || true
+            return 0
+        else
+            print_info "Non-interactive and COMPOSE_REMOVE_ORPHANS=false: skipping orphan removal"
+            return 0
+        fi
+    fi
+
+    echo
+    print_info "Would you like to remove these orphan containers?"
+    select opt in "Remove all" "Show logs" "Skip"; do
+        case $opt in
+            "Remove all")
+                echo "$orphans" | xargs -r docker rm -f || true
+                print_success "Removed orphan containers"
+                break
+                ;;
+            "Show logs")
+                echo "$orphans" | while read -r c; do
+                    print_info "Logs for $c:"; docker logs --tail 50 "$c" || true; echo; done
+                ;;
+            "Skip")
+                print_info "Skipping orphan removal"
+                break
+                ;;
+        esac
+    done
 }
 
 
