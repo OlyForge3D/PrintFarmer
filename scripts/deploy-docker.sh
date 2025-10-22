@@ -10,6 +10,8 @@ DRY_RUN=false
 NON_INTERACTIVE=false
 TEAR_DOWN=false
 SHOW_HELP=false
+# Compose up option to pass --remove-orphans (default true)
+COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
 # Parse simple flags early (only --dry-run / -n for now)
 for arg in "$@"; do
@@ -212,6 +214,19 @@ tear_down_deployment() {
     else
         print_info "No containers to remove"
     fi
+
+    # Additionally, ensure any supported database containers are removed explicitly
+    # This helps on systems where compose project names or previous runs left DB containers behind
+    print_info "Ensuring supported database containers are removed (postgres/sqlserver/mysql)"
+    for dbc in postgres sqlserver mysql; do
+        # Look for container names that start with pfarm- or contain the service name
+        containers=$(docker ps -a --format '{{.Names}}' | grep -E "(^|/)pfarm-${dbc}|${dbc}" || true)
+        if [ -n "$containers" ]; then
+            print_warning "Found database containers to remove for $dbc: $containers"
+            docker rm -f $containers 2>/dev/null || true
+            print_success "Removed $dbc containers: $containers"
+        fi
+    done
     
     # 3. Remove all volumes
     print_info "Step 3/7: Removing all Docker volumes..."
@@ -2086,7 +2101,24 @@ deploy_containers() {
             esac
 
             # Run infra services up
-            if "${infra_compose[@]}" up -d "${infra_services[@]}"; then
+            # Optionally include --remove-orphans
+            local remove_orphans_flag=""
+            if [ "${COMPOSE_REMOVE_ORPHANS}" = "true" ] || [ "${COMPOSE_REMOVE_ORPHANS}" = "1" ]; then
+                remove_orphans_flag="--remove-orphans"
+            fi
+
+            # Preflight: if starting sqlserver, ensure host port is free to avoid Docker bind errors
+            if echo " ${infra_services[*]} " | grep -q " sqlserver "; then
+                local sql_host_port=${SQLSERVER_PORT:-1433}
+                if nc -z localhost "$sql_host_port" 2>/dev/null; then
+                    print_error "SQL Server host port $sql_host_port is already in use. Can't bind container port."
+                    print_info "If you intended to run a host SQL Server, stop it or change SQLSERVER_PORT in .env.microservices or .deploy-config"
+                    print_info "Diagnostic: sudo lsof -nP -iTCP:$sql_host_port -sTCP:LISTEN"
+                    exit 3
+                fi
+            fi
+
+            if "${infra_compose[@]}" up -d ${remove_orphans_flag} "${infra_services[@]}"; then
                 print_success "Core infra (DB, Redis) started"
             else
                 print_warning "Failed to start infra services - continuing to full bring-up"
@@ -2094,6 +2126,16 @@ deploy_containers() {
 
             # Wait for DB health/readiness
             wait_for_database || true
+
+            # Detect orphan containers left by compose and suggest removal if any exist
+            local orphan_list
+            orphan_list=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --quiet --all 2>/dev/null | xargs -r docker inspect --format '{{.Name}} {{.State.Status}}' 2>/dev/null | grep -E "orphan|Exited|Created" || true)
+            if [ -n "$orphan_list" ]; then
+                print_warning "Found orphan or leftover containers that may interfere with startup:"
+                echo "$orphan_list"
+                print_info "Suggestion: run with --remove-orphans or manually remove the listed containers:"
+                echo "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE up -d --remove-orphans"
+            fi
 
             # Start API first, wait for it to become healthy, then start remaining services
             print_info "Starting API service first so it can initialize before frontend/workers"
