@@ -1,0 +1,22 @@
+# Stub assets image for OrcaSlicer when no AppImage is available
+# Creates a minimal stub that allows the build to proceed
+ARG ORCASLICER_VERSION=stub
+FROM ubuntu:22.04
+ARG ORCASLICER_VERSION
+LABEL orcaslicer.version="${ORCASLICER_VERSION}"
+WORKDIR /tmp
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Create stub directory structure
+RUN mkdir -p /orcaslicer-dist/opt/orcaslicer/bin
+
+# Create a stub orcaslicer binary that returns a helpful error
+RUN printf '#!/bin/sh\n\
+echo "[ERROR] OrcaSlicer stub binary - no real AppImage was provided during build" >&2\n\
+echo "[ERROR] To use OrcaSlicer worker, rebuild with orcaslicer.AppImage present" >&2\n\
+exit 127\n' > /orcaslicer-dist/orcaslicer && \
+    chmod +x /orcaslicer-dist/orcaslicer && \
+    cp /orcaslicer-dist/orcaslicer /orcaslicer-dist/opt/orcaslicer/bin/orca-slicer
+
+CMD ["true"]

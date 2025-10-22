@@ -1952,16 +1952,37 @@ deploy_containers() {
 
         # Build orcaslicer-assets:local first if orca worker is enabled (required dependency)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            print_info "Building orcaslicer-assets:local image (required for OrcaSlicer worker)..."
-            # Check if we have a prebuilt AppImage
-            if [ -f "./orcaslicer.AppImage" ]; then
-                print_info "Using existing orcaslicer.AppImage for assets build"
+            # Check if we have a real AppImage (non-empty, reasonable size > 1MB)
+            if [ ! -f "./orcaslicer.AppImage" ] || [ ! -s "./orcaslicer.AppImage" ] || [ "$(stat -f%z "./orcaslicer.AppImage" 2>/dev/null || stat -c%s "./orcaslicer.AppImage" 2>/dev/null || echo 0)" -lt 1000000 ]; then
+                print_info "No valid orcaslicer.AppImage found, downloading latest release..."
+                
+                # Fetch latest release info from GitHub API
+                ORCA_API_URL="https://api.github.com/repos/SoftFever/OrcaSlicer/releases/latest"
+                ORCA_RELEASE_JSON=$(curl -s "$ORCA_API_URL")
+                
+                # Extract Linux x86_64 AppImage URL
+                ORCA_DOWNLOAD_URL=$(echo "$ORCA_RELEASE_JSON" | grep -o '"browser_download_url": "[^"]*Linux.*x86_64.*AppImage"' | grep -o 'https://[^"]*' | head -1)
+                
+                if [ -z "$ORCA_DOWNLOAD_URL" ]; then
+                    print_error "Failed to find OrcaSlicer AppImage download URL"
+                    print_error "Please manually download from: https://github.com/SoftFever/OrcaSlicer/releases"
+                    print_error "Place the AppImage in the repository root as 'orcaslicer.AppImage'"
+                    exit 1
+                fi
+                
+                print_info "Downloading OrcaSlicer from: $ORCA_DOWNLOAD_URL"
+                if curl -L -o orcaslicer.AppImage "$ORCA_DOWNLOAD_URL"; then
+                    chmod +x orcaslicer.AppImage
+                    print_success "Downloaded OrcaSlicer AppImage ($(du -h orcaslicer.AppImage | cut -f1))"
+                else
+                    print_error "Failed to download OrcaSlicer AppImage"
+                    exit 1
+                fi
             else
-                print_warning "No orcaslicer.AppImage found - creating stub for build"
-                # Create a minimal stub file so the build doesn't fail
-                touch ./orcaslicer.AppImage
+                print_info "Found existing orcaslicer.AppImage ($(du -h orcaslicer.AppImage | cut -f1))"
             fi
             
+            print_info "Building orcaslicer-assets:local image..."
             if docker build -f Dockerfile.orca-assets -t orcaslicer-assets:local .; then
                 print_success "orcaslicer-assets:local image built successfully"
             else
