@@ -11,14 +11,31 @@ A React TypeScript dashboard for managing multiple 3D printers.
 
 ## Documentation
 
-**📋 [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
-**🔧 [Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging  
-**🐳 [Docker Deployment Guide](DOCKER_DEPLOYMENT.md)** - Production containers, scaling, monitoring  
-**🚀 [Production Readiness](PRODUCTION_READINESS.md)** - Current status and feature completion  
-**🏗️ [Slicer Microservices Architecture](documentation/architecture/slicer-microservices.md)** - Distributed slicing system  
-**📡 [Service Interfaces](INTERFACE_DOCUMENTATION_SUMMARY.md)** - Complete API service interfaces  
-**🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards  
-**🔒 [Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
+### � Getting Started
+- **[Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs
+- **[Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging
+- **[Quick Reference](QUICK_REFERENCE.md)** - Command reference and common tasks
+
+### 🐳 Deployment Guides
+- **[Docker Deployment](DOCKER_DEPLOYMENT.md)** - Production containers, scaling, monitoring
+- **[Deployment Architectures](DEPLOYMENT_ARCHITECTURES.md)** - Monolithic vs. microservices deployment options
+- **[Docker Network Configuration](DOCKER_NETWORK_CONFIG.md)** - Network modes and configuration
+
+### 🏗️ Architecture & Design
+- **[Code Flow](CODE_FLOW.md)** - Application flow and component interactions
+- **[Service Interfaces](INTERFACE_DOCUMENTATION_SUMMARY.md)** - Complete API service interfaces with documentation
+- **[Slicer Microservices Architecture](documentation/architecture/slicer-microservices.md)** - Distributed slicing system design
+
+### 📊 Project Status
+- **[Production Readiness](PRODUCTION_READINESS.md)** - Current status, feature completion, and blockers resolved
+
+### 🤝 Contributing
+- **[Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards
+- **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
+
+### 📚 Additional Resources
+- **[Documentation Cleanup Plan](DOCUMENTATION_AUDIT_AND_CLEANUP.md)** - Documentation organization strategy
+- **[Archived Documentation](archived/root-level-notes/README.md)** - Historical implementation notes and completed work
 
 ## Features
 - **Multi-backend Support**: Moonraker and PrusaLink API integration
@@ -128,14 +145,6 @@ Port mapping: each worker listens internally on `8080`; external host ports (e.g
 Health & readiness endpoints: each worker exposes `/healthz` (liveness) and readiness via the same endpoint (engine initialization performs binary detection early and fails fast if missing).
 
 Graceful shutdown: workers finish active jobs then exit (shutdown timeout managed by host/container orchestrator; future enhancement could add configurable timeout via `WORKER_SHUTDOWN_TIMEOUT`).
-
-
-## Detailed Documentation
-
-**📋 [Deployment Overview](DEPLOYMENT_OVERVIEW.md)** - Choose the right deployment approach for your needs  
-**🔧 [Local Development Guide](LOCAL_DEVELOPMENT.md)** - Development setup, hot reload, debugging  
-**🐳 [Docker Deployment Guide](DOCKER_DEPLOYMENT.md)** - Production containers, scaling, monitoring  
-**🤝 [Contributing Guide](CONTRIBUTING.md)** - Development workflow, testing, code standards
 
 ## System Requirements
 
