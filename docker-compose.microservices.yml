@@ -229,6 +229,25 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+  nginx-proxy:
+    image: nginx:alpine
+    profiles:
+      - proxy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - api
+      - orcaslicer-worker
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - printfarmer-network
 
 networks:
   printfarmer-network:
