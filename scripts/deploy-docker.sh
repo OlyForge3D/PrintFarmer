@@ -158,21 +158,57 @@ tear_down_deployment() {
     
     echo
     print_info "Starting tear-down process..."
-    
-    # 1. Stop all containers
-    print_info "Step 1/7: Stopping all Docker containers..."
-    if docker ps -q | grep -q .; then
+
+    # First attempt: bring down compose-managed stacks so containers created by compose
+    # are removed with the correct project name and associated volumes/networks.
+    print_info "Attempting to stop compose stacks (microservices / host-network / default)..."
+    # Prefer microservices compose if present
+    if [ -f docker-compose.microservices.yml ]; then
+        print_info "Running: docker compose --env-file .env.microservices -f docker-compose.microservices.yml down --volumes --rmi all"
+        docker compose --env-file .env.microservices -f docker-compose.microservices.yml down --volumes --rmi all || true
+    fi
+
+    # If host-network compose exists, tear it down explicitly
+    if [ -f docker-compose.host-network.yml ]; then
+        print_info "Running: docker compose -f docker-compose.host-network.yml down --volumes --rmi all"
+        docker compose -f docker-compose.host-network.yml down --volumes --rmi all || true
+    fi
+
+    # Try the default compose file as well
+    if [ -f docker-compose.yml ]; then
+        print_info "Running: docker compose -f docker-compose.yml down --volumes --rmi all"
+        docker compose -f docker-compose.yml down --volumes --rmi all || true
+    fi
+
+    # 1. Stop all remaining running containers (fallback)
+    print_info "Step 1/7: Stopping any remaining running Docker containers..."
+    if [ -n "$(docker ps -q)" ]; then
         docker stop $(docker ps -aq) 2>/dev/null || true
-        print_success "Containers stopped"
+        print_success "Stopped running containers (attempted)"
     else
         print_info "No running containers found"
     fi
-    
-    # 2. Remove all containers
-    print_info "Step 2/7: Removing all Docker containers..."
-    if docker ps -aq | grep -q .; then
-        docker rm $(docker ps -aq) 2>/dev/null || true
-        print_success "Containers removed"
+
+    # 2. Remove all remaining containers (force remove any leftovers)
+    print_info "Step 2/7: Removing any remaining Docker containers..."
+    local all_containers
+    all_containers=$(docker ps -aq)
+    if [ -n "$all_containers" ]; then
+        # Try normal remove first, then force-remove to handle odd states
+        docker rm $all_containers 2>/dev/null || true
+        # Re-query and force remove stubborn containers
+        remaining=$(docker ps -aq)
+        if [ -n "$remaining" ]; then
+            print_warning "Some containers remain after normal removal. Attempting force remove..."
+            docker rm -f $remaining 2>/dev/null || true
+        fi
+
+        # Final check
+        if [ -z "$(docker ps -aq)" ]; then
+            print_success "Containers removed"
+        else
+            print_warning "Some containers could not be removed. Run 'docker ps -a' to inspect and remove manually."
+        fi
     else
         print_info "No containers to remove"
     fi
