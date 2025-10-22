@@ -40,11 +40,7 @@ import {
   UserDto,
   DiscoveredGcodeFileDto,
   GcodeHarvestResultDto,
-  BulkImportResponse,
-  ForgotPasswordRequest,
-  ForgotPasswordResponse,
-  ResetPasswordRequest,
-  ResetPasswordResponse
+  BulkImportResponse
 } from '@/types/api';
 import type { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import axios from 'axios';

@@ -424,6 +424,7 @@ export const SlicerProfilesPage: React.FC = () => {
           </div>
         </div>
       </div>
+      </div>
     </PageTemplate>
   );
 };

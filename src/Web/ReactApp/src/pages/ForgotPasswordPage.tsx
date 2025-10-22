@@ -26,7 +26,7 @@ export default function ForgotPasswordPage() {
       } else {
         setError(response.message || 'Failed to send password reset email');
       }
-    } catch (err) {
+    } catch {
       // Always show success to prevent email enumeration
       setSuccess(true);
     } finally {

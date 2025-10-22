@@ -26,7 +26,7 @@ import WorkerManagementPage from '@/pages/WorkerManagementPage';
 import JobQueueDashboardPage from '@/pages/JobQueueDashboardPage';
 import NewSliceJobPage from '@/pages/NewSliceJobPage';
 import SlicerProfilesPage from '@/pages/SlicerProfilesPage';
-import { SlicerRegistryPage } from '@/pages/SlicerRegistryPage';
+import SlicerRegistryPage from '@/pages/SlicerRegistryPage';
 import { OrcaImportWizard } from '@/components/profiles/OrcaImportWizard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
