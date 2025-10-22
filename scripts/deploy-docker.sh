@@ -107,6 +107,32 @@ remove_version_keys() {
     fi
 }
 
+# Force-remove containers matching a set of name/image patterns (best-effort)
+force_remove_matching_containers() {
+    local patterns=("printfarmer" "pfarm" "orcaslicer" "prusaslicer" "redis" "postgres" "mysql" "mcr.microsoft.com/mssql" "mssql" "sqlserver")
+    local removed_all=""
+    for p in "${patterns[@]}"; do
+        # match by name
+        local byname
+        byname=$(docker ps -aq --filter "name=$p" 2>/dev/null || true)
+        if [ -n "$byname" ]; then
+            docker rm -f $byname 2>/dev/null || true
+            removed_all="$removed_all $byname"
+        fi
+        # match by image/ancestor
+        local byimage
+        byimage=$(docker ps -aq --filter "ancestor=$p" 2>/dev/null || true)
+        if [ -n "$byimage" ]; then
+            docker rm -f $byimage 2>/dev/null || true
+            removed_all="$removed_all $byimage"
+        fi
+    done
+    if [ -n "$removed_all" ]; then
+        audit_log "remove" "force-removed matching containers:$removed_all"
+        print_success "Force-removed matching containers: $removed_all"
+    fi
+}
+
 
 # Function to prompt user with default value
 prompt_with_default() {
@@ -250,6 +276,9 @@ tear_down_deployment() {
             print_success "Containers removed"
         else
             print_warning "Some containers could not be removed. Run 'docker ps -a' to inspect and remove manually."
+            # Attempt best-effort force removal of commonly-named PrintFarmer containers
+            print_info "Attempting force removal of known PrintFarmer containers (best-effort)..."
+            force_remove_matching_containers || true
         fi
     else
         print_info "No containers to remove"
@@ -2394,10 +2423,10 @@ prompt_remove_orphans() {
         if [ "${COMPOSE_REMOVE_ORPHANS:-true}" = "true" ]; then
             print_info "Non-interactive and COMPOSE_REMOVE_ORPHANS=true: removing orphans"
             removed=""
-            echo "$orphans" | while read -r c; do
+            while IFS= read -r c; do
                 docker rm -f "$c" || true
                 removed="$removed $c"
-            done
+            done <<< "$orphans"
             audit_log "remove" "non-interactive: removed orphan containers:$removed"
             return 0
         else
@@ -2412,17 +2441,17 @@ prompt_remove_orphans() {
         case $opt in
             "Remove all")
                 removed=""
-                echo "$orphans" | while read -r c; do
+                while IFS= read -r c; do
                     docker rm -f "$c" || true
                     removed="$removed $c"
-                done
+                done <<< "$orphans"
                 audit_log "remove" "interactive: removed orphan containers:$removed"
                 print_success "Removed orphan containers"
                 break
                 ;;
             "Show logs")
-                echo "$orphans" | while read -r c; do
-                    print_info "Logs for $c:"; docker logs --tail 50 "$c" || true; echo; done
+                while IFS= read -r c; do
+                    print_info "Logs for $c:"; docker logs --tail 50 "$c" || true; echo; done <<< "$orphans"
                 ;;
             "Skip")
                 print_info "Skipping orphan removal"

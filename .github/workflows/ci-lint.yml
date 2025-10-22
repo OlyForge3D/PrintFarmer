@@ -1,0 +1,38 @@
+name: CI - Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck
+
+      - name: Run shell syntax checks (bash -n)
+        run: |
+          # check all shell scripts in repository
+          find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
+
+      - name: Run ShellCheck on scripts/
+        run: |
+          # Run ShellCheck but allow warnings (don't fail the job on suggestions)
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck -x -s bash scripts/*.sh || true
+          else
+            echo "shellcheck not available"
+          fi
+
+      - name: Check for top-level compose 'version:' keys
+        run: |
+          chmod +x scripts/lint/check-compose-version.sh
+          scripts/lint/check-compose-version.sh
