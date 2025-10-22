@@ -1,18 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure;
 using System.Net.Http;
-using Microsoft.AspNetCore.Http;
-using Farm.Web.Shared.Annotations;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared.Annotations;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Printers
 {
@@ -270,8 +270,7 @@ namespace Farm.Web.Api.Services.Printers
                         string jobJson = await breaker.ExecuteAsync(async ct => await _octoprint.GetJobStatusAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
                         // plugin checks and parsing intentionally minimal here; keep parity with previous controller behavior
                         bool hasPositionPlugin = false;
-                        bool hasSpoolManager = false;
-                        bool hasSpoolmanPlugin = false;
+                        // Note: hasSpoolManager and hasSpoolmanPlugin were removed as they were assigned but never used
                         try
                         {
                             HttpRequestMessage pluginsRequest = new(HttpMethod.Get, $"{p.ServerUrl.TrimEnd('/')}/api/plugins");
@@ -295,14 +294,7 @@ namespace Farm.Web.Api.Services.Printers
                                                 {
                                                     hasPositionPlugin = true;
                                                 }
-                                                if (key.Equals("spoolmanager", StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    hasSpoolManager = true;
-                                                }
-                                                if (key.Equals("spoolman", StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    hasSpoolmanPlugin = true;
-                                                }
+                                                // Removed spoolmanager and spoolman plugin checks as they were never used
                                             }
                                         }
                                     }

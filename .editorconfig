@@ -476,3 +476,54 @@ dotnet_diagnostic.S6605.severity = suggestion
 
 # CA2100: Review SQL queries for security vulnerabilities
 dotnet_diagnostic.CA2100.severity = suggestion
+
+# -------------------------
+# PrintFarmer Warning Suppressions
+# Added: 2025-09-07
+# Context: Suppress low-priority analyzer warnings from the 82 found in clean build
+# -------------------------
+
+# CA1002: Do not expose generic lists (DTO design decision - List<T> is acceptable)
+dotnet_diagnostic.CA1002.severity = none
+
+# S2325: Make methods static (not always desirable for future extensibility)
+dotnet_diagnostic.S2325.severity = suggestion
+
+# S1075: Hardcoded URIs (acceptable for default configurations)
+dotnet_diagnostic.S1075.severity = none
+
+# CA1850: Prefer static HashData (will fix separately)
+dotnet_diagnostic.CA1850.severity = suggestion
+
+# CA1869: Cache JsonSerializerOptions (will fix separately)
+dotnet_diagnostic.CA1869.severity = suggestion
+
+# CA1861: Avoid constant arrays as arguments (micro-optimization)
+dotnet_diagnostic.CA1861.severity = suggestion
+
+# S1854: Useless assignments (will fix unused variables separately)
+dotnet_diagnostic.S1854.severity = suggestion
+
+# CA1814: Prefer jagged arrays (not a priority)
+dotnet_diagnostic.CA1814.severity = suggestion
+
+# CA1508: Dead code detection (false positives in complex conditionals)
+dotnet_diagnostic.CA1508.severity = suggestion
+
+# S6602: Use Find instead of FirstOrDefault (style preference)
+dotnet_diagnostic.S6602.severity = suggestion
+
+# S6603: Use TrueForAll instead of All (style preference)
+dotnet_diagnostic.S6603.severity = suggestion
+
+# CA1872: Prefer ToHexStringLower (not critical)
+dotnet_diagnostic.CA1872.severity = suggestion
+
+# S3260: Private classes should be sealed (style preference)
+dotnet_diagnostic.S3260.severity = suggestion
+
+# Keep warnings for critical issues:
+# - VSTHRD002/VSTHRD105: Threading issues (can cause deadlocks)
+# - CS8604/CS8602: Nullable reference warnings (potential null refs)
+# - CS0219: Unused variables (easy to fix)
+# - xUnit1031: Blocking in async tests (correctness)
