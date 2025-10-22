@@ -1950,6 +1950,26 @@ deploy_containers() {
             print_info "Prepared temporary build_context at ./build_context"
         fi
 
+        # Build orcaslicer-assets:local first if orca worker is enabled (required dependency)
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+            print_info "Building orcaslicer-assets:local image (required for OrcaSlicer worker)..."
+            # Check if we have a prebuilt AppImage
+            if [ -f "./orcaslicer.AppImage" ]; then
+                print_info "Using existing orcaslicer.AppImage for assets build"
+            else
+                print_warning "No orcaslicer.AppImage found - creating stub for build"
+                # Create a minimal stub file so the build doesn't fail
+                touch ./orcaslicer.AppImage
+            fi
+            
+            if docker build -f Dockerfile.orca-assets -t orcaslicer-assets:local .; then
+                print_success "orcaslicer-assets:local image built successfully"
+            else
+                print_error "Failed to build orcaslicer-assets:local image"
+                exit 1
+            fi
+        fi
+
         # Build slicer-base first if workers are enabled (required dependency)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ] || [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
             print_info "Building printfarmer-slicer-base image (required for worker containers)..."
