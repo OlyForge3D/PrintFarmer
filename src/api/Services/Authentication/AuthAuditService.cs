@@ -169,8 +169,8 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogAccountLockedAsync(Guid userId, int attemptCount, TimeSpan lockoutDuration, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var metadata = new 
-        { 
+        var metadata = new
+        {
             AttemptCount = attemptCount,
             LockoutDurationMinutes = lockoutDuration.TotalMinutes
         };
@@ -239,8 +239,8 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogTokenRevokedAsync(Guid userId, Guid revokedByUserId, string reason, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var metadata = new 
-        { 
+        var metadata = new
+        {
             RevokedByUserId = revokedByUserId,
             Reason = reason
         };

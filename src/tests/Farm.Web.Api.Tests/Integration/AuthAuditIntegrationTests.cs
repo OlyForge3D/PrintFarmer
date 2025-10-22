@@ -139,7 +139,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Arrange - Create and login user
         var username = $"auditpwchange{Guid.NewGuid():N}";
         var email = $"{username}@test.com";
-        
+
         var registerRequest = new RegisterRequest(
             username,
             email,
@@ -190,7 +190,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     {
         // Arrange - Create user
         var email = $"auditreset{Guid.NewGuid():N}@test.com";
-        
+
         var registerRequest = new RegisterRequest(
             $"auditreset{Guid.NewGuid():N}",
             email,
@@ -228,7 +228,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Arrange - Create user and reset token
         var username = $"auditresetcomp{Guid.NewGuid():N}";
         var email = $"{username}@test.com";
-        
+
         var registerRequest = new RegisterRequest(
             username,
             email,
@@ -289,7 +289,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Arrange - Create user
         var username = $"auditlockuser{Guid.NewGuid():N}";
         var email = $"{username}@test.com";
-        
+
         var registerRequest = new RegisterRequest(
             username,
             email,
@@ -333,7 +333,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Arrange - Create user and perform actions
         var username = $"auditgetlog{Guid.NewGuid():N}";
         var email = $"{username}@test.com";
-        
+
         var registerRequest = new RegisterRequest(
             username,
             email,

@@ -22,7 +22,7 @@ public class AccountLockoutService : IAccountLockoutService
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _authAuditService = authAuditService ?? throw new ArgumentNullException(nameof(authAuditService));
-        
+
         // Read lockout settings from configuration with sensible defaults
         _maxFailedAttempts = int.Parse(_configuration["AccountLockout:MaxFailedAttempts"] ?? "5");
         _lockoutDurationMinutes = int.Parse(_configuration["AccountLockout:LockoutDurationMinutes"] ?? "15");
@@ -48,10 +48,10 @@ public class AccountLockoutService : IAccountLockoutService
         {
             user.LockoutEnd = null;
             user.FailedLoginAttempts = 0;
-            
+
             // Audit log account unlock (automatic expiration)
             await _authAuditService.LogAccountUnlockedAsync(user.Id, "Lockout period expired", null);
-            
+
             await _context.SaveChangesAsync();
         }
 
@@ -94,12 +94,12 @@ public class AccountLockoutService : IAccountLockoutService
         if (user.FailedLoginAttempts >= _maxFailedAttempts)
         {
             user.LockoutEnd = DateTime.UtcNow.AddMinutes(_lockoutDurationMinutes);
-            
+
             // Audit log account lockout
             await _authAuditService.LogAccountLockedAsync(
-                user.Id, 
-                user.FailedLoginAttempts, 
-                TimeSpan.FromMinutes(_lockoutDurationMinutes), 
+                user.Id,
+                user.FailedLoginAttempts,
+                TimeSpan.FromMinutes(_lockoutDurationMinutes),
                 ipAddress);
         }
 
@@ -109,7 +109,7 @@ public class AccountLockoutService : IAccountLockoutService
     public async Task RecordFailedLoginByUsernameAsync(string username, string? ipAddress, string? failureReason = null)
     {
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == username);
-        
+
         if (user != null)
         {
             await RecordFailedLoginAsync(user.Id, username, ipAddress, failureReason);

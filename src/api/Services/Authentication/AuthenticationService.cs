@@ -21,7 +21,7 @@ public class AuthenticationService(
 {
     private const string PasswordResetPath = "/reset-password";
     private const string EmailConfirmationPath = "/confirm-email";
-    
+
     private readonly IUsersRepository _usersRepository = usersRepository;
     private readonly IPasswordHashingService _passwordHashing = passwordHashing;
     private readonly IConfiguration _configuration = configuration;
@@ -44,7 +44,7 @@ public class AuthenticationService(
                 _logger.LogWarning($"Authentication failed for username: {username} - user not found", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
-            
+
             // Check if account is locked out
             if (await _accountLockoutService.IsLockedOutAsync(user.Id))
             {
@@ -53,14 +53,14 @@ public class AuthenticationService(
                 _logger.LogWarning($"Authentication failed for username: {username} - account locked until {lockoutEnd}", null, null);
                 return new AuthenticationResult(false, Error: $"Account is temporarily locked. Please try again later.");
             }
-            
+
             if (!user.IsActive)
             {
                 await _authAuditService.LogLoginFailedAsync(username, "User account is disabled", "unknown", null);
                 _logger.LogWarning($"Authentication failed for username: {username} - user is inactive", null, null);
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
-            
+
             if (!_passwordHashing.VerifyPassword(password, user.PasswordHash))
             {
                 // Record failed login attempt (may trigger lockout)
@@ -69,17 +69,17 @@ public class AuthenticationService(
                 _logger.LogWarning($"Authentication failed for username: {username} - invalid password", null, null);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
-            
+
             // Successful authentication - reset failed login counter
             await _accountLockoutService.ResetFailedLoginCountAsync(user.Id);
-            
+
             user.LastLogin = DateTime.UtcNow;
             user.UpdatedAt = DateTime.UtcNow;
             await _usersRepository.SaveChangesAsync();
-            
+
             // Audit log successful login
             await _authAuditService.LogLoginAsync(user.Id, "unknown", null);
-            
+
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
             _logger.LogInformation($"User {username} authenticated successfully", null, null);
@@ -132,10 +132,10 @@ public class AuthenticationService(
                 await _usersRepository.UpdateUserRolesAsync(user.Id, new[] { defaultRole.Id });
             }
             await _usersRepository.SaveChangesAsync();
-            
+
             // Audit log successful registration
             await _authAuditService.LogRegisterAsync(user.Id, "unknown", null);
-            
+
             string token = await GenerateJwtTokenAsync(user);
             UserDto? dto = await GetUserWithRolesAndPermissionsAsync(user.Id);
             _logger.LogInformation($"User {request.Username} registered successfully", null, null);
@@ -284,18 +284,18 @@ public class AuthenticationService(
         }
         string newHash = _passwordHashing.HashPassword(newPassword);
         bool success = await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
-        
+
         if (success)
         {
             // Audit log password change
             await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
         }
-        
+
         return success;
     }
 
     public Task<bool> SendEmailConfirmationAsync(User user) => SendEmailConfirmationInternalAsync(user);
-    
+
     public Task<bool> ConfirmEmailAsync(string token) => ConfirmEmailInternalAsync(token);
 
     private async Task<bool> SendEmailConfirmationInternalAsync(User user)
@@ -477,7 +477,7 @@ public class AuthenticationService(
                 ResetLink = resetLink,
                 ExpirationMinutes = 60
             });
-            
+
             // Audit log password reset initiation
             await _authAuditService.LogPasswordResetInitiatedAsync(user.Email, ipAddress, null);
 
@@ -537,7 +537,7 @@ public class AuthenticationService(
             resetToken.UsedByIp = ipAddress;
 
             await _usersRepository.SaveChangesAsync();
-            
+
             // Audit log successful password reset
             await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
 

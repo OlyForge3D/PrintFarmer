@@ -135,11 +135,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         var updatedUser = await verifyContext.Users.FindAsync(user.Id);
         updatedUser.Should().NotBeNull();
-        
+
         // Verify old password no longer works
         var verifyHashing = verifyScope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
         verifyHashing.VerifyPassword("OldPassword123!", updatedUser!.PasswordHash).Should().BeFalse();
-        
+
         // Verify new password works
         verifyHashing.VerifyPassword("NewSecurePassword123!", updatedUser.PasswordHash).Should().BeTrue();
 
@@ -367,7 +367,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
 
         // Act - Make multiple rapid requests (default limit is 3 per hour from config)
         var request = new ForgotPasswordRequest { Email = "ratelimit@test.com" };
-        
+
         for (int i = 0; i < 3; i++)
         {
             var response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
@@ -386,7 +386,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         var tokenCount = await verifyContext.PasswordResetTokens
             .Where(t => t.UserId == user.Id)
             .CountAsync();
-        
+
         // Should have created tokens for the first 3 requests only
         tokenCount.Should().BeLessOrEqualTo(3);
     }

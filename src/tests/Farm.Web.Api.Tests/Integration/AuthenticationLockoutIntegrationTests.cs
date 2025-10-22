@@ -55,7 +55,7 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         // Assert - Next login should be blocked due to lockout
         var finalRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "ValidPassword123!" };
         var finalResponse = await client.PostAsJsonAsync("/api/auth/login", finalRequest);
-        
+
         finalResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         var errorContent = await finalResponse.Content.ReadAsStringAsync();
         errorContent.Should().Contain("locked");
