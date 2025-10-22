@@ -74,6 +74,20 @@ print_header() {
     echo
 }
 
+# Audit log helper: record removal actions with timestamp and actor
+DEPLOY_AUDIT_LOG=${DEPLOY_AUDIT_LOG:-"./.deploy-audit.log"}
+audit_log() {
+    # usage: audit_log "ACTION" "details..."
+    local action="$1"
+    shift || true
+    local details="$*"
+    local user
+    user=$(whoami 2>/dev/null || echo unknown)
+    local ts
+    ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "$ts [$user] $action: $details" >> "$DEPLOY_AUDIT_LOG" || true
+}
+
 # Function to prompt user with default value
 prompt_with_default() {
     local prompt="$1"
@@ -231,6 +245,7 @@ tear_down_deployment() {
             print_warning "Found database containers to remove for $dbc: $containers"
             docker rm -f $containers 2>/dev/null || true
             print_success "Removed $dbc containers: $containers"
+            audit_log "remove" "teardown: removed DB containers for $dbc: $containers"
         fi
     done
     
@@ -2126,20 +2141,22 @@ deploy_containers() {
                     if [ -n "$owner_container" ]; then
                         print_info "Port $sql_host_port appears bound by container: $owner_container"
                         if [ "$NON_INTERACTIVE" = "true" ]; then
-                            if [ "${COMPOSE_REMOVE_ORPHANS:-true}" = "true" ]; then
-                                print_info "Non-interactive: removing container $owner_container"
-                                docker rm -f "$owner_container" || true
-                            else
-                                print_error "Non-interactive and COMPOSE_REMOVE_ORPHANS=false: cannot auto-remove $owner_container. Exiting."
-                                exit 3
-                            fi
-                        else
+                                    if [ "${COMPOSE_REMOVE_ORPHANS:-true}" = "true" ]; then
+                                        print_info "Non-interactive: removing container $owner_container"
+                                        docker rm -f "$owner_container" || true
+                                        audit_log "remove" "preflight: removed owner container $owner_container binding port $sql_host_port"
+                                    else
+                                        print_error "Non-interactive and COMPOSE_REMOVE_ORPHANS=false: cannot auto-remove $owner_container. Exiting."
+                                        exit 3
+                                    fi
+                                else
                             # Interactive prompt: ask to remove only that container
                             echo
                             print_info "Remove container $owner_container that is binding port $sql_host_port? (y/N)"
                             read -r resp || true
                             if [[ "$resp" =~ ^([yY][eE][sS]|[yY])$ ]]; then
                                 docker rm -f "$owner_container" || true
+                                audit_log "remove" "preflight: removed owner container $owner_container binding port $sql_host_port"
                                 print_success "Removed $owner_container"
                             else
                                 print_error "Please free port $sql_host_port or change SQLSERVER_PORT in your configuration. Aborting."
@@ -2352,7 +2369,12 @@ prompt_remove_orphans() {
     if [ "$NON_INTERACTIVE" = "true" ]; then
         if [ "${COMPOSE_REMOVE_ORPHANS:-true}" = "true" ]; then
             print_info "Non-interactive and COMPOSE_REMOVE_ORPHANS=true: removing orphans"
-            echo "$orphans" | xargs -r docker rm -f || true
+            removed=""
+            echo "$orphans" | while read -r c; do
+                docker rm -f "$c" || true
+                removed="$removed $c"
+            done
+            audit_log "remove" "non-interactive: removed orphan containers:$removed"
             return 0
         else
             print_info "Non-interactive and COMPOSE_REMOVE_ORPHANS=false: skipping orphan removal"
@@ -2365,7 +2387,12 @@ prompt_remove_orphans() {
     select opt in "Remove all" "Show logs" "Skip"; do
         case $opt in
             "Remove all")
-                echo "$orphans" | xargs -r docker rm -f || true
+                removed=""
+                echo "$orphans" | while read -r c; do
+                    docker rm -f "$c" || true
+                    removed="$removed $c"
+                done
+                audit_log "remove" "interactive: removed orphan containers:$removed"
                 print_success "Removed orphan containers"
                 break
                 ;;
