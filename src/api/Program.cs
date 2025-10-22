@@ -158,6 +158,20 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Slicing.OrcaDefaultProfi
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.Web.Api.Services.Slicing.SlicersService>();
+// Redis-backed job queue: register ConnectionMultiplexer and queue implementation
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>().GetValue<string>("REDIS_CONNECTION") ?? "redis:6379";
+    // Use synchronous Connect here during startup; ConnectionMultiplexer is thread-safe and intended as a singleton
+    return ConnectionMultiplexer.Connect(config);
+});
+builder.Services.AddScoped<Farm.Web.Shared.ISlicerJobQueue, Farm.Web.Api.Services.SlicerServices.RedisSlicerJobQueue>();
+// Register the orchestrator implementation used by slicing submission and controllers
+builder.Services.AddScoped<Farm.Web.Shared.ISlicerOrchestrator, Farm.Web.Api.Services.SlicerServices.SlicerOrchestrator>();
+// Register slicer progress notifier (SignalR-based) so SlicerOrchestrator and other services can send updates
+builder.Services.AddSingleton<Farm.Web.Shared.ISlicerProgressNotifier, Farm.Web.Api.Services.SlicerServices.SignalRSlicerProgressNotifier>();
+// Register the orchestrator implementation used by slicing submission and controllers
+builder.Services.AddScoped<Farm.Web.Shared.ISlicerOrchestrator, Farm.Web.Api.Services.SlicerServices.SlicerOrchestrator>();
 // Slice job repository (distributed slicing queue)
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository, Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository>();
 // Slice job event service (SignalR notifications for job lifecycle)

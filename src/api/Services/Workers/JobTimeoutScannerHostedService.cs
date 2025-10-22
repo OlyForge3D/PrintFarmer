@@ -41,6 +41,13 @@ namespace Farm.Web.Api.Services.Workers
         {
             _logger.LogInformation("JobTimeoutScannerHostedService started");
 
+            // Short initial delay to allow dependent services (DB, network) to come online
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+            catch (OperationCanceledException) { /* shutting down */ }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -49,13 +56,46 @@ namespace Farm.Web.Api.Services.Workers
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error while scanning for stuck slice jobs");
+                    if (IsTransientDatabaseError(ex))
+                    {
+                        // Log as warning for transient DNS/connection issues during startup
+                        _logger.LogWarning(ex, "Transient DB/DNS error while scanning for stuck slice jobs; will retry");
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "Error while scanning for stuck slice jobs");
+                    }
                 }
 
                 await Task.Delay(_scanInterval, stoppingToken);
             }
 
             _logger.LogInformation("JobTimeoutScannerHostedService stopping");
+        }
+
+        private static bool IsTransientDatabaseError(Exception? ex)
+        {
+            // Walk inner exception chain looking for socket/DNS or Npgsql connection failures
+            while (ex != null)
+            {
+                // Socket-level errors (DNS resolution, connection refused, etc.)
+                if (ex is System.Net.Sockets.SocketException)
+                {
+                    return true;
+                }
+
+                // Npgsql exceptions often indicate transient DB connectivity issues during startup
+                var typeName = ex.GetType().Name;
+                if (typeName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) ||
+                    (ex.Message != null && ex.Message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                ex = ex.InnerException;
+            }
+
+            return false;
         }
 
         private async Task ScanOnceAsync(CancellationToken ct)
@@ -69,7 +109,37 @@ namespace Farm.Web.Api.Services.Workers
 
             // Determine stuck jobs: jobs with expired leases OR processing longer than 15 minutes
             int longRunningSeconds = 60 * 15; // 15 minutes
-            var stuck = await repo.GetStuckJobsAsync(longRunningSeconds, limit: 100, ct: ct);
+            // Retry on transient DB/DNS errors with exponential backoff
+            const int maxDbRetries = 4;
+            int attempt = 0;
+            IReadOnlyList<Farm.Infrastructure.Domain.SliceJob>? stuck = null;
+            while (attempt < maxDbRetries)
+            {
+                try
+                {
+                    stuck = await repo.GetStuckJobsAsync(longRunningSeconds, limit: 100, ct: ct);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    if (IsTransientDatabaseError(ex) && attempt < maxDbRetries - 1)
+                    {
+                        // exponential backoff: 1s, 2s, 4s, ...
+                        int delayMs = (int)(Math.Pow(2, attempt) * 1000);
+                        _logger.LogWarning(ex, "Transient DB/DNS error querying stuck jobs. Retrying in {Delay}ms (attempt {Attempt}/{Max})", delayMs, attempt + 1, maxDbRetries);
+                        try
+                        {
+                            await Task.Delay(delayMs, ct);
+                        }
+                        catch (OperationCanceledException) { break; }
+                        attempt++;
+                        continue;
+                    }
+
+                    // Non-transient or max attempts reached - rethrow to be handled by caller
+                    throw;
+                }
+            }
 
             if (stuck == null || stuck.Count == 0)
             {

@@ -2066,11 +2066,64 @@ deploy_containers() {
         print_info "Dry-run mode: not starting containers."
         print_info "Would run: ${final_compose_cmd[*]} up -d"
     else
-        if "${final_compose_cmd[@]}" up -d; then
-            print_success "Containers started successfully"
+        # If microservices architecture, start DB and Redis first to speed up readiness
+        if [ "$ARCHITECTURE" = "microservices" ]; then
+            print_info "Bringing up database and redis services first to speed readiness"
+            # Attempt to start postgres/mysql/sqlserver and redis only
+            local seed_cmd=("")
+            # Build a minimal compose command for core infra
+            local infra_compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+            if [ -f docker-compose.override.yml ]; then
+                infra_compose+=( -f docker-compose.override.yml )
+            fi
+
+            # Decide which services to start
+            local infra_services=(redis)
+            case "${DB_PROVIDER:-postgres}" in
+                postgres) infra_services+=(postgres) ;;
+                sqlserver) infra_services+=(sqlserver) ;;
+                mysql) infra_services+=(mysql) ;;
+            esac
+
+            # Run infra services up
+            if "${infra_compose[@]}" up -d "${infra_services[@]}"; then
+                print_success "Core infra (DB, Redis) started"
+            else
+                print_warning "Failed to start infra services - continuing to full bring-up"
+            fi
+
+            # Wait for DB health/readiness
+            wait_for_database || true
+
+            # Start API first, wait for it to become healthy, then start remaining services
+            print_info "Starting API service first so it can initialize before frontend/workers"
+            if "${final_compose_cmd[@]}" up -d api; then
+                print_success "API container started (initial)"
+            else
+                print_warning "Failed to start API alone; will attempt full bring-up for all services"
+            fi
+
+            # Wait for API health endpoint before bringing up UI and workers
+            if wait_for_api; then
+                print_success "API is healthy - proceeding to start remaining services"
+            else
+                print_warning "API did not become healthy within timeout. Proceeding to start remaining services anyway. Monitor API logs for issues."
+            fi
+
+            # Now start the remaining services (frontend, workers, etc.)
+            if "${final_compose_cmd[@]}" up -d; then
+                print_success "All containers started successfully"
+            else
+                print_error "Failed to start containers"
+                exit 1
+            fi
         else
-            print_error "Failed to start containers"
-            exit 1
+            if "${final_compose_cmd[@]}" up -d; then
+                print_success "Containers started successfully"
+            else
+                print_error "Failed to start containers"
+                exit 1
+            fi
         fi
     fi
 
@@ -2120,6 +2173,121 @@ deploy_containers() {
             print_warning "Some services may still be starting after ${max_wait}s. Checking detailed status..."
         fi
     fi
+}
+
+
+# Wait for database service to become healthy. Uses docker compose health status when available
+wait_for_database() {
+    # Only relevant for microservices where DB runs in compose
+    if [ "$ARCHITECTURE" != "microservices" ]; then
+        return 0
+    fi
+
+    print_info "Waiting for database service to be healthy (timeout configurable via DB_WAIT_TIMEOUT env)..."
+    local timeout=${DB_WAIT_TIMEOUT:-120}
+    local interval=3
+    local elapsed=0
+
+    # Determine DB service name from DB_PROVIDER
+    local db_service="postgres"
+    case "${DB_PROVIDER:-postgres}" in
+        postgres) db_service="postgres" ;;
+        sqlserver) db_service="sqlserver" ;;
+        mysql) db_service="mysql" ;;
+        *) db_service="postgres" ;;
+    esac
+
+    while [ $elapsed -lt $timeout ]; do
+        # Use docker compose ps JSON to look for Health or rely on container's port availability
+        # Prefer checking container health status if available
+        local health_state
+        health_state=$(docker compose --env-file "$ENV_FILE" ps --format json 2>/dev/null | grep -o '"Name":"[^"]*' | grep -o '[^\"]*$' | while read -r name; do
+            # Match service by suffix
+            if echo "$name" | grep -q "$db_service"; then
+                docker inspect --format='{{json .State.Health.Status}}' "$name" 2>/dev/null || echo "unknown"
+            fi
+        done | head -n1 | tr -d '"') || true
+
+        if [ "$health_state" = "healthy" ]; then
+            print_success "Database ($db_service) reports healthy"
+            return 0
+        fi
+
+        # As fallback, attempt a simple TCP connect to common DB ports
+        if [ "${DB_PROVIDER:-postgres}" = "postgres" ]; then
+            # Port 5432 inside compose network exposed to host as 5432 by override; try localhost:5432
+            if nc -z localhost 5432 2>/dev/null; then
+                print_success "Database port 5432 reachable on localhost"
+                return 0
+            fi
+        elif [ "${DB_PROVIDER:-postgres}" = "sqlserver" ]; then
+            if nc -z localhost ${SQLSERVER_PORT:-1433} 2>/dev/null; then
+                print_success "SQL Server port ${SQLSERVER_PORT:-1433} reachable on localhost"
+                return 0
+            fi
+        elif [ "${DB_PROVIDER:-postgres}" = "mysql" ]; then
+            if nc -z localhost 3306 2>/dev/null; then
+                print_success "MySQL port 3306 reachable on localhost"
+                return 0
+            fi
+        fi
+
+        if [ $((elapsed % 15)) -eq 0 ]; then
+            print_info "Still waiting for DB to become available... ($elapsed/$timeout seconds)"
+            docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy|health" || true
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    print_warning "Timeout waiting for database to be healthy after ${timeout}s. Proceeding, but API may log connection errors until DB is ready."
+    return 1
+}
+
+
+wait_for_api() {
+    print_info "Waiting for API to become healthy (timeout configurable via API_WAIT_TIMEOUT)..."
+    local timeout=${API_WAIT_TIMEOUT:-120}
+    local interval=3
+    local elapsed=0
+    local api_url="http://localhost:${API_PORT:-5245}/healthz"
+
+    while [ $elapsed -lt $timeout ]; do
+        if curl -sf "$api_url" >/dev/null 2>&1; then
+            print_success "API responded to health check: $api_url"
+            return 0
+        fi
+
+        if [ $((elapsed % 15)) -eq 0 ]; then
+            print_info "Still waiting for API to be healthy... ($elapsed/$timeout seconds)"
+            docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer|prusaslicer" || true
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    print_warning "Timeout waiting for API health after ${timeout}s. Proceeding with deployment but UI may show errors until API is ready."
+    # If configured, fail the deployment on API health timeout
+    # API_FAIL_ON_TIMEOUT: if "true" (default), exit with non-zero to stop deployment
+    local fail_on_timeout=${API_FAIL_ON_TIMEOUT:-true}
+
+    if [ "$fail_on_timeout" = "true" ] || [ "$fail_on_timeout" = "1" ]; then
+        print_error "API did not become healthy within ${timeout}s and API_FAIL_ON_TIMEOUT is enabled. Failing deployment."
+        echo
+        print_info "Useful diagnostic commands to investigate the API container:"
+        echo "  docker compose --env-file $ENV_FILE ps"
+        echo "  docker compose --env-file $ENV_FILE logs api --no-color --tail 200"
+        echo "  docker compose --env-file $ENV_FILE logs api -f"
+        echo "  docker compose --env-file $ENV_FILE exec api sh -c 'ls -la /app'  # inspect container filesystem"
+        echo "  docker compose --env-file $ENV_FILE exec api sh -c 'cat /app/logs/*.log 2>/dev/null || true'"
+        echo "  docker compose --env-file $ENV_FILE up -d --build api  # rebuild and restart API"
+        echo
+        exit 2
+    fi
+
+    return 1
 }
 
 # Verify deployment
