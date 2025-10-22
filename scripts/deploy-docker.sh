@@ -1960,8 +1960,8 @@ deploy_containers() {
                 ORCA_API_URL="https://api.github.com/repos/SoftFever/OrcaSlicer/releases/latest"
                 ORCA_RELEASE_JSON=$(curl -s "$ORCA_API_URL")
                 
-                # Extract Linux x86_64 AppImage URL
-                ORCA_DOWNLOAD_URL=$(echo "$ORCA_RELEASE_JSON" | grep -o '"browser_download_url": "[^"]*Linux.*x86_64.*AppImage"' | grep -o 'https://[^"]*' | head -1)
+                # Extract Linux AppImage URL (pattern: OrcaSlicer_Linux_*.AppImage)
+                ORCA_DOWNLOAD_URL=$(echo "$ORCA_RELEASE_JSON" | grep -o '"browser_download_url": "[^"]*' | grep -o 'https://[^"]*' | grep 'Linux.*\.AppImage$' | head -1)
                 
                 if [ -z "$ORCA_DOWNLOAD_URL" ]; then
                     print_error "Failed to find OrcaSlicer AppImage download URL"
