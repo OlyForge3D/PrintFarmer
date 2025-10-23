@@ -144,10 +144,10 @@ TARGETPLATFORM=linux/arm64 ./scripts/deploy-docker.sh
 FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 ```
 
-### New (Flexible)
+### New (Simplified)
 ```dockerfile
 ARG TARGETPLATFORM=linux/amd64
-FROM --platform=$TARGETPLATFORM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 ```
 
-This change eliminates BuildKit warnings while maintaining the same default behavior and adding flexibility for different deployment scenarios.
+This approach removes redundant `--platform=$TARGETPLATFORM` declarations that caused BuildKit warnings, since `$TARGETPLATFORM` is the default behavior. The ARG is retained for documentation purposes and potential future use with explicit platform builds.

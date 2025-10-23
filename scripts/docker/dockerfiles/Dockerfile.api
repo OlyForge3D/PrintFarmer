@@ -1,7 +1,7 @@
 # API-Only Dockerfile
 # Build with configurable platform (defaults to linux/amd64 to avoid ARM64 protoc issues)
 ARG TARGETPLATFORM=linux/amd64
-FROM --platform=$TARGETPLATFORM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
@@ -10,7 +10,7 @@ RUN apt-get update && \
     apt-get install -y curl iputils-ping iproute2 net-tools dnsutils && \
     rm -rf /var/lib/apt/lists/*
 
-FROM --platform=$TARGETPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy project files
