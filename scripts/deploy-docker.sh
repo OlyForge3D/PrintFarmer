@@ -2789,7 +2789,7 @@ redeploy_existing() {
     fi
     
     # Deploy with rebuild
-    deploy_docker_services
+    deploy_containers
     
     print_success "✅ Redeployment complete!"
     print_info "All containers have been rebuilt and restarted with the same configuration."
