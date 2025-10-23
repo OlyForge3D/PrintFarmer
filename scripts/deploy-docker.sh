@@ -201,6 +201,11 @@ generate_deployment_config() {
         generator_args+=("--enable-prusa-worker" "$ENABLE_PRUSA_WORKER")
     fi
     
+    # Add database provider configuration
+    if [ -n "${DB_PROVIDER:-}" ]; then
+        generator_args+=("--db-provider" "$DB_PROVIDER")
+    fi
+    
     # Set output directory
     generator_args+=("--output-dir" "$output_dir")
     
@@ -441,17 +446,15 @@ tear_down_deployment() {
 
     # Additionally, ensure any supported database containers are removed explicitly
     # This helps on systems where compose project names or previous runs left DB containers behind
-    print_info "Ensuring supported database containers are removed (postgres/sqlserver/mysql)"
-    for dbc in postgres sqlserver mysql; do
-        # Look for container names that start with pfarm- or contain the service name
-        containers=$(docker ps -a --format '{{.Names}}' | grep -E "(^|/)pfarm-${dbc}|${dbc}" || true)
-        if [ -n "$containers" ]; then
-            print_warning "Found database containers to remove for $dbc: $containers"
-            docker rm -f $containers 2>/dev/null || true
-            print_success "Removed $dbc containers: $containers"
-            audit_log "remove" "teardown: removed DB containers for $dbc: $containers"
-        fi
-    done
+    print_info "Ensuring PrintFarmer database containers are removed"
+    # Look for both generic database containers and provider-specific legacy containers
+    containers=$(docker ps -a --format '{{.Names}}' | grep -E "printfarmer-database|pfarm-(postgres|sqlserver|mysql)" || true)
+    if [ -n "$containers" ]; then
+        print_warning "Found database containers to remove: $containers"
+        docker rm -f $containers 2>/dev/null || true
+        print_success "Removed database containers: $containers"
+        audit_log "remove" "teardown: removed database containers: $containers"
+    fi
     
     # 3. Remove all volumes
     print_info "Step 3/7: Removing all Docker volumes..."
@@ -2395,12 +2398,8 @@ deploy_containers() {
             fi
 
             # Decide which services to start
-            local infra_services=(redis)
-            case "${DB_PROVIDER:-postgres}" in
-                postgres) infra_services+=(postgres) ;;
-                sqlserver) infra_services+=(sqlserver) ;;
-                mysql) infra_services+=(mysql) ;;
-            esac
+            local infra_services=(redis database)
+            # Note: Using generic 'database' service name that supports multiple providers via environment variables
 
             # Run infra services up
             # Optionally include --remove-orphans
@@ -2409,8 +2408,8 @@ deploy_containers() {
                 remove_orphans_flag="--remove-orphans"
             fi
 
-            # Preflight: if starting sqlserver, ensure host port is free to avoid Docker bind errors
-            if echo " ${infra_services[*]} " | grep -q " sqlserver "; then
+            # Preflight: if starting database with SQL Server provider, ensure host port is free to avoid Docker bind errors
+            if echo " ${infra_services[*]} " | grep -q " database " && [ "${DB_PROVIDER:-postgres}" = "sqlserver" ]; then
                 local sql_host_port=${SQLSERVER_PORT:-1433}
                 if nc -z localhost "$sql_host_port" 2>/dev/null; then
                     print_warning "SQL Server host port $sql_host_port is already in use. Attempting to identify owner..."
@@ -2564,14 +2563,8 @@ wait_for_database() {
     local interval=3
     local elapsed=0
 
-    # Determine DB service name from DB_PROVIDER
-    local db_service="postgres"
-    case "${DB_PROVIDER:-postgres}" in
-        postgres) db_service="postgres" ;;
-        sqlserver) db_service="sqlserver" ;;
-        mysql) db_service="mysql" ;;
-        *) db_service="postgres" ;;
-    esac
+    # Use generic database service name (all providers use the same service)
+    local db_service="database"
 
     while [ $elapsed -lt $timeout ]; do
         # Use docker compose ps JSON to look for Health or rely on container's port availability

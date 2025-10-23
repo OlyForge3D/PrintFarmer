@@ -40,6 +40,7 @@ OPTIONS:
     --include-registry      Include local registry
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
     --enable-prusa-worker VAL   Enable PrusaSlicer workers (yes/no/true/false or count, default: no)
+    --db-provider PROVIDER  Database provider (postgres|sqlserver|mysql, default: postgres)
     --keep-generated        Don't clean up generated files after deployment
     --dry-run              Show what would be generated without creating files
     --help                 Show this help message
@@ -70,6 +71,7 @@ KEEP_GENERATED=false
 DRY_RUN=false
 ENABLE_ORCA_WORKER=""
 ENABLE_PRUSA_WORKER=""
+DB_PROVIDER=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -108,6 +110,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --enable-prusa-worker)
             ENABLE_PRUSA_WORKER="$2"
+            shift 2
+            ;;
+        --db-provider)
+            DB_PROVIDER="$2"
             shift 2
             ;;
         --dry-run)
@@ -213,6 +219,40 @@ copy_dockerfiles() {
     esac
 }
 
+# Function to generate database service configuration based on provider
+generate_database_config() {
+    local provider="${DB_PROVIDER:-postgres}"
+    local database_templates_dir="$DOCKER_DIR/database-templates"
+    local temp_file
+    
+    # Normalize provider name
+    case "$provider" in
+        "postgres"|"postgresql")
+            provider="postgres"
+            ;;
+        "sqlserver"|"mssql"|"sql-server")
+            provider="sqlserver"
+            ;;
+        "mysql"|"mariadb")
+            provider="mysql"
+            ;;
+        *)
+            log_warning "Unknown database provider '$provider', defaulting to postgres"
+            provider="postgres"
+            ;;
+    esac
+    
+    local template_file="$database_templates_dir/$provider.yml"
+    
+    if [[ ! -f "$template_file" ]]; then
+        log_error "Database template not found: $template_file"
+        return 1
+    fi
+    
+    log_info "Using $provider database configuration"
+    cat "$template_file"
+}
+
 # Function to generate docker-compose.yml based on architecture and options
 generate_compose() {
     local arch="$1"
@@ -240,10 +280,56 @@ generate_compose() {
         return 1
     fi
     
-    # Copy base template
+    # Copy base template and replace database configuration
     if ! cp "$base_template" "$compose_file"; then
         log_error "Failed to copy base template"
         return 1
+    fi
+    
+    # Replace the database service with provider-specific configuration
+    # Check if architecture needs a database service (skip monolithic as it uses SQLite)
+    if [[ "$arch" == "microservices" || "$arch" == "host-network" ]]; then
+        # Generate provider-specific database config
+        local db_config
+        if ! db_config="$(generate_database_config)"; then
+            log_error "Failed to generate database configuration"
+            return 1
+        fi
+        
+        # Create temporary files
+        local temp_before temp_after temp_new_compose
+        temp_before="$(mktemp)"
+        temp_after="$(mktemp)"
+        temp_new_compose="$(mktemp)"
+        
+        # Split the compose file: everything before database service, and everything after
+        awk '/^  database:/{exit} {print}' "$compose_file" > "$temp_before"
+        
+        # Find everything after the database service (skip until next service or volumes/networks)
+        awk '
+        BEGIN { found_db=0; skip=0 }
+        /^  database:/ { found_db=1; skip=1; next }
+        found_db && skip && /^  [a-zA-Z]/ { skip=0 }
+        found_db && skip && /^(volumes|networks|version):/ { skip=0 }
+        found_db && !skip { print }
+        ' "$compose_file" > "$temp_after"
+        
+        # Combine: before + new database config + after
+        cat "$temp_before" > "$temp_new_compose"
+        echo "$db_config" >> "$temp_new_compose"
+        cat "$temp_after" >> "$temp_new_compose"
+        
+        # Replace the original file
+        if ! mv "$temp_new_compose" "$compose_file"; then
+            log_error "Failed to update compose file with new database configuration"
+            rm -f "$temp_before" "$temp_after" "$temp_new_compose"
+            return 1
+        fi
+        
+        # Clean up temporary files
+        rm -f "$temp_before" "$temp_after"
+        
+        log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
     fi
     
     # For now, skip the merging to avoid docker compose config issues
