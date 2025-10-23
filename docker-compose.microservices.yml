@@ -18,21 +18,32 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
-  # Database (PostgreSQL for production microservices)
+  # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
-    image: postgres:15-alpine
+    image: ${DATABASE_IMAGE:-postgres:15-alpine}
+    container_name: printfarmer-database
     environment:
-      POSTGRES_DB: printfarmer
-      POSTGRES_USER: printfarmer
-      POSTGRES_PASSWORD: printfarmer_password
+      # PostgreSQL (default)
+      POSTGRES_DB: ${DATABASE_NAME:-printfarmer}
+      POSTGRES_USER: ${DATABASE_USER:-printfarmer}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-printfarmer_password}
+      # SQL Server (when using mcr.microsoft.com/mssql/server:2022-latest)
+      ACCEPT_EULA: ${ACCEPT_EULA:-Y}
+      SA_PASSWORD: ${SA_PASSWORD:-}
+      MSSQL_PID: ${MSSQL_PID:-Developer}
+      # MySQL (when using mysql:8.0)
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+      MYSQL_DATABASE: ${DATABASE_NAME:-printfarmer}
+      MYSQL_USER: ${DATABASE_USER:-printfarmer}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:-printfarmer_password}
     ports:
-      - "5432:5432"
+      - "${DATABASE_PORT:-5432}:${DATABASE_INTERNAL_PORT:-5432}"
     networks:
       - printfarmer-network
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - database_data:/var/lib/postgresql/data  # Default path, override in production
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]
+      test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]}
       interval: 10s
       timeout: 5s
       retries: 5
@@ -271,7 +282,7 @@ networks:
 
 volumes:
   redis_data:
-  postgres_data:
+  database_data:  # Generic database volume (PostgreSQL, SQL Server, MySQL)
   app_data:
   model_uploads:
   gcode_storage:
