@@ -14,6 +14,7 @@ DRY_RUN=false
 NON_INTERACTIVE=false
 TEAR_DOWN=false
 SHOW_HELP=false
+REDEPLOY=false
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
@@ -37,6 +38,10 @@ for arg in "$@"; do
             ;;
         --help|-h)
             SHOW_HELP=true
+            ;;
+        --redeploy)
+            REDEPLOY=true
+            NON_INTERACTIVE=true  # Redeploy is always non-interactive
             ;;
     esac
 done
@@ -362,6 +367,8 @@ OPTIONS:
     -n, --dry-run           Validate configuration without starting containers
     -b, --batch             Run in non-interactive mode (uses defaults/env vars)
         --non-interactive   Same as --batch
+        --redeploy          Rebuild and restart using existing configuration
+                            (detects previous deployment automatically)
     --tear-down             Tear down existing deployment (stops containers, removes
         --teardown          volumes, cleans up). Useful for starting fresh.
         --clean             Same as --tear-down
@@ -369,6 +376,9 @@ OPTIONS:
 EXAMPLES:
     # Interactive deployment (recommended for first-time setup)
     ./scripts/deploy-docker.sh
+
+    # Quick redeploy with rebuild (uses existing configuration)
+    ./scripts/deploy-docker.sh --redeploy
 
     # Tear down existing deployment and clean up
     ./scripts/deploy-docker.sh --tear-down
@@ -2280,8 +2290,8 @@ wait_for_database() {
         return 0
     fi
 
-    print_info "Waiting for database service to be healthy (timeout configurable via DB_WAIT_TIMEOUT env)..."
-    local timeout=${DB_WAIT_TIMEOUT:-120}
+    print_info "Waiting for database service to be healthy (timeout: ${DB_WAIT_TIMEOUT:-300}s, increased for SQL Server)..."
+    local timeout=${DB_WAIT_TIMEOUT:-300}
     local interval=3
     local elapsed=0
 
@@ -2413,7 +2423,7 @@ prompt_remove_orphans() {
 
 wait_for_api() {
     print_info "Waiting for API to become healthy (timeout configurable via API_WAIT_TIMEOUT)..."
-    local timeout=${API_WAIT_TIMEOUT:-120}
+    local timeout=${API_WAIT_TIMEOUT:-180}
     local interval=3
     local elapsed=0
     local api_url="http://localhost:${API_PORT:-5245}/healthz"
@@ -2479,7 +2489,7 @@ verify_deployment() {
     # Test basic health endpoint
     print_info "Testing basic health endpoint..."
     local basic_health=$(curl -s "$api_url/healthz" 2>/dev/null)
-    if [ -n "$basic_health" ] && echo "$basic_health" | grep -q '"status":"ok"'; then
+    if [ -n "$basic_health" ] && (echo "$basic_health" | grep -q '"status":"ok"' || echo "$basic_health" | grep -q '^OK$'); then
         print_success "✓ Basic health check: OK"
     else
         print_warning "✗ Basic health check: FAILED (endpoint not responding or unexpected response)"
@@ -2494,27 +2504,39 @@ verify_deployment() {
     local health_json=$(curl -s "$api_url/health" 2>/dev/null)
     
     if [ -n "$health_json" ]; then
-        local health_status=$(echo "$health_json" | grep -o '"status":"[^"]*"' | head -1 | cut -d '"' -f4)
-        
-        if [ "$health_status" = "Healthy" ]; then
-            print_success "✓ Comprehensive health check: Healthy"
+        # Check if it's JSON or simple text response
+        if echo "$health_json" | grep -q '^{'; then
+            # JSON response
+            local health_status=$(echo "$health_json" | grep -o '"status":"[^"]*"' | head -1 | cut -d '"' -f4)
             
-            # Parse and display key health metrics
-            if command -v jq >/dev/null 2>&1; then
-                print_info "Health check details:"
-                echo "$health_json" | jq -r '
-                    .results | to_entries[] | 
-                    "  • \(.key): \(.value.description // .value.status // "OK")"
-                ' 2>/dev/null || true
-            fi
-        else
-            print_warning "✗ Comprehensive health check: Status = ${health_status:-unknown}"
-            print_info "Full health check result:"
-            if command -v jq >/dev/null 2>&1; then
-                echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
+            if [ "$health_status" = "Healthy" ]; then
+                print_success "✓ Comprehensive health check: Healthy"
+                
+                # Parse and display key health metrics
+                if command -v jq >/dev/null 2>&1; then
+                    print_info "Health check details:"
+                    echo "$health_json" | jq -r '
+                        .results | to_entries[] | 
+                        "  • \(.key): \(.value.description // .value.status // "OK")"
+                    ' 2>/dev/null || true
+                fi
             else
-                echo "$health_json"
+                print_warning "✗ Comprehensive health check: Status = ${health_status:-unknown}"
+                print_info "Full health check result:"
+                if command -v jq >/dev/null 2>&1; then
+                    echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
+                else
+                    echo "$health_json"
+                fi
+                health_check_failed=true
             fi
+        elif echo "$health_json" | grep -q '^OK$'; then
+            # Simple "OK" response
+            print_success "✓ Comprehensive health check: OK"
+        else
+            print_warning "✗ Comprehensive health check: Unexpected response"
+            print_info "Full health check result:"
+            echo "$health_json"
             health_check_failed=true
         fi
     else
@@ -2723,11 +2745,69 @@ display_final_info() {
     print_info "For local development, see: LOCAL_DEVELOPMENT.md"
 }
 
+# Redeploy existing deployment with rebuild
+redeploy_existing() {
+    print_header "🔄 Redeploying PrintFarmer (Rebuild Mode)"
+    
+    # Check if previous config exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        print_error "No previous deployment configuration found!"
+        print_info "File expected: $CONFIG_FILE"
+        print_info "Please run a full deployment first: ./scripts/deploy-docker.sh"
+        exit 1
+    fi
+    
+    print_info "Loading previous deployment configuration..."
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+    
+    print_success "Loaded configuration:"
+    echo -e "  ${BLUE}Architecture:${NC} $ARCHITECTURE"
+    echo -e "  ${BLUE}Database:${NC} $DB_PROVIDER"
+    echo -e "  ${BLUE}Network Mode:${NC} $NETWORK_MODE"
+    echo -e "  ${BLUE}Compose File:${NC} $COMPOSE_FILE"
+    echo
+    
+    # Force rebuild flag
+    REBUILD=true
+    
+    # Set env file path
+    ENV_FILE=".env"
+    
+    print_info "Starting redeployment with rebuild..."
+    
+    # Validate configuration first
+    validate_configuration
+    
+    # Generate fresh env files with same config
+    generate_env_file
+    generate_react_env_production
+    
+    # Use existing compose override if it exists
+    if [ -f "docker-compose.override.yml" ]; then
+        print_info "Using existing docker-compose.override.yml"
+    fi
+    
+    # Deploy with rebuild
+    deploy_docker_services
+    
+    print_success "✅ Redeployment complete!"
+    print_info "All containers have been rebuilt and restarted with the same configuration."
+    
+    exit 0
+}
+
 # Main execution
 main() {
     # Handle help mode first
     if [ "$SHOW_HELP" = "true" ]; then
         show_help
+        # Function exits, so we never reach here
+    fi
+    
+    # Handle redeploy mode
+    if [ "$REDEPLOY" = "true" ]; then
+        redeploy_existing
         # Function exits, so we never reach here
     fi
     

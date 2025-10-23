@@ -11,6 +11,10 @@ services:
     networks:
       - printfarmer-network
     healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
@@ -47,6 +51,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+      args:
+        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
     image: printfarmer-api
     container_name: printfarmer-api
     ports:
