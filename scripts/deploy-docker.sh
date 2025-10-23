@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+# Source shared Docker utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/docker-utils.sh"
+
 # Default flags
 DRY_RUN=false
 NON_INTERACTIVE=false
@@ -107,31 +111,8 @@ remove_version_keys() {
     fi
 }
 
-# Force-remove containers matching a set of name/image patterns (best-effort)
-force_remove_matching_containers() {
-    local patterns=("printfarmer" "pfarm" "orcaslicer" "prusaslicer" "redis" "postgres" "mysql" "mcr.microsoft.com/mssql" "mssql" "sqlserver")
-    local removed_all=""
-    for p in "${patterns[@]}"; do
-        # match by name
-        local byname
-        byname=$(docker ps -aq --filter "name=$p" 2>/dev/null || true)
-        if [ -n "$byname" ]; then
-            docker rm -f $byname 2>/dev/null || true
-            removed_all="$removed_all $byname"
-        fi
-        # match by image/ancestor
-        local byimage
-        byimage=$(docker ps -aq --filter "ancestor=$p" 2>/dev/null || true)
-        if [ -n "$byimage" ]; then
-            docker rm -f $byimage 2>/dev/null || true
-            removed_all="$removed_all $byimage"
-        fi
-    done
-    if [ -n "$removed_all" ]; then
-        audit_log "remove" "force-removed matching containers:$removed_all"
-        print_success "Force-removed matching containers: $removed_all"
-    fi
-}
+# Note: force_remove_matching_containers is now provided by docker-utils.sh
+# as docker_force_remove_matching_containers()
 
 
 # Function to prompt user with default value
@@ -278,7 +259,7 @@ tear_down_deployment() {
             print_warning "Some containers could not be removed. Run 'docker ps -a' to inspect and remove manually."
             # Attempt best-effort force removal of commonly-named PrintFarmer containers
             print_info "Attempting force removal of known PrintFarmer containers (best-effort)..."
-            force_remove_matching_containers || true
+            docker_force_remove_matching_containers || true
         fi
     else
         print_info "No containers to remove"
@@ -308,26 +289,13 @@ tear_down_deployment() {
     fi
     
     # 4. Remove PrintFarmer images
-    print_info "Step 4/7: Removing PrintFarmer Docker images..."
-    if docker images --format "{{.Repository}}" | grep -q "printfarmer"; then
-        docker images --format "{{.Repository}}:{{.Tag}}" | grep "printfarmer" | xargs -r docker rmi -f 2>/dev/null || true
-        print_success "PrintFarmer images removed"
-    else
-        print_info "No PrintFarmer images to remove"
-    fi
+    docker_cleanup_printfarmer_images force
     
-    # 5. Prune unused networks
-    print_info "Step 5/7: Cleaning up Docker networks..."
-    docker network prune -f > /dev/null 2>&1 || true
-    print_success "Networks cleaned"
-    
-    # 6. Prune orphaned/dangling images
-    print_info "Step 6/7: Pruning orphaned and dangling images..."
-    docker image prune -f > /dev/null 2>&1 || true
-    print_success "Orphaned images pruned"
+    # 5-6. Docker system cleanup
+    docker_system_cleanup aggressive
     
     # 7. Remove generated files
-    print_info "Step 7/7: Removing generated configuration files..."
+    print_info "Step 5/5: Removing generated configuration files..."
     local files_removed=0
     
     if [ -f docker-compose.host-network.yml ]; then
