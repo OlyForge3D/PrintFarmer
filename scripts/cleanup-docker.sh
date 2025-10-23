@@ -32,6 +32,37 @@ if [ -n "$existing_containers" ]; then
     if [[ "$response" =~ ^[Yy]$ ]]; then
         print_info "🛑 Force removing all remaining PrintFarmer containers..."
         docker_force_remove_matching_containers
+        
+        # Check if any containers are still stuck after force removal
+        remaining_after_force=$(docker ps -a --format "{{.Names}}" | grep -E "(printfarmer|pfarm)" || true)
+        if [[ -n "$remaining_after_force" ]]; then
+            echo ""
+            print_warning "Some containers could not be removed with standard force methods"
+            echo "Stuck containers:"
+            echo "$remaining_after_force"
+            echo ""
+            echo "❓ Would you like to:"
+            echo "1) Diagnose stuck containers"
+            echo "2) Try nuclear cleanup (aggressive removal)"
+            echo "3) Skip and continue"
+            echo "Choose [1/2/3]: "
+            read -r cleanup_choice
+            
+            case "$cleanup_choice" in
+                1)
+                    for container in $remaining_after_force; do
+                        docker_diagnose_stuck_container "$container"
+                        echo ""
+                    done
+                    ;;
+                2)
+                    docker_nuclear_cleanup
+                    ;;
+                *)
+                    print_info "Skipping advanced cleanup"
+                    ;;
+            esac
+        fi
     fi
 else
     print_success "No remaining PrintFarmer containers found"

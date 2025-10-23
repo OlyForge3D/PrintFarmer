@@ -127,13 +127,52 @@ docker_remove_container() {
     existing_containers=$(docker ps -aq --filter "name=${container_name}" 2>/dev/null || true)
     if [[ -n "$existing_containers" ]]; then
         print_info "🗑️  Removing container: $container_name"
+        
+        # First attempt: normal removal
         if $remove_cmd "$container_name" 2>/dev/null; then
             audit_log "remove" "container: $container_name (force: ${force_flag:-no})"
             return 0
-        else
-            print_warning "Failed to remove container: $container_name"
-            return 1
         fi
+        
+        # Second attempt: force removal if not already tried
+        if [[ "$force_flag" != "force" ]]; then
+            print_warning "Normal removal failed, trying force removal..."
+            if docker rm -f "$container_name" 2>/dev/null; then
+                audit_log "remove" "container: $container_name (force: yes - escalated)"
+                return 0
+            fi
+        fi
+        
+        # Third attempt: kill then remove for stubborn containers
+        print_warning "Force removal failed, trying kill + remove..."
+        docker kill "$container_name" 2>/dev/null || true
+        sleep 2
+        if docker rm -f "$container_name" 2>/dev/null; then
+            audit_log "remove" "container: $container_name (kill+remove)"
+            return 0
+        fi
+        
+        # Fourth attempt: detailed diagnostics and system-level removal
+        print_error "All removal attempts failed for: $container_name"
+        print_info "Container details:"
+        docker inspect "$container_name" --format "{{.State.Status}} - {{.State.Error}}" 2>/dev/null || print_warning "Cannot inspect container"
+        
+        # Try to get container ID and remove by ID
+        local container_id
+        container_id=$(docker ps -aq --filter "name=${container_name}" --format "{{.ID}}" 2>/dev/null | head -1)
+        if [[ -n "$container_id" ]]; then
+            print_info "Attempting removal by container ID: $container_id"
+            if docker rm -f "$container_id" 2>/dev/null; then
+                audit_log "remove" "container: $container_name (by ID: $container_id)"
+                return 0
+            fi
+        fi
+        
+        print_error "Unable to remove container: $container_name"
+        print_info "Manual intervention may be required. Try:"
+        print_info "  sudo systemctl restart docker"
+        print_info "  docker system prune -af"
+        return 1
     fi
     return 1
 }
@@ -405,8 +444,170 @@ docker_check_availability() {
     return 0
 }
 
+# Nuclear option: remove stuck containers after Docker reinstall
+# Usage: docker_nuclear_cleanup
+docker_nuclear_cleanup() {
+    print_warning "🚨 NUCLEAR CLEANUP: This will attempt aggressive container removal"
+    print_warning "This should only be used when normal cleanup fails after Docker reinstall"
+    
+    echo "❓ Are you sure you want to proceed with nuclear cleanup? [y/N]"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        print_info "Nuclear cleanup cancelled"
+        return 0
+    fi
+    
+    print_info "🚨 Starting nuclear cleanup..."
+    
+    # Step 1: Kill all running containers
+    local running_containers
+    running_containers=$(docker ps -q 2>/dev/null || true)
+    if [[ -n "$running_containers" ]]; then
+        print_info "Killing all running containers..."
+        echo "$running_containers" | xargs -r docker kill 2>/dev/null || true
+        sleep 3
+    fi
+    
+    # Step 2: Force remove all containers
+    local all_containers
+    all_containers=$(docker ps -aq 2>/dev/null || true)
+    if [[ -n "$all_containers" ]]; then
+        print_info "Force removing all containers..."
+        echo "$all_containers" | xargs -r docker rm -f 2>/dev/null || true
+        sleep 2
+    fi
+    
+    # Step 3: System-level cleanup
+    print_info "Running aggressive system cleanup..."
+    docker system prune -af --volumes 2>/dev/null || true
+    
+    # Step 4: Check if Docker daemon restart is needed
+    if docker ps -a 2>/dev/null | grep -q .; then
+        print_warning "Some containers still remain. Docker daemon restart may be needed:"
+        print_info "  sudo systemctl restart docker"
+        print_info "  # or on macOS: restart Docker Desktop"
+    else
+        print_success "Nuclear cleanup completed successfully"
+    fi
+    
+    audit_log "nuclear-cleanup" "executed aggressive container removal"
+}
+
+# Fix Docker state after reinstallation
+# Usage: docker_fix_post_reinstall
+docker_fix_post_reinstall() {
+    print_info "🔧 Attempting to fix Docker state after reinstallation..."
+    
+    # Step 1: Stop Docker daemon
+    print_info "Step 1: Stopping Docker daemon..."
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl stop docker 2>/dev/null || true
+    elif command -v service >/dev/null 2>&1; then
+        sudo service docker stop 2>/dev/null || true
+    else
+        print_warning "Cannot stop Docker daemon automatically. Please stop Docker manually."
+        return 1
+    fi
+    
+    sleep 3
+    
+    # Step 2: Clean up Docker's runtime directory
+    print_info "Step 2: Cleaning Docker runtime state..."
+    if [[ -d "/var/run/docker" ]]; then
+        sudo rm -rf /var/run/docker/* 2>/dev/null || true
+    fi
+    
+    # Step 3: Clean up containerd state if it exists
+    print_info "Step 3: Cleaning containerd state..."
+    if [[ -d "/run/containerd" ]]; then
+        sudo rm -rf /run/containerd/* 2>/dev/null || true
+    fi
+    
+    # Step 4: Clean up any remaining container metadata
+    print_info "Step 4: Cleaning container metadata..."
+    if [[ -d "/var/lib/docker/containers" ]]; then
+        print_warning "This will remove all container metadata. Continue? [y/N]"
+        read -r confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            sudo rm -rf /var/lib/docker/containers/* 2>/dev/null || true
+        fi
+    fi
+    
+    # Step 5: Restart Docker daemon
+    print_info "Step 5: Starting Docker daemon..."
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl start docker
+    elif command -v service >/dev/null 2>&1; then
+        sudo service docker start
+    else
+        print_warning "Cannot start Docker daemon automatically. Please start Docker manually."
+        return 1
+    fi
+    
+    # Step 6: Wait for Docker to be ready
+    print_info "Step 6: Waiting for Docker to be ready..."
+    local attempts=0
+    while ! docker info >/dev/null 2>&1 && [[ $attempts -lt 30 ]]; do
+        sleep 2
+        ((attempts++))
+        echo -n "."
+    done
+    echo ""
+    
+    if docker info >/dev/null 2>&1; then
+        print_success "Docker daemon restarted successfully"
+        return 0
+    else
+        print_error "Docker daemon failed to start properly"
+        return 1
+    fi
+}
+
+# Diagnose why a container cannot be removed
+# Usage: docker_diagnose_stuck_container "container_name"
+docker_diagnose_stuck_container() {
+    local container_name="$1"
+    
+    print_info "🔍 Diagnosing stuck container: $container_name"
+    
+    # Check if container exists
+    if ! docker ps -aq --filter "name=${container_name}" | grep -q .; then
+        print_info "Container does not exist"
+        return 0
+    fi
+    
+    # Get container details
+    print_info "Container state and details:"
+    docker inspect "$container_name" --format "State: {{.State.Status}}" 2>/dev/null || print_warning "Cannot get state"
+    docker inspect "$container_name" --format "Error: {{.State.Error}}" 2>/dev/null || print_warning "Cannot get error"
+    docker inspect "$container_name" --format "PID: {{.State.Pid}}" 2>/dev/null || print_warning "Cannot get PID"
+    
+    # Check if it's running
+    if docker ps -q --filter "name=${container_name}" | grep -q .; then
+        print_warning "Container is still running"
+        print_info "Ports in use:"
+        docker port "$container_name" 2>/dev/null || print_info "No ports mapped"
+    fi
+    
+    # Check for volume mounts that might be causing issues
+    print_info "Volume mounts:"
+    docker inspect "$container_name" --format "{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}" 2>/dev/null || print_warning "Cannot get mounts"
+    
+    # Check system resources
+    print_info "System information:"
+    docker system df 2>/dev/null || print_warning "Cannot get system usage"
+    
+    # Check Docker daemon logs for recent errors
+    print_info "Recent Docker daemon issues (if any):"
+    if command -v journalctl >/dev/null 2>&1; then
+        journalctl -u docker --since "10 minutes ago" --no-pager -q | tail -5 2>/dev/null || print_info "No recent Docker daemon logs"
+    else
+        print_info "journalctl not available (non-systemd system)"
+    fi
+}
+
 print_info "📚 Docker utilities library loaded successfully"
-print_info "Available functions: docker_cleanup_container, docker_force_remove_matching_containers, docker_comprehensive_cleanup, docker_cleanup_printfarmer_images, docker_check_port_conflicts, docker_system_cleanup, docker_show_status"
+print_info "Available functions: docker_cleanup_container, docker_force_remove_matching_containers, docker_comprehensive_cleanup, docker_cleanup_printfarmer_images, docker_check_port_conflicts, docker_system_cleanup, docker_show_status, docker_nuclear_cleanup, docker_diagnose_stuck_container"
 
 # Check Docker availability when library is loaded
 if ! docker_check_availability; then
