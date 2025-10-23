@@ -231,31 +231,16 @@ generate_deployment_config() {
             "docker-entrypoint-config.sh"
         )
         
-        # Add Dockerfiles based on architecture
+        # Add Dockerfiles based on architecture - all use multi-stage builds now
         case "$architecture" in
             "monolithic")
-                GENERATED_FILES+=("Dockerfile")
+                GENERATED_FILES+=("Dockerfile.multistage")
                 ;;
             "microservices")
-                GENERATED_FILES+=(
-                    "Dockerfile.api"
-                    "Dockerfile.frontend"
-                    "Dockerfile.orcaslicer"
-                    "Dockerfile.slicer-base"
-                )
-                ;;
-            "multistage")
-                GENERATED_FILES+=(
-                    "Dockerfile.multistage"
-                )
+                GENERATED_FILES+=("Dockerfile.multistage")
                 ;;
             "host-network")
-                GENERATED_FILES+=(
-                    "Dockerfile.api"
-                    "Dockerfile.frontend-host"
-                    "Dockerfile.orcaslicer"
-                    "Dockerfile.slicer-base"
-                )
+                GENERATED_FILES+=("Dockerfile.multistage")
                 ;;
         esac
         
@@ -548,7 +533,7 @@ OPTIONS:
         --keep-generated    Keep generated Docker files after deployment (for debugging)
 
 COMPOSE GENERATOR OPTIONS:
-        --architecture ARCH Architecture to deploy (monolithic|microservices|multistage|host-network)
+        --architecture ARCH Architecture to deploy (monolithic|microservices|host-network)
         --include-monitoring Include monitoring stack (Prometheus, Grafana)
         --include-telemetry Include telemetry/observability (OpenTelemetry)
         --include-security  Include security configurations
@@ -953,13 +938,6 @@ choose_architecture() {
                 print_success "Using CLI option: Microservices deployment"
                 return 0
                 ;;
-            multistage|multi)
-                ARCHITECTURE="multistage"
-                ENV_FILE=".env.multistage"
-                COMPOSE_FILE="docker-compose.multistage.yml"
-                print_success "Using CLI option: Multi-Stage Build deployment"
-                return 0
-                ;;
             host-network)
                 ARCHITECTURE="microservices"  # Host-network is a variant of microservices
                 NETWORK_MODE="host"
@@ -970,49 +948,43 @@ choose_architecture() {
                 ;;
             *)
                 print_error "Invalid architecture: $CLI_ARCHITECTURE"
-                print_info "Valid options: monolithic, microservices, multistage, host-network"
+                print_info "Valid options: monolithic, microservices, host-network"
                 exit 1
                 ;;
         esac
     fi
     
-    echo -e "${BLUE}PrintFarmer supports three deployment architectures:${NC}"
+    echo -e "${BLUE}PrintFarmer supports two deployment architectures:${NC}"
     echo
     echo -e "${GREEN}1. Monolithic (Recommended)${NC}"
     echo "   • Single container with API + Web frontend"
     echo "   • Simpler configuration and networking"
     echo "   • Good for most deployments"
     echo "   • Uses SQLite database by default"
+    echo "   • Built with multi-stage Docker builds for efficiency"
     echo
     echo -e "${GREEN}2. Microservices (Advanced)${NC}"
     echo "   • Separate containers for API, Web, Database, Redis"
     echo "   • Enhanced networking capabilities"
     echo "   • Better for large-scale deployments"
     echo "   • Supports PostgreSQL, SQL Server, MySQL"
-    echo
-    echo -e "${GREEN}3. Multi-Stage Build (Efficient)${NC}"
-    echo "   • Optimized builds - compiles shared libraries once"
-    echo "   • Smaller image sizes and faster builds"
-    echo "   • Only OrcaSlicer support (PrusaSlicer removed)"
-    echo "   • Best for production deployments"
+    echo "   • Built with multi-stage Docker builds for efficiency"
     echo
     
     # Use previous architecture as default, or "1" for new deployments
     local default_choice="1"
     if [ "${ARCHITECTURE:-}" = "microservices" ]; then
         default_choice="2"
-    elif [ "${ARCHITECTURE:-}" = "multistage" ]; then
-        default_choice="3"
     fi
     
-    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices, 3=Multi-Stage]:" "$default_choice" "ARCH_CHOICE"
+    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices]:" "$default_choice" "ARCH_CHOICE"
     
     case "$ARCH_CHOICE" in
         1|monolithic|mono)
             ARCHITECTURE="monolithic"
             ENV_FILE=".env.monolithic"
             COMPOSE_FILE="docker-compose.yml"
-            print_success "Selected: Monolithic deployment"
+            print_success "Selected: Monolithic deployment (with multi-stage builds)"
             
             # Check .NET SDK for monolithic (optional but recommended for local builds)
             check_dotnet_sdk
@@ -1021,13 +993,7 @@ choose_architecture() {
             ARCHITECTURE="microservices"
             ENV_FILE=".env.microservices"
             COMPOSE_FILE="docker-compose.microservices.yml"
-            print_success "Selected: Microservices deployment (using docker-compose.microservices.yml)"
-            ;;
-        3|multistage|multi)
-            ARCHITECTURE="multistage"
-            ENV_FILE=".env.multistage"
-            COMPOSE_FILE="docker-compose.multistage.yml"
-            print_success "Selected: Multi-Stage Build deployment (efficient builds, OrcaSlicer only)"
+            print_success "Selected: Microservices deployment (with multi-stage builds)"
             ;;
         *)
             print_error "Invalid choice. Please run the script again."

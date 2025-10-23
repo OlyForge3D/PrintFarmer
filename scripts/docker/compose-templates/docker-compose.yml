@@ -27,24 +27,25 @@ services:
     volumes:
       - redis_data:/data
 
-  # .NET API Backend - Enhanced host networking for macOS Docker Desktop
+  # .NET API Backend - Multi-stage build for efficiency
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: Dockerfile.multistage
+      target: api-runtime
       args:
         TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: printfarmer-api
+    image: printfarmer-api-multistage
     container_name: printfarmer-api
     ports:
-      - "5001:5001" # HTTP API / SignalR
+      - "5245:5000" # HTTP API / SignalR (corrected port mapping)
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:5001
+      - ASPNETCORE_URLS=http://+:5000
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
       - Redis__ConnectionString=redis:6379
-      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5001}
+      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5245}
       - DEPLOYMENT_MODE=monolithic
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - ALLOW_LOCAL_NETWORK=true
@@ -76,26 +77,27 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:5001/healthz && curl -f http://localhost:5001/health | grep -q 'Healthy' && curl -f http://localhost:5001/api/signalrtest/connection-stats"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:5000/healthz && curl -f http://localhost:5000/health | grep -q 'Healthy' && curl -f http://localhost:5000/api/signalrtest/connection-stats"]
       interval: 30s
       timeout: 15s
       retries: 5
       start_period: 40s
 
-  # React Frontend with Nginx
+  # React Frontend with Nginx - Multi-stage build
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
-    image: printfarmer-frontend
+      dockerfile: Dockerfile.multistage
+      target: frontend-runtime
+    image: printfarmer-frontend-multistage
     container_name: printfarmer-frontend
     ports:
       - "3000:80"
     environment:
       # Point directly at API (no nginx proxy needed in local dev stack script)
-      - VITE_API_BASE_URL=http://localhost:5001/api
-      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5001/hubs/printers
-      - VITE_SIGNALR_HARVEST_URL=http://localhost:5001/hubs/harvest
+      - VITE_API_BASE_URL=http://localhost:5245/api
+      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5245/hubs/printers
+      - VITE_SIGNALR_HARVEST_URL=http://localhost:5245/hubs/harvest
     depends_on:
       api:
         condition: service_healthy
@@ -120,23 +122,24 @@ services:
       - orca
       - orca-binaries
 
-  # OrcaSlicer Worker for distributed slicing
+  # OrcaSlicer Worker for distributed slicing - Multi-stage build
   orcaslicer-worker:
     build:
       context: .
-      dockerfile: Dockerfile.orcaslicer
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-worker
       args:
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
-    image: printfarmer-orcaslicer-worker
+    image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
     profiles:
       - orca
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8081
+      - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__Redis=redis:6379
-      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5001}
+      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5000}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
@@ -153,7 +156,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -46,14 +46,15 @@ services:
       timeout: 5s
       retries: 5
 
-  # PrintFarmer API - Core microservice
+  # PrintFarmer API - Core microservice with multi-stage build
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: Dockerfile.multistage
+      target: api-runtime
       args:
         TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: printfarmer-api
+    image: printfarmer-api-multistage
     container_name: printfarmer-api
     ports:
       - "${API_PORT:-5001}:8080"
@@ -109,17 +110,18 @@ services:
       - orca
       - orca-binaries
 
-  # OrcaSlicer Worker - Distributed slicing microservice
+  # OrcaSlicer Worker - Distributed slicing microservice with multi-stage build
   orcaslicer-worker:
     build:
       context: .
-      dockerfile: Dockerfile.orcaslicer
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-worker
       args:
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
     profiles:
       - orca
-    image: printfarmer-orcaslicer-worker
+    image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
     ports:
       - "8081:8080"
@@ -173,12 +175,13 @@ services:
 
 
 
-  # React Frontend
+  # React Frontend with multi-stage build
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
-    image: printfarmer-frontend
+      dockerfile: Dockerfile.multistage
+      target: frontend-runtime
+    image: printfarmer-frontend-multistage
     container_name: printfarmer-frontend
     ports:
       - "3000:80"

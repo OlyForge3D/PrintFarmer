@@ -170,43 +170,10 @@ copy_dockerfiles() {
     fi
     
     case "$arch" in
-        "monolithic")
-            cp "$DOCKERFILES_DIR/Dockerfile" "$output_dir/"
-            ;;
-        "microservices")
-            # Core services
-            cp "$DOCKERFILES_DIR/Dockerfile.api" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.frontend" "$output_dir/"
-            
-            # Slicer workers (conditional)
-            if [[ "$need_orca_worker" == "true" ]]; then
-                log_info "Including OrcaSlicer worker Dockerfiles (workers enabled)"
-                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
-                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer-binaries" "$output_dir/"
-                cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
-            fi
-            
-            if [[ "$need_prusa_worker" == "true" ]]; then
-                log_info "Including PrusaSlicer worker Dockerfiles (workers enabled)"
-                cp "$DOCKERFILES_DIR/Dockerfile.prusaslicer" "$output_dir/"
-                # Only copy slicer-base if not already copied by orca
-                if [[ "$need_orca_worker" != "true" ]]; then
-                    cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
-                fi
-            fi
-            ;;
-        "host-network")
-            # Core services
-            cp "$DOCKERFILES_DIR/Dockerfile.api" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.frontend-host" "$output_dir/"
-            
-            # Slicer workers (conditional)
-            if [[ "$need_orca_worker" == "true" ]]; then
-                log_info "Including OrcaSlicer worker Dockerfiles (workers enabled)"
-                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
-                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer-binaries" "$output_dir/"
-                cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
-            fi
+        "monolithic"|"microservices"|"host-network")
+            # All architectures now use multi-stage builds for efficiency
+            log_info "Using multi-stage Dockerfile for $arch architecture"
+            cp "$DOCKERFILES_DIR/Dockerfile.multistage" "$output_dir/"
             
             if [[ "$need_prusa_worker" == "true" ]]; then
                 log_info "Including PrusaSlicer worker Dockerfiles (workers enabled)"
@@ -398,43 +365,16 @@ show_dry_run() {
     fi
 
     case "$arch" in
-        "monolithic")
-            echo "  - Dockerfile"
-            ;;
-        "microservices")
-            echo "  - Dockerfile.api"
-            echo "  - Dockerfile.frontend"
+        "monolithic"|"microservices"|"host-network")
+            echo "  - Dockerfile.multistage (efficient multi-stage build for all services)"
             if [[ "$need_orca_worker" == "true" ]]; then
-                echo "  - Dockerfile.orcaslicer (OrcaSlicer workers enabled)"
-                echo "  - Dockerfile.orcaslicer-binaries (OrcaSlicer workers enabled)"
-                echo "  - Dockerfile.slicer-base (OrcaSlicer workers enabled)"
+                echo "    • Includes OrcaSlicer worker build target"
             fi
             if [[ "$need_prusa_worker" == "true" ]]; then
-                echo "  - Dockerfile.prusaslicer (PrusaSlicer workers enabled)"
-                if [[ "$need_orca_worker" != "true" ]]; then
-                    echo "  - Dockerfile.slicer-base (PrusaSlicer workers enabled)"
-                fi
+                echo "    • PrusaSlicer worker not available (removed from deployment)"
             fi
             if [[ "$need_orca_worker" != "true" && "$need_prusa_worker" != "true" ]]; then
-                echo "  (No slicer worker Dockerfiles - workers disabled)"
-            fi
-            ;;
-        "host-network")
-            echo "  - Dockerfile.api"
-            echo "  - Dockerfile.frontend-host"
-            if [[ "$need_orca_worker" == "true" ]]; then
-                echo "  - Dockerfile.orcaslicer (OrcaSlicer workers enabled)"
-                echo "  - Dockerfile.orcaslicer-binaries (OrcaSlicer workers enabled)"
-                echo "  - Dockerfile.slicer-base (OrcaSlicer workers enabled)"
-            fi
-            if [[ "$need_prusa_worker" == "true" ]]; then
-                echo "  - Dockerfile.prusaslicer (PrusaSlicer workers enabled)"
-                if [[ "$need_orca_worker" != "true" ]]; then
-                    echo "  - Dockerfile.slicer-base (PrusaSlicer workers enabled)"
-                fi
-            fi
-            if [[ "$need_orca_worker" != "true" && "$need_prusa_worker" != "true" ]]; then
-                echo "  (No slicer worker Dockerfiles - workers disabled)"
+                echo "    • Slicer workers disabled"  
             fi
             ;;
     esac
