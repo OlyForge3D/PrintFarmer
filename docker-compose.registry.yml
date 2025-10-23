@@ -1,0 +1,31 @@
+# Docker Compose override for local registry deployment
+# This file modifies the base docker-compose.yml to use images from a local registry
+# 
+# Usage:
+#   1. Set your registry host: export REGISTRY_HOST=192.168.1.100:5000
+#   2. Deploy: docker compose -f docker-compose.yml -f docker-compose.registry.yml up
+#
+# Or use environment file:
+#   echo "REGISTRY_HOST=192.168.1.100:5000" > .env.registry
+#   docker compose --env-file .env.registry -f docker-compose.yml -f docker-compose.registry.yml up
+
+services:
+  # Override binary layer to use registry image
+  orcaslicer-binaries:
+    image: ${REGISTRY_HOST}/orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
+    build: null  # Disable build, use pre-built image from registry
+    
+  # Override worker to use registry image  
+  orcaslicer-worker:
+    image: ${REGISTRY_HOST}/printfarmer-orcaslicer-worker:latest
+    build: null  # Disable build, use pre-built image from registry
+
+  # Optional: Override API if you build and push it to registry
+  api:
+    image: ${REGISTRY_HOST}/printfarmer-api:latest
+    build: null  # Disable build, use pre-built image from registry
+
+  # Optional: Override React frontend if you build and push it to registry  
+  web:
+    image: ${REGISTRY_HOST}/printfarmer-web:latest
+    build: null  # Disable build, use pre-built image from registry
