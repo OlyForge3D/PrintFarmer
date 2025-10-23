@@ -2,21 +2,15 @@
 # Supports both OrcaSlicer and PrusaSlicer workers for distributed slicing
 
 services:
-  # Redis for job queuing and worker coordination
+    # Redis for caching and SignalR backplane
   redis:
     image: redis:7-alpine
+    container_name: printfarmer-redis
     ports:
       - "6379:6379"
     networks:
       - printfarmer-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
@@ -54,6 +48,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     image: printfarmer-api
+    container_name: printfarmer-api
     ports:
       - "${API_PORT:-5001}:8080"
     networks:
@@ -120,6 +115,7 @@ services:
     profiles:
       - orca
     image: printfarmer-orcaslicer-worker
+    container_name: printfarmer-orcaslicer-worker
     ports:
       - "8081:8080"
     networks:
@@ -182,6 +178,7 @@ services:
     profiles:
       - prusa
     image: printfarmer-prusaslicer-worker
+    container_name: printfarmer-prusaslicer-worker
     restart: unless-stopped
     ports:
       - "8082:8080"
@@ -239,6 +236,7 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     image: printfarmer-frontend
+    container_name: printfarmer-frontend
     ports:
       - "3000:80"
     networks:
@@ -258,6 +256,7 @@ services:
       retries: 3
   nginx-proxy:
     image: nginx:alpine
+    container_name: printfarmer-nginx-proxy
     profiles:
       - proxy
     ports:

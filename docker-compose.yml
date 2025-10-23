@@ -18,6 +18,7 @@ services:
   # Redis for caching and SignalR backplane
   redis:
     image: redis:7-alpine
+    container_name: printfarmer-redis
     # No external port mapping needed; accessed only by internal services (api, workers)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -33,6 +34,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     image: printfarmer-api
+    container_name: printfarmer-api
     ports:
       - "5001:5001" # HTTP API / SignalR
     environment:
@@ -85,6 +87,7 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     image: printfarmer-frontend
+    container_name: printfarmer-frontend
     ports:
       - "3000:80"
     environment:
@@ -125,6 +128,7 @@ services:
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
     image: printfarmer-orcaslicer-worker
+    container_name: printfarmer-orcaslicer-worker
     profiles:
       - orca
     environment:
@@ -181,6 +185,7 @@ services:
         ALLOW_STUB: "false"  # Production: require real PrusaSlicer binary
         PRUSASLICER_VERSION: ${PRUSASLICER_VERSION:-2.9.3}
     image: printfarmer-prusaslicer-worker
+    container_name: printfarmer-prusaslicer-worker
     profiles:
       - prusa
     environment:
@@ -229,6 +234,7 @@ services:
   # Optional: Load balancer for production
   nginx-proxy:
     image: nginx:alpine
+    container_name: printfarmer-nginx-proxy
     profiles:
       - proxy
     ports:
