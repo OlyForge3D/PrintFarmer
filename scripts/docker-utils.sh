@@ -20,7 +20,7 @@ if [[ -z "${RED:-}" ]]; then
 fi
 
 # Print functions (if not already defined)
-if ! command -v print_info &> /dev/null; then
+if ! declare -F print_info > /dev/null 2>&1; then
     print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
     print_success() { echo -e "${GREEN}✅ $1${NC}"; }
     print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
@@ -28,7 +28,7 @@ if ! command -v print_info &> /dev/null; then
 fi
 
 # Audit log helper (if not already defined)
-if ! command -v audit_log &> /dev/null; then
+if ! declare -F audit_log > /dev/null 2>&1; then
     DEPLOY_AUDIT_LOG=${DEPLOY_AUDIT_LOG:-"./.docker-ops-audit.log"}
     audit_log() {
         local action="$1"
@@ -84,11 +84,24 @@ declare -a PRINTFARMER_CONTAINERS=(
 # Usage: docker_stop_container "container_name"
 docker_stop_container() {
     local container_name="$1"
-    if docker ps -q -f name="$container_name" | grep -q .; then
+    
+    # Check if Docker is running
+    if ! docker info >/dev/null 2>&1; then
+        print_warning "Docker is not running or not accessible"
+        return 1
+    fi
+    
+    local running_containers
+    running_containers=$(docker ps -q --filter "name=${container_name}" 2>/dev/null || true)
+    if [[ -n "$running_containers" ]]; then
         print_info "🛑 Stopping container: $container_name"
-        docker stop "$container_name" || true
-        audit_log "stop" "container: $container_name"
-        return 0
+        if docker stop "$container_name" 2>/dev/null; then
+            audit_log "stop" "container: $container_name"
+            return 0
+        else
+            print_warning "Failed to stop container: $container_name"
+            return 1
+        fi
     fi
     return 1
 }
@@ -100,15 +113,27 @@ docker_remove_container() {
     local force_flag="${2:-}"
     local remove_cmd="docker rm"
     
+    # Check if Docker is running
+    if ! docker info >/dev/null 2>&1; then
+        print_warning "Docker is not running or not accessible"
+        return 1
+    fi
+    
     if [[ "$force_flag" == "force" ]]; then
         remove_cmd="docker rm -f"
     fi
     
-    if docker ps -aq -f name="$container_name" | grep -q .; then
+    local existing_containers
+    existing_containers=$(docker ps -aq --filter "name=${container_name}" 2>/dev/null || true)
+    if [[ -n "$existing_containers" ]]; then
         print_info "🗑️  Removing container: $container_name"
-        $remove_cmd "$container_name" || true
-        audit_log "remove" "container: $container_name (force: ${force_flag:-no})"
-        return 0
+        if $remove_cmd "$container_name" 2>/dev/null; then
+            audit_log "remove" "container: $container_name (force: ${force_flag:-no})"
+            return 0
+        else
+            print_warning "Failed to remove container: $container_name"
+            return 1
+        fi
     fi
     return 1
 }
@@ -119,8 +144,23 @@ docker_cleanup_container() {
     local container_name="$1"
     local force_flag="${2:-}"
     
-    docker_stop_container "$container_name" || true
-    docker_remove_container "$container_name" "$force_flag" || true
+    local stopped=false
+    local removed=false
+    
+    if docker_stop_container "$container_name"; then
+        stopped=true
+    fi
+    
+    if docker_remove_container "$container_name" "$force_flag"; then
+        removed=true
+    fi
+    
+    # Return success if either stopped or removed something
+    if [[ "$stopped" == "true" || "$removed" == "true" ]]; then
+        return 0
+    fi
+    
+    return 1
 }
 
 # Force-remove containers matching a set of name/image patterns (best-effort)
@@ -165,17 +205,25 @@ docker_cleanup_problematic_containers() {
     
     print_info "🧹 Cleaning up known problematic containers..."
     
+    # Check Docker availability first
+    if ! docker_check_availability; then
+        return 1
+    fi
+    
     local cleaned=0
+    local total=${#KNOWN_PROBLEMATIC_CONTAINERS[@]}
+    
     for container in "${KNOWN_PROBLEMATIC_CONTAINERS[@]}"; do
+        print_info "  • Checking: $container"
         if docker_cleanup_container "$container" "$force_flag"; then
             ((cleaned++))
         fi
     done
     
     if [[ $cleaned -gt 0 ]]; then
-        print_success "Cleaned up $cleaned problematic containers"
+        print_success "Cleaned up $cleaned problematic containers (checked $total)"
     else
-        print_info "No problematic containers found"
+        print_info "No problematic containers found (checked $total containers)"
     fi
 }
 
@@ -186,17 +234,25 @@ docker_cleanup_printfarmer_containers() {
     
     print_info "🧹 Cleaning up PrintFarmer containers..."
     
+    # Check Docker availability first
+    if ! docker_check_availability; then
+        return 1
+    fi
+    
     local cleaned=0
+    local total=${#PRINTFARMER_CONTAINERS[@]}
+    
     for container in "${PRINTFARMER_CONTAINERS[@]}"; do
+        print_info "  • Checking: $container"
         if docker_cleanup_container "$container" "$force_flag"; then
             ((cleaned++))
         fi
     done
     
     if [[ $cleaned -gt 0 ]]; then
-        print_success "Cleaned up $cleaned PrintFarmer containers"
+        print_success "Cleaned up $cleaned PrintFarmer containers (checked $total)"
     else
-        print_info "No PrintFarmer containers found"
+        print_info "No PrintFarmer containers found (checked $total containers)"
     fi
 }
 
@@ -334,5 +390,25 @@ docker_show_status() {
     echo ""
 }
 
+# Check if Docker is available and running
+docker_check_availability() {
+    if ! command -v docker >/dev/null 2>&1; then
+        print_error "Docker command not found. Please install Docker."
+        return 1
+    fi
+    
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker is not running or not accessible. Please start Docker."
+        return 1
+    fi
+    
+    return 0
+}
+
 print_info "📚 Docker utilities library loaded successfully"
 print_info "Available functions: docker_cleanup_container, docker_force_remove_matching_containers, docker_comprehensive_cleanup, docker_cleanup_printfarmer_images, docker_check_port_conflicts, docker_system_cleanup, docker_show_status"
+
+# Check Docker availability when library is loaded
+if ! docker_check_availability; then
+    print_warning "Docker utilities loaded but Docker is not available"
+fi

@@ -13,8 +13,11 @@ echo "This script will clean up orphaned containers and resolve naming conflicts
 echo ""
 
 # Clean up known problematic containers and PrintFarmer containers
+print_info "Starting problematic containers cleanup..."
 docker_cleanup_problematic_containers
+print_info "Starting PrintFarmer containers cleanup..."
 docker_cleanup_printfarmer_containers
+print_info "Container cleanup completed."
 
 echo ""
 echo "🔍 Checking for any remaining PrintFarmer containers..."
