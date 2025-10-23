@@ -38,19 +38,21 @@ OPTIONS:
     --include-telemetry     Include telemetry/observability
     --include-security      Include security configurations  
     --include-registry      Include local registry
+    --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
+    --enable-prusa-worker VAL   Enable PrusaSlicer workers (yes/no/true/false or count, default: no)
     --keep-generated        Don't clean up generated files after deployment
     --dry-run              Show what would be generated without creating files
     --help                 Show this help message
 
 EXAMPLES:
-    # Generate microservices configuration
-    $0 --architecture microservices
+    # Generate microservices configuration with OrcaSlicer workers only
+    $0 --architecture microservices --enable-orca-worker yes --enable-prusa-worker no
 
     # Generate with monitoring and telemetry
     $0 --architecture microservices --include-monitoring --include-telemetry
 
-    # Generate for host network mode
-    $0 --architecture host-network --output-dir /tmp/deploy
+    # Generate for host network mode without any slicer workers
+    $0 --architecture host-network --enable-orca-worker no --enable-prusa-worker no
 
     # Dry run to see what would be generated
     $0 --architecture monolithic --dry-run
@@ -66,6 +68,8 @@ INCLUDE_SECURITY=false
 INCLUDE_REGISTRY=false
 KEEP_GENERATED=false
 DRY_RUN=false
+ENABLE_ORCA_WORKER=""
+ENABLE_PRUSA_WORKER=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -97,6 +101,14 @@ while [[ $# -gt 0 ]]; do
         --keep-generated)
             KEEP_GENERATED=true
             shift
+            ;;
+        --enable-orca-worker)
+            ENABLE_ORCA_WORKER="$2"
+            shift 2
+            ;;
+        --enable-prusa-worker)
+            ENABLE_PRUSA_WORKER="$2"
+            shift 2
             ;;
         --dry-run)
             DRY_RUN=true
@@ -133,23 +145,70 @@ copy_dockerfiles() {
     
     log_info "Copying Dockerfiles for $arch architecture..."
     
+    # Determine if workers are needed based on configuration or environment
+    local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+    local need_prusa_worker="${ENABLE_PRUSA_WORKER:-${PRUSA_WORKER_COUNT:-no}}"
+    
+    # Parse yes/no and numeric values
+    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+        need_orca_worker="true"
+    else
+        need_orca_worker="false"
+    fi
+    
+    if [[ "$need_prusa_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_prusa_worker" =~ ^[0-9]+$ && "$need_prusa_worker" -gt 0 ]]; then
+        need_prusa_worker="true"
+    else
+        need_prusa_worker="false"
+    fi
+    
     case "$arch" in
         "monolithic")
             cp "$DOCKERFILES_DIR/Dockerfile" "$output_dir/"
             ;;
         "microservices")
+            # Core services
             cp "$DOCKERFILES_DIR/Dockerfile.api" "$output_dir/"
             cp "$DOCKERFILES_DIR/Dockerfile.frontend" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.prusaslicer" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
+            
+            # Slicer workers (conditional)
+            if [[ "$need_orca_worker" == "true" ]]; then
+                log_info "Including OrcaSlicer worker Dockerfiles (workers enabled)"
+                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
+                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer-binaries" "$output_dir/"
+                cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
+            fi
+            
+            if [[ "$need_prusa_worker" == "true" ]]; then
+                log_info "Including PrusaSlicer worker Dockerfiles (workers enabled)"
+                cp "$DOCKERFILES_DIR/Dockerfile.prusaslicer" "$output_dir/"
+                # Only copy slicer-base if not already copied by orca
+                if [[ "$need_orca_worker" != "true" ]]; then
+                    cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
+                fi
+            fi
             ;;
         "host-network")
+            # Core services
             cp "$DOCKERFILES_DIR/Dockerfile.api" "$output_dir/"
             cp "$DOCKERFILES_DIR/Dockerfile.frontend-host" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.prusaslicer" "$output_dir/"
-            cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
+            
+            # Slicer workers (conditional)
+            if [[ "$need_orca_worker" == "true" ]]; then
+                log_info "Including OrcaSlicer worker Dockerfiles (workers enabled)"
+                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
+                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer-binaries" "$output_dir/"
+                cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
+            fi
+            
+            if [[ "$need_prusa_worker" == "true" ]]; then
+                log_info "Including PrusaSlicer worker Dockerfiles (workers enabled)"
+                cp "$DOCKERFILES_DIR/Dockerfile.prusaslicer" "$output_dir/"
+                # Only copy slicer-base if not already copied by orca
+                if [[ "$need_orca_worker" != "true" ]]; then
+                    cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
+                fi
+            fi
             ;;
     esac
 }
@@ -234,6 +293,23 @@ show_dry_run() {
     log_info "DRY RUN: Would generate the following for $arch architecture:"
     echo
     echo "Dockerfiles:"
+    # Determine worker configuration for dry run display
+    local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+    local need_prusa_worker="${ENABLE_PRUSA_WORKER:-${PRUSA_WORKER_COUNT:-no}}"
+    
+    # Parse yes/no and numeric values
+    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+        need_orca_worker="true"
+    else
+        need_orca_worker="false"
+    fi
+    
+    if [[ "$need_prusa_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_prusa_worker" =~ ^[0-9]+$ && "$need_prusa_worker" -gt 0 ]]; then
+        need_prusa_worker="true"
+    else
+        need_prusa_worker="false"
+    fi
+
     case "$arch" in
         "monolithic")
             echo "  - Dockerfile"
@@ -241,16 +317,38 @@ show_dry_run() {
         "microservices")
             echo "  - Dockerfile.api"
             echo "  - Dockerfile.frontend"
-            echo "  - Dockerfile.orcaslicer"
-            echo "  - Dockerfile.prusaslicer"
-            echo "  - Dockerfile.slicer-base"
+            if [[ "$need_orca_worker" == "true" ]]; then
+                echo "  - Dockerfile.orcaslicer (OrcaSlicer workers enabled)"
+                echo "  - Dockerfile.orcaslicer-binaries (OrcaSlicer workers enabled)"
+                echo "  - Dockerfile.slicer-base (OrcaSlicer workers enabled)"
+            fi
+            if [[ "$need_prusa_worker" == "true" ]]; then
+                echo "  - Dockerfile.prusaslicer (PrusaSlicer workers enabled)"
+                if [[ "$need_orca_worker" != "true" ]]; then
+                    echo "  - Dockerfile.slicer-base (PrusaSlicer workers enabled)"
+                fi
+            fi
+            if [[ "$need_orca_worker" != "true" && "$need_prusa_worker" != "true" ]]; then
+                echo "  (No slicer worker Dockerfiles - workers disabled)"
+            fi
             ;;
         "host-network")
             echo "  - Dockerfile.api"
             echo "  - Dockerfile.frontend-host"
-            echo "  - Dockerfile.orcaslicer"
-            echo "  - Dockerfile.prusaslicer"
-            echo "  - Dockerfile.slicer-base"
+            if [[ "$need_orca_worker" == "true" ]]; then
+                echo "  - Dockerfile.orcaslicer (OrcaSlicer workers enabled)"
+                echo "  - Dockerfile.orcaslicer-binaries (OrcaSlicer workers enabled)"
+                echo "  - Dockerfile.slicer-base (OrcaSlicer workers enabled)"
+            fi
+            if [[ "$need_prusa_worker" == "true" ]]; then
+                echo "  - Dockerfile.prusaslicer (PrusaSlicer workers enabled)"
+                if [[ "$need_orca_worker" != "true" ]]; then
+                    echo "  - Dockerfile.slicer-base (PrusaSlicer workers enabled)"
+                fi
+            fi
+            if [[ "$need_orca_worker" != "true" && "$need_prusa_worker" != "true" ]]; then
+                echo "  (No slicer worker Dockerfiles - workers disabled)"
+            fi
             ;;
     esac
     

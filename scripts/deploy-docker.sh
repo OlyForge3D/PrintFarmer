@@ -193,6 +193,14 @@ generate_deployment_config() {
         generator_args+=("--include-registry")
     fi
     
+    # Add worker configuration
+    if [ -n "${ENABLE_ORCA_WORKER:-}" ]; then
+        generator_args+=("--enable-orca-worker" "$ENABLE_ORCA_WORKER")
+    fi
+    if [ -n "${ENABLE_PRUSA_WORKER:-}" ]; then
+        generator_args+=("--enable-prusa-worker" "$ENABLE_PRUSA_WORKER")
+    fi
+    
     # Set output directory
     generator_args+=("--output-dir" "$output_dir")
     
