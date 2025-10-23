@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Build the orcaslicer-worker image for amd64 to obtain a real (non-stub) OrcaSlicer binary even on arm64 hosts.
+# Build the orcaslicer-worker image for amd64 using optimized binary layer caching.
+# This script builds both the binary layer and worker for amd64 to obtain a real (non-stub) OrcaSlicer binary even on arm64 hosts.
 # Requires docker buildx with an amd64 builder configured (example: docker run --privileged --rm tonistiigi/binfmt --install all).
 # Usage:
 #   scripts/build-orcaslicer-amd64.sh [tag]
@@ -12,11 +13,23 @@ if ! docker buildx version >/dev/null 2>&1; then
   exit 2
 fi
 
-echo "[buildx] Building image for linux/amd64 -> ${TAG}";
+ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
+
+echo "[buildx] Building orcaslicer-binaries:${ORCA_VERSION} for linux/amd64 (cached layer)";
+DOCKER_BUILDKIT=1 docker buildx build \
+  --platform linux/amd64 \
+  -t "orcaslicer-binaries:${ORCA_VERSION}" \
+  -f Dockerfile.orcaslicer-binaries \
+  --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+  --build-arg ALLOW_STUB=false \
+  --load .
+
+echo "[buildx] Building worker image for linux/amd64 -> ${TAG} (using cached binaries)";
 DOCKER_BUILDKIT=1 docker buildx build \
   --platform linux/amd64 \
   -t "${TAG}" \
   -f Dockerfile.orcaslicer \
+  --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
   --load .
 
 # Tag for local development stack compatibility

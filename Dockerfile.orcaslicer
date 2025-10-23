@@ -58,87 +58,9 @@ RUN set -e; \
 # Runtime Stage
 ########################################
 ########################################
-# Orca Binary Assets Stage (download & extract) for better caching
+# Orca Binary Assets Stage (optimized caching layer)
 ########################################
-FROM orcaslicer-assets:local AS orcaassets
-USER root
-WORKDIR /tmp
-ARG ORCASLICER_VERSION
-ARG ORCASLICER_URL
-ARG ALLOW_STUB
-ARG GITHUB_TOKEN
-ARG PRESEED_SECRET_ID=orca
-# If a buildkit secret with id matching PRESEED_SECRET_ID is provided, it will be mounted at /run/secrets/${PRESEED_SECRET_ID}
-RUN set -e; echo "[orcaassets] Resolving OrcaSlicer version=${ORCASLICER_VERSION}"; \
-    if [ -f "/run/secrets/${PRESEED_SECRET_ID}" ]; then echo "[orcaassets] Using preseeded AppImage from /run/secrets/${PRESEED_SECRET_ID}"; cp "/run/secrets/${PRESEED_SECRET_ID}" orcaslicer.AppImage || true; fi; \
-    API_URL="https://api.github.com/repos/SoftFever/OrcaSlicer/releases"; \
-    AUTH=""; [ -n "${GITHUB_TOKEN}" ] && AUTH="-H Authorization: Bearer ${GITHUB_TOKEN}"; \
-    echo "[orcaassets] Querying GitHub Releases API"; \
-    dynamic_url=$(curl -H "Accept: application/vnd.github+json" -H "User-Agent: OrcaSlicerWorker/1.0" $AUTH -fsSL "$API_URL" | jq -r --arg ver "v${ORCASLICER_VERSION}" '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | head -n1 || true); \
-    if [ -n "$dynamic_url" ]; then echo "[orcaassets] Discovered asset: $dynamic_url"; ORCASLICER_URL="$dynamic_url"; fi; \
-    try_download() { url="$1"; echo "[orcaassets] -> $url"; \
-    if curl -H "User-Agent: OrcaSlicerWorker/1.0" -fSL -o orcaslicer.AppImage.tmp "$url"; then \
-    size=$(stat -c%s orcaslicer.AppImage.tmp || echo 0); \
-    if [ "$size" -gt 5000000 ]; then mv orcaslicer.AppImage.tmp orcaslicer.AppImage; return 0; fi; \
-    echo "[orcaassets]   (size $size < 5MB, invalid)"; \
-    fi; rm -f orcaslicer.AppImage.tmp || true; return 1; }; \
-    try_download "${ORCASLICER_URL}" \
-    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
-    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
-    || echo "[orcaassets] WARNING: All download attempts failed."; \
-    mkdir -p /orcaslicer-dist/opt; \
-    if [ -f orcaslicer.AppImage ]; then chmod +x orcaslicer.AppImage; arch=$(uname -m); \
-    echo "[orcaassets] File magic: $( (command -v file >/dev/null 2>&1 && file orcaslicer.AppImage) || echo 'file N/A')"; \
-    echo "[orcaassets] Head bytes: $(od -An -tx1 -N8 orcaslicer.AppImage 2>/dev/null | tr -s ' ' | sed 's/^ //')"; \
-    echo "[orcaassets] Host build arch: $arch"; \
-    if [ "$arch" = "x86_64" ] || [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then \
-    echo "[orcaassets] Attempting unsquashfs extraction first"; \
-    if unsquashfs -d squashfs-root orcaslicer.AppImage >/dev/null 2>&1; then \
-    mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
-    cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer || true; \
-    else \
-    echo "[orcaassets] unsquashfs failed, trying --appimage-extract"; \
-    if ./orcaslicer.AppImage --appimage-extract 2>extract.err; then \
-    mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
-    cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer || true; \
-    else \
-    echo "[orcaassets] Primary extract failed (exec format or other). Trying 7z then bsdtar then carve"; \
-    if command -v 7z >/dev/null 2>&1; then \
-    if 7z x -y -oorca7z orcaslicer.AppImage >/dev/null 2>&1; then \
-    if [ -d orca7z/squashfs-root ]; then mv orca7z/squashfs-root /orcaslicer-dist/opt/orcaslicer; fi; \
-    if [ ! -d /orcaslicer-dist/opt/orcaslicer ]; then mkdir -p /orcaslicer-dist/opt/orcaslicer; cp -R orca7z/* /orcaslicer-dist/opt/orcaslicer/ || true; fi; \
-    cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
-    else echo "[orcaassets] 7z extraction failed"; fi; \
-    fi; \
-    if [ ! -d /orcaslicer-dist/opt/orcaslicer ] && command -v bsdtar >/dev/null 2>&1; then \
-    if bsdtar -xf orcaslicer.AppImage 2>/dev/null && [ -d squashfs-root ]; then \
-    mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
-    cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
-    fi; \
-    fi; \
-    if [ ! -d /orcaslicer-dist/opt/orcaslicer ]; then \
-    echo "[orcaassets] Attempting raw carve for hsqs magic"; \
-    off=$(grep -aob 'hsqs' orcaslicer.AppImage | head -n1 | cut -d: -f1 || true); \
-    if [ -n "$off" ]; then \
-    dd if=orcaslicer.AppImage bs=1 skip=$off of=core.squashfs 2>/dev/null || true; \
-    if unsquashfs -d squashfs-root core.squashfs >/dev/null 2>&1; then \
-    mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
-    cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
-    else echo "[orcaassets] Carve unsquashfs failed"; fi; \
-    else echo "[orcaassets] hsqs magic not found"; fi; \
-    fi; \
-    fi; \
-    fi; \
-    else echo "[orcaassets] Skipping extraction due to unsupported arch: $arch"; fi; \
-    rm -f orcaslicer.AppImage; \
-    fi; \
-    if [ ! -f /orcaslicer-dist/orcaslicer ]; then \
-    if [ "${ALLOW_STUB}" = "true" ]; then \
-    echo "[orcaassets] Creating stub binary"; \
-    printf '#!/bin/sh\n>&2 echo "[WARN] OrcaSlicer binary not present (version %s)"\nexit 2\n' "${ORCASLICER_VERSION}" > /orcaslicer-dist/orcaslicer; \
-    chmod +x /orcaslicer-dist/orcaslicer; \
-    else echo "[orcaassets] ERROR: Binary missing and ALLOW_STUB=false"; exit 1; fi; \
-    fi
+FROM orcaslicer-binaries:${ORCASLICER_VERSION} AS orcaassets
 
 ########################################
 # Final Runtime Stage

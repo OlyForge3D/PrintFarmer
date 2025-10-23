@@ -615,14 +615,31 @@ fi
 
 # Check for Docker images
 if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect printfarmer/orcaslicer-worker >/dev/null 2>&1 ); then
-  warn "OrcaSlicer worker image not found. Building it..."
+  warn "OrcaSlicer worker image not found. Building it with optimized binary caching..."
   cd "$ROOT_DIR"
+  
+  # Build slicer-base first
   docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base . 
   docker tag printfarmer/slicer-base:latest slicer-base:latest
   # Tag alternate name used by worker Dockerfiles if present
   docker tag printfarmer/slicer-base:latest printfarmer-slicer-base:latest || true
   
-  docker build -f Dockerfile.orcaslicer -t printfarmer/orcaslicer-worker .
+  # Build optimized binary layer first (cached for future builds)
+  ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
+  info "Building orcaslicer-binaries:${ORCA_VERSION} (cached binary layer)..."
+  docker build -f Dockerfile.orcaslicer-binaries \
+    -t "orcaslicer-binaries:${ORCA_VERSION}" \
+    -t "orcaslicer-binaries:latest" \
+    --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+    --build-arg ALLOW_STUB=false \
+    .
+  
+  # Build worker using cached binaries (fast)
+  info "Building orcaslicer-worker using cached binaries..."
+  docker build -f Dockerfile.orcaslicer \
+    -t printfarmer/orcaslicer-worker \
+    --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+    .
 fi
 
 if [[ $NO_PRUSA -eq 0 ]] && ( [[ $BUILD_PRUSA -eq 1 ]] || ! docker image inspect printfarmer/prusaslicer-worker >/dev/null 2>&1 ); then

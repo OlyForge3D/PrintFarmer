@@ -83,6 +83,21 @@ services:
       retries: 5
       start_period: 60s
 
+  # OrcaSlicer Binary Layer (cached layer for binary assets)
+  orcaslicer-binaries:
+    build:
+      context: .
+      dockerfile: Dockerfile.orcaslicer-binaries
+      args:
+        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
+        # Optional: GitHub token for API rate limiting
+        # GITHUB_TOKEN: ${GITHUB_TOKEN}
+    image: orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
+    profiles:
+      - orca
+      - orca-binaries
+
   # OrcaSlicer Worker - Distributed slicing microservice
   orcaslicer-worker:
     build:
@@ -114,6 +129,8 @@ services:
       - orcaslicer_temp:/app/temp
       - gcode_storage:/app/gcode
     depends_on:
+      orcaslicer-binaries:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       api:

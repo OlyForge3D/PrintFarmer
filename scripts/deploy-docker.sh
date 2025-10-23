@@ -2075,43 +2075,24 @@ deploy_containers() {
             print_info "Prepared temporary build_context at ./build_context"
         fi
 
-        # Build orcaslicer-assets:local first if orca worker is enabled (required dependency)
+        # Build orcaslicer-binaries layer first if orca worker is enabled (optimized caching)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            # Check if we have a real AppImage (non-empty, reasonable size > 1MB)
-            if [ ! -f "./orcaslicer.AppImage" ] || [ ! -s "./orcaslicer.AppImage" ] || [ "$(stat -f%z "./orcaslicer.AppImage" 2>/dev/null || stat -c%s "./orcaslicer.AppImage" 2>/dev/null || echo 0)" -lt 1000000 ]; then
-                print_info "No valid orcaslicer.AppImage found, downloading latest release..."
-                
-                # Fetch latest release info from GitHub API
-                ORCA_API_URL="https://api.github.com/repos/SoftFever/OrcaSlicer/releases/latest"
-                ORCA_RELEASE_JSON=$(curl -s "$ORCA_API_URL")
-                
-                # Extract Linux AppImage URL (pattern: OrcaSlicer_Linux_*.AppImage)
-                ORCA_DOWNLOAD_URL=$(echo "$ORCA_RELEASE_JSON" | grep -o '"browser_download_url": "[^"]*' | grep -o 'https://[^"]*' | grep 'Linux.*\.AppImage$' | head -1)
-                
-                if [ -z "$ORCA_DOWNLOAD_URL" ]; then
-                    print_error "Failed to find OrcaSlicer AppImage download URL"
-                    print_error "Please manually download from: https://github.com/SoftFever/OrcaSlicer/releases"
-                    print_error "Place the AppImage in the repository root as 'orcaslicer.AppImage'"
-                    exit 1
-                fi
-                
-                print_info "Downloading OrcaSlicer from: $ORCA_DOWNLOAD_URL"
-                if curl -L -o orcaslicer.AppImage "$ORCA_DOWNLOAD_URL"; then
-                    chmod +x orcaslicer.AppImage
-                    print_success "Downloaded OrcaSlicer AppImage ($(du -h orcaslicer.AppImage | cut -f1))"
-                else
-                    print_error "Failed to download OrcaSlicer AppImage"
-                    exit 1
-                fi
-            else
-                print_info "Found existing orcaslicer.AppImage ($(du -h orcaslicer.AppImage | cut -f1))"
+            ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
+            print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching)..."
+            
+            # Build binary layer with automatic download and extraction
+            BUILD_ARGS="--build-arg ORCASLICER_VERSION=${ORCA_VERSION} --build-arg ALLOW_STUB=false"
+            
+            # Add GitHub token if available (to avoid rate limits)
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+                BUILD_ARGS="$BUILD_ARGS --build-arg GITHUB_TOKEN=${GITHUB_TOKEN}"
             fi
             
-            print_info "Building orcaslicer-assets:local image..."
-            if docker build -f Dockerfile.orca-assets -t orcaslicer-assets:local .; then
-                print_success "orcaslicer-assets:local image built successfully"
+            if docker build -f Dockerfile.orcaslicer-binaries -t "orcaslicer-binaries:${ORCA_VERSION}" -t "orcaslicer-binaries:latest" $BUILD_ARGS .; then
+                print_success "orcaslicer-binaries:${ORCA_VERSION} layer built successfully (cached for future builds)"
             else
-                print_error "Failed to build orcaslicer-assets:local image"
+                print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
+                print_error "This layer contains the OrcaSlicer binary and will be cached for optimal build performance"
                 exit 1
             fi
         fi
