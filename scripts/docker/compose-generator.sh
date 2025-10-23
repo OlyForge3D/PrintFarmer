@@ -39,7 +39,7 @@ OPTIONS:
     --include-security      Include security configurations  
     --include-registry      Include local registry
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
-    --enable-prusa-worker VAL   Enable PrusaSlicer workers (yes/no/true/false or count, default: no)
+    --enable-prusa-worker VAL   Enable PrusaSlicer workers (DISABLED - not ready for deployment)
     --db-provider PROVIDER  Database provider (postgres|sqlserver|mysql, default: postgres)
     --keep-generated        Don't clean up generated files after deployment
     --dry-run              Show what would be generated without creating files
@@ -153,7 +153,8 @@ copy_dockerfiles() {
     
     # Determine if workers are needed based on configuration or environment
     local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    local need_prusa_worker="${ENABLE_PRUSA_WORKER:-${PRUSA_WORKER_COUNT:-no}}"
+    # PrusaSlicer temporarily disabled
+    local need_prusa_worker="false"
     
     # Parse yes/no and numeric values
     if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then

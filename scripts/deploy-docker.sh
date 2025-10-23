@@ -101,12 +101,10 @@ fi
 
 # Global guard: disable all slicer-related automatic builds when requested
 if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" = "1" ]; then
-    print_warning "DISABLE_SLICER_BUILDS is set; automatic Orca/Prusa worker builds will be disabled."
+    print_warning "DISABLE_SLICER_BUILDS is set; automatic OrcaSlicer worker builds will be disabled."
     # Ensure variables exist so downstream logic respects the disable
     ENABLE_ORCA_WORKER=no
-    ENABLE_PRUSA_WORKER=no
     ORCA_WORKER_COUNT=0
-    PRUSA_WORKER_COUNT=0
 fi
 
 # Colors for output
@@ -243,8 +241,12 @@ generate_deployment_config() {
                     "Dockerfile.api"
                     "Dockerfile.frontend"
                     "Dockerfile.orcaslicer"
-                    "Dockerfile.prusaslicer"
                     "Dockerfile.slicer-base"
+                )
+                ;;
+            "multistage")
+                GENERATED_FILES+=(
+                    "Dockerfile.multistage"
                 )
                 ;;
             "host-network")
@@ -252,7 +254,6 @@ generate_deployment_config() {
                     "Dockerfile.api"
                     "Dockerfile.frontend-host"
                     "Dockerfile.orcaslicer"
-                    "Dockerfile.prusaslicer"
                     "Dockerfile.slicer-base"
                 )
                 ;;
@@ -547,7 +548,7 @@ OPTIONS:
         --keep-generated    Keep generated Docker files after deployment (for debugging)
 
 COMPOSE GENERATOR OPTIONS:
-        --architecture ARCH Architecture to deploy (monolithic|microservices|host-network)
+        --architecture ARCH Architecture to deploy (monolithic|microservices|multistage|host-network)
         --include-monitoring Include monitoring stack (Prometheus, Grafana)
         --include-telemetry Include telemetry/observability (OpenTelemetry)
         --include-security  Include security configurations
@@ -713,10 +714,9 @@ ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
-ENABLE_PRUSA_WORKER=${ENABLE_PRUSA_WORKER:-no}
-PRUSA_WORKER_COUNT=${PRUSA_WORKER_COUNT:-0}
-PRUSA_HOST_PORT=${PRUSA_HOST_PORT:-8082}
-PRUSASLICER_VERSION=${PRUSASLICER_VERSION:-2.9.3}
+# PrusaSlicer support temporarily disabled
+ENABLE_PRUSA_WORKER=no
+PRUSA_WORKER_COUNT=0
 EOF
 
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
@@ -953,6 +953,13 @@ choose_architecture() {
                 print_success "Using CLI option: Microservices deployment"
                 return 0
                 ;;
+            multistage|multi)
+                ARCHITECTURE="multistage"
+                ENV_FILE=".env.multistage"
+                COMPOSE_FILE="docker-compose.multistage.yml"
+                print_success "Using CLI option: Multi-Stage Build deployment"
+                return 0
+                ;;
             host-network)
                 ARCHITECTURE="microservices"  # Host-network is a variant of microservices
                 NETWORK_MODE="host"
@@ -963,13 +970,13 @@ choose_architecture() {
                 ;;
             *)
                 print_error "Invalid architecture: $CLI_ARCHITECTURE"
-                print_info "Valid options: monolithic, microservices, host-network"
+                print_info "Valid options: monolithic, microservices, multistage, host-network"
                 exit 1
                 ;;
         esac
     fi
     
-    echo -e "${BLUE}PrintFarmer supports two deployment architectures:${NC}"
+    echo -e "${BLUE}PrintFarmer supports three deployment architectures:${NC}"
     echo
     echo -e "${GREEN}1. Monolithic (Recommended)${NC}"
     echo "   • Single container with API + Web frontend"
@@ -983,14 +990,22 @@ choose_architecture() {
     echo "   • Better for large-scale deployments"
     echo "   • Supports PostgreSQL, SQL Server, MySQL"
     echo
+    echo -e "${GREEN}3. Multi-Stage Build (Efficient)${NC}"
+    echo "   • Optimized builds - compiles shared libraries once"
+    echo "   • Smaller image sizes and faster builds"
+    echo "   • Only OrcaSlicer support (PrusaSlicer removed)"
+    echo "   • Best for production deployments"
+    echo
     
     # Use previous architecture as default, or "1" for new deployments
     local default_choice="1"
     if [ "${ARCHITECTURE:-}" = "microservices" ]; then
         default_choice="2"
+    elif [ "${ARCHITECTURE:-}" = "multistage" ]; then
+        default_choice="3"
     fi
     
-    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices]:" "$default_choice" "ARCH_CHOICE"
+    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices, 3=Multi-Stage]:" "$default_choice" "ARCH_CHOICE"
     
     case "$ARCH_CHOICE" in
         1|monolithic|mono)
@@ -1007,6 +1022,12 @@ choose_architecture() {
             ENV_FILE=".env.microservices"
             COMPOSE_FILE="docker-compose.microservices.yml"
             print_success "Selected: Microservices deployment (using docker-compose.microservices.yml)"
+            ;;
+        3|multistage|multi)
+            ARCHITECTURE="multistage"
+            ENV_FILE=".env.multistage"
+            COMPOSE_FILE="docker-compose.multistage.yml"
+            print_success "Selected: Multi-Stage Build deployment (efficient builds, OrcaSlicer only)"
             ;;
         *)
             print_error "Invalid choice. Please run the script again."
@@ -1075,7 +1096,7 @@ validate_configuration() {
             ORCA_WORKER_COUNT=1
         fi
         if [ "$PRUSA_WORKER_COUNT" -gt 1 ]; then
-            print_warning "Monolithic mode: Cannot scale PrusaSlicer workers (host networking / fixed port 8082). Forcing count=1."
+
             PRUSA_WORKER_COUNT=1
         fi
     fi
@@ -1862,6 +1883,13 @@ EOF
     fi
     
     print_success "Environment file created: $ENV_FILE"
+    
+    # Also create a standard .env file for docker-compose default behavior
+    if [ "$ENV_FILE" != ".env" ]; then
+        print_info "Creating standard .env file"
+        cp "$ENV_FILE" .env
+        print_success "Standard .env file created"
+    fi
 }
 
 # Generate React .env.production file for Docker builds

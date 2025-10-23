@@ -1,52 +1,64 @@
+# PrintFarmer Multi-Stage Architecture
+# Uses multi-stage Docker builds to avoid rebuilding shared libraries in each container
+# Supports OrcaSlicer worker for distributed slicing
+
 services:
-  # Base image builder for slicer workers (not actually run)
-  slicer-base:
+  # Redis for caching and SignalR backplane
+  redis:
+    image: redis:7-alpine
+    container_name: printfarmer-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - printfarmer-network
+
+  # OrcaSlicer Binary Layer (cached layer for binary assets)
+  orcaslicer-binaries:
     build:
       context: .
-      dockerfile: Dockerfile.slicer-base
-    image: printfarmer-slicer-base
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-binaries
+      args:
+        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
+    image: orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
     profiles:
       - orca
+      - orca-binaries
     entrypoint: ["/bin/true"]
     healthcheck:
       test: ["CMD", "true"]
       interval: 1m
       timeout: 5s
-      retries: 1
-      start_period: 5s
-  # Redis for caching and SignalR backplane
-  redis:
-    image: redis:7-alpine
-    container_name: printfarmer-redis
-    # No external port mapping needed; accessed only by internal services (api, workers)
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - redis_data:/data
 
-  # .NET API Backend - Enhanced host networking for macOS Docker Desktop
+  # API Backend using multi-stage build
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: Dockerfile.multistage
+      target: api-runtime
       args:
         TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: printfarmer-api
+    image: printfarmer-api-multistage
     container_name: printfarmer-api
     ports:
-      - "5001:5001" # HTTP API / SignalR
+      - "5245:5000" # HTTP API / SignalR (corrected port mapping)
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:5001
+      - ASPNETCORE_URLS=http://+:5000
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
       - Redis__ConnectionString=redis:6379
-      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5001}
+      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5245}
       - DEPLOYMENT_MODE=monolithic
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
+      - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://orcaslicer-worker:8080}
       - ALLOW_LOCAL_NETWORK=true
       - ALLOWED_NETWORK_RANGES=10.0.0.0/24,172.16.0.0/12
       - DOCKER_HOST_NETWORK=false
@@ -76,26 +88,29 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:5001/healthz && curl -f http://localhost:5001/health | grep -q 'Healthy' && curl -f http://localhost:5001/api/signalrtest/connection-stats"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:5000/healthz && curl -f http://localhost:5000/health | grep -q 'Healthy' && curl -f http://localhost:5000/api/signalrtest/connection-stats"]
       interval: 30s
       timeout: 15s
       retries: 5
       start_period: 40s
+    networks:
+      - printfarmer-network
 
-  # React Frontend with Nginx
+  # React Frontend using multi-stage build
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
-    image: printfarmer-frontend
+      dockerfile: Dockerfile.multistage
+      target: frontend-runtime
+    image: printfarmer-frontend-multistage
     container_name: printfarmer-frontend
     ports:
       - "3000:80"
     environment:
       # Point directly at API (no nginx proxy needed in local dev stack script)
-      - VITE_API_BASE_URL=http://localhost:5001/api
-      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5001/hubs/printers
-      - VITE_SIGNALR_HARVEST_URL=http://localhost:5001/hubs/harvest
+      - VITE_API_BASE_URL=http://localhost:5245/api
+      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5245/hubs/printers
+      - VITE_SIGNALR_HARVEST_URL=http://localhost:5245/hubs/harvest
     depends_on:
       api:
         condition: service_healthy
@@ -104,39 +119,27 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - printfarmer-network
 
-  # OrcaSlicer Binary Layer (cached layer for binary assets)
-  orcaslicer-binaries:
-    build:
-      context: .
-      dockerfile: Dockerfile.orcaslicer-binaries
-      args:
-        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
-        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
-        # Optional: GitHub token for API rate limiting
-        # GITHUB_TOKEN: ${GITHUB_TOKEN}
-    image: orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
-    profiles:
-      - orca
-      - orca-binaries
-
-  # OrcaSlicer Worker for distributed slicing
+  # OrcaSlicer Worker using multi-stage build
   orcaslicer-worker:
     build:
       context: .
-      dockerfile: Dockerfile.orcaslicer
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-worker
       args:
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
-    image: printfarmer-orcaslicer-worker
+    image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
     profiles:
       - orca
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8081
+      - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__Redis=redis:6379
-      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5001}
+      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5000}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
@@ -153,7 +156,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -175,6 +178,8 @@ services:
         reservations:
           cpus: "0.25"
           memory: 256M
+    networks:
+      - printfarmer-network
 
   # Optional: Load balancer for production
   nginx-proxy:
@@ -183,20 +188,19 @@ services:
     profiles:
       - proxy
     ports:
-      - "8080:8080"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - frontend
       - api
-      - orcaslicer-worker
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - frontend
     networks:
       - printfarmer-network
+
+networks:
+  printfarmer-network:
+    driver: bridge
 
 volumes:
   redis_data:
