@@ -1620,6 +1620,51 @@ configure_additional() {
         print_info "Production mode: Swagger UI and detailed logging disabled"
     fi
     
+    echo
+    echo -e "${BLUE}Observability & Monitoring Configuration${NC}"
+    echo "PrintFarmer supports optional monitoring and telemetry stacks for production deployments."
+    
+    # Only offer monitoring/telemetry prompts if not already set by CLI flags
+    if [ "$CLI_INCLUDE_MONITORING" = "false" ]; then
+        prompt_yes_no "Enable monitoring stack (Prometheus, Grafana)?" "no" "INCLUDE_MONITORING_CHOICE"
+        if [ "$INCLUDE_MONITORING_CHOICE" = "yes" ]; then
+            INCLUDE_MONITORING=true
+        fi
+    else
+        print_info "Monitoring stack enabled via CLI flag"
+        INCLUDE_MONITORING=true
+    fi
+    
+    if [ "$CLI_INCLUDE_TELEMETRY" = "false" ]; then
+        prompt_yes_no "Enable telemetry/observability (OpenTelemetry)?" "no" "INCLUDE_TELEMETRY_CHOICE"
+        if [ "$INCLUDE_TELEMETRY_CHOICE" = "yes" ]; then
+            INCLUDE_TELEMETRY=true
+        fi
+    else
+        print_info "Telemetry/observability enabled via CLI flag"
+        INCLUDE_TELEMETRY=true
+    fi
+    
+    if [ "$CLI_INCLUDE_SECURITY" = "false" ]; then
+        prompt_yes_no "Enable security configurations (enhanced security headers, HTTPS)?" "no" "INCLUDE_SECURITY_CHOICE"
+        if [ "$INCLUDE_SECURITY_CHOICE" = "yes" ]; then
+            INCLUDE_SECURITY=true
+        fi
+    else
+        print_info "Security configurations enabled via CLI flag"
+        INCLUDE_SECURITY=true
+    fi
+    
+    if [ "$CLI_INCLUDE_REGISTRY" = "false" ]; then
+        prompt_yes_no "Enable local Docker registry (for development/air-gapped deployments)?" "no" "INCLUDE_REGISTRY_CHOICE"
+        if [ "$INCLUDE_REGISTRY_CHOICE" = "yes" ]; then
+            INCLUDE_REGISTRY=true
+        fi
+    else
+        print_info "Local Docker registry enabled via CLI flag"
+        INCLUDE_REGISTRY=true
+    fi
+    
     if [ "$ARCHITECTURE" = "microservices" ]; then
         echo
         echo -e "${BLUE}Redis is used for real-time SignalR communication between containers.${NC}"
