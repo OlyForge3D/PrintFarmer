@@ -498,10 +498,15 @@ docker_nuclear_cleanup() {
 docker_fix_post_reinstall() {
     print_info "🔧 Attempting to fix Docker state after reinstallation..."
     
-    # Step 1: Stop Docker daemon
-    print_info "Step 1: Stopping Docker daemon..."
+    # Step 1: Stop Docker daemon and socket
+    print_info "Step 1: Stopping Docker daemon and socket..."
     if command -v systemctl >/dev/null 2>&1; then
-        sudo systemctl stop docker 2>/dev/null || true
+        print_info "Stopping docker.socket..."
+        sudo systemctl stop docker.socket 2>/dev/null || true
+        print_info "Stopping docker.service..."
+        sudo systemctl stop docker.service 2>/dev/null || true
+        print_info "Stopping containerd.service (if present)..."
+        sudo systemctl stop containerd.service 2>/dev/null || true
     elif command -v service >/dev/null 2>&1; then
         sudo service docker stop 2>/dev/null || true
     else
@@ -533,10 +538,15 @@ docker_fix_post_reinstall() {
         fi
     fi
     
-    # Step 5: Restart Docker daemon
-    print_info "Step 5: Starting Docker daemon..."
+    # Step 5: Restart Docker daemon and socket
+    print_info "Step 5: Starting Docker daemon and socket..."
     if command -v systemctl >/dev/null 2>&1; then
-        sudo systemctl start docker
+        print_info "Starting containerd.service (if present)..."
+        sudo systemctl start containerd.service 2>/dev/null || true
+        print_info "Starting docker.socket..."
+        sudo systemctl start docker.socket 2>/dev/null || true
+        print_info "Starting docker.service..."
+        sudo systemctl start docker.service 2>/dev/null || true
     elif command -v service >/dev/null 2>&1; then
         sudo service docker start
     else
@@ -561,6 +571,98 @@ docker_fix_post_reinstall() {
         print_error "Docker daemon failed to start properly"
         return 1
     fi
+}
+
+# Extreme cleanup for completely broken Docker state
+# Usage: docker_extreme_cleanup
+docker_extreme_cleanup() {
+    print_warning "🚨 EXTREME CLEANUP: This will completely reset Docker state"
+    print_warning "This will:"
+    print_warning "  • Stop all Docker services including socket"
+    print_warning "  • Remove all Docker runtime data"
+    print_warning "  • Remove all container metadata"
+    print_warning "  • Kill any orphaned Docker processes"
+    echo ""
+    
+    echo "❓ This is a nuclear option. Are you absolutely sure? [y/N]"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        print_info "Extreme cleanup cancelled"
+        return 0
+    fi
+    
+    print_info "🚨 Starting extreme cleanup..."
+    
+    # Step 1: Stop all Docker services completely
+    print_info "Step 1: Stopping all Docker services and socket..."
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
+        # Disable to prevent automatic restart
+        sudo systemctl stop docker.socket 2>/dev/null || true
+        sleep 3
+    fi
+    
+    # Step 2: Kill any remaining Docker processes
+    print_info "Step 2: Killing any remaining Docker processes..."
+    sudo pkill -f dockerd 2>/dev/null || true
+    sudo pkill -f docker-containerd 2>/dev/null || true
+    sudo pkill -f containerd 2>/dev/null || true
+    sudo pkill -f runc 2>/dev/null || true
+    sleep 3
+    
+    # Step 3: Remove all Docker runtime directories
+    print_info "Step 3: Removing Docker runtime directories..."
+    sudo rm -rf /var/run/docker 2>/dev/null || true
+    sudo rm -rf /run/containerd 2>/dev/null || true
+    sudo rm -rf /run/docker 2>/dev/null || true
+    
+    # Step 4: Remove container metadata (this fixes stuck containers)
+    print_info "Step 4: Removing all container metadata..."
+    sudo rm -rf /var/lib/docker/containers 2>/dev/null || true
+    sudo rm -rf /var/lib/docker/image/overlay2/repositories.json 2>/dev/null || true
+    
+    # Step 5: Clean up network state
+    print_info "Step 5: Cleaning up network state..."
+    sudo rm -rf /var/lib/docker/network 2>/dev/null || true
+    
+    # Step 6: Remove any Docker-related mount points
+    print_info "Step 6: Cleaning up mount points..."
+    mount | grep docker | awk '{print $3}' | sudo xargs -r umount 2>/dev/null || true
+    
+    # Step 7: Restart Docker completely
+    print_info "Step 7: Restarting Docker services..."
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl daemon-reload
+        sudo systemctl start containerd.service 2>/dev/null || true
+        sleep 2
+        sudo systemctl start docker.socket
+        sleep 2
+        sudo systemctl start docker.service
+    fi
+    
+    # Step 8: Wait for Docker to be ready and test
+    print_info "Step 8: Waiting for Docker to initialize..."
+    local attempts=0
+    while ! docker info >/dev/null 2>&1 && [[ $attempts -lt 60 ]]; do
+        sleep 2
+        ((attempts++))
+        echo -n "."
+    done
+    echo ""
+    
+    if docker info >/dev/null 2>&1; then
+        print_success "Extreme cleanup completed successfully!"
+        print_info "Docker has been completely reset. All containers and images are gone."
+        docker_show_status
+    else
+        print_error "Docker failed to start after extreme cleanup"
+        print_info "Manual intervention required:"
+        print_info "  sudo systemctl status docker"
+        print_info "  sudo journalctl -fu docker"
+        return 1
+    fi
+    
+    audit_log "extreme-cleanup" "completely reset Docker state"
 }
 
 # Diagnose why a container cannot be removed

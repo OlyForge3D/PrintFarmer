@@ -45,10 +45,11 @@ echo "❓ What would you like to do?"
 echo "1) Diagnose specific containers"
 echo "2) Try enhanced force removal"
 echo "3) Nuclear cleanup (remove everything)"
-echo "4) Restart Docker daemon (requires sudo)"
-echo "5) Exit"
+echo "4) Fix Docker state after reinstall (stops/starts Docker properly)"
+echo "5) EXTREME cleanup (complete Docker reset - for broken installs)"
+echo "6) Exit"
 echo ""
-echo "Choose [1-5]: "
+echo "Choose [1-6]: "
 read -r choice
 
 case "$choice" in
@@ -67,24 +68,12 @@ case "$choice" in
         docker_nuclear_cleanup
         ;;
     4)
-        print_info "Attempting Docker daemon restart..."
-        if command -v systemctl >/dev/null 2>&1; then
-            print_info "Using systemctl to restart Docker..."
-            sudo systemctl stop docker || true
-            sleep 3
-            sudo systemctl start docker || true
-            sleep 5
-            if docker info >/dev/null 2>&1; then
-                print_success "Docker daemon restarted successfully"
-                docker_show_status
-            else
-                print_error "Docker daemon restart failed"
-            fi
-        else
-            print_warning "systemctl not available. Manual Docker restart required:"
-            print_info "  On macOS: Restart Docker Desktop application"
-            print_info "  On other systems: sudo service docker restart"
-        fi
+        print_info "Fixing Docker state after reinstall..."
+        docker_fix_post_reinstall
+        ;;
+    5)
+        print_warning "⚠️  EXTREME CLEANUP will completely reset Docker!"
+        docker_extreme_cleanup
         ;;
     *)
         print_info "Exiting..."
