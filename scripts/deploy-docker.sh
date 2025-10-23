@@ -18,30 +18,78 @@ REDEPLOY=false
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
-# Parse simple flags early (only --dry-run / -n for now)
-for arg in "$@"; do
-    case "$arg" in
+# New compose-generator option flags
+CLI_ARCHITECTURE=""
+CLI_INCLUDE_MONITORING=false
+CLI_INCLUDE_TELEMETRY=false
+CLI_INCLUDE_SECURITY=false
+CLI_INCLUDE_REGISTRY=false
+CLI_OUTPUT_DIR=""
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
         --dry-run|-n)
             DRY_RUN=true
+            shift
             ;;
         --non-interactive|--batch|-b)
             NON_INTERACTIVE=true
+            shift
             ;;
         --remove-orphans)
             COMPOSE_REMOVE_ORPHANS=true
+            shift
             ;;
         --no-remove-orphans)
             COMPOSE_REMOVE_ORPHANS=false
+            shift
             ;;
         --tear-down|--teardown|--clean)
             TEAR_DOWN=true
+            shift
             ;;
         --help|-h)
             SHOW_HELP=true
+            shift
             ;;
         --redeploy)
             REDEPLOY=true
             NON_INTERACTIVE=true  # Redeploy is always non-interactive
+            shift
+            ;;
+        --keep-generated)
+            KEEP_GENERATED=true
+            shift
+            ;;
+        --architecture)
+            CLI_ARCHITECTURE="$2"
+            shift 2
+            ;;
+        --include-monitoring)
+            CLI_INCLUDE_MONITORING=true
+            shift
+            ;;
+        --include-telemetry)
+            CLI_INCLUDE_TELEMETRY=true
+            shift
+            ;;
+        --include-security)
+            CLI_INCLUDE_SECURITY=true
+            shift
+            ;;
+        --include-registry)
+            CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --output-dir)
+            CLI_OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            print_info "Use --help to see available options"
+            exit 1
             ;;
     esac
 done
@@ -113,6 +161,119 @@ remove_version_keys() {
     # Preserve mode if possible
     if [ -f "$tmp" ]; then
         mv "$tmp" "$file" 2>/dev/null || (cat "$tmp" > "$file" && rm -f "$tmp")
+    fi
+}
+
+# Generate deployment configuration using the compose generator
+generate_deployment_config() {
+    local architecture="$1"
+    local include_monitoring="${2:-false}"
+    local include_telemetry="${3:-false}"
+    local include_security="${4:-false}"
+    local include_registry="${5:-false}"
+    local output_dir="${6:-$(pwd)}"
+    
+    print_info "Generating deployment configuration for $architecture architecture..."
+    
+    # Use the compose generator
+    local generator_cmd="$SCRIPT_DIR/docker/compose-generator.sh"
+    local generator_args=("--architecture" "$architecture")
+    
+    # Add optional services based on configuration
+    if [ "$include_monitoring" = "true" ]; then
+        generator_args+=("--include-monitoring")
+    fi
+    if [ "$include_telemetry" = "true" ]; then
+        generator_args+=("--include-telemetry")
+    fi
+    if [ "$include_security" = "true" ]; then
+        generator_args+=("--include-security")
+    fi
+    if [ "$include_registry" = "true" ]; then
+        generator_args+=("--include-registry")
+    fi
+    
+    # Set output directory
+    generator_args+=("--output-dir" "$output_dir")
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        generator_args+=("--dry-run")
+    fi
+    
+    # Check if the generator exists
+    if [ ! -f "$generator_cmd" ]; then
+        print_error "Compose generator not found: $generator_cmd"
+        print_info "Falling back to legacy compose file generation..."
+        return 1
+    fi
+    
+    # Run the generator
+    if "$generator_cmd" "${generator_args[@]}"; then
+        print_success "Deployment configuration generated successfully"
+        
+        # Set the compose file path for the rest of the deployment script
+        COMPOSE_FILE="docker-compose.yml"
+        
+        # Record generated files for cleanup
+        GENERATED_FILES=(
+            "docker-compose.yml"
+            "docker-entrypoint-config.sh"
+        )
+        
+        # Add Dockerfiles based on architecture
+        case "$architecture" in
+            "monolithic")
+                GENERATED_FILES+=("Dockerfile")
+                ;;
+            "microservices")
+                GENERATED_FILES+=(
+                    "Dockerfile.api"
+                    "Dockerfile.frontend"
+                    "Dockerfile.orcaslicer"
+                    "Dockerfile.prusaslicer"
+                    "Dockerfile.slicer-base"
+                )
+                ;;
+            "host-network")
+                GENERATED_FILES+=(
+                    "Dockerfile.api"
+                    "Dockerfile.frontend-host"
+                    "Dockerfile.orcaslicer"
+                    "Dockerfile.prusaslicer"
+                    "Dockerfile.slicer-base"
+                )
+                ;;
+        esac
+        
+        # Add optional config files
+        [ "$include_monitoring" = "true" ] && GENERATED_FILES+=("prometheus.yml")
+        [ "$include_telemetry" = "true" ] && GENERATED_FILES+=("otel-collector-config.yaml")
+        [ "$include_security" = "true" ] && GENERATED_FILES+=("security-config.json")
+        [ "$include_registry" = "true" ] && GENERATED_FILES+=("registry-config.yml")
+        
+        return 0
+    else
+        print_error "Failed to generate deployment configuration"
+        return 1
+    fi
+}
+
+# Cleanup generated deployment files
+cleanup_generated_files() {
+    if [ "${KEEP_GENERATED:-false}" = "true" ]; then
+        print_info "Keeping generated files (KEEP_GENERATED=true)"
+        return 0
+    fi
+    
+    if [ -n "${GENERATED_FILES:-}" ]; then
+        print_info "Cleaning up generated deployment files..."
+        for file in "${GENERATED_FILES[@]}"; do
+            if [ -f "$file" ]; then
+                rm -f "$file"
+                print_info "  • Removed $file"
+            fi
+        done
+        audit_log "cleanup" "removed generated files: ${GENERATED_FILES[*]}"
     fi
 }
 
@@ -372,6 +533,15 @@ OPTIONS:
     --tear-down             Tear down existing deployment (stops containers, removes
         --teardown          volumes, cleans up). Useful for starting fresh.
         --clean             Same as --tear-down
+        --keep-generated    Keep generated Docker files after deployment (for debugging)
+
+COMPOSE GENERATOR OPTIONS:
+        --architecture ARCH Architecture to deploy (monolithic|microservices|host-network)
+        --include-monitoring Include monitoring stack (Prometheus, Grafana)
+        --include-telemetry Include telemetry/observability (OpenTelemetry)
+        --include-security  Include security configurations
+        --include-registry  Include local Docker registry
+        --output-dir DIR    Output directory for generated files (default: repository root)
 
 EXAMPLES:
     # Interactive deployment (recommended for first-time setup)
@@ -388,6 +558,18 @@ EXAMPLES:
 
     # Non-interactive deployment (for automation/CI)
     ./scripts/deploy-docker.sh --non-interactive
+
+    # Deploy specific architecture with additional services
+    ./scripts/deploy-docker.sh --architecture microservices --include-monitoring
+    
+    # Deploy with full observability stack
+    ./scripts/deploy-docker.sh --architecture microservices --include-monitoring --include-telemetry
+    
+    # Deploy monolithic with security and registry
+    ./scripts/deploy-docker.sh --architecture monolithic --include-security --include-registry
+    
+    # Non-interactive deployment with all options
+    ./scripts/deploy-docker.sh --non-interactive --architecture microservices --include-monitoring --include-telemetry --include-security
 
 DEPLOYMENT MODES:
     1. Monolithic      - All services in one container (simplest)
@@ -741,6 +923,40 @@ install_dotnet_sdk() {
 # Choose deployment architecture
 choose_architecture() {
     print_header "🏗️  Deployment Architecture"
+    
+    # Check if architecture was specified via CLI
+    if [ -n "$CLI_ARCHITECTURE" ]; then
+        case "$CLI_ARCHITECTURE" in
+            monolithic|mono)
+                ARCHITECTURE="monolithic"
+                ENV_FILE=".env.monolithic"
+                COMPOSE_FILE="docker-compose.yml"
+                print_success "Using CLI option: Monolithic deployment"
+                check_dotnet_sdk
+                return 0
+                ;;
+            microservices|micro)
+                ARCHITECTURE="microservices"
+                ENV_FILE=".env.microservices"
+                COMPOSE_FILE="docker-compose.microservices.yml"
+                print_success "Using CLI option: Microservices deployment"
+                return 0
+                ;;
+            host-network)
+                ARCHITECTURE="microservices"  # Host-network is a variant of microservices
+                NETWORK_MODE="host"
+                ENV_FILE=".env.microservices"
+                COMPOSE_FILE="docker-compose.host-network.yml"
+                print_success "Using CLI option: Host-network deployment"
+                return 0
+                ;;
+            *)
+                print_error "Invalid architecture: $CLI_ARCHITECTURE"
+                print_info "Valid options: monolithic, microservices, host-network"
+                exit 1
+                ;;
+        esac
+    fi
     
     echo -e "${BLUE}PrintFarmer supports two deployment architectures:${NC}"
     echo
@@ -2824,9 +3040,10 @@ main() {
     echo
     
     # Check if we're in the right directory
-    if [ ! -f "docker-compose.yml" ] || [ ! -f "global.json" ]; then
+    # We now generate docker-compose.yml dynamically, so only check for global.json and docker templates
+    if [ ! -f "global.json" ] || [ ! -d "scripts/docker" ]; then
         print_error "Please run this script from the PrintFarmer root directory"
-        print_info "Expected files: docker-compose.yml, global.json"
+        print_info "Expected files: global.json, scripts/docker/ directory"
         exit 1
     fi
     
@@ -2844,8 +3061,39 @@ main() {
     save_deployment_config
     generate_env_file
     generate_react_env_production
-    generate_compose_override
-    generate_host_network_override
+    
+    # Generate deployment configuration using new compose generator
+    # CLI flags take precedence over environment variables
+    local include_monitoring="false"
+    local include_telemetry="false" 
+    local include_security="false"
+    local include_registry="false"
+    
+    # Set from CLI flags or environment variables
+    if [ "$CLI_INCLUDE_MONITORING" = "true" ] || [ "${INCLUDE_MONITORING:-false}" = "true" ]; then
+        include_monitoring="true"
+    fi
+    if [ "$CLI_INCLUDE_TELEMETRY" = "true" ] || [ "${INCLUDE_TELEMETRY:-false}" = "true" ]; then
+        include_telemetry="true"
+    fi
+    if [ "$CLI_INCLUDE_SECURITY" = "true" ] || [ "${INCLUDE_SECURITY:-false}" = "true" ]; then
+        include_security="true"
+    fi
+    if [ "$CLI_INCLUDE_REGISTRY" = "true" ] || [ "${INCLUDE_REGISTRY:-false}" = "true" ]; then
+        include_registry="true"
+    fi
+    
+    # Determine output directory (CLI option or default to current directory)
+    local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
+    
+    if generate_deployment_config "$ARCHITECTURE" "$include_monitoring" "$include_telemetry" "$include_security" "$include_registry" "$output_dir"; then
+        print_success "Using new compose generator"
+    else
+        print_warning "Falling back to legacy compose generation"
+        generate_compose_override
+        generate_host_network_override
+    fi
+    
     deploy_containers
     
     # Run verification and capture result
@@ -2853,6 +3101,9 @@ main() {
     verify_deployment || verification_passed=false
     
     display_final_info "$verification_passed"
+    
+    # Cleanup generated files unless requested to keep them
+    cleanup_generated_files
     
     if [ "$verification_passed" = true ]; then
         print_success "Setup completed successfully! 🎉"
