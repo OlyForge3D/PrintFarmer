@@ -36,6 +36,31 @@ vi.mock('@/services/signalr', () => ({
   }
 }));
 
+// Provide a global mock for the official SignalR package used directly by pages/components
+// This ensures code that does `new signalR.HubConnectionBuilder().withUrl(...).build()` works in tests
+vi.mock('@microsoft/signalr', () => {
+  const mockConnection = {
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
+    off: vi.fn(),
+  };
+
+  const mockBuilder = {
+    withUrl: vi.fn().mockReturnThis(),
+    withAutomaticReconnect: vi.fn().mockReturnThis(),
+    build: vi.fn().mockReturnValue(mockConnection),
+  };
+
+  return {
+    HubConnectionBuilder: vi.fn().mockImplementation(() => mockBuilder),
+    HubConnectionState: {
+      Connected: 'Connected',
+      Disconnected: 'Disconnected',
+    },
+  };
+});
+
 // Mock harvest SignalR service to avoid connection attempts and warnings in tests
 vi.mock('@/services/harvest-signalr', () => ({
   SignalRService: vi.fn().mockImplementation(() => ({

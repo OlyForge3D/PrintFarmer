@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { Mock } from 'vitest';
 import SlicersAdminPage from '../../../../src/pages/admin/SlicersAdminPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -33,16 +33,18 @@ describe('SlicersAdminPage', () => {
       </QueryClientProvider>
     );
 
-  expect(await screen.findByText('Admin: Slicers')).toBeTruthy();
+    expect(await screen.findByText('Admin: Slicers')).toBeTruthy();
     expect(await screen.findByText('Orca-1')).toBeTruthy();
 
     const deregBtn = screen.getByRole('button', { name: /Deregister/i });
     expect(deregBtn).toBeTruthy();
 
-    fireEvent.click(deregBtn);
+    await act(async () => {
+      fireEvent.click(deregBtn);
 
-  type SlicerRegistryMock = { slicerRegistry: { deregisterSlicer: Mock } };
-  const mod = (await vi.importMock('../../../../src/services/slicerRegistry')) as unknown as SlicerRegistryMock;
-  await waitFor(() => expect(mod.slicerRegistry.deregisterSlicer).toHaveBeenCalled());
+      type SlicerRegistryMock = { slicerRegistry: { deregisterSlicer: Mock } };
+      const mod = (await vi.importMock('../../../../src/services/slicerRegistry')) as unknown as SlicerRegistryMock;
+      await waitFor(() => expect(mod.slicerRegistry.deregisterSlicer).toHaveBeenCalled());
+    });
   });
 });

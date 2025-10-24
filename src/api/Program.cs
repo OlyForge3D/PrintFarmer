@@ -80,7 +80,15 @@ builder.Services.AddScoped<Farm.Importing.Services.Import.IImportParserService, 
 
 // Artifact storage settings & service (Phase 4)
 builder.Services.Configure<ArtifactStorageSettings>(builder.Configuration.GetSection(ArtifactStorageSettings.SectionName));
-builder.Services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
+// Register ArtifactsMetrics as a singleton in production. When running under the
+// 'Testing' environment we skip the application's registration so test code can
+// register a test-friendly per-host instance (avoids shared process-wide singleton
+// semantics that lead to cross-test leakage when multiple test hosts run in one
+// process).
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
+}
 builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
 builder.Services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactCleanupService, Farm.Web.Api.Services.Artifacts.ArtifactCleanupService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Artifacts.ArtifactCleanupHostedService>();

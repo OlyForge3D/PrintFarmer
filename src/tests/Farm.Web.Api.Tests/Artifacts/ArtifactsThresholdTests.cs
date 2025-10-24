@@ -9,7 +9,6 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
-[Collection("Artifacts")]
 public class ArtifactsThresholdTests
 {
     [Fact(DisplayName = "Warning threshold event fires when exceeded")]
@@ -86,46 +85,18 @@ public class ArtifactsThresholdTests
         // Arrange
         using var metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
-
-        var meterListener = new MeterListener();
-        var stateValues = new System.Collections.Generic.List<int>();
-
-        meterListener.InstrumentPublished = (instrument, listener) =>
-        {
-            if (instrument.Meter.Name == "PrintFarmer.Artifacts" &&
-                instrument.Name == "printfarmer.artifacts.storage_threshold_state")
-            {
-                listener.EnableMeasurementEvents(instrument);
-            }
-        };
-
-        meterListener.SetMeasurementEventCallback<int>((instrument, measurement, tags, state) =>
-        {
-            if (instrument.Name == "printfarmer.artifacts.storage_threshold_state")
-            {
-                stateValues.Add(measurement);
-            }
-        });
-
-        meterListener.Start();
-
-        // Act - Record initial state (normal)
-        meterListener.RecordObservableInstruments();
-        var initialState = stateValues.LastOrDefault();
+        // Act & Assert using instance-local state (avoids global MeterListener interference)
+        var initialState = metrics.CurrentState;
 
         // Upload to warning level
         metrics.RecordUpload(1500);
         Thread.Sleep(50);
-        meterListener.RecordObservableInstruments();
-        var warningState = stateValues.LastOrDefault();
+        var warningState = metrics.CurrentState;
 
         // Upload to critical level
         metrics.RecordUpload(4000);
         Thread.Sleep(50);
-        meterListener.RecordObservableInstruments();
-        var criticalState = stateValues.LastOrDefault();
-
-        meterListener.Dispose();
+        var criticalState = metrics.CurrentState;
 
         // Assert
         initialState.Should().Be(0); // Normal

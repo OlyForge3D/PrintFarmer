@@ -81,3 +81,6 @@ build_context/
 orca_assets/
 prusa_preseed/
 
+# Test-generated artifacts directory (cleaned by tests). Safe to ignore.
+src/test-artifacts/
+

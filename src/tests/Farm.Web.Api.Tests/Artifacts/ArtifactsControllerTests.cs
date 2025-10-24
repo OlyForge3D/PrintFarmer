@@ -7,7 +7,6 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
-[Collection("Artifacts")]
 public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -17,7 +16,7 @@ public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactor
         _factory = factory;
     }
 
-    [Fact(DisplayName="Artifact service upload + file presence works")]
+    [Fact(DisplayName = "Artifact service upload + file presence works")]
     public async Task Artifact_Upload_And_File_Persisted()
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();

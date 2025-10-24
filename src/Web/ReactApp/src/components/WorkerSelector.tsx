@@ -70,6 +70,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
 
         return (
           <div
+            data-testid={`worker-card-${worker.id}`}
             key={worker.id}
             onClick={() => onWorkerSelect && onWorkerSelect(worker.id)}
             className={`
@@ -108,7 +109,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                     </span>
                   </div>
 
-                  {showCapabilities && worker.capabilities.length > 0 && (
+                  {showCapabilities && Array.isArray(worker.capabilities) && worker.capabilities.length > 0 && (
                     <div className="mt-2">
                       <strong className="text-pf-text">Capabilities:</strong>{' '}
                       <div className="flex flex-wrap gap-1 mt-1">

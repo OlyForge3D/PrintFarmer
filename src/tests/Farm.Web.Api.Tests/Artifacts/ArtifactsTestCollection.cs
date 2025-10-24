@@ -1,7 +1,5 @@
-using Xunit;
+// Artifacts test collection placeholder.
+// Parallelization is no longer disabled — metrics are per-instance and observable gauges aggregate across instances.
+// This file is intentionally left as a placeholder to avoid accidental reintroduction of DisableParallelization.
 
-[CollectionDefinition("Artifacts", DisableParallelization = true)]
-public class ArtifactsTestCollectionDefinition
-{
-    // Intentionally empty: this type only defines the collection and disables parallelization
-}
+// If you need a real collection definition for other reasons, reintroduce it intentionally.
