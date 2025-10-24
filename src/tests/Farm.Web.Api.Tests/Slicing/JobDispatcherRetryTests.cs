@@ -100,6 +100,19 @@ public class JobDispatcherRetryTests
             return Task.CompletedTask;
         }
         public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+
+        // New idempotency methods added to ISliceJobRepository interface
+        public Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default)
+        {
+            var existing = Jobs.Find(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(existing);
+        }
+
+        public Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default)
+        {
+            var exists = Jobs.Exists(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(exists);
+        }
     }
     private class StubWorkerRepository : IWorkerRepository
     {

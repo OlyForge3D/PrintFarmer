@@ -82,6 +82,16 @@ public interface ISliceJobRepository
     Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
 
     /// <summary>
+    /// Find an existing job by correlation id and checksum (idempotency lookup)
+    /// </summary>
+    Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default);
+
+    /// <summary>
+    /// Check if a job exists with the given correlation id and checksum
+    /// </summary>
+    Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default);
+
+    /// <summary>
     /// Find jobs that are considered stuck (Processing but lease expired or long-running) and return a paged set.
     /// </summary>
     Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default);

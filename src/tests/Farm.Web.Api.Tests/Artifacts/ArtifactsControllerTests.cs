@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
+[Collection("Artifacts")]
 public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

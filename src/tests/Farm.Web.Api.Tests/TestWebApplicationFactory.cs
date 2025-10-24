@@ -917,6 +917,17 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         }
         catch { }
 
+        // Reset global metric state before constructing the host so any uploads
+        // that occur during application startup (DB seeding, hosted services) do
+        // not leave residual metric state that can interfere with tests. This
+        // is a best-effort call; keep it quiet if the metrics type isn't
+        // available or reset fails.
+        try
+        {
+            Farm.Web.Api.Services.Artifacts.ArtifactsMetrics.ResetForTests();
+        }
+        catch { }
+
         var host = base.CreateHost(builder);
 
         // After host construction, run a deterministic pre-seed on the actual host's service provider
@@ -986,6 +997,62 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         {
             // Re-throw to fail host creation and make test output explicit
             throw new InvalidOperationException("TestWebApplicationFactory: Host pre-seed or verification failed.", ex);
+        }
+
+        // Reset global metric state to ensure tests start with deterministic counters/gauges
+        try
+        {
+            Farm.Web.Api.Services.Artifacts.ArtifactsMetrics.ResetForTests();
+        }
+        catch
+        {
+            // best-effort; don't fail host creation if metrics reset is not available
+        }
+
+        // Diagnostic self-check: ensure the IAuthAuditService can write an audit entry
+        // and that the entry is visible when queried from a new scope. This helps
+        // detect DB/DI mismatches (different connections or context lifetimes)
+        // which previously caused integration tests to observe missing audit rows.
+        try
+        {
+            using (var checkScope = host.Services.CreateScope())
+            {
+                var svc = checkScope.ServiceProvider.GetService<Farm.Web.Api.Services.Authentication.IAuthAuditService>();
+                var db = checkScope.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+                if (svc != null && db != null)
+                {
+                    var marker = "tests-selfcheck-" + Guid.NewGuid().ToString("N");
+                    // Write a failed-login audit (username in metadata) to exercise LogLoginFailedAsync
+                    svc.LogLoginFailedAsync(marker, "selfcheck", "127.0.0.1", null).GetAwaiter().GetResult();
+
+                    // Create a new scope to verify visibility from an independent resolve
+                    using var verify = host.Services.CreateScope();
+                    var verifyDb = verify.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+                    if (verifyDb != null)
+                    {
+                        var found = verifyDb.AuthAuditLogs.AnyAsync(a => a.FailureReason == "selfcheck" || (a.Metadata != null && a.Metadata.Contains(marker))).GetAwaiter().GetResult();
+                        if (!found)
+                        {
+                            // Dump a short diagnostic to console to make failure obvious in CI/test logs
+                            Console.WriteLine("TestWebApplicationFactory: AuthAudit diagnostic self-check FAILED - audit row not visible from a new scope.");
+                            Console.WriteLine($"DB Provider: {verifyDb.Database.ProviderName}");
+                            try
+                            { Console.WriteLine($"Connection string: {verifyDb.Database.GetConnectionString()}"); }
+                            catch { }
+                            // Also dump a small DB state to help triage
+                            try
+                            { DumpDatabaseState(verifyDb); }
+                            catch { }
+                            throw new InvalidOperationException("AuthAudit diagnostic self-check failed: audit writes are not visible across scopes. This typically indicates AppDbContext/connection mismatch in test DI registration.");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // If diagnostic check fails, surface a clear error to speed debugging of failing tests
+            throw new InvalidOperationException("TestWebApplicationFactory: AuthAudit diagnostic check failed during host setup.", ex);
         }
 
         return host;

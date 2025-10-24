@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
+[Collection("Artifacts")]
 public class ArtifactsThresholdTests
 {
     [Fact(DisplayName = "Warning threshold event fires when exceeded")]

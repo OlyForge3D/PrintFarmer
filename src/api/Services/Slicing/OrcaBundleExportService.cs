@@ -26,12 +26,12 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
         // Add metadata if requested
         if (request.IncludeMetadata)
         {
-            bundle["_metadata"] = new
+            // Tests expect a top-level 'metadata' object with exported_at and source keys
+            bundle["metadata"] = new Dictionary<string, object>
             {
-                version = "1.0.0",
-                source = "PrintFarmer",
-                timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                generator = "PrintFarmer OrcaSlicer Export Service"
+                ["exported_at"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ["source"] = "PrintFarmer",
+                ["version"] = "1.0.0"
             };
         }
 

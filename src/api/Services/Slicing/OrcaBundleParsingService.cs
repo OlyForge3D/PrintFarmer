@@ -129,6 +129,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
             {
                 continue;
             }
+            // Validate presence of certain required fields. Historically callers expected
+            // missing critical fields (like nozzle diameter) to cause a BadRequest on preview.
+            // Enforce that at least one of the known nozzle diameter keys exists; otherwise
+            // treat the bundle as malformed so the controller can return a 400.
+            bool hasNozzleKey = printerObj.ContainsKey("nozzle_diameter")
+                                || printerObj.ContainsKey("nozzle_size");
+            if (!hasNozzleKey)
+            {
+                throw new FormatException("Printer preset missing required field 'nozzle_diameter'");
+            }
 
             var printer = new OrcaPrinterPresetDto
             {
@@ -365,9 +375,14 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                         return bln;
                     }
                     if (str == "1")
+                    {
                         return true;
+                    }
+
                     if (str == "0")
+                    {
                         return false;
+                    }
                 }
                 // Handle numeric representations (1 = true, 0 = false)
                 if (value.TryGetValue<int>(out var intVal))

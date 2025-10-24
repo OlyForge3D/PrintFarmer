@@ -9,6 +9,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -362,18 +363,37 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
     }
 
     // Helper methods for database seeding
-
-    private async Task SeedBambuLabPrinters()
+    private async Task<Manufacturer> EnsureManufacturerExists(string name)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        var lowered = name.ToLowerInvariant();
+        var existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name.ToLower() == lowered);
+        if (existing != null)
+        {
+            return existing;
+        }
+
         var manufacturer = new Manufacturer
         {
             Id = Guid.NewGuid(),
-            Name = "Bambu Lab",
+            Name = name,
             IsActive = true
         };
+
+        db.Manufacturers.Add(manufacturer);
+        await db.SaveChangesAsync();
+        return manufacturer;
+    }
+
+    private async Task SeedBambuLabPrinters()
+    {
+        // Ensure manufacturer exists (idempotent)
+        var manufacturer = await EnsureManufacturerExists("Bambu Lab");
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var printerModels = new[]
         {
@@ -401,22 +421,24 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             }
         };
 
-        db.Manufacturers.Add(manufacturer);
-        db.Models.AddRange(printerModels);
+        // Attach models to the resolved manufacturer id and save
+        foreach (var pm in printerModels)
+        {
+            var exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            if (!exists)
+            {
+                db.Models.Add(pm);
+            }
+        }
         await db.SaveChangesAsync();
     }
 
     private async Task SeedSimilarPrinterModels()
     {
+        var manufacturer = await EnsureManufacturerExists("Prusa Research");
+
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var manufacturer = new Manufacturer
-        {
-            Id = Guid.NewGuid(),
-            Name = "Prusa Research",
-            IsActive = true
-        };
 
         var printerModels = new[]
         {
@@ -444,22 +466,23 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             }
         };
 
-        db.Manufacturers.Add(manufacturer);
-        db.Models.AddRange(printerModels);
+        foreach (var pm in printerModels)
+        {
+            var exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            if (!exists)
+            {
+                db.Models.Add(pm);
+            }
+        }
         await db.SaveChangesAsync();
     }
 
     private async Task SeedPrintersWithDifferentBedSizes()
     {
+        var manufacturer = await EnsureManufacturerExists("Generic Manufacturer");
+
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var manufacturer = new Manufacturer
-        {
-            Id = Guid.NewGuid(),
-            Name = "Generic Manufacturer",
-            IsActive = true
-        };
 
         var printerModels = new[]
         {
@@ -487,22 +510,23 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             }
         };
 
-        db.Manufacturers.Add(manufacturer);
-        db.Models.AddRange(printerModels);
+        foreach (var pm in printerModels)
+        {
+            var exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            if (!exists)
+            {
+                db.Models.Add(pm);
+            }
+        }
         await db.SaveChangesAsync();
     }
 
     private async Task SeedPrintersWithDifferentNozzles()
     {
+        var manufacturer = await EnsureManufacturerExists("Generic Manufacturer");
+
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var manufacturer = new Manufacturer
-        {
-            Id = Guid.NewGuid(),
-            Name = "Generic Manufacturer",
-            IsActive = true
-        };
 
         var printerModels = new[]
         {
@@ -541,8 +565,14 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             }
         };
 
-        db.Manufacturers.Add(manufacturer);
-        db.Models.AddRange(printerModels);
+        foreach (var pm in printerModels)
+        {
+            var exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            if (!exists)
+            {
+                db.Models.Add(pm);
+            }
+        }
         await db.SaveChangesAsync();
     }
 }

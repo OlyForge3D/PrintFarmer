@@ -73,7 +73,11 @@ public class ArtifactCleanupService : IArtifactCleanupService
                 long runningTotal = totalSize;
                 foreach (var artifact in allArtifacts)
                 {
-                    if (runningTotal <= _settings.MaxTotalBytes.Value) break;
+                    if (runningTotal <= _settings.MaxTotalBytes.Value)
+                    {
+                        break;
+                    }
+
                     if (!candidatesForDeletion.Contains(artifact))
                     {
                         candidatesForDeletion.Add(artifact);

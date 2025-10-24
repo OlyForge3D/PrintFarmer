@@ -145,7 +145,9 @@ public class EfSliceJobRepository : ISliceJobRepository
     {
         var job = await GetByIdAsync(jobId, ct);
         if (job == null)
+        {
             return;
+        }
 
         var ids = artifactIds?.Distinct().ToArray() ?? Array.Empty<Guid>();
         job.Status = SliceJobStatus.Completed;
@@ -267,7 +269,9 @@ public class EfSliceJobRepository : ISliceJobRepository
     {
         var job = await GetByIdAsync(jobId, ct);
         if (job == null)
+        {
             return;
+        }
 
         job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds);
         job.UpdatedAt = DateTime.UtcNow;
@@ -278,7 +282,9 @@ public class EfSliceJobRepository : ISliceJobRepository
     {
         var job = await GetByIdAsync(jobId, ct);
         if (job == null)
+        {
             return;
+        }
 
         job.RetryCount += 1;
         job.WorkerId = null;
@@ -300,6 +306,24 @@ public class EfSliceJobRepository : ISliceJobRepository
         }
 
         await SaveChangesAsync(ct);
+    }
+
+    public async Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default)
+    {
+        // Try to find a job with matching CorrelationId and checksum if those fields are populated
+        var job = await _db.SliceJobs.FirstOrDefaultAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
+        if (job != null)
+        {
+            return job;
+        }
+
+        // Fallback: attempt lookup by correlation only
+        return await _db.SliceJobs.FirstOrDefaultAsync(j => j.CorrelationId == correlationId, ct);
+    }
+
+    public async Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default)
+    {
+        return await _db.SliceJobs.AnyAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct = default)

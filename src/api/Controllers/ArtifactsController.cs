@@ -171,7 +171,11 @@ public class ArtifactsController : ControllerBase
     [RequestSizeLimit(110_000_000)] // Slightly above default max to match settings guard
     public async Task<IActionResult> UploadAsync([FromForm] Guid jobId, [FromForm] string kind, [FromForm] Guid? workerId, [FromForm] IFormFile file, CancellationToken ct)
     {
-        if (file == null) return BadRequest("file is required");
+        if (file == null)
+        {
+            return BadRequest("file is required");
+        }
+
         var allowed = _settings.Value.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (string.IsNullOrWhiteSpace(kind) || !allowed.Contains(kind, StringComparer.OrdinalIgnoreCase))
         {
@@ -205,14 +209,17 @@ public class ArtifactsController : ControllerBase
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
         var a = await _service.GetAsync(id, ct);
-        if (a == null) return NotFound();
-        
+        if (a == null)
+        {
+            return NotFound();
+        }
+
         // Authorization: only job owner or admin can access
         if (!await CanAccessArtifactAsync(a.JobId, ct))
         {
             return Forbid();
         }
-        
+
         return Ok(Map(a));
     }
 
@@ -238,7 +245,7 @@ public class ArtifactsController : ControllerBase
         {
             return Forbid();
         }
-        
+
         var list = await _service.ListByJobAsync(jobId, ct);
         return Ok(list.Select(Map));
     }
@@ -269,16 +276,24 @@ public class ArtifactsController : ControllerBase
     public async Task<IActionResult> DownloadAsync(Guid id, CancellationToken ct)
     {
         var result = await _service.GetWithPathAsync(id, ct);
-        if (result == null) return NotFound();
+        if (result == null)
+        {
+            return NotFound();
+        }
+
         var (artifact, fullPath) = result.Value;
-        
+
         // Authorization: only job owner or admin can download
         if (!await CanAccessArtifactAsync(artifact.JobId, ct))
         {
             return Forbid();
         }
-        
-        if (!System.IO.File.Exists(fullPath)) return NotFound(new { error = "file missing" });
+
+        if (!System.IO.File.Exists(fullPath))
+        {
+            return NotFound(new { error = "file missing" });
+        }
+
         var stream = System.IO.File.OpenRead(fullPath);
         return File(stream, artifact.ContentType ?? "application/octet-stream", artifact.FileName);
     }

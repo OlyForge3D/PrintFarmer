@@ -9,6 +9,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -368,33 +369,43 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
 
     private async Task SeedPrinterModels()
     {
+        // Ensure manufacturer and model exist without causing UNIQUE constraint collisions
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var manufacturer = new Manufacturer
+        var lowered = "bambu lab";
+        var existingManufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name.ToLower() == lowered);
+        if (existingManufacturer == null)
         {
-            Id = Guid.NewGuid(),
-            Name = "Bambu Lab",
-            IsActive = true
-        };
+            existingManufacturer = new Manufacturer
+            {
+                Id = Guid.NewGuid(),
+                Name = "Bambu Lab",
+                IsActive = true
+            };
+            db.Manufacturers.Add(existingManufacturer);
+            await db.SaveChangesAsync();
+        }
 
-        var printerModel = new PrinterModel
+        var existsModel = await db.Models.AnyAsync(m => m.ManufacturerId == existingManufacturer.Id && m.Name.ToLower() == "x1 carbon");
+        if (!existsModel)
         {
-            Id = Guid.NewGuid(),
-            Name = "X1 Carbon",
-            ManufacturerId = manufacturer.Id,
-            MaxX = 256,
-            MaxY = 256,
-            MaxZ = 256,
-            DefaultNozzleDiameter = 0.4,
-            MaxBedTemp = 120,
-            MaxHotendTemp = 300,
-            IsActive = true
-        };
-
-        db.Manufacturers.Add(manufacturer);
-        db.Models.Add(printerModel);
-        await db.SaveChangesAsync();
+            var printerModel = new PrinterModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "X1 Carbon",
+                ManufacturerId = existingManufacturer.Id,
+                MaxX = 256,
+                MaxY = 256,
+                MaxZ = 256,
+                DefaultNozzleDiameter = 0.4,
+                MaxBedTemp = 120,
+                MaxHotendTemp = 300,
+                IsActive = true
+            };
+            db.Models.Add(printerModel);
+            await db.SaveChangesAsync();
+        }
     }
 
     private async Task SeedFilamentTypes()
@@ -402,29 +413,21 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var filamentTypes = new[]
+        var types = new[] { "PLA", "PETG", "ABS" };
+        foreach (var t in types)
         {
-            new FilamentType
+            var lowered = t.ToLowerInvariant();
+            var exists = await db.FilamentTypes.AnyAsync(f => f.Name.ToLower() == lowered);
+            if (!exists)
             {
-                Id = Guid.NewGuid(),
-                Name = "PLA",
-                IsActive = true
-            },
-            new FilamentType
-            {
-                Id = Guid.NewGuid(),
-                Name = "PETG",
-                IsActive = true
-            },
-            new FilamentType
-            {
-                Id = Guid.NewGuid(),
-                Name = "ABS",
-                IsActive = true
+                db.FilamentTypes.Add(new FilamentType
+                {
+                    Id = Guid.NewGuid(),
+                    Name = t,
+                    IsActive = true
+                });
             }
-        };
-
-        db.FilamentTypes.AddRange(filamentTypes);
+        }
         await db.SaveChangesAsync();
     }
 
@@ -433,12 +436,20 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var manufacturer = new Manufacturer
+        var manufacturerName = "Test Manufacturer";
+        var lowered = manufacturerName.ToLowerInvariant();
+        var manufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name.ToLower() == lowered);
+        if (manufacturer == null)
         {
-            Id = Guid.NewGuid(),
-            Name = "Test Manufacturer",
-            IsActive = true
-        };
+            manufacturer = new Manufacturer
+            {
+                Id = Guid.NewGuid(),
+                Name = manufacturerName,
+                IsActive = true
+            };
+            db.Manufacturers.Add(manufacturer);
+            await db.SaveChangesAsync();
+        }
 
         var models = new[]
         {
@@ -466,11 +477,26 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             }
         };
 
-        db.Manufacturers.Add(manufacturer);
-        db.Models.AddRange(models);
+        var addedIds = new List<Guid>();
+        foreach (var m in models)
+        {
+            var exists = await db.Models.AnyAsync(x => x.ManufacturerId == m.ManufacturerId && x.Name.ToLower() == m.Name.ToLower());
+            if (!exists)
+            {
+                db.Models.Add(m);
+                addedIds.Add(m.Id);
+            }
+        }
         await db.SaveChangesAsync();
 
-        return models.Select(m => m.Id).ToArray();
+        // If none were added because they existed, return the existing ids for the requested names
+        if (addedIds.Count == 0)
+        {
+            var ids = await db.Models.Where(x => x.ManufacturerId == manufacturer.Id && (x.Name == "Printer A" || x.Name == "Printer B")).Select(x => x.Id).ToArrayAsync();
+            return ids;
+        }
+
+        return addedIds.ToArray();
     }
 
     private async Task<Guid[]> SeedMultipleFilamentTypes()
@@ -478,17 +504,26 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var filamentTypes = new[]
+        var desired = new[] { "PLA", "PETG", "ABS" };
+        var addedIds = new List<Guid>();
+        foreach (var name in desired)
         {
-            new FilamentType { Id = Guid.NewGuid(), Name = "PLA", IsActive = true },
-            new FilamentType { Id = Guid.NewGuid(), Name = "PETG", IsActive = true },
-            new FilamentType { Id = Guid.NewGuid(), Name = "ABS", IsActive = true }
-        };
-
-        db.FilamentTypes.AddRange(filamentTypes);
+            var lowered = name.ToLowerInvariant();
+            var existing = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name.ToLower() == lowered);
+            if (existing == null)
+            {
+                var ft = new FilamentType { Id = Guid.NewGuid(), Name = name, IsActive = true };
+                db.FilamentTypes.Add(ft);
+                addedIds.Add(ft.Id);
+            }
+            else
+            {
+                addedIds.Add(existing.Id);
+            }
+        }
         await db.SaveChangesAsync();
 
-        return filamentTypes.Select(f => f.Id).ToArray();
+        return addedIds.ToArray();
     }
 
     private static string CreateComprehensiveOrcaBundle()

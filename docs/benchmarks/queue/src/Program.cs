@@ -5,8 +5,8 @@ using BenchmarkDotNet.Running;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using QueueBenchmark.Providers;
 using QueueBenchmark.Models;
+using QueueBenchmark.Providers;
 using QueueBenchmark.Shared;
 
 namespace QueueBenchmark;
@@ -28,7 +28,6 @@ public class Program
             {
                 services.AddLogging(builder => builder.AddConsole());
                 services.AddTransient<QueueBenchmarkRunner>();
-                services.AddTransient<RedisQueueProvider>();
                 services.AddTransient<RabbitMqQueueProvider>();
                 services.AddTransient<KafkaQueueProvider>();
             })
@@ -36,7 +35,7 @@ public class Program
 
         var benchmarkRunner = host.Services.GetRequiredService<QueueBenchmarkRunner>();
         await benchmarkRunner.RunPocAsync();
-        
+
         await host.RunAsync();
     }
 }
@@ -74,7 +73,7 @@ public class QueueBenchmarkRunner
         foreach (var (name, provider) in providers)
         {
             _logger.LogInformation("Testing {ProviderName}", name);
-            
+
             try
             {
                 await TestProviderAsync(name, provider);
@@ -91,7 +90,7 @@ public class QueueBenchmarkRunner
     {
         const int jobCount = 100;
         var jobs = GenerateTestJobs(jobCount);
-        
+
         // Initialize provider
         await provider.InitializeAsync();
 
@@ -103,7 +102,7 @@ public class QueueBenchmarkRunner
         {
             await provider.EnqueueAsync(job);
         }
-        
+
         var enqueueTime = stopwatch.ElapsedMilliseconds;
         stopwatch.Restart();
 
@@ -120,32 +119,28 @@ public class QueueBenchmarkRunner
             if (job != null)
             {
                 processedJobs.Add(job);
-                
+
                 // Simulate processing with some failures for retry/DLQ testing
                 if (job.Id % 20 == 0) // 5% failure rate for retry testing
-                {
                     await provider.RetryAsync(job);
-                    retryCount++;
-                }
-                else if (job.Id % 50 == 0) // 2% failure rate for DLQ testing  
-                {
-                    await provider.SendToDeadLetterQueueAsync(job, "Simulated processing failure");
-                    dlqCount++;
-                }
-                else
-                {
-                    await provider.AcknowledgeAsync(job);
-                    successCount++;
-                }
+                retryCount++;
+            }
+            else if (job.Id % 50 == 0) // 2% failure rate for DLQ testing  
+            {
+                dlqCount++;
+            }
+            else
+            {
+                successCount++;
             }
         }
+    }
 
-        var dequeueTime = stopwatch.ElapsedMilliseconds;
+    var dequeueTime = stopwatch.ElapsedMilliseconds;
 
-        // Log results
-        _logger.LogInformation(
+    // Log results
+    _logger.LogInformation(
             "{ProviderName} Results: Enqueue={EnqueueTime}ms, Dequeue={DequeueTime}ms, Success={Success}, Retry={Retry}, DLQ={DLQ}",
-            providerName, enqueueTime, dequeueTime, successCount, retryCount, dlqCount);
 
         // Cleanup
         await provider.CleanupAsync();
@@ -161,7 +156,7 @@ public class QueueBenchmarkRunner
             var priority = (SlicingJobPriority)random.Next(0, 4);
             var engine = (SlicerEngineType)random.Next(0, 3);
             var payloadSize = random.Next(1024, 51200); // 1KB to 50KB
-            
+
             jobs.Add(new TestJob
             {
                 Id = i,
@@ -200,7 +195,7 @@ public class QueueProviderBenchmark
     public async Task SetupAsync()
     {
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-        
+
         _redisProvider = new RedisQueueProvider(loggerFactory.CreateLogger<RedisQueueProvider>());
         _rabbitMqProvider = new RabbitMqQueueProvider(loggerFactory.CreateLogger<RabbitMqQueueProvider>());
         _kafkaProvider = new KafkaQueueProvider(loggerFactory.CreateLogger<KafkaQueueProvider>());
@@ -218,14 +213,17 @@ public class QueueProviderBenchmark
     [GlobalCleanup]
     public async Task CleanupAsync()
     {
-        if (_redisProvider != null) await _redisProvider.CleanupAsync();
-        if (_rabbitMqProvider != null) await _rabbitMqProvider.CleanupAsync();
-        if (_kafkaProvider != null) await _kafkaProvider.CleanupAsync();
+        if (_redisProvider != null)
+            await _redisProvider.CleanupAsync();
+        if (_rabbitMqProvider != null)
+            await _rabbitMqProvider.CleanupAsync();
+        if (_kafkaProvider != null)
+            await _kafkaProvider.CleanupAsync();
     }
 
     [Benchmark]
     [Arguments("Small")]
-    [Arguments("Medium")]  
+    [Arguments("Medium")]
     [Arguments("Large")]
     public async Task RedisEnqueueAsync(string loadType)
     {
@@ -235,11 +233,10 @@ public class QueueProviderBenchmark
             await _redisProvider!.EnqueueAsync(job);
         }
     }
-
     [Benchmark]
     [Arguments("Small")]
     [Arguments("Medium")]
-    [Arguments("Large")] 
+    [Arguments("Large")]
     public async Task RabbitMqEnqueueAsync(string loadType)
     {
         var jobs = GetJobsForLoad(loadType);
@@ -247,46 +244,43 @@ public class QueueProviderBenchmark
         {
             await _rabbitMqProvider!.EnqueueAsync(job);
         }
-    }
 
-    [Benchmark]
-    [Arguments("Small")]
-    [Arguments("Medium")]
-    [Arguments("Large")]
-    public async Task KafkaEnqueueAsync(string loadType)
-    {
-        var jobs = GetJobsForLoad(loadType);
-        foreach (var job in jobs)
+        [Benchmark]
+        [Arguments("Medium")]
+        [Arguments("Large")]
+        public async Task KafkaEnqueueAsync(string loadType)
         {
-            await _kafkaProvider!.EnqueueAsync(job);
+            var jobs = GetJobsForLoad(loadType);
+            foreach (var job in jobs)
+            {
+                await _kafkaProvider!.EnqueueAsync(job);
+            }
         }
-    }
 
     private List<TestJob> GetJobsForLoad(string loadType) => loadType switch
-    {
         "Small" => _smallJobs,
         "Medium" => _mediumJobs,
         "Large" => _largeJobs,
         _ => _smallJobs
-    };
+};
 
-    private static List<TestJob> GenerateJobs(int count, int payloadSize)
+private static List<TestJob> GenerateJobs(int count, int payloadSize)
+{
+    var jobs = new List<TestJob>();
+    var random = new Random(42);
+
+    for (int i = 1; i <= count; i++)
     {
-        var jobs = new List<TestJob>();
-        var random = new Random(42);
-
-        for (int i = 1; i <= count; i++)
+        jobs.Add(new TestJob
         {
-            jobs.Add(new TestJob
-            {
-                Id = i,
-                Priority = (SlicingJobPriority)random.Next(0, 4),
-                Engine = (SlicerEngineType)random.Next(0, 3),
-                Payload = new string('x', payloadSize),
-                CreatedAt = DateTime.UtcNow
-            });
-        }
-
-        return jobs;
+            Id = i,
+            Priority = (SlicingJobPriority)random.Next(0, 4),
+            Engine = (SlicerEngineType)random.Next(0, 3),
+            Payload = new string('x', payloadSize),
+            CreatedAt = DateTime.UtcNow
+        });
     }
+
+    return jobs;
+}
 }

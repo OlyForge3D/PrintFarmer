@@ -36,9 +36,20 @@ public class ArtifactsService : IArtifactsService
     public async Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
-        if (file.Length <= 0) throw new InvalidOperationException("Empty file not allowed.");
-        if (file.Length > _settings.MaxFileSizeBytes) throw new InvalidOperationException("File exceeds maximum size.");
-        if (!IsAllowedKind(kind)) throw new InvalidOperationException("Unsupported artifact kind.");
+        if (file.Length <= 0)
+        {
+            throw new InvalidOperationException("Empty file not allowed.");
+        }
+
+        if (file.Length > _settings.MaxFileSizeBytes)
+        {
+            throw new InvalidOperationException("File exceeds maximum size.");
+        }
+
+        if (!IsAllowedKind(kind))
+        {
+            throw new InvalidOperationException("Unsupported artifact kind.");
+        }
 
         string sanitized = SanitizeFileName(file.FileName);
         string root = ResolveRootPath();
@@ -93,11 +104,26 @@ public class ArtifactsService : IArtifactsService
 
     public async Task<Artifact> UploadTextAsync(string content, string fileName, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
     {
-        if (content == null) content = string.Empty;
+        if (content == null)
+        {
+            content = string.Empty;
+        }
+
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
-        if (bytes.Length == 0) throw new InvalidOperationException("Empty content not allowed.");
-        if (bytes.Length > _settings.MaxFileSizeBytes) throw new InvalidOperationException("Content exceeds maximum size.");
-        if (!IsAllowedKind(kind)) throw new InvalidOperationException("Unsupported artifact kind.");
+        if (bytes.Length == 0)
+        {
+            throw new InvalidOperationException("Empty content not allowed.");
+        }
+
+        if (bytes.Length > _settings.MaxFileSizeBytes)
+        {
+            throw new InvalidOperationException("Content exceeds maximum size.");
+        }
+
+        if (!IsAllowedKind(kind))
+        {
+            throw new InvalidOperationException("Unsupported artifact kind.");
+        }
 
         string sanitized = SanitizeFileName(string.IsNullOrWhiteSpace(fileName) ? "artifact.txt" : fileName);
         string root = ResolveRootPath();
@@ -165,7 +191,11 @@ public class ArtifactsService : IArtifactsService
     public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
     {
         var artifact = await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);
-        if (artifact == null) return null;
+        if (artifact == null)
+        {
+            return null;
+        }
+
         string root = ResolveRootPath();
         string fullPath = Path.Combine(root, artifact.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         return (artifact, fullPath);
@@ -183,14 +213,22 @@ public class ArtifactsService : IArtifactsService
 
     private static string SanitizeFileName(string fileName)
     {
-        if (string.IsNullOrWhiteSpace(fileName)) return "artifact.bin";
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return "artifact.bin";
+        }
+
         string cleaned = FileNameSafeRegex.Replace(fileName.Trim(), "-");
         return cleaned.Length > 128 ? cleaned.Substring(0, 128) : cleaned;
     }
 
     private bool IsAllowedKind(string kind)
     {
-        if (string.IsNullOrWhiteSpace(kind)) return false;
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            return false;
+        }
+
         var allowed = _settings.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return allowed.Contains(kind, StringComparer.OrdinalIgnoreCase);
     }

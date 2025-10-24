@@ -79,6 +79,17 @@ public class SliceJob
     public DateTime QueuedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// Correlation ID for idempotent job submission / message envelope tracking
+    /// </summary>
+    public Guid? CorrelationId { get; set; }
+
+    /// <summary>
+    /// Optional checksum/hash for idempotency and deduplication
+    /// </summary>
+    [MaxLength(128)]
+    public string? Checksum { get; set; }
+
+    /// <summary>
     /// When a worker started processing this job
     /// </summary>
     public DateTime? StartedAt { get; set; }

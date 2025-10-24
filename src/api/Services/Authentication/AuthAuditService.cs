@@ -11,13 +11,32 @@ namespace Farm.Web.Api.Services.Authentication;
 /// </summary>
 public class AuthAuditService : IAuthAuditService
 {
-    private readonly AppDbContext _context;
+    private readonly Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext> _dbFactory;
     private readonly IUnifiedLoggingService _logging;
 
-    public AuthAuditService(AppDbContext context, IUnifiedLoggingService logging)
+    public AuthAuditService(Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext> dbFactory, IUnifiedLoggingService logging)
     {
-        _context = context;
+        _dbFactory = dbFactory;
         _logging = logging;
+    }
+
+    // Centralized save helper so writes always use a factory-created context
+    private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
+    {
+        using var ctx = _dbFactory.CreateDbContext();
+        ctx.AuthAuditLogs.Add(auditLog);
+        await ctx.SaveChangesAsync(cancellationToken);
+        _logging.LogInformation($"[AuthAudit] Saved audit {auditLog.EventType} Id={auditLog.Id}");
+        try
+        {
+            var provider = ctx.Database.ProviderName;
+            string? conn = null;
+            try
+            { conn = ctx.Database.GetConnectionString(); }
+            catch { }
+            Console.WriteLine($"[AuthAuditService] Saved audit Id={auditLog.Id} Provider={provider} Conn={conn} EventType={auditLog.EventType}");
+        }
+        catch { }
     }
 
     public async Task LogLoginAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -34,10 +53,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logging.LogInformation($"[AuthAudit] Login successful for UserId: {userId} from IP: {ipAddress}");
+        await SaveAuditAsync(auditLog, cancellationToken);
     }
 
     public async Task LogLoginFailedAsync(string usernameOrEmail, string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -58,9 +74,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogWarning($"[AuthAudit] Login failed for '{usernameOrEmail}' from IP: {ipAddress} - Reason: {reason}");
     }
 
@@ -78,9 +92,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Logout for UserId: {userId} from IP: {ipAddress}");
     }
 
@@ -98,9 +110,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] New user registered: UserId: {userId} from IP: {ipAddress}");
     }
 
@@ -118,9 +128,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Password changed for UserId: {userId} from IP: {ipAddress}");
     }
 
@@ -141,9 +149,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Password reset initiated for email: {email} from IP: {ipAddress}");
     }
 
@@ -161,9 +167,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Password reset completed for UserId: {userId} from IP: {ipAddress}");
     }
 
@@ -188,9 +192,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogWarning($"[AuthAudit] Account locked for UserId: {userId} after {attemptCount} failed attempts. Lockout duration: {lockoutDuration.TotalMinutes} minutes");
     }
 
@@ -211,9 +213,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Account unlocked for UserId: {userId}. Reason: {reason}");
     }
 
@@ -231,9 +231,7 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Token refreshed for UserId: {userId} from IP: {ipAddress}");
     }
 
@@ -258,15 +256,14 @@ public class AuthAuditService : IAuthAuditService
             CorrelationId = correlationId
         };
 
-        _context.AuthAuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogWarning($"[AuthAudit] Token revoked for UserId: {userId} by admin UserId: {revokedByUserId}. Reason: {reason}");
     }
 
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)
     {
-        return await _context.AuthAuditLogs
+        using var ctx = _dbFactory.CreateDbContext();
+        return await ctx.AuthAuditLogs
             .Where(aal => aal.UserId == userId)
             .OrderByDescending(aal => aal.Timestamp)
             .Skip((pageNumber - 1) * pageSize)
@@ -276,7 +273,8 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task<List<AuthAuditLog>> GetRecentFailedLoginsAsync(int count = 100, CancellationToken cancellationToken = default)
     {
-        return await _context.AuthAuditLogs
+        using var ctx = _dbFactory.CreateDbContext();
+        return await ctx.AuthAuditLogs
             .Where(aal => aal.EventType == AuthEventType.LoginFailed)
             .OrderByDescending(aal => aal.Timestamp)
             .Take(count)
@@ -285,7 +283,8 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task<List<AuthAuditLog>> GetSecurityEventsAsync(DateTime? since = null, int pageSize = 100, CancellationToken cancellationToken = default)
     {
-        var query = _context.AuthAuditLogs
+        using var ctx = _dbFactory.CreateDbContext();
+        var query = ctx.AuthAuditLogs
             .Where(aal => aal.EventType == AuthEventType.AccountLocked ||
                          aal.EventType == AuthEventType.AccountUnlocked ||
                          aal.EventType == AuthEventType.PasswordReset ||

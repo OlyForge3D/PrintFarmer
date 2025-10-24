@@ -40,7 +40,6 @@ using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using StackExchange.Redis;
 using Swashbuckle.AspNetCore.Swagger;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
@@ -158,14 +157,8 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Slicing.OrcaDefaultProfi
 builder.Services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
 // Slicers registry service (business logic)
 builder.Services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.Web.Api.Services.Slicing.SlicersService>();
-// Redis-backed job queue: register ConnectionMultiplexer and queue implementation
-builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-{
-    var config = sp.GetRequiredService<IConfiguration>().GetValue<string>("REDIS_CONNECTION") ?? "redis:6379";
-    // Use synchronous Connect here during startup; ConnectionMultiplexer is thread-safe and intended as a singleton
-    return ConnectionMultiplexer.Connect(config);
-});
-builder.Services.AddScoped<Farm.Web.Shared.ISlicerJobQueue, Farm.Web.Api.Services.SlicerServices.RedisSlicerJobQueue>();
+// Use DB-backed slicer job queue (default) to support HTTP claim/renew/complete worker flow
+builder.Services.AddScoped<Farm.Web.Shared.ISlicerJobQueue, Farm.Web.Api.Services.SlicerServices.DbSlicerJobQueue>();
 // Register the orchestrator implementation used by slicing submission and controllers
 builder.Services.AddScoped<Farm.Web.Shared.ISlicerOrchestrator, Farm.Web.Api.Services.SlicerServices.SlicerOrchestrator>();
 // Register slicer progress notifier (SignalR-based) so SlicerOrchestrator and other services can send updates
