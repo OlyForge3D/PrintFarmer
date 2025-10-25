@@ -262,22 +262,36 @@ merge_addon_services() {
         last_service_line=$(grep -n '^  [a-zA-Z]' "$compose_file" | tail -1 | cut -d: -f1 | tr -d ' ')
         
         if [[ -n "$last_service_line" && "$last_service_line" -gt 0 ]]; then
-            # Simpler approach: just append services at the end before volumes/networks
-            local volumes_line
+            # Insert services before the first root-level section (networks/volumes)
+            local volumes_line networks_line insertion_line file_length
             volumes_line=$(grep -n '^volumes:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
-            
+            networks_line=$(grep -n '^networks:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
+
+            insertion_line=""
+            if [[ -n "$networks_line" && "$networks_line" -gt 0 ]]; then
+                insertion_line="$networks_line"
+            fi
             if [[ -n "$volumes_line" && "$volumes_line" -gt 0 ]]; then
-                # Insert before volumes section
-                head -n "$((volumes_line - 1))" "$compose_file" > "$temp_merged"
-                echo "" >> "$temp_merged"  # Add blank line
+                if [[ -z "$insertion_line" || "$volumes_line" -lt "$insertion_line" ]]; then
+                    insertion_line="$volumes_line"
+                fi
+            fi
+            if [[ -z "$insertion_line" ]]; then
+                file_length=$(wc -l < "$compose_file")
+                insertion_line=$((file_length + 1))
+            fi
+
+            if [[ "$insertion_line" -gt 1 ]]; then
+                head -n "$((insertion_line - 1))" "$compose_file" > "$temp_merged"
+                echo "" >> "$temp_merged"
                 cat "$temp_addon_services" >> "$temp_merged"
-                echo "" >> "$temp_merged"  # Add blank line
-                tail -n +"$volumes_line" "$compose_file" >> "$temp_merged"
+                echo "" >> "$temp_merged"
+                tail -n +"$insertion_line" "$compose_file" >> "$temp_merged"
                 mv "$temp_merged" "$compose_file"
             else
-                # Append at the end
-                echo "" >> "$compose_file"
-                cat "$temp_addon_services" >> "$compose_file"
+                # Fallback: prepend to file
+                cat "$temp_addon_services" "$compose_file" > "$temp_merged"
+                mv "$temp_merged" "$compose_file"
             fi
         fi
     fi

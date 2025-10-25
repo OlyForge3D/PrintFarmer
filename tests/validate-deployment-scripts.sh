@@ -134,11 +134,21 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
     if [ -f "$TEMP_DIR/docker-compose.yml" ]; then
         prometheus_count=$(grep -c 'printfarmer-prometheus' "$TEMP_DIR/docker-compose.yml" 2>/dev/null || true)
         jaeger_count=$(grep -c 'printfarmer-jaeger' "$TEMP_DIR/docker-compose.yml" 2>/dev/null || true)
-        if [ "$prometheus_count" -eq 1 ] && [ "$jaeger_count" -eq 1 ]; then
+        prometheus_line=$(grep -n 'printfarmer-prometheus' "$TEMP_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
+        networks_line=$(grep -n '^networks:' "$TEMP_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
+        if [ "$prometheus_count" -eq 1 ] && [ "$jaeger_count" -eq 1 ] && [ "$prometheus_line" -gt 0 ] && [ "$networks_line" -gt 0 ] && [ "$prometheus_line" -lt "$networks_line" ]; then
             check_result "Telemetry and monitoring stack merge cleanly"
+            if command -v docker >/dev/null 2>&1; then
+                if ! (cd "$TEMP_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
+                    check_result "docker compose config validation" || true
+                fi
+            fi
         else
             [ "$prometheus_count" -eq 1 ] || echo -e "${YELLOW}⚠️  Expected one Prometheus definition, found $prometheus_count${NC}"
             [ "$jaeger_count" -eq 1 ] || echo -e "${YELLOW}⚠️  Expected one Jaeger definition, found $jaeger_count${NC}"
+            if [ "$prometheus_line" -ge "$networks_line" ]; then
+                echo -e "${YELLOW}⚠️  Prometheus service appears after networks section (line $prometheus_line vs $networks_line)${NC}"
+            fi
             false
             check_result "Telemetry and monitoring stack merge cleanly" || true
         fi
