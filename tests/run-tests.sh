@@ -37,7 +37,7 @@ OPTIONS:
     -v, --verbose           Show verbose output from tests
     -f, --fast              Skip slower integration tests
     -s, --suite SUITE       Run specific test suite only
-                           (compose-generator|deploy-docker|integration)
+                           (compose-generator|deploy-docker|config-persistence|integration)
     --parallel              Run test suites in parallel (experimental)
 
 EXAMPLES:
@@ -187,6 +187,7 @@ main() {
             # Run all suites
             run_test_suite "$SCRIPT_DIR/test-compose-generator.sh" "Compose Generator Tests" "$verbose"
             run_test_suite "$SCRIPT_DIR/test-deploy-docker.sh" "Deploy Docker Tests" "$verbose"
+            run_test_suite "$SCRIPT_DIR/test-config-persistence.sh" "Configuration Persistence Tests" "$verbose"
             
             if [ "$fast" != "true" ]; then
                 run_test_suite "$SCRIPT_DIR/test-integration.sh" "Integration Tests" "$verbose"
@@ -198,12 +199,15 @@ main() {
         "deploy-docker")
             run_test_suite "$SCRIPT_DIR/test-deploy-docker.sh" "Deploy Docker Tests" "$verbose"
             ;;
+        "config-persistence")
+            run_test_suite "$SCRIPT_DIR/test-config-persistence.sh" "Configuration Persistence Tests" "$verbose"
+            ;;
         "integration")
             run_test_suite "$SCRIPT_DIR/test-integration.sh" "Integration Tests" "$verbose"
             ;;
         *)
             log_error "Unknown test suite: $specific_suite"
-            log_error "Available suites: compose-generator, deploy-docker, integration"
+            log_error "Available suites: compose-generator, deploy-docker, config-persistence, integration"
             exit 1
             ;;
     esac

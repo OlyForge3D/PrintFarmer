@@ -691,6 +691,12 @@ ENVIRONMENT=$ENVIRONMENT
 ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
 
+# Observability & Monitoring Configuration
+INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
+INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
+INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
+INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
+
 # Distributed Slicing
 ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
@@ -1578,6 +1584,12 @@ DOCKEREOF
 configure_additional() {
     print_header "⚙️  Additional Configuration"
     
+    # Initialize monitoring/observability variables with defaults if not already set
+    INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
+    INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
+    INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
+    INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
+    
     prompt_with_default "Environment [Development/Production]:" "Development" "ENVIRONMENT"
     
     if [ "$ENVIRONMENT" = "Development" ]; then
@@ -1598,41 +1610,41 @@ configure_additional() {
     if [ "$CLI_INCLUDE_MONITORING" = "false" ]; then
         prompt_yes_no "Enable monitoring stack (Prometheus, Grafana)?" "no" "INCLUDE_MONITORING_CHOICE"
         if [ "$INCLUDE_MONITORING_CHOICE" = "yes" ]; then
-            INCLUDE_MONITORING=true
+            INCLUDE_MONITORING="true"
         fi
     else
         print_info "Monitoring stack enabled via CLI flag"
-        INCLUDE_MONITORING=true
+        INCLUDE_MONITORING="true"
     fi
     
     if [ "$CLI_INCLUDE_TELEMETRY" = "false" ]; then
         prompt_yes_no "Enable telemetry/observability (OpenTelemetry)?" "no" "INCLUDE_TELEMETRY_CHOICE"
         if [ "$INCLUDE_TELEMETRY_CHOICE" = "yes" ]; then
-            INCLUDE_TELEMETRY=true
+            INCLUDE_TELEMETRY="true"
         fi
     else
         print_info "Telemetry/observability enabled via CLI flag"
-        INCLUDE_TELEMETRY=true
+        INCLUDE_TELEMETRY="true"
     fi
     
     if [ "$CLI_INCLUDE_SECURITY" = "false" ]; then
         prompt_yes_no "Enable security configurations (enhanced security headers, HTTPS)?" "no" "INCLUDE_SECURITY_CHOICE"
         if [ "$INCLUDE_SECURITY_CHOICE" = "yes" ]; then
-            INCLUDE_SECURITY=true
+            INCLUDE_SECURITY="true"
         fi
     else
         print_info "Security configurations enabled via CLI flag"
-        INCLUDE_SECURITY=true
+        INCLUDE_SECURITY="true"
     fi
     
     if [ "$CLI_INCLUDE_REGISTRY" = "false" ]; then
         prompt_yes_no "Enable local Docker registry (for development/air-gapped deployments)?" "no" "INCLUDE_REGISTRY_CHOICE"
         if [ "$INCLUDE_REGISTRY_CHOICE" = "yes" ]; then
-            INCLUDE_REGISTRY=true
+            INCLUDE_REGISTRY="true"
         fi
     else
         print_info "Local Docker registry enabled via CLI flag"
-        INCLUDE_REGISTRY=true
+        INCLUDE_REGISTRY="true"
     fi
     
 

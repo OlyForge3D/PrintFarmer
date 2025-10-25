@@ -65,7 +65,15 @@ Tests the main `scripts/deploy-docker.sh` script:
 - ✅ **No Redis prompts** - Ensures Redis configuration is not requested
 - ✅ **No PrusaSlicer prompts** - Ensures PrusaSlicer configuration is not requested
 
-#### 3. Integration Tests (`test-integration.sh`)
+#### 3. Configuration Persistence Tests (`test-config-persistence.sh`)
+Tests configuration saving and loading for monitoring/telemetry/security settings:
+
+- ✅ **Configuration persistence** - Verifies monitoring settings are saved to config file
+- ✅ **Configuration loading** - Ensures saved settings are properly loaded on subsequent runs
+- ✅ **CLI flag override** - Confirms command-line flags override saved configuration
+- ✅ **Interactive choice memory** - Tests that user choices in interactive mode are remembered
+
+#### 4. Integration Tests (`test-integration.sh`)
 Tests the complete deployment pipeline:
 
 - ✅ **End-to-end workflows** - Full deployment pipeline for each architecture
@@ -153,6 +161,9 @@ assert_not_contains "$help_output" "multistage"
 # Run deploy script tests only  
 ./tests/test-deploy-docker.sh
 
+# Run configuration persistence tests only
+./tests/test-config-persistence.sh
+
 # Run integration tests only
 ./tests/test-integration.sh
 ```
@@ -208,6 +219,12 @@ Current test coverage includes:
 - ✅ Port conflict detection
 - ✅ Batch and dry-run modes
 
+### Configuration Persistence (`test-config-persistence.sh`)
+- ✅ 3 test cases covering configuration memory
+- ✅ Monitoring/telemetry/security setting persistence
+- ✅ CLI flag override behavior
+- ✅ Configuration loading and display
+
 ### Integration Tests
 - ✅ 10 test cases covering end-to-end workflows
 - ✅ Complete deployment pipelines for all architectures
@@ -215,4 +232,4 @@ Current test coverage includes:
 - ✅ File coordination and cleanup
 - ✅ Error handling and recovery
 
-**Total: 40+ test cases ensuring robust deployment functionality**
+**Total: 43+ test cases ensuring robust deployment functionality**
