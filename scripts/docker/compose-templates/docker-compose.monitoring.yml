@@ -21,7 +21,7 @@ services:
     ports:
       - "9090:9090"
     networks:
-      - monitoring
+      - printfarmer-network
 
   # Grafana for visualization
   grafana:
@@ -37,7 +37,7 @@ services:
     ports:
       - "3001:3000"
     networks:
-      - monitoring
+      - printfarmer-network
 
   # ELK Stack for logging
   elasticsearch:
@@ -54,7 +54,7 @@ services:
     ports:
       - "9200:9200"
     networks:
-      - monitoring
+      - printfarmer-network
 
   logstash:
     image: docker.elastic.co/logstash/logstash:8.10.0
@@ -72,7 +72,7 @@ services:
     depends_on:
       - elasticsearch
     networks:
-      - monitoring
+      - printfarmer-network
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.10.0
@@ -84,20 +84,7 @@ services:
     depends_on:
       - elasticsearch
     networks:
-      - monitoring
-
-  # Redis Exporter for Redis metrics
-  redis-exporter:
-    image: oliver006/redis_exporter:latest
-    container_name: printfarmer-redis-exporter
-    environment:
-      REDIS_ADDR: redis://redis:6379
-    ports:
-      - "9121:9121"
-    depends_on:
-      - redis
-    networks:
-      - monitoring
+      - printfarmer-network
 
 volumes:
   prometheus_data:
@@ -105,5 +92,3 @@ volumes:
   elasticsearch_data:
 
 networks:
-  monitoring:
-    driver: bridge

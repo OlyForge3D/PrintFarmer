@@ -3,8 +3,9 @@ services:
   slicer-base:
     build:
       context: .
-      dockerfile: Dockerfile.slicer-base
-    image: printfarmer-slicer-base
+      dockerfile: Dockerfile.multistage
+      target: slicer-base
+    image: printfarmer-slicer-base-multistage
     profiles:
       - orca
     entrypoint: ["/bin/true"]
@@ -14,19 +15,6 @@ services:
       timeout: 5s
       retries: 1
       start_period: 5s
-  # Redis for caching and SignalR backplane
-  redis:
-    image: redis:7-alpine
-    container_name: printfarmer-redis
-    # No external port mapping needed; accessed only by internal services (api, workers)
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - redis_data:/data
-
   # .NET API Backend - Multi-stage build for efficiency
   api:
     build:
@@ -44,7 +32,6 @@ services:
       - ASPNETCORE_URLS=http://+:5000
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
-      - Redis__ConnectionString=redis:6379
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5245}
       - DEPLOYMENT_MODE=monolithic
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
@@ -73,9 +60,7 @@ services:
       - slicer_profiles:/app/profiles
       - ./wwwroot/gcode-library:/app/wwwroot/gcode-library
       - ./models:/app/models
-    depends_on:
-      redis:
-        condition: service_healthy
+
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:5000/healthz && curl -f http://localhost:5000/health | grep -q 'Healthy' && curl -f http://localhost:5000/api/signalrtest/connection-stats"]
       interval: 30s
@@ -111,13 +96,12 @@ services:
   orcaslicer-binaries:
     build:
       context: .
-      dockerfile: Dockerfile.orcaslicer-binaries
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-binaries
       args:
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
-        # Optional: GitHub token for API rate limiting
-        # GITHUB_TOKEN: ${GITHUB_TOKEN}
-    image: orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
+    image: orcaslicer-binaries-multistage:${ORCASLICER_VERSION:-2.3.1}
     profiles:
       - orca
       - orca-binaries
@@ -138,7 +122,6 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__Redis=redis:6379
       - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5000}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
@@ -151,8 +134,6 @@ services:
     depends_on:
       orcaslicer-binaries:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
       api:
         condition: service_healthy
     healthcheck:
@@ -202,7 +183,6 @@ services:
       - printfarmer-network
 
 volumes:
-  redis_data:
   app_data:
   model_uploads:
   gcode_storage:

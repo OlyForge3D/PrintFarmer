@@ -221,6 +221,115 @@ generate_database_config() {
     cat "$template_file"
 }
 
+# Function to merge addon services into the main compose file
+merge_addon_services() {
+    local compose_file="$1"
+    local addon_type="$2"
+    local addon_template="$TEMPLATES_DIR/docker-compose.$addon_type.yml"
+    
+    if [[ ! -f "$addon_template" ]]; then
+        log_error "Addon template not found: $addon_template"
+        return 1
+    fi
+    
+    # Create temporary files for merging
+    local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks
+    temp_merged="$(mktemp)"
+    temp_addon_services="$(mktemp)"
+    temp_addon_volumes="$(mktemp)"
+    temp_addon_networks="$(mktemp)"
+    
+    # Extract services from addon template (excluding comments and metadata)
+    awk '
+    BEGIN { in_services=0 }
+    /^services:/ { in_services=1; next }
+    /^[a-zA-Z][^:]*:/ && !/^  / { in_services=0 }
+    in_services { print }
+    ' "$addon_template" > "$temp_addon_services"
+    
+    # Extract volumes from addon template
+    awk '
+    BEGIN { in_volumes=0 }
+    /^volumes:/ { in_volumes=1; next }
+    /^[a-zA-Z][^:]*:/ && !/^  / { in_volumes=0 }
+    in_volumes { print }
+    ' "$addon_template" > "$temp_addon_volumes"
+    
+    # Extract networks from addon template
+    awk '
+    BEGIN { in_networks=0 }
+    /^networks:/ { in_networks=1; next }
+    /^[a-zA-Z][^:]*:/ && !/^  / { in_networks=0 }
+    in_networks { print }
+    ' "$addon_template" > "$temp_addon_networks"
+    
+    # Merge services into main compose file
+    if [[ -s "$temp_addon_services" ]]; then
+        # Find the line after the last service definition
+        local last_service_line
+        last_service_line=$(grep -n '^  [a-zA-Z]' "$compose_file" | tail -1 | cut -d: -f1 | tr -d ' ')
+        
+        if [[ -n "$last_service_line" && "$last_service_line" -gt 0 ]]; then
+            # Simpler approach: just append services at the end before volumes/networks
+            local volumes_line
+            volumes_line=$(grep -n '^volumes:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
+            
+            if [[ -n "$volumes_line" && "$volumes_line" -gt 0 ]]; then
+                # Insert before volumes section
+                head -n "$((volumes_line - 1))" "$compose_file" > "$temp_merged"
+                echo "" >> "$temp_merged"  # Add blank line
+                cat "$temp_addon_services" >> "$temp_merged"
+                echo "" >> "$temp_merged"  # Add blank line
+                tail -n +"$volumes_line" "$compose_file" >> "$temp_merged"
+                mv "$temp_merged" "$compose_file"
+            else
+                # Append at the end
+                echo "" >> "$compose_file"
+                cat "$temp_addon_services" >> "$compose_file"
+            fi
+        fi
+    fi
+    
+    # Merge volumes section
+    if [[ -s "$temp_addon_volumes" ]]; then
+        if grep -q '^volumes:' "$compose_file"; then
+            # Append to existing volumes section
+            awk -v addon_volumes="$temp_addon_volumes" '
+            /^volumes:/ { print; while ((getline line < addon_volumes) > 0) print line; close(addon_volumes); next }
+            { print }
+            ' "$compose_file" > "$temp_merged"
+            mv "$temp_merged" "$compose_file"
+        else
+            # Add volumes section at the end
+            echo "" >> "$compose_file"
+            echo "volumes:" >> "$compose_file"
+            cat "$temp_addon_volumes" >> "$compose_file"
+        fi
+    fi
+    
+    # Merge networks section
+    if [[ -s "$temp_addon_networks" ]]; then
+        if grep -q '^networks:' "$compose_file"; then
+            # Append to existing networks section
+            awk -v addon_networks="$temp_addon_networks" '
+            /^networks:/ { print; while ((getline line < addon_networks) > 0) print line; close(addon_networks); next }
+            { print }
+            ' "$compose_file" > "$temp_merged"
+            mv "$temp_merged" "$compose_file"
+        else
+            # Add networks section at the end
+            echo "" >> "$compose_file"
+            echo "networks:" >> "$compose_file"
+            cat "$temp_addon_networks" >> "$compose_file"
+        fi
+    fi
+    
+    # Clean up temporary files
+    rm -f "$temp_merged" "$temp_addon_services" "$temp_addon_volumes" "$temp_addon_networks"
+    
+    return 0
+}
+
 # Function to generate docker-compose.yml based on architecture and options
 generate_compose() {
     local arch="$1"
@@ -300,11 +409,47 @@ generate_compose() {
         log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
     fi
     
-    # For now, skip the merging to avoid docker compose config issues
-    # We'll implement proper merging later when we have proper environment setup
-    if [[ "$INCLUDE_MONITORING" == "true" || "$INCLUDE_TELEMETRY" == "true" || "$INCLUDE_SECURITY" == "true" || "$INCLUDE_REGISTRY" == "true" ]]; then
-        log_warning "Additional service merging not yet implemented in this version"
-        log_info "Base $arch compose file generated. Additional services can be added manually."
+    # Merge addon services into the compose file
+    local addons_merged=false
+    
+    if [[ "$INCLUDE_MONITORING" == "true" ]]; then
+        if merge_addon_services "$compose_file" "monitoring"; then
+            log_info "Merged monitoring stack services"
+            addons_merged=true
+        else
+            log_warning "Failed to merge monitoring services, continuing without them"
+        fi
+    fi
+    
+    if [[ "$INCLUDE_TELEMETRY" == "true" ]]; then
+        if merge_addon_services "$compose_file" "telemetry"; then
+            log_info "Merged telemetry stack services"
+            addons_merged=true
+        else
+            log_warning "Failed to merge telemetry services, continuing without them"
+        fi
+    fi
+    
+    if [[ "$INCLUDE_SECURITY" == "true" ]]; then
+        if merge_addon_services "$compose_file" "security"; then
+            log_info "Merged security stack services"
+            addons_merged=true
+        else
+            log_warning "Failed to merge security services, continuing without them"
+        fi
+    fi
+    
+    if [[ "$INCLUDE_REGISTRY" == "true" ]]; then
+        if merge_addon_services "$compose_file" "registry"; then
+            log_info "Merged registry stack services"
+            addons_merged=true
+        else
+            log_warning "Failed to merge registry services, continuing without them"
+        fi
+    fi
+    
+    if [[ "$addons_merged" == "true" ]]; then
+        log_info "Successfully merged addon services into compose file"
     fi
     
     # Validate the generated compose file
@@ -328,7 +473,19 @@ copy_configs() {
     
     # Copy additional configs based on what's included
     if [[ "$INCLUDE_MONITORING" == "true" ]]; then
-        [[ -f "$CONFIGS_DIR/prometheus.yml" ]] && cp "$CONFIGS_DIR/prometheus.yml" "$output_dir/"
+        # Copy Prometheus configuration
+        if [[ -f "$CONFIGS_DIR/prometheus.yml" ]]; then
+            mkdir -p "$output_dir/monitoring/prometheus"
+            cp "$CONFIGS_DIR/prometheus.yml" "$output_dir/monitoring/prometheus/"
+        fi
+        
+        # Copy Grafana configurations
+        if [[ -d "$REPO_ROOT/grafana" ]]; then
+            mkdir -p "$output_dir/monitoring/grafana"
+            cp -r "$REPO_ROOT/grafana/"* "$output_dir/monitoring/grafana/"
+        fi
+        
+        log_info "Copied monitoring stack configurations"
     fi
     
     if [[ "$INCLUDE_TELEMETRY" == "true" ]]; then
@@ -412,13 +569,13 @@ main() {
     log_info "Architecture: $ARCHITECTURE"
     log_info "Output directory: $OUTPUT_DIR"
     
-    # Create output directory if it doesn't exist
-    mkdir -p "$OUTPUT_DIR"
-    
     if [[ "$DRY_RUN" == "true" ]]; then
         show_dry_run "$ARCHITECTURE"
         return 0
     fi
+    
+    # Create output directory if it doesn't exist
+    mkdir -p "$OUTPUT_DIR"
     
     # Generate the configuration
     copy_dockerfiles "$ARCHITECTURE" "$OUTPUT_DIR"

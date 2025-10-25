@@ -2,20 +2,6 @@
 # Supports OrcaSlicer worker for distributed slicing
 
 services:
-    # Redis for caching and SignalR backplane
-  redis:
-    image: redis:7-alpine
-    container_name: printfarmer-redis
-    ports:
-      - "6379:6379"
-    networks:
-      - printfarmer-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
     image: ${DATABASE_IMAGE:-postgres:15-alpine}
@@ -65,7 +51,6 @@ services:
       - ASPNETCORE_URLS=http://+:8080
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
       - ConnectionStrings__Default=${ConnectionStrings__Default:-Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password}
-      - ConnectionStrings__Redis=redis:6379
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
       - DOCKER_HOST_NETWORK=${DOCKER_HOST_NETWORK:-false}
       - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
@@ -84,8 +69,6 @@ services:
       - gcode_storage:/app/gcode
       - slicer_profiles:/app/profiles
     depends_on:
-      redis:
-        condition: service_healthy
       database:
         condition: service_healthy
     healthcheck:
@@ -99,13 +82,12 @@ services:
   orcaslicer-binaries:
     build:
       context: .
-      dockerfile: Dockerfile.orcaslicer-binaries
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-binaries
       args:
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
-        # Optional: GitHub token for API rate limiting
-        # GITHUB_TOKEN: ${GITHUB_TOKEN}
-    image: orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
+    image: orcaslicer-binaries-multistage:${ORCASLICER_VERSION:-2.3.1}
     profiles:
       - orca
       - orca-binaries
@@ -130,7 +112,6 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__Redis=redis:6379
       - Worker__StorageEndpoint=http://api:8080
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
@@ -145,8 +126,6 @@ services:
     depends_on:
       orcaslicer-binaries:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
       api:
         condition: service_healthy
     healthcheck:
@@ -226,7 +205,6 @@ networks:
     driver: bridge
 
 volumes:
-  redis_data:
   database_data:  # Generic database volume (PostgreSQL, SQL Server, MySQL)
   app_data:
   model_uploads:

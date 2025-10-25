@@ -10,7 +10,7 @@ scrape_configs:
   # PrintFarmer API metrics
   - job_name: 'printfarmer-api'
     static_configs:
-      - targets: ['host.docker.internal:5245']
+      - targets: ['api:8080']
     metrics_path: '/metrics'
     scrape_interval: 10s
 

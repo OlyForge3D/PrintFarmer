@@ -195,9 +195,7 @@ generate_deployment_config() {
     if [ -n "${ENABLE_ORCA_WORKER:-}" ]; then
         generator_args+=("--enable-orca-worker" "$ENABLE_ORCA_WORKER")
     fi
-    if [ -n "${ENABLE_PRUSA_WORKER:-}" ]; then
-        generator_args+=("--enable-prusa-worker" "$ENABLE_PRUSA_WORKER")
-    fi
+
     
     # Add database provider configuration
     if [ -n "${DB_PROVIDER:-}" ]; then
@@ -699,9 +697,7 @@ ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
-# PrusaSlicer support temporarily disabled
-ENABLE_PRUSA_WORKER=no
-PRUSA_WORKER_COUNT=0
+
 EOF
 
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
@@ -711,7 +707,7 @@ EOF
 OVERRIDE_WORKER_ENDPOINTS=yes
 EOF
         [ "${ENABLE_ORCA_WORKER}" = "yes" ] && echo "ORCA_WORKER_ENDPOINT=${ORCA_WORKER_ENDPOINT}" >> "$CONFIG_FILE"
-        [ "${ENABLE_PRUSA_WORKER}" = "yes" ] && echo "PRUSA_WORKER_ENDPOINT=${PRUSA_WORKER_ENDPOINT}" >> "$CONFIG_FILE"
+
     fi
 
     if [ "${ENABLE_SPOOLMAN:-no}" = "yes" ]; then
@@ -729,9 +725,7 @@ EOF
         echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no" >> "$CONFIG_FILE"
     fi
 
-    if [ "$ARCHITECTURE" = "microservices" ] && [ "${REDIS_PERSIST:-no}" = "yes" ]; then
-        echo "REDIS_PERSIST=yes" >> "$CONFIG_FILE"
-    fi
+
 
     cat >> "$CONFIG_FILE" << EOF
 
@@ -964,7 +958,7 @@ choose_architecture() {
     echo "   • Built with multi-stage Docker builds for efficiency"
     echo
     echo -e "${GREEN}2. Microservices (Advanced)${NC}"
-    echo "   • Separate containers for API, Web, Database, Redis"
+    echo "   • Separate containers for API, Web, Database"
     echo "   • Enhanced networking capabilities"
     echo "   • Better for large-scale deployments"
     echo "   • Supports PostgreSQL, SQL Server, MySQL"
@@ -1041,7 +1035,7 @@ validate_configuration() {
     print_header "🧪 Validating Configuration"
 
     # Validate numeric worker counts
-    for var in ORCA_WORKER_COUNT PRUSA_WORKER_COUNT; do
+    for var in ORCA_WORKER_COUNT; do
         val=${!var:-0}
         if ! is_positive_int "$val"; then
             print_warning "Invalid value '$val' for $var. Resetting to 1."
@@ -1052,7 +1046,6 @@ validate_configuration() {
     # If distributed slicing disabled, zero out counts
     if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" != "true" ]; then
         ORCA_WORKER_COUNT=0
-        PRUSA_WORKER_COUNT=0
     fi
 
     # Monolithic constraints: host networking -> only one instance per worker due to fixed ports 8081/8082
@@ -1061,10 +1054,7 @@ validate_configuration() {
             print_warning "Monolithic mode: Cannot scale OrcaSlicer workers (host networking / fixed port 8081). For scaling, use microservices. Forcing count=1."
             ORCA_WORKER_COUNT=1
         fi
-        if [ "$PRUSA_WORKER_COUNT" -gt 1 ]; then
 
-            PRUSA_WORKER_COUNT=1
-        fi
     fi
 
     # Automatic port suggestion helper
@@ -1105,23 +1095,18 @@ validate_configuration() {
     # Worker ports in monolithic (8081 / 8082). Only warn if corresponding worker enabled.
     # Worker port handling
     ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
-    PRUSA_HOST_PORT=${PRUSA_HOST_PORT:-8082}
     if [ "$ARCHITECTURE" = "monolithic" ]; then
         # Only warn; cannot remap easily due to fixed host network & static internal ports
         if [ "$ENABLE_ORCA_WORKER" = "yes" ] && port_in_use "$ORCA_HOST_PORT"; then
             print_warning "Monolithic: Orca worker port $ORCA_HOST_PORT in use; startup may fail."
         fi
-        if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && port_in_use "$PRUSA_HOST_PORT"; then
-            print_warning "Monolithic: Prusa worker port $PRUSA_HOST_PORT in use; startup may fail."
-        fi
+
     else
         # Allow remap for microservices (we will rely on variable interpolation in compose file)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && port_in_use "$ORCA_HOST_PORT"; then
             suggest_port_replacement ORCA_HOST_PORT "$ORCA_HOST_PORT" "Orca worker"
         fi
-        if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 0 ] && port_in_use "$PRUSA_HOST_PORT"; then
-            suggest_port_replacement PRUSA_HOST_PORT "$PRUSA_HOST_PORT" "Prusa worker"
-        fi
+
     fi
 
     # Logical consistency: worker enabled but count 0 -> adjust to 1
@@ -1129,18 +1114,13 @@ validate_configuration() {
         print_warning "ENABLE_ORCA_WORKER=yes but ORCA_WORKER_COUNT=0. Setting count=1."
         ORCA_WORKER_COUNT=1
     fi
-    if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -eq 0 ]; then
-        print_warning "ENABLE_PRUSA_WORKER=yes but PRUSA_WORKER_COUNT=0. Setting count=1."
-        PRUSA_WORKER_COUNT=1
-    fi
+
 
     # If distributed slicing disabled but workers were enabled by mistake
-    if [ "$ENABLE_DISTRIBUTED_SLICING" != "true" ] && { [ "$ENABLE_ORCA_WORKER" = "yes" ] || [ "$ENABLE_PRUSA_WORKER" = "yes" ]; }; then
+    if [ "$ENABLE_DISTRIBUTED_SLICING" != "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
         print_warning "Workers enabled but distributed slicing disabled. Forcing workers off."
         ENABLE_ORCA_WORKER=no
-        ENABLE_PRUSA_WORKER=no
         ORCA_WORKER_COUNT=0
-        PRUSA_WORKER_COUNT=0
     fi
 
     print_success "Validation complete."
@@ -1655,11 +1635,7 @@ configure_additional() {
         INCLUDE_REGISTRY=true
     fi
     
-    if [ "$ARCHITECTURE" = "microservices" ]; then
-        echo
-        echo -e "${BLUE}Redis is used for real-time SignalR communication between containers.${NC}"
-        prompt_yes_no "Use persistent Redis storage?" "no" "REDIS_PERSIST"
-    fi
+
 
     echo
     echo -e "${BLUE}Distributed Slicing Configuration${NC}"
@@ -1673,7 +1649,7 @@ configure_additional() {
     # Worker enablement & scaling (only meaningful if distributed slicing enabled)
     if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
         echo
-        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer and/or PrusaSlicer workers and specify replica counts.${NC}"
+        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer workers and specify replica counts.${NC}"
     # Default to 'no' to avoid accidental enabling when slicer work is paused
     prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
@@ -1683,13 +1659,9 @@ configure_additional() {
             ORCA_WORKER_COUNT=0
         fi
 
-        prompt_yes_no "Enable PrusaSlicer worker(s)?" "no" "ENABLE_PRUSA_WORKER"
-        if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
-            prompt_with_default "PrusaSlicer version to deploy:" "${PRUSASLICER_VERSION:-2.9.3}" "PRUSASLICER_VERSION"
-            prompt_with_default "Number of PrusaSlicer worker replicas:" "1" "PRUSA_WORKER_COUNT"
-        else
-            PRUSA_WORKER_COUNT=0
-        fi
+        # PrusaSlicer support removed - not ready for deployment
+        ENABLE_PRUSA_WORKER=no
+        PRUSA_WORKER_COUNT=0
 
         # Allow endpoint override (advanced) only if microservices; monolithic uses host networking and localhost
         if [ "$ARCHITECTURE" = "microservices" ]; then
@@ -1782,15 +1754,11 @@ ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
 ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
-PRUSA_WORKER_COUNT=$PRUSA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
-ENABLE_PRUSA_WORKER=$ENABLE_PRUSA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
-PRUSA_HOST_PORT=$PRUSA_HOST_PORT
 
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
-PRUSASLICER_VERSION=${PRUSASLICER_VERSION:-2.9.3}
 
 # Spoolman
 SPOOLMAN_ENABLED=$ENABLE_SPOOLMAN
@@ -1805,13 +1773,7 @@ EOF
         cat >> "$ENV_FILE" << EOF
 API_PORT=$API_PORT
 
-# Redis Configuration
-REDIS_CONNECTION=redis:6379
 EOF
-        
-        if [ "${REDIS_PERSIST:-no}" = "yes" ]; then
-            echo "REDIS_PERSISTENCE=yes" >> "$ENV_FILE"
-        fi
     fi
     
     if [ "${INCLUDE_POSTGRES:-no}" = "yes" ]; then
@@ -1985,21 +1947,7 @@ generate_host_network_override() {
 # DO NOT use with docker-compose.microservices.yml (conflicts due to network_mode)
 
 services:
-  # Redis for job queuing and worker coordination  
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    networks:
-      - printfarmer-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
 
 MAINEOF
 
@@ -2091,8 +2039,6 @@ DBEOF
     depends_on:
       database:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     restart: on-failure:5
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
@@ -2142,7 +2088,6 @@ DBEOF
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__Redis=redis:6379
       - Worker__StorageEndpoint=http://localhost:${API_PORT:-5245}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
@@ -2175,7 +2120,6 @@ DBEOF
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__Redis=redis:6379
       - Worker__StorageEndpoint=http://localhost:${API_PORT:-5245}
       - Worker__WorkingDirectory=/app/temp
       - Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
@@ -2221,7 +2165,6 @@ networks:
     driver: bridge
 
 volumes:
-  redis_data:
   postgres_data:
   sqlserver_data:
   mysql_data:
@@ -2832,16 +2775,7 @@ verify_deployment() {
         fi
     fi
     
-    if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
-        print_info "Testing PrusaSlicer worker..."
-        local prusa_url="http://localhost:${PRUSA_HOST_PORT:-8082}"
-        if curl -sf "$prusa_url/healthz" >/dev/null 2>&1; then
-            print_success "✓ PrusaSlicer worker: Healthy"
-        else
-            print_warning "✗ PrusaSlicer worker: Not responding"
-            health_check_failed=true
-        fi
-    fi
+
     
     echo
     if [ "$health_check_failed" = true ]; then
