@@ -12,26 +12,36 @@ echo "Version: $ORCASLICER_VERSION"
 
 # Build the binary layer first - this will be cached and reused
 echo "Building orcaslicer-binaries:$ORCASLICER_VERSION..."
-docker build \
-    -f Dockerfile.orcaslicer-binaries \
+ORCA_BIN_CMD=(docker build)
+if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    ORCA_BIN_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+fi
+ORCA_BIN_CMD+=( -f Dockerfile.orcaslicer-binaries \
     -t orcaslicer-binaries:$ORCASLICER_VERSION \
     -t orcaslicer-binaries:latest \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
     ${GITHUB_TOKEN:+--build-arg GITHUB_TOKEN=$GITHUB_TOKEN} \
-    .
+    .)
+
+"${ORCA_BIN_CMD[@]}"
 
 echo "✅ Binary layer built successfully!"
 echo ""
 echo "=== Building OrcaSlicer Worker (Using Cached Binaries) ==="
 
 # Now build the worker, which will use the cached binary layer
-docker build \
-    -f Dockerfile.orcaslicer \
+WORKER_CMD=(docker build)
+if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+fi
+WORKER_CMD+=( -f Dockerfile.orcaslicer \
     -t printfarmer-orcaslicer-worker \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
-    .
+    .)
+
+"${WORKER_CMD[@]}"
 
 echo "✅ OrcaSlicer worker built successfully!"
 echo ""

@@ -16,10 +16,14 @@ ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
 
 # Pre-install tooling in a separate layer for better caching
-FROM printfarmer-slicer-base AS orca-tools
+# Use the official bookworm-slim based slicer base for consistency with multistage
+# This avoids attempting to pull a non-published 'printfarmer-slicer-base' image.
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS orca-tools
 USER root
-RUN set -e; apk add --no-cache curl ca-certificates jq 2>/dev/null || (apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates jq fuse libfuse2 squashfs-tools libarchive-tools p7zip-full file && rm -rf /var/lib/apt/lists/*)
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -e; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates jq fuse libfuse2 squashfs-tools libarchive-tools p7zip-full file && rm -rf /var/lib/apt/lists/*
 
 
 ########################################
@@ -65,7 +69,7 @@ FROM orcaslicer-binaries:${ORCASLICER_VERSION} AS orcaassets
 ########################################
 # Final Runtime Stage
 ########################################
-FROM printfarmer-slicer-base AS final
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS final
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
 LABEL component="orcaslicer-worker" \

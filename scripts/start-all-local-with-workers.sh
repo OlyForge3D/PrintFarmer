@@ -602,7 +602,12 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   cd "$ROOT_DIR"
   
   # Build slicer-base first
-  docker build -f Dockerfile.slicer-base -t printfarmer/slicer-base . 
+  SLICER_CMD=(docker build)
+  if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    SLICER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+  fi
+  SLICER_CMD+=(-f Dockerfile.slicer-base -t printfarmer/slicer-base .)
+  "${SLICER_CMD[@]}"
   docker tag printfarmer/slicer-base:latest slicer-base:latest
   # Tag alternate name used by worker Dockerfiles if present
   docker tag printfarmer/slicer-base:latest printfarmer-slicer-base:latest || true
@@ -610,19 +615,29 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   # Build optimized binary layer first (cached for future builds)
   ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
   info "Building orcaslicer-binaries:${ORCA_VERSION} (cached binary layer)..."
-  docker build -f Dockerfile.orcaslicer-binaries \
+  ORCA_BIN_CMD=(docker build)
+  if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    ORCA_BIN_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+  fi
+  ORCA_BIN_CMD+=(-f Dockerfile.orcaslicer-binaries \
     -t "orcaslicer-binaries:${ORCA_VERSION}" \
     -t "orcaslicer-binaries:latest" \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
     --build-arg ALLOW_STUB=false \
     .
+  "${ORCA_BIN_CMD[@]}"
   
   # Build worker using cached binaries (fast)
   info "Building orcaslicer-worker using cached binaries..."
-  docker build -f Dockerfile.orcaslicer \
+  ORCA_WORKER_CMD=(docker build)
+  if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    ORCA_WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+  fi
+  ORCA_WORKER_CMD+=(-f Dockerfile.orcaslicer \
     -t printfarmer/orcaslicer-worker \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
-    .
+    .)
+  "${ORCA_WORKER_CMD[@]}"
 fi
 
 

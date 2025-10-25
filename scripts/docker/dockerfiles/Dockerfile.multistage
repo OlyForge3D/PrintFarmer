@@ -116,30 +116,20 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
 USER root
 WORKDIR /app
 
-# Install runtime dependencies for slicer workers
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        libssl3 \
-        libicu74 \
-        libc6 \
-        libgcc-s1 \
-        libstdc++6 \
-        zlib1g \
-        fuse \
-        squashfs-tools \
-        file \
-        p7zip-full && \
-    rm -rf /var/lib/apt/lists/*
+# Avoid interactive prompts and install a minimal, compatible set of runtime
+# dependencies. Keep the list conservative to improve cross-distro compatibility
+# (some hosts/providers may not have exact versioned package names like libicu74).
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates \
+    libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 xvfb fuse \
+    squashfs-tools file p7zip-full && rm -rf /var/lib/apt/lists/*
 
-# Create app user for security
-RUN groupadd --gid 1000 appuser && \
-    useradd --uid 1000 --gid appuser --create-home appuser
+# Create non-root user for runtime
+RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --create-home appuser
 
-# Create necessary directories
-RUN mkdir -p /app/temp /app/gcode /app/profiles && \
-    chown -R appuser:appuser /app
+# Create necessary directories and set ownership
+RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
 
 USER appuser
 

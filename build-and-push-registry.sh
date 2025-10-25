@@ -25,8 +25,11 @@ echo ""
 
 # Build binary layer
 echo "🔨 Building binary layer: orcaslicer-binaries:$ORCASLICER_VERSION"
-docker build \
-    -f Dockerfile.orcaslicer-binaries \
+ORCA_BUILD_CMD=(docker build)
+if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+fi
+ORCA_BUILD_CMD+=( -f Dockerfile.orcaslicer-binaries \
     -t "orcaslicer-binaries:$ORCASLICER_VERSION" \
     -t "orcaslicer-binaries:latest" \
     -t "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION" \
@@ -34,21 +37,28 @@ docker build \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
     ${GITHUB_TOKEN:+--build-arg GITHUB_TOKEN=$GITHUB_TOKEN} \
-    .
+    .)
+
+"${ORCA_BUILD_CMD[@]}"
 
 echo "✅ Binary layer built successfully"
 echo ""
 
 # Build worker
 echo "🔨 Building worker: printfarmer-orcaslicer-worker"
-docker build \
-    -f Dockerfile.orcaslicer \
+WORKER_CMD=(docker build)
+if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+    WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+fi
+WORKER_CMD+=( -f Dockerfile.orcaslicer \
     -t "printfarmer-orcaslicer-worker:latest" \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:latest" \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION" \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
-    .
+    .)
+
+"${WORKER_CMD[@]}"
 
 echo "✅ Worker built successfully"
 echo ""

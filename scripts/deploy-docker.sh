@@ -29,6 +29,9 @@ CLI_INCLUDE_TELEMETRY=false
 CLI_INCLUDE_SECURITY=false
 CLI_INCLUDE_REGISTRY=false
 CLI_OUTPUT_DIR=""
+# Optional explicit docker build platform (e.g. linux/amd64). Empty means use host default.
+DOCKER_BUILD_PLATFORM="${DOCKER_BUILD_PLATFORM:-}"
+
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -94,6 +97,10 @@ while [[ $# -gt 0 ]]; do
             CLI_OUTPUT_DIR="$2"
             shift 2
             ;;
+        --build-platform)
+            DOCKER_BUILD_PLATFORM="$2"
+            shift 2
+            ;;
         *)
             print_error "Unknown option: $1"
             print_info "Use --help to see available options"
@@ -116,12 +123,10 @@ if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" =
 fi
 
 # Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
 # Print colored output
 print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 print_success() { echo -e "${GREEN}✅ $1${NC}"; }
@@ -170,7 +175,7 @@ remove_version_keys() {
     fi
 }
 
-# Generate deployment configuration using the compose generator
+        
 generate_deployment_config() {
     local architecture="$1"
     local include_monitoring="${2:-false}"
@@ -2055,7 +2060,6 @@ generate_react_env_production() {
             break
         fi
     done
-
     if [ -z "$react_dir" ]; then
         print_warning "React app directory not found, skipping React environment setup"
         return 0
@@ -2459,7 +2463,12 @@ deploy_containers() {
                 BUILD_ARGS="$BUILD_ARGS --build-arg GITHUB_TOKEN=${GITHUB_TOKEN}"
             fi
             
-            if docker build -f Dockerfile.orcaslicer-binaries -t "orcaslicer-binaries:${ORCA_VERSION}" -t "orcaslicer-binaries:latest" $BUILD_ARGS .; then
+            ORCA_BUILD_CMD=(docker build)
+            if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+                ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+            fi
+            ORCA_BUILD_CMD+=(-f Dockerfile.orcaslicer-binaries -t "orcaslicer-binaries:${ORCA_VERSION}" -t "orcaslicer-binaries:latest" $BUILD_ARGS .)
+            if "${ORCA_BUILD_CMD[@]}"; then
                 print_success "orcaslicer-binaries:${ORCA_VERSION} layer built successfully (cached for future builds)"
             else
                 print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
@@ -2471,7 +2480,12 @@ deploy_containers() {
         # Build slicer-base first if workers are enabled (required dependency)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             print_info "Building printfarmer-slicer-base image (required for worker containers)..."
-            if docker build -f scripts/docker/dockerfiles/Dockerfile.slicer-base -t printfarmer-slicer-base:latest .; then
+            SLICER_BUILD_CMD=(docker build)
+            if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+                SLICER_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
+            fi
+            SLICER_BUILD_CMD+=(-f scripts/docker/dockerfiles/Dockerfile.slicer-base -t printfarmer-slicer-base:latest .)
+            if "${SLICER_BUILD_CMD[@]}"; then
                 print_success "printfarmer-slicer-base image built successfully"
             else
                 print_error "Failed to build printfarmer-slicer-base image"
@@ -2480,11 +2494,21 @@ deploy_containers() {
         fi
         
         # Now build all services
-        if "${compose_cmd[@]}" build --no-cache; then
-            print_success "Docker images built successfully"
+        # Support passing --platform to docker compose build when requested
+        if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+            if "${compose_cmd[@]}" build --no-cache --platform "${DOCKER_BUILD_PLATFORM}"; then
+                print_success "Docker images built successfully"
+            else
+                print_error "Failed to build Docker images"
+                exit 1
+            fi
         else
-            print_error "Failed to build Docker images"
-            exit 1
+            if "${compose_cmd[@]}" build --no-cache; then
+                print_success "Docker images built successfully"
+            else
+                print_error "Failed to build Docker images"
+                exit 1
+            fi
         fi
     fi
     
