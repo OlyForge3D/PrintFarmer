@@ -1101,7 +1101,7 @@ choose_architecture() {
             microservices|micro)
                 ARCHITECTURE="microservices"
                 ENV_FILE=".env.microservices"
-                COMPOSE_FILE="docker-compose.microservices.yml"
+                COMPOSE_FILE="docker-compose.yml"
                 print_success "Using CLI option: Microservices deployment"
                 return 0
                 ;;
@@ -1109,7 +1109,7 @@ choose_architecture() {
                 ARCHITECTURE="microservices"  # Host-network is a variant of microservices
                 NETWORK_MODE="host"
                 ENV_FILE=".env.microservices"
-                COMPOSE_FILE="docker-compose.host-network.yml"
+                COMPOSE_FILE="docker-compose.yml"
                 print_success "Using CLI option: Host-network deployment"
                 return 0
                 ;;
@@ -1159,7 +1159,7 @@ choose_architecture() {
         2|microservices|micro)
             ARCHITECTURE="microservices"
             ENV_FILE=".env.microservices"
-            COMPOSE_FILE="docker-compose.microservices.yml"
+            COMPOSE_FILE="docker-compose.yml"
             print_success "Selected: Microservices deployment (with multi-stage builds)"
             ;;
         *)
@@ -3182,7 +3182,13 @@ main() {
     # Determine output directory (CLI option or default to current directory)
     local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
     
-    if generate_deployment_config "$ARCHITECTURE" "$include_monitoring" "$include_telemetry" "$include_security" "$include_registry" "$output_dir"; then
+    local generator_architecture="$ARCHITECTURE"
+    if [ "$ARCHITECTURE" = "microservices" ] && [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+        generator_architecture="host-network"
+        print_info "Host network mode detected – generating host-network compose configuration"
+    fi
+
+    if generate_deployment_config "$generator_architecture" "$include_monitoring" "$include_telemetry" "$include_security" "$include_registry" "$output_dir"; then
         print_success "Using new compose generator"
     else
         print_warning "Falling back to legacy compose generation"

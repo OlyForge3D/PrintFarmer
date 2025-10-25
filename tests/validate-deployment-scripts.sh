@@ -45,9 +45,12 @@ fi
 # Test 2: Compose generator creates files with multistage dockerfile
 echo
 echo "Test 2: Compose generator creates multistage files"
-if "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture monolithic --output-dir "$TEMP_DIR" >/dev/null 2>&1; then
-    if [ -f "$TEMP_DIR/docker-compose.yml" ] && [ -f "$TEMP_DIR/Dockerfile.multistage" ]; then
-        if grep -q "dockerfile: Dockerfile.multistage" "$TEMP_DIR/docker-compose.yml"; then
+TEST2_DIR="$TEMP_DIR/test2-compose"
+rm -rf "$TEST2_DIR" 2>/dev/null || true
+mkdir -p "$TEST2_DIR"
+if "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture monolithic --output-dir "$TEST2_DIR" >/dev/null 2>&1; then
+    if [ -f "$TEST2_DIR/docker-compose.yml" ] && [ -f "$TEST2_DIR/Dockerfile.multistage" ]; then
+        if grep -q "dockerfile: Dockerfile.multistage" "$TEST2_DIR/docker-compose.yml"; then
             check_result "Compose generator creates multistage configuration"
         else
             check_result "Compose file uses multistage dockerfile" || true
@@ -85,61 +88,155 @@ else
     check_result "PrusaSlicer references removed" || true
 fi
 
-# Test 5: Deploy script dry-run completes
+# Test 5: Monolithic dry-run generates expected config
 echo
-echo "Test 5: Deploy script dry-run execution"
-cd "$TEMP_DIR"
+echo "Test 5: Monolithic dry-run generates expected config"
+MONO_DIR="$TEMP_DIR/monolith-dryrun"
+rm -rf "$MONO_DIR" 2>/dev/null || true
+mkdir -p "$MONO_DIR/Web/ReactApp"
+pushd "$MONO_DIR" >/dev/null
 cat > ".deploy-config" << 'EOF'
 ARCHITECTURE=monolithic
-DB_PROVIDER=postgres
+ENVIRONMENT=Development
+DB_PROVIDER=sqlite
+CONNECTION_STRING=Data Source=/data/farm.db
 NETWORK_MODE=bridge
-API_PORT=5245
-WEB_PORT=3000
-DISCOVERY_RANGES=192.168.0.0/16
-ENABLE_DISTRIBUTED_SLICING=true
-ORCA_WORKER_COUNT=1
-ENABLE_ORCA_WORKER=yes
+HTTP_PORT=8080
+ENABLE_DISCOVERY=yes
+ALLOW_LOCAL_NETWORK=true
+NETWORK_RANGES=192.168.0.0/16
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_DISTRIBUTED_SLICING=no
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.3.1
 EOF
 
-if timeout 30 "$REPO_ROOT/scripts/deploy-docker.sh" --dry-run --batch >/dev/null 2>&1; then
-    check_result "Deploy script dry-run completes successfully"
-else
-    check_result "Deploy script dry-run execution" || true
-fi
+if mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" --dry-run --batch 2>&1); then
+    mono_checks_pass=true
 
-# Test 6: Generated compose file has no Redis services
+    if [ ! -f ".env.monolithic" ]; then
+        mono_checks_pass=false
+        echo -e "${YELLOW}⚠️  .env.monolithic not generated${NC}"
+    elif ! grep -q 'ConnectionStrings__Default=Data Source=/data/farm.db' ".env.monolithic" 2>/dev/null; then
+        mono_checks_pass=false
+        echo -e "${YELLOW}⚠️  Monolithic connection string missing expected SQLite value${NC}"
+    fi
+
+    if [ "$mono_checks_pass" = true ]; then
+        check_result "Monolithic dry-run generates expected config"
+    else
+        check_result "Monolithic configuration validation" || true
+    fi
+else
+    echo "$mono_output"
+    check_result "Monolithic dry-run execution" || true
+fi
+popd >/dev/null
+
+# Test 6: Host-network microservices dry-run generates expected config
 echo
-echo "Test 6: Generated compose files contain no Redis services"
-if [ -f "docker-compose.yml" ]; then
-    if ! grep -qi "redis:" "docker-compose.yml" 2>/dev/null; then
-        check_result "Generated compose file contains no Redis services"
+echo "Test 6: Host-network microservices dry-run generates expected config"
+HOST_DIR="$TEMP_DIR/host-dryrun"
+rm -rf "$HOST_DIR" 2>/dev/null || true
+mkdir -p "$HOST_DIR/Web/ReactApp"
+pushd "$HOST_DIR" >/dev/null
+cat > ".deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+ENVIRONMENT=Development
+DB_PROVIDER=postgres
+POSTGRES_DB=printfarmer
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+DB_PASSWORD=postgres
+INCLUDE_POSTGRES=yes
+CONNECTION_STRING=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
+NETWORK_MODE=host
+ALLOW_LOCAL_NETWORK=true
+NETWORK_RANGES=192.168.0.0/16
+ALLOWED_NETWORK_RANGES=192.168.0.0/16
+ENABLE_DISCOVERY=yes
+HTTP_PORT=8080
+API_PORT=5245
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_DISTRIBUTED_SLICING=no
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
+ENABLE_SPOOLMAN=no
+EOF
+
+if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" --dry-run --batch 2>&1); then
+    host_checks_pass=true
+
+    if [ ! -f ".env.microservices" ]; then
+        host_checks_pass=false
+        echo -e "${YELLOW}⚠️  .env.microservices not generated${NC}"
+    elif ! grep -q 'ConnectionStrings__Default=Host=localhost;Database=printfarmer;Username=postgres;Password=postgres' ".env.microservices" 2>/dev/null; then
+        host_checks_pass=false
+        echo -e "${YELLOW}⚠️  Host-network connection string not rewritten to localhost${NC}"
+    fi
+
+    if [[ "$host_output" != *"Host network mode detected – generating host-network compose configuration"* ]]; then
+        host_checks_pass=false
+        echo -e "${YELLOW}⚠️  Host-network compose generator not triggered (log missing)${NC}"
+    fi
+
+    if [ "$host_checks_pass" = true ]; then
+        check_result "Host-network microservices dry-run generates expected config"
+    else
+        check_result "Host-network configuration validation" || true
+    fi
+else
+    echo "$host_output"
+    check_result "Host-network dry-run execution" || true
+fi
+popd >/dev/null
+
+# Test 7: Generated compose files contain no Redis services
+echo
+echo "Test 7: Generated compose files contain no Redis services"
+HOST_COMPOSE_DIR="$TEMP_DIR/host-compose"
+rm -rf "$HOST_COMPOSE_DIR" 2>/dev/null || true
+mkdir -p "$HOST_COMPOSE_DIR"
+if ! "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture host-network --output-dir "$HOST_COMPOSE_DIR" >/dev/null 2>&1; then
+    check_result "Host-network compose generation" || true
+else
+    redis_check_pass=true
+    for compose_path in "$TEST2_DIR/docker-compose.yml" "$HOST_COMPOSE_DIR/docker-compose.yml"; do
+        if [ -f "$compose_path" ] && grep -qi "redis:" "$compose_path" 2>/dev/null; then
+            redis_check_pass=false
+            echo -e "${YELLOW}⚠️  Found Redis reference in $(basename "$compose_path")${NC}"
+        fi
+    done
+    if [ "$redis_check_pass" = true ]; then
+        check_result "Generated compose files contain no Redis services"
     else
         check_result "No Redis services in generated files" || true
     fi
-else
-    echo -e "${YELLOW}⚠️  No docker-compose.yml generated, skipping check${NC}"
 fi
 
-# Test 7: Telemetry and monitoring coexistence
+# Test 8: Telemetry and monitoring coexistence
 echo
-echo "Test 7: Telemetry and monitoring coexistence"
-rm -rf "$TEMP_DIR"/* 2>/dev/null || true
+echo "Test 8: Telemetry and monitoring coexistence"
+STACK_DIR="$TEMP_DIR/telemetry"
+rm -rf "$STACK_DIR" 2>/dev/null || true
+mkdir -p "$STACK_DIR"
 if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
     --architecture microservices \
     --include-monitoring \
     --include-telemetry \
-    --output-dir "$TEMP_DIR" >/dev/null 2>&1; then
-    if [ -f "$TEMP_DIR/docker-compose.yml" ]; then
-        prometheus_count=$(grep -c 'printfarmer-prometheus' "$TEMP_DIR/docker-compose.yml" 2>/dev/null || true)
-        jaeger_count=$(grep -c 'printfarmer-jaeger' "$TEMP_DIR/docker-compose.yml" 2>/dev/null || true)
-        prometheus_line=$(grep -n 'printfarmer-prometheus' "$TEMP_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
-        networks_line=$(grep -n '^networks:' "$TEMP_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
+    --output-dir "$STACK_DIR" >/dev/null 2>&1; then
+    if [ -f "$STACK_DIR/docker-compose.yml" ]; then
+        prometheus_count=$(grep -c 'printfarmer-prometheus' "$STACK_DIR/docker-compose.yml" 2>/dev/null || true)
+        jaeger_count=$(grep -c 'printfarmer-jaeger' "$STACK_DIR/docker-compose.yml" 2>/dev/null || true)
+        prometheus_line=$(grep -n 'printfarmer-prometheus' "$STACK_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
+        networks_line=$(grep -n '^networks:' "$STACK_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
         if [ "$prometheus_count" -eq 1 ] && [ "$jaeger_count" -eq 1 ] && [ "$prometheus_line" -gt 0 ] && [ "$networks_line" -gt 0 ] && [ "$prometheus_line" -lt "$networks_line" ]; then
             check_result "Telemetry and monitoring stack merge cleanly"
             if command -v docker >/dev/null 2>&1; then
-                if ! (cd "$TEMP_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
+                if ! (cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
                     check_result "docker compose config validation" || true
                 fi
             fi
@@ -176,3 +273,4 @@ echo "• Redis services and references completely removed"
 echo "• PrusaSlicer references completely removed"
 echo "• Deployment pipeline generates valid configurations"
 echo "• Architecture options correctly show monolithic|microservices|host-network"
+echo "• Dry-run covers monolithic and host-network microservices defaults"
