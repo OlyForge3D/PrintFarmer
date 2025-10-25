@@ -11,6 +11,29 @@ TEMPLATES_DIR="$DOCKER_DIR/compose-templates"
 DOCKERFILES_DIR="$DOCKER_DIR/dockerfiles"
 CONFIGS_DIR="$DOCKER_DIR/configs"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SYSTEM_ARCH="${TARGET_ARCH:-$(uname -m)}"
+
+# Architecture capabilities
+SUPPORTS_ELASTIC_STACK=false
+if [[ -z "${ENABLE_ELASTIC_STACK:-}" ]]; then
+    case "$SYSTEM_ARCH" in
+        arm*|aarch64)
+            SUPPORTS_ELASTIC_STACK=false
+            ;;
+        *)
+            SUPPORTS_ELASTIC_STACK=false
+            ;;
+    esac
+else
+    case "${ENABLE_ELASTIC_STACK,,}" in
+        true|yes|1)
+            SUPPORTS_ELASTIC_STACK=true
+            ;;
+        false|no|0)
+            SUPPORTS_ELASTIC_STACK=false
+            ;;
+    esac
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -223,6 +246,17 @@ merge_addon_services() {
     local compose_file="$1"
     local addon_type="$2"
     local addon_template="$TEMPLATES_DIR/docker-compose.$addon_type.yml"
+
+    if [[ "$addon_type" == "monitoring" && "$SUPPORTS_ELASTIC_STACK" != "true" ]]; then
+        local lite_template="$TEMPLATES_DIR/docker-compose.monitoring.lite.yml"
+        if [[ -f "$lite_template" ]]; then
+            log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH; using lightweight monitoring template"
+            addon_template="$lite_template"
+        else
+            log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH and no lightweight monitoring template found; skipping monitoring services"
+            return 0
+        fi
+    fi
     
     if [[ ! -f "$addon_template" ]]; then
         log_error "Addon template not found: $addon_template"
