@@ -472,8 +472,11 @@ generate_compose() {
     fi
 
     if [[ -n "$compose_validate_cmd" ]]; then
-        if ! $compose_validate_cmd -f "$compose_file" config --quiet >/dev/null 2>&1; then
-            log_warning "Generated compose file may have validation issues, but continuing..."
+        local validation_output=""
+        if ! validation_output=$($compose_validate_cmd -f "$compose_file" config --quiet 2>&1); then
+            log_warning "Generated compose file failed validation via '$compose_validate_cmd config':"
+            [[ -n "$validation_output" ]] && printf '%s\n' "$validation_output" >&2
+            log_warning "Continuing despite validation failure"
         fi
     else
         log_info "Docker Compose validation skipped (command not available)"
