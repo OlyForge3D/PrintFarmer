@@ -35,8 +35,11 @@ node_modules/
 .deploy-config
 
 # Docker generated files (created by deployment script)
-docker-compose.host-network.yml
+/docker-compose*.yml
 .env.microservices
+# Keep template sources tracked
+!scripts/docker/compose-templates/
+!scripts/docker/compose-templates/**
 
 # SqlLite Database Files
 *.db
@@ -67,8 +70,8 @@ coverage-final.json
 dotnet-install.sh.*
 
 # Deploy script generated compose files
-docker-compose.override.yml
-docker-compose.host-network.yml
+/docker-compose.override.yml
+/docker-compose.host-network.yml
 
 # Local Orca extraction artifacts (should not be committed)
 orca7z/

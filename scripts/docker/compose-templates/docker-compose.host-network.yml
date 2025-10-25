@@ -1,0 +1,154 @@
+# PrintFarmer Microservices Architecture - HOST NETWORK MODE
+# Complete standalone compose file with API in host network mode
+# DO NOT use with docker-compose.microservices.yml (conflicts due to network_mode)
+
+services:
+  # Database (configured via override file - postgres/sqlserver/mysql)
+  database:
+    image: postgres:15-alpine
+    container_name: printfarmer-database
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    networks:
+      - printfarmer-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-printfarmer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PrintFarmer API - Using HOST NETWORK MODE with multi-stage build
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.multistage
+      target: api-runtime
+      args:
+        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
+    image: printfarmer-api-multistage
+    container_name: printfarmer-api
+    # HOST NETWORK MODE: Direct host network access (no ports/networks allowed)
+    network_mode: "host"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://0.0.0.0:${API_PORT:-5245}
+      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=${ConnectionStrings__Default}
+      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
+      - DOCKER_HOST_NETWORK=true
+      - NETWORK_MODE=host
+      - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
+      - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
+      - DEPLOYMENT_MODE=microservices
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
+      - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://localhost:8081}
+    volumes:
+      - app_data:/data
+      - model_uploads:/app/uploads
+      - gcode_storage:/app/gcode
+      - slicer_profiles:/app/profiles
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-5245}/healthz"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  # OrcaSlicer Binary Layer (cached layer for binary assets)
+  orcaslicer-binaries:
+    build:
+      context: .
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-binaries
+      args:
+        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
+    image: orcaslicer-binaries-multistage:${ORCASLICER_VERSION:-2.3.1}
+    profiles:
+      - orca
+      - orca-binaries
+
+  # OrcaSlicer Worker - Distributed slicing microservice with multi-stage build
+  orcaslicer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-worker
+      args:
+        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
+        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+    profiles:
+      - orca
+    image: printfarmer-orcaslicer-worker-multistage
+    container_name: printfarmer-orcaslicer-worker
+    depends_on:
+      orcaslicer-binaries:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8080"
+    networks:
+      - printfarmer-network
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - Worker__StorageEndpoint=http://localhost:${API_PORT:-5245}
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__WorkerId=orcaslicer-worker-1
+      - Worker__QueueName=orcaslicer-jobs
+      - Logging__LogLevel__Default=Information
+    volumes:
+      - orcaslicer_temp:/app/temp
+      - gcode_storage:/app/gcode
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+
+  # React Frontend with multi-stage build
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.multistage
+      target: frontend-runtime
+      args:
+        # Use relative URLs for host network deployment (routes through Nginx proxy)
+        VITE_API_BASE_URL: /api
+        VITE_SIGNALR_PRINTERS_URL: /hubs/printers
+        VITE_SIGNALR_HARVEST_URL: /hubs/harvest
+    image: printfarmer-frontend-multistage-host
+    container_name: printfarmer-frontend
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    networks:
+      - printfarmer-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  printfarmer-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  app_data:
+  model_uploads:
+  gcode_storage:
+  slicer_profiles:
+  orcaslicer_temp:
