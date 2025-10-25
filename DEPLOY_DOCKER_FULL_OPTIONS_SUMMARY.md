@@ -10,7 +10,7 @@ Successfully enhanced the `deploy-docker.sh` script to support **all** compose-g
 | Option | Compose Generator | Deploy Docker (Before) | Status |
 |--------|------------------|------------------------|--------|
 | `--dry-run` | ✅ | ✅ | Already supported |
-| `--keep-generated` | ✅ | ✅ | Already supported |
+| `--cleanup-generated` / `--keep-generated` | ✅ | ✅ | Files now kept by default; use `--cleanup-generated` to remove |
 | Architecture selection | ✅ | 🟡 Interactive only | **Now enhanced** |
 
 ### **Newly Added Support**
@@ -146,8 +146,8 @@ fi
 # Generate files in custom location
 ./scripts/deploy-docker.sh --architecture monolithic --output-dir /tmp/deploy
 
-# Keep generated files for debugging
-./scripts/deploy-docker.sh --architecture microservices --keep-generated
+# Remove generated files after deployment
+./scripts/deploy-docker.sh --architecture microservices --cleanup-generated
 ```
 
 ## 🔄 **Backward Compatibility**

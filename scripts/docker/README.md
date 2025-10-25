@@ -90,4 +90,4 @@ The deployment script handles all file management automatically:
 ./scripts/deploy-docker.sh --architecture monolithic
 ```
 
-Generated files are automatically cleaned up after deployment unless `--keep-generated` is specified.
+Generated files now stay on disk after deployment for easier troubleshooting; use `--cleanup-generated` if you want the script to remove them automatically.

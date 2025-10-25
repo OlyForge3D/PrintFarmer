@@ -41,7 +41,8 @@ OPTIONS:
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
 
     --db-provider PROVIDER  Database provider (postgres|sqlserver|mysql, default: postgres)
-    --keep-generated        Don't clean up generated files after deployment
+    --cleanup-generated     Remove generated files after deployment (default keeps them)
+    --keep-generated        Preserve generated files (default; retained for compatibility)
     --dry-run              Show what would be generated without creating files
     --help                 Show this help message
 
@@ -67,7 +68,7 @@ INCLUDE_MONITORING=false
 INCLUDE_TELEMETRY=false
 INCLUDE_SECURITY=false
 INCLUDE_REGISTRY=false
-KEEP_GENERATED=false
+KEEP_GENERATED=${KEEP_GENERATED:-true}
 DRY_RUN=false
 ENABLE_ORCA_WORKER=""
 DB_PROVIDER=""
@@ -101,6 +102,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --keep-generated)
             KEEP_GENERATED=true
+            shift
+            ;;
+        --cleanup-generated)
+            KEEP_GENERATED=false
             shift
             ;;
         --enable-orca-worker)
@@ -579,8 +584,10 @@ main() {
     log_success "Successfully generated Docker configuration for $ARCHITECTURE architecture"
     log_info "Files generated in: $OUTPUT_DIR"
     
-    if [[ "$KEEP_GENERATED" == "false" ]]; then
-        log_info "Use --keep-generated to prevent cleanup after deployment"
+    if [[ "$KEEP_GENERATED" == "true" ]]; then
+        log_info "Generated files retained; use --cleanup-generated to remove them automatically after deployment"
+    else
+        log_info "Generated files marked for cleanup after deployment"
     fi
 }
 

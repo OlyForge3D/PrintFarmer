@@ -19,6 +19,9 @@ REDEPLOY=false
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
+# Generated files are retained by default; allow env override for CI
+KEEP_GENERATED=${KEEP_GENERATED:-true}
+
 # New compose-generator option flags
 CLI_ARCHITECTURE=""
 CLI_INCLUDE_MONITORING=false
@@ -61,6 +64,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --keep-generated)
             KEEP_GENERATED=true
+            shift
+            ;;
+        --cleanup-generated)
+            KEEP_GENERATED=false
             shift
             ;;
         --architecture)
@@ -209,6 +216,10 @@ generate_deployment_config() {
     if [ "$DRY_RUN" = "true" ]; then
         generator_args+=("--dry-run")
     fi
+
+    if [ "${KEEP_GENERATED:-true}" = "false" ]; then
+        generator_args+=("--cleanup-generated")
+    fi
     
     # Check if the generator exists
     if [ ! -f "$generator_cmd" ]; then
@@ -258,11 +269,11 @@ generate_deployment_config() {
 
 # Cleanup generated deployment files
 cleanup_generated_files() {
-    if [ "${KEEP_GENERATED:-false}" = "true" ]; then
-        print_info "Keeping generated files (KEEP_GENERATED=true)"
+    if [ "${KEEP_GENERATED:-true}" = "true" ]; then
+        print_info "Keeping generated deployment files (set KEEP_GENERATED=false or use --cleanup-generated to auto-remove)"
         return 0
     fi
-    
+
     if [ -n "${GENERATED_FILES:-}" ]; then
         print_info "Cleaning up generated deployment files..."
         for file in "${GENERATED_FILES[@]}"; do
@@ -529,7 +540,8 @@ OPTIONS:
     --tear-down             Tear down existing deployment (stops containers, removes
         --teardown          volumes, cleans up). Useful for starting fresh.
         --clean             Same as --tear-down
-        --keep-generated    Keep generated Docker files after deployment (for debugging)
+        --cleanup-generated Remove generated Docker files after deployment (default keeps them)
+        --keep-generated    Preserve generated files (default; retained for compatibility)
 
 COMPOSE GENERATOR OPTIONS:
         --architecture ARCH Architecture to deploy (monolithic|microservices|host-network)

@@ -86,14 +86,14 @@ All testing successful:
 ./scripts/deploy-docker.sh --dry-run --non-interactive ✅
 # Shows: "Using new compose generator" + proper cleanup
 
-# Keep generated files works
-./scripts/deploy-docker.sh --dry-run --non-interactive --keep-generated ✅
-# Shows: "Keeping generated files (KEEP_GENERATED=true)"
+# Generated files retained by default
+./scripts/deploy-docker.sh --dry-run --non-interactive ✅
+# Shows: "Keeping generated deployment files..."
 ```
 
 ### **File Cleanup Verification**
-- **Without --keep-generated**: All files cleaned up after deployment ✅
-- **With --keep-generated**: Files preserved for debugging ✅
+- **With default settings**: Files preserved for debugging ✅
+- **With --cleanup-generated**: Files removed after deployment ✅
 
 ## Architecture Support
 
