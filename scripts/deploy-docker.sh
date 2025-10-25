@@ -321,12 +321,19 @@ run_api_diagnostics() {
         if [ -n "$conn_string" ]; then
             print_info "ConnectionStrings__Default: $conn_string"
 
-            if [ "$ARCHITECTURE" = "microservices" ] && echo "$conn_string" | grep -qiE 'host=(localhost|127\.0\.0\.1)'; then
-                print_warning "Microservices deployment detected but connection string points to localhost. Use Host=database for the in-cluster database."
+            local host_network_enabled="false"
+            if [ "${NETWORK_MODE:-bridge}" = "host" ] || ${SYSTEM_HOST_NETWORK:-false}; then
+                host_network_enabled="true"
             fi
 
-            if [ "${NETWORK_MODE:-bridge}" = "host" ] && echo "$conn_string" | grep -qiE 'host=database'; then
-                print_warning "Host networking enabled but connection string uses Docker service name. Use Host=localhost when API runs in host network mode."
+            if [ "$host_network_enabled" = "true" ]; then
+                if echo "$conn_string" | grep -qiE 'host=(database|postgres|sqlserver|mysql)'; then
+                    print_warning "Host network mode detected but connection string uses Docker service name. Use Host=localhost when the API is on the host network."
+                fi
+            else
+                if echo "$conn_string" | grep -qiE 'host=(localhost|127\.0\.0\.1)'; then
+                    print_warning "Bridge network detected but connection string points to localhost. Use the service name (e.g., Host=database)."
+                fi
             fi
         else
             print_warning "ConnectionStrings__Default not found in $ENV_FILE."
@@ -405,6 +412,11 @@ run_api_diagnostics() {
     local conn_string
     conn_string=$(get_env_value "ConnectionStrings__Default")
     if [ -n "$conn_string" ]; then
+        local host_network_enabled="false"
+        if [ "${NETWORK_MODE:-bridge}" = "host" ] || ${SYSTEM_HOST_NETWORK:-false}; then
+            host_network_enabled="true"
+        fi
+
         local db_host
         db_host=$(extract_conn_setting "Host" "$conn_string")
         if [ -z "$db_host" ]; then
@@ -414,7 +426,7 @@ run_api_diagnostics() {
             db_host=$(extract_conn_setting "Data Source" "$conn_string")
         fi
 
-        if [ -n "$db_host" ]; then
+        if [ -n "$db_host" ] && [ "$host_network_enabled" = "false" ]; then
             local api_running
             api_running=$(docker compose --env-file "$ENV_FILE" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep 'api ' || true)
             if echo "$api_running" | grep -qi 'running'; then
@@ -1935,12 +1947,12 @@ EOF
     fi
     
     if [ "${INCLUDE_POSTGRES:-no}" = "yes" ]; then
-        cat >> "$ENV_FILE" << EOF
-
-# PostgreSQL Configuration
-POSTGRES_DB=${POSTGRES_DB:-printfarmer}
-POSTGRES_USER=${POSTGRES_USER:-postgres}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-$DB_PASSWORD}
+    local react_dir="./Web/ReactApp"
+    if [ ! -d "$react_dir" ]; then
+        print_warning "React directory not found: $react_dir"
+        return 0
+    fi
+    cat > "$react_dir/.env.production" << 'EOF'
 EOF
     fi
     
@@ -1980,12 +1992,12 @@ EOF
 
 # Generate React .env.production file for Docker builds
 generate_react_env_production() {
-    local react_dir="src/Web/ReactApp"
+    local react_dir="./Web/ReactApp"
     
     if [ ! -d "$react_dir" ]; then
         print_warning "React app directory not found, skipping React environment setup"
         return 0
-    fi
+    cat > "$react_dir/.env.production" << 'EOF'
     
     print_info "Creating React production environment file"
     
