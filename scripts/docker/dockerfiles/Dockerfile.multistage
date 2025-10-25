@@ -56,7 +56,7 @@ RUN test -s /app/publish/api/Farm.Web.Api.dll && \
 ############################################################
 # API Runtime Container
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS api-runtime
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
@@ -112,7 +112,7 @@ RUN set -e; \
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS slicer-base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
 USER root
 WORKDIR /app
 
