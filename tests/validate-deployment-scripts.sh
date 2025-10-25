@@ -122,6 +122,35 @@ else
     echo -e "${YELLOW}⚠️  No docker-compose.yml generated, skipping check${NC}"
 fi
 
+# Test 7: Telemetry and monitoring coexistence
+echo
+echo "Test 7: Telemetry and monitoring coexistence"
+rm -rf "$TEMP_DIR"/* 2>/dev/null || true
+if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
+    --architecture microservices \
+    --include-monitoring \
+    --include-telemetry \
+    --output-dir "$TEMP_DIR" >/dev/null 2>&1; then
+    if [ -f "$TEMP_DIR/docker-compose.yml" ]; then
+        prometheus_count=$(grep -c 'printfarmer-prometheus' "$TEMP_DIR/docker-compose.yml" 2>/dev/null || true)
+        jaeger_count=$(grep -c 'printfarmer-jaeger' "$TEMP_DIR/docker-compose.yml" 2>/dev/null || true)
+        if [ "$prometheus_count" -eq 1 ] && [ "$jaeger_count" -eq 1 ]; then
+            check_result "Telemetry and monitoring stack merge cleanly"
+        else
+            [ "$prometheus_count" -eq 1 ] || echo -e "${YELLOW}⚠️  Expected one Prometheus definition, found $prometheus_count${NC}"
+            [ "$jaeger_count" -eq 1 ] || echo -e "${YELLOW}⚠️  Expected one Jaeger definition, found $jaeger_count${NC}"
+            false
+            check_result "Telemetry and monitoring stack merge cleanly" || true
+        fi
+    else
+        echo -e "${YELLOW}⚠️  docker-compose.yml not generated for telemetry test${NC}"
+        false
+        check_result "Telemetry and monitoring stack merge cleanly" || true
+    fi
+else
+    check_result "Compose generator execution for telemetry+monitoring" || true
+fi
+
 # Cleanup
 echo
 echo "🧹 Cleaning up test directory: $TEMP_DIR"

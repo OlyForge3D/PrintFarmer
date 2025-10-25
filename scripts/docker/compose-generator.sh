@@ -139,6 +139,14 @@ if [[ ! "$ARCHITECTURE" =~ ^(monolithic|microservices|host-network)$ ]]; then
     exit 1
 fi
 
+# Telemetry stack depends on the monitoring services (Prometheus/Grafana).
+# Auto-enable monitoring when telemetry is requested so the generated compose
+# file stays valid without duplicating service definitions.
+if [[ "$INCLUDE_TELEMETRY" == "true" && "$INCLUDE_MONITORING" != "true" ]]; then
+    log_info "Telemetry stack requested; enabling monitoring add-on automatically"
+    INCLUDE_MONITORING=true
+fi
+
 # Function to copy Dockerfiles based on architecture
 copy_dockerfiles() {
     local arch="$1"
