@@ -286,6 +286,148 @@ cleanup_generated_files() {
     fi
 }
 
+# Helper: read a value from generated environment file (if present)
+get_env_value() {
+    local key="$1"
+    [ -f "$ENV_FILE" ] || return 0
+    # shellcheck disable=SC2002
+    cat "$ENV_FILE" 2>/dev/null | grep -E "^${key}=" | tail -1 | cut -d= -f2- | tr -d '\r'
+}
+
+# Helper: extract a key from semicolon-delimited connection string (case-insensitive)
+extract_conn_setting() {
+    local target_key="$1"
+    local conn_string="$2"
+    [ -n "$conn_string" ] || return 0
+    echo "$conn_string" | tr ';' '\n' | while IFS= read -r segment; do
+        local key=$(echo "$segment" | cut -d= -f1 | tr '[:upper:]' '[:lower:]')
+        local value=$(echo "$segment" | cut -d= -f2-)
+        if [ "$key" = "$(echo "$target_key" | tr '[:upper:]' '[:lower:]')" ]; then
+            echo "$value"
+            return 0
+        fi
+    done
+}
+
+run_api_diagnostics() {
+    local title="${1:-🩺 API Diagnostics}"
+    print_header "$title"
+
+    if [ ! -f "$ENV_FILE" ]; then
+        print_warning "Environment file $ENV_FILE not found; skipping configuration diagnostics."
+    else
+        local conn_string
+        conn_string=$(get_env_value "ConnectionStrings__Default")
+        if [ -n "$conn_string" ]; then
+            print_info "ConnectionStrings__Default: $conn_string"
+
+            if [ "$ARCHITECTURE" = "microservices" ] && echo "$conn_string" | grep -qiE 'host=(localhost|127\.0\.0\.1)'; then
+                print_warning "Microservices deployment detected but connection string points to localhost. Use Host=database for the in-cluster database."
+            fi
+
+            if [ "${NETWORK_MODE:-bridge}" = "host" ] && echo "$conn_string" | grep -qiE 'host=database'; then
+                print_warning "Host networking enabled but connection string uses Docker service name. Use Host=localhost when API runs in host network mode."
+            fi
+        else
+            print_warning "ConnectionStrings__Default not found in $ENV_FILE."
+        fi
+    fi
+
+    print_info "Container status snapshot:"
+    docker compose --env-file "$ENV_FILE" ps || true
+
+    if [ "$ARCHITECTURE" = "microservices" ]; then
+        print_info "Database container status:"
+        docker compose --env-file "$ENV_FILE" ps database || true
+    fi
+
+    local provider=$(echo "${DB_PROVIDER:-postgres}" | tr '[:upper:]' '[:lower:]')
+
+    case "$provider" in
+        postgres)
+            if docker compose --env-file "$ENV_FILE" ps --services 2>/dev/null | grep -q '^database$'; then
+                local pg_user pg_db pg_password
+                pg_user=$(get_env_value "POSTGRES_USER"); pg_user=${pg_user:-postgres}
+                pg_db=$(get_env_value "POSTGRES_DB"); pg_db=${pg_db:-printfarmer}
+                pg_password=$(get_env_value "POSTGRES_PASSWORD")
+
+                if [ -n "$pg_password" ]; then
+                    print_info "PostgreSQL readiness (pg_isready):"
+                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "PGPASSWORD=\"$pg_password\" pg_isready -U \"$pg_user\" -d \"$pg_db\"" || true
+                    print_info "Sample database tables:"
+                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "PGPASSWORD=\"$pg_password\" psql -U \"$pg_user\" -d \"$pg_db\" -At -c \"SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name LIMIT 5;\"" || true
+                else
+                    print_warning "POSTGRES_PASSWORD not set; skipping Postgres connectivity diagnostics."
+                fi
+            fi
+            ;;
+        sqlserver)
+            if docker compose --env-file "$ENV_FILE" ps --services 2>/dev/null | grep -q '^database$'; then
+                local sql_password sql_db
+                sql_password=$(get_env_value "SQLSERVER_PASSWORD"); sql_password=${sql_password:-$(get_env_value "DB_PASSWORD")}
+                sql_db=$(get_env_value "SQLSERVER_DB"); sql_db=${sql_db:-printfarmer}
+
+                if [ -n "$sql_password" ]; then
+                    print_info "SQL Server ping (sqlcmd):"
+                    docker compose --env-file "$ENV_FILE" exec -T database /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$sql_password" -Q "SELECT name FROM sys.databases;" || true
+                else
+                    print_warning "SQLSERVER_PASSWORD not found; skipping SQL Server diagnostics."
+                fi
+            fi
+            ;;
+        mysql)
+            if docker compose --env-file "$ENV_FILE" ps --services 2>/dev/null | grep -q '^database$'; then
+                local mysql_user mysql_password mysql_db
+                mysql_user=$(get_env_value "MYSQL_USER"); mysql_user=${mysql_user:-root}
+                mysql_password=$(get_env_value "MYSQL_ROOT_PASSWORD")
+                if [ -z "$mysql_password" ]; then
+                    mysql_password=$(get_env_value "MYSQL_PASSWORD")
+                fi
+                mysql_db=$(get_env_value "MYSQL_DB"); mysql_db=${mysql_db:-printfarmer}
+
+                if [ -n "$mysql_password" ]; then
+                    print_info "MySQL ping (mysqladmin):"
+                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "mysqladmin ping -h 127.0.0.1 -u \"$mysql_user\" --password=\"$mysql_password\"" || true
+                    print_info "Sample database tables:"
+                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "mysql -u \"$mysql_user\" --password=\"$mysql_password\" $mysql_db -e \"SHOW TABLES;\" | head -n 10" || true
+                else
+                    print_warning "MySQL password not found; skipping MySQL diagnostics."
+                fi
+            fi
+            ;;
+        *)
+            if [ "$ARCHITECTURE" = "microservices" ]; then
+                print_warning "No diagnostics defined for DB provider '$provider'."
+            fi
+            ;;
+    esac
+
+    local conn_string
+    conn_string=$(get_env_value "ConnectionStrings__Default")
+    if [ -n "$conn_string" ]; then
+        local db_host
+        db_host=$(extract_conn_setting "Host" "$conn_string")
+        if [ -z "$db_host" ]; then
+            db_host=$(extract_conn_setting "Server" "$conn_string")
+        fi
+        if [ -z "$db_host" ]; then
+            db_host=$(extract_conn_setting "Data Source" "$conn_string")
+        fi
+
+        if [ -n "$db_host" ]; then
+            local api_running
+            api_running=$(docker compose --env-file "$ENV_FILE" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep 'api ' || true)
+            if echo "$api_running" | grep -qi 'running'; then
+                print_info "DNS reachability from API container (ping $db_host):"
+                docker compose --env-file "$ENV_FILE" exec -T api sh -c "ping -c 1 -W 1 $db_host" || true
+            fi
+        fi
+    fi
+
+    print_info "Recent API logs (last 40 lines):"
+    docker compose --env-file "$ENV_FILE" logs api --tail 40 || true
+}
+
 # Note: force_remove_matching_containers is now provided by docker-utils.sh
 # as docker_force_remove_matching_containers()
 
@@ -2609,6 +2751,7 @@ wait_for_api() {
     local fail_on_timeout=${API_FAIL_ON_TIMEOUT:-true}
 
     if [ "$fail_on_timeout" = "true" ] || [ "$fail_on_timeout" = "1" ]; then
+        run_api_diagnostics "🩺 API Startup Diagnostics"
         print_error "API did not become healthy within ${timeout}s and API_FAIL_ON_TIMEOUT is enabled. Failing deployment."
         echo
         print_info "Useful diagnostic commands to investigate the API container:"
@@ -2622,6 +2765,7 @@ wait_for_api() {
         exit 2
     fi
 
+    run_api_diagnostics "🩺 API Startup Diagnostics"
     return 1
 }
 
@@ -2740,6 +2884,7 @@ verify_deployment() {
     
     echo
     if [ "$health_check_failed" = true ]; then
+        run_api_diagnostics "🩺 API Health Diagnostics"
         print_warning "⚠️  Some health checks failed. Services may still be initializing."
         print_info "Wait a few moments and check manually:"
         print_info "  • Health: curl http://localhost:$HTTP_PORT/health | jq"
