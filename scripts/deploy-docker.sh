@@ -1946,16 +1946,6 @@ API_PORT=$API_PORT
 EOF
     fi
     
-    if [ "${INCLUDE_POSTGRES:-no}" = "yes" ]; then
-    local react_dir="./Web/ReactApp"
-    if [ ! -d "$react_dir" ]; then
-        print_warning "React directory not found: $react_dir"
-        return 0
-    fi
-    cat > "$react_dir/.env.production" << 'EOF'
-EOF
-    fi
-    
     if [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; then
         cat >> "$ENV_FILE" << EOF
 
@@ -1992,9 +1982,22 @@ EOF
 
 # Generate React .env.production file for Docker builds
 generate_react_env_production() {
-    local react_dir="./Web/ReactApp"
-    
-    if [ ! -d "$react_dir" ]; then
+    local react_dir=""
+    local candidates=(
+        "$REPO_ROOT/src/Web/ReactApp"
+        "$REPO_ROOT/Web/ReactApp"
+        "./src/Web/ReactApp"
+        "./Web/ReactApp"
+    )
+
+    for path in "${candidates[@]}"; do
+        if [ -d "$path" ]; then
+            react_dir="$path"
+            break
+        fi
+    done
+
+    if [ -z "$react_dir" ]; then
         print_warning "React app directory not found, skipping React environment setup"
         return 0
     fi

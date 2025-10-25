@@ -463,9 +463,20 @@ generate_compose() {
         log_info "Successfully merged addon services into compose file"
     fi
     
-    # Validate the generated compose file
-    if ! docker compose -f "$compose_file" config --quiet >/dev/null 2>&1; then
-        log_warning "Generated compose file may have validation issues, but continuing..."
+    # Validate the generated compose file when Docker Compose is available
+    local compose_validate_cmd=""
+    if docker compose version >/dev/null 2>&1; then
+        compose_validate_cmd="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        compose_validate_cmd="docker-compose"
+    fi
+
+    if [[ -n "$compose_validate_cmd" ]]; then
+        if ! $compose_validate_cmd -f "$compose_file" config --quiet >/dev/null 2>&1; then
+            log_warning "Generated compose file may have validation issues, but continuing..."
+        fi
+    else
+        log_info "Docker Compose validation skipped (command not available)"
     fi
     
     return 0

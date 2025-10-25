@@ -42,9 +42,35 @@ else
     check_result "Architecture options validation" || true
 fi
 
-# Test 2: Compose generator creates files with multistage dockerfile
+# Test 2: Host-network compose template is present and tracked
 echo
-echo "Test 2: Compose generator creates multistage files"
+echo "Test 2: Host-network compose template availability"
+TEMPLATE_PATH="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.host-network.yml"
+template_checks_pass=true
+
+if [ ! -f "$TEMPLATE_PATH" ]; then
+    template_checks_pass=false
+    echo -e "${YELLOW}⚠️  Host-network compose template missing at $TEMPLATE_PATH${NC}"
+fi
+
+if command -v git >/dev/null 2>&1; then
+    if git -C "$REPO_ROOT" check-ignore -q -- "scripts/docker/compose-templates/docker-compose.host-network.yml"; then
+        template_checks_pass=false
+        echo -e "${YELLOW}⚠️  Host-network compose template is ignored by git${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️  git not available; skipping tracked-status validation${NC}"
+fi
+
+if [ "$template_checks_pass" = true ]; then
+    check_result "Host-network compose template available and tracked"
+else
+    check_result "Host-network compose template availability" || true
+fi
+
+# Test 3: Compose generator creates files with multistage dockerfile
+echo
+echo "Test 3: Compose generator creates multistage files"
 TEST2_DIR="$TEMP_DIR/test2-compose"
 rm -rf "$TEST2_DIR" 2>/dev/null || true
 mkdir -p "$TEST2_DIR"
@@ -62,9 +88,9 @@ else
     check_result "Compose generator execution" || true
 fi
 
-# Test 3: No Redis references in generated files
+# Test 4: No Redis references in generated files
 echo
-echo "Test 3: Redis references removed from templates"
+echo "Test 4: Redis references removed from templates"
 redis_found=false
 for template in "$REPO_ROOT/scripts/docker/compose-templates"/*.yml; do
     if grep -qi "redis" "$template" 2>/dev/null; then
@@ -79,21 +105,21 @@ else
     check_result "Redis references removed" || true
 fi
 
-# Test 4: No PrusaSlicer references in deploy script
+# Test 5: No PrusaSlicer references in deploy script
 echo
-echo "Test 4: PrusaSlicer references removed from deploy script"
+echo "Test 5: PrusaSlicer references removed from deploy script"
 if ! grep -qi "prusa" "$REPO_ROOT/scripts/deploy-docker.sh" 2>/dev/null; then
     check_result "No PrusaSlicer references in deploy script"
 else
     check_result "PrusaSlicer references removed" || true
 fi
 
-# Test 5: Monolithic dry-run generates expected config
+# Test 6: Monolithic dry-run generates expected config
 echo
-echo "Test 5: Monolithic dry-run generates expected config"
+echo "Test 6: Monolithic dry-run generates expected config"
 MONO_DIR="$TEMP_DIR/monolith-dryrun"
 rm -rf "$MONO_DIR" 2>/dev/null || true
-mkdir -p "$MONO_DIR/Web/ReactApp"
+mkdir -p "$MONO_DIR/src/Web/ReactApp"
 pushd "$MONO_DIR" >/dev/null
 cat > ".deploy-config" << 'EOF'
 ARCHITECTURE=monolithic
@@ -135,12 +161,12 @@ else
 fi
 popd >/dev/null
 
-# Test 6: Host-network microservices dry-run generates expected config
+# Test 7: Host-network microservices dry-run generates expected config
 echo
-echo "Test 6: Host-network microservices dry-run generates expected config"
+echo "Test 7: Host-network microservices dry-run generates expected config"
 HOST_DIR="$TEMP_DIR/host-dryrun"
 rm -rf "$HOST_DIR" 2>/dev/null || true
-mkdir -p "$HOST_DIR/Web/ReactApp"
+mkdir -p "$HOST_DIR/src/Web/ReactApp"
 pushd "$HOST_DIR" >/dev/null
 cat > ".deploy-config" << 'EOF'
 ARCHITECTURE=microservices
@@ -178,6 +204,12 @@ if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.s
         echo -e "${YELLOW}⚠️  Host-network connection string not rewritten to localhost${NC}"
     fi
 
+    react_env_path="$HOST_DIR/src/Web/ReactApp/.env.production"
+    if [ ! -f "$react_env_path" ]; then
+        host_checks_pass=false
+        echo -e "${YELLOW}⚠️  React production .env not generated at $react_env_path${NC}"
+    fi
+
     if [[ "$host_output" != *"Host network mode detected – generating host-network compose configuration"* ]]; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  Host-network compose generator not triggered (log missing)${NC}"
@@ -194,9 +226,9 @@ else
 fi
 popd >/dev/null
 
-# Test 7: Generated compose files contain no Redis services
+# Test 8: Generated compose files contain no Redis services
 echo
-echo "Test 7: Generated compose files contain no Redis services"
+echo "Test 8: Generated compose files contain no Redis services"
 HOST_COMPOSE_DIR="$TEMP_DIR/host-compose"
 rm -rf "$HOST_COMPOSE_DIR" 2>/dev/null || true
 mkdir -p "$HOST_COMPOSE_DIR"
@@ -217,9 +249,9 @@ else
     fi
 fi
 
-# Test 8: Telemetry and monitoring coexistence
+# Test 9: Telemetry and monitoring coexistence
 echo
-echo "Test 8: Telemetry and monitoring coexistence"
+echo "Test 9: Telemetry and monitoring coexistence"
 STACK_DIR="$TEMP_DIR/telemetry"
 rm -rf "$STACK_DIR" 2>/dev/null || true
 mkdir -p "$STACK_DIR"
