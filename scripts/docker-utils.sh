@@ -47,8 +47,6 @@ declare -a PRINTFARMER_PATTERNS=(
     "printfarmer"
     "pfarm"
     "orcaslicer"
-    "prusaslicer"
-    "redis"
     "postgres" 
     "mysql"
     "mcr.microsoft.com/mssql"
@@ -63,7 +61,6 @@ declare -a KNOWN_PROBLEMATIC_CONTAINERS=(
     "pfarm-postgres-1"
     "pfarm-api-1"
     "pfarm-frontend-1"
-    "pfarm-redis-1"
 )
 
 # Standardized PrintFarmer container names
@@ -74,9 +71,7 @@ declare -a PRINTFARMER_CONTAINERS=(
     "printfarmer-database-mysql"
     "printfarmer-api"
     "printfarmer-frontend"
-    "printfarmer-redis"
     "printfarmer-orcaslicer-worker"
-    "printfarmer-prusaslicer-worker"
     "printfarmer-nginx-proxy"
 )
 

@@ -7,6 +7,7 @@ set -euo pipefail
 
 # Source shared Docker utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/docker-utils.sh"
 
 # Default flags
@@ -1671,10 +1672,6 @@ configure_additional() {
             ORCA_WORKER_COUNT=0
         fi
 
-        # PrusaSlicer support removed - not ready for deployment
-        ENABLE_PRUSA_WORKER=no
-        PRUSA_WORKER_COUNT=0
-
         # Allow endpoint override (advanced) only if microservices; monolithic uses host networking and localhost
         if [ "$ARCHITECTURE" = "microservices" ]; then
             prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
@@ -1682,16 +1679,11 @@ configure_additional() {
                 if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
                     prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
                 fi
-                if [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
-                    prompt_with_default "PrusaSlicer worker endpoint (API reachable URL):" "http://prusaslicer-worker:8080" "PRUSA_WORKER_ENDPOINT"
-                fi
             fi
         fi
     else
         ENABLE_ORCA_WORKER=no
-        ENABLE_PRUSA_WORKER=no
         ORCA_WORKER_COUNT=0
-        PRUSA_WORKER_COUNT=0
     fi
 
     echo
@@ -2058,7 +2050,6 @@ DBEOF
       - API_URL=http://localhost:${API_PORT:-5245}
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
       - ConnectionStrings__Default=${ConnectionStrings__Default}
-      - ConnectionStrings__Redis=localhost:6379
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
       - DOCKER_HOST_NETWORK=true
       - NETWORK_MODE=host
@@ -2069,7 +2060,6 @@ DBEOF
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://localhost:8081}
-      - SlicerOrchestrator__Workers__PrusaSlicer=${PRUSA_WORKER_ENDPOINT:-http://localhost:8082}
       - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
@@ -2116,39 +2106,6 @@ DBEOF
       retries: 3
       start_period: 90s
 
-  # PrusaSlicer Worker - Distributed slicing microservice
-  prusaslicer-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.prusaslicer
-    profiles:
-      - prusa
-    image: printfarmer-prusaslicer-worker
-    restart: unless-stopped
-    ports:
-      - "8082:8080"
-    networks:
-      - printfarmer-network
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - Worker__StorageEndpoint=http://localhost:${API_PORT:-5245}
-      - Worker__WorkingDirectory=/app/temp
-      - Worker__PrusaSlicerPath=/usr/local/bin/prusa-slicer
-      - Worker__WorkerId=prusaslicer-worker-1
-      - Worker__QueueName=prusaslicer-jobs
-      - Logging__LogLevel__Default=Information
-      - Logging__LogLevel__Farm.PrusaSlicer.Worker=Debug
-    volumes:
-      - prusaslicer_temp:/app/temp
-      - gcode_storage:/app/gcode
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-
   # React Frontend
   frontend:
     build:
@@ -2185,14 +2142,13 @@ volumes:
   gcode_storage:
   slicer_profiles:
   orcaslicer_temp:
-  prusaslicer_temp:
 RESTEOF
         
         print_success "Host network compose file created: docker-compose.host-network.yml"
         # Ensure no top-level `version:` key remains in generated host-network file
         remove_version_keys "docker-compose.host-network.yml"
         print_warning "API will bind directly to host port ${API_PORT:-5245}"
-        print_warning "Database and Redis accessible on localhost (host networking)"
+    print_warning "Database accessible on localhost (host networking)"
         print_info "Workers and frontend use bridge network, API uses host network"
         print_info "This file is standalone - do NOT combine with docker-compose.microservices.yml"
     fi
@@ -2225,12 +2181,9 @@ deploy_containers() {
         # ORCA_ASSET_IMAGE  -> name of a prebuilt assets image (registry or local)
         # ORCA_ASSET_PATH   -> local path containing extracted orcaslicer files (orca7z/ or orcaslicer-dist/)
         # ORCA_ASSET_URL    -> URL to download an asset (handled as needed)
-        # PRUSA_PRESEED_PATH/URL/IMAGE similar for Prusa
         ORCA_ASSET_IMAGE=${ORCA_ASSET_IMAGE:-}
         ORCA_ASSET_PATH=${ORCA_ASSET_PATH:-}
         ORCA_ASSET_URL=${ORCA_ASSET_URL:-}
-        PRUSA_PRESEED_PATH=${PRUSA_PRESEED_PATH:-}
-        PRUSA_PRESEED_URL=${PRUSA_PRESEED_URL:-}
 
         # Prepare a temporary build_context folder that will be used by docker compose build
         BUILD_CTX_DIR="./.tmp_build_context"
@@ -2256,16 +2209,7 @@ deploy_containers() {
             # Extraction logic could be added here depending on asset type
         fi
 
-        # Copy prusa preseed artifact into build context if provided
-        if [ -n "$PRUSA_PRESEED_PATH" ] && [ -d "$PRUSA_PRESEED_PATH" ]; then
-            print_info "Copying Prusa preseed from $PRUSA_PRESEED_PATH into temporary build context"
-            rm -rf "$BUILD_CTX_DIR/prusa" || true
-            mkdir -p "$BUILD_CTX_DIR/prusa"
-            cp -a "$PRUSA_PRESEED_PATH"/. "$BUILD_CTX_DIR/prusa/"
-        elif [ -n "$PRUSA_PRESEED_URL" ]; then
-            print_info "Downloading Prusa preseed from $PRUSA_PRESEED_URL into temporary build context"
-            mkdir -p "$BUILD_CTX_DIR/prusa" && curl -fsSL "$PRUSA_PRESEED_URL" -o "$BUILD_CTX_DIR/prusa/prusa_artifact" || print_warning "Download failed"
-        fi
+
 
         # If we prepared files into .tmp_build_context, make them available to docker-compose by copying into repo root under build_context/
         if [ -d "$BUILD_CTX_DIR" ]; then
@@ -2297,9 +2241,9 @@ deploy_containers() {
         fi
 
         # Build slicer-base first if workers are enabled (required dependency)
-        if [ "$ENABLE_ORCA_WORKER" = "yes" ] || [ "$ENABLE_PRUSA_WORKER" = "yes" ]; then
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             print_info "Building printfarmer-slicer-base image (required for worker containers)..."
-            if docker build -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .; then
+            if docker build -f scripts/docker/dockerfiles/Dockerfile.slicer-base -t printfarmer-slicer-base:latest .; then
                 print_success "printfarmer-slicer-base image built successfully"
             else
                 print_error "Failed to build printfarmer-slicer-base image"
@@ -2326,19 +2270,16 @@ deploy_containers() {
     if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
         final_compose_cmd+=(--profile orca)
     fi
-    if [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 0 ]; then
-        final_compose_cmd+=(--profile prusa)
-    fi
 
     # Bring up services
     if [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: not starting containers."
         print_info "Would run: ${final_compose_cmd[*]} up -d"
     else
-        # If microservices architecture, start DB and Redis first to speed up readiness
+        # If microservices architecture, start the database first to speed up readiness
         if [ "$ARCHITECTURE" = "microservices" ]; then
-            print_info "Bringing up database and redis services first to speed readiness"
-            # Attempt to start postgres/mysql/sqlserver and redis only
+            print_info "Bringing up database service first to speed readiness"
+            # Attempt to start postgres/mysql/sqlserver only
             local seed_cmd=("")
             # Build a minimal compose command for core infra
             local infra_compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
@@ -2347,7 +2288,7 @@ deploy_containers() {
             fi
 
             # Decide which services to start
-            local infra_services=(redis database)
+            local infra_services=(database)
             # Note: Using generic 'database' service name that supports multiple providers via environment variables
 
             # Run infra services up
@@ -2401,7 +2342,7 @@ deploy_containers() {
             fi
 
             if "${infra_compose[@]}" up -d ${remove_orphans_flag} "${infra_services[@]}"; then
-                print_success "Core infra (DB, Redis) started"
+                print_success "Database service started"
             else
                 print_warning "Failed to start infra services - continuing to full bring-up"
             fi
@@ -2455,10 +2396,6 @@ deploy_containers() {
     if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
         print_info "Scaling OrcaSlicer workers to $ORCA_WORKER_COUNT replicas"
         "${final_compose_cmd[@]}" up -d --scale orcaslicer-worker="$ORCA_WORKER_COUNT"
-    fi
-    if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_PRUSA_WORKER" = "yes" ] && [ "$PRUSA_WORKER_COUNT" -gt 1 ]; then
-        print_info "Scaling PrusaSlicer workers to $PRUSA_WORKER_COUNT replicas"
-        "${final_compose_cmd[@]}" up -d --scale prusaslicer-worker="$PRUSA_WORKER_COUNT"
     fi
     
     if [ "$DRY_RUN" = "true" ]; then
@@ -2647,7 +2584,7 @@ wait_for_api() {
 
         if [ $((elapsed % 15)) -eq 0 ]; then
             print_info "Still waiting for API to be healthy... ($elapsed/$timeout seconds)"
-            docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer|prusaslicer" || true
+            docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer" || true
         fi
 
         sleep $interval
@@ -2885,7 +2822,6 @@ display_final_info() {
     echo -e "${BLUE}  • Enabled: $ENABLE_DISTRIBUTED_SLICING${NC}"
     if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
         echo -e "${BLUE}  • Orca Workers: $ORCA_WORKER_COUNT (enabled: $ENABLE_ORCA_WORKER)${NC}"
-        echo -e "${BLUE}  • Prusa Workers: $PRUSA_WORKER_COUNT (enabled: $ENABLE_PRUSA_WORKER)${NC}"
     fi
     
     echo -e "${GREEN}Configuration Files:${NC}"
@@ -3025,12 +2961,17 @@ main() {
     print_info "You'll be prompted for configuration with sensible defaults provided."
     echo
     
-    # Check if we're in the right directory
-    # We now generate docker-compose.yml dynamically, so only check for global.json and docker templates
-    if [ ! -f "global.json" ] || [ ! -d "scripts/docker" ]; then
-        print_error "Please run this script from the PrintFarmer root directory"
-        print_info "Expected files: global.json, scripts/docker/ directory"
+    # Verify repository assets are available even when executed outside repo root
+    if [ ! -f "$REPO_ROOT/global.json" ] || [ ! -d "$REPO_ROOT/scripts/docker" ]; then
+        print_error "Required repository assets not found"
+        print_info "Expected files: $REPO_ROOT/global.json and $REPO_ROOT/scripts/docker/"
         exit 1
+    fi
+
+    # Inform user when running from a directory other than the repository root
+    if [ "$(pwd)" != "$REPO_ROOT" ]; then
+        print_info "Detected repository root at $REPO_ROOT"
+        print_info "Running from $(pwd); generated deployment files will be created here"
     fi
     
     # Load previous configuration if available (sets defaults for interactive mode)
