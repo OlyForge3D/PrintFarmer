@@ -35,7 +35,7 @@ namespace Farm.Web.Api.Services.Artifacts
 
                 s_storageTotalBytes = s_meter.CreateObservableGauge<long>("printfarmer.artifacts.storage_total_bytes", ObserveStorageBytes, unit: "bytes", description: "Approximate total size of stored artifacts (global)");
                 s_storageThresholdState = s_meter.CreateObservableGauge<int>("printfarmer.artifacts.storage_threshold_state", ObserveThresholdState, description: "Storage threshold state: 0=normal, 1=warning, 2=critical");
-                
+
             }
             catch
             {

@@ -219,7 +219,7 @@ public class EfSliceJobRepository : ISliceJobRepository
             var candidates = await baseQuery.Take(50).ToListAsync(ct);
             job = candidates.FirstOrDefault(j =>
                 string.IsNullOrEmpty(j.RequiredCapabilitiesJson) || j.RequiredCapabilitiesJson == "[]" ||
-                capabilities.Any(cap => j.RequiredCapabilitiesJson!.IndexOf($"\"{cap}\"", StringComparison.OrdinalIgnoreCase) >= 0));
+                capabilities.Any(cap => j.RequiredCapabilitiesJson.Contains($"\"{cap}\"", StringComparison.OrdinalIgnoreCase)));
             if (job == null)
             {
                 return null; // no matching job

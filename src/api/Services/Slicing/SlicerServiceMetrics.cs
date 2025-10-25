@@ -342,7 +342,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         {
             return;
         }
-        
+
         _meter.Dispose();
         _disposed = true;
     }

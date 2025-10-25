@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Services.Email;
 public sealed class MailjetEmailService : IEmailService, IDisposable
 {
     private const string MailjetApiBaseUrl = "https://api.mailjet.com/v3.1/send";
-    
+
     private readonly IUnifiedLoggingService _logger;
     private readonly EmailOptions _options;
     private readonly IEmailTemplateRenderer _renderer;

@@ -36,29 +36,29 @@ public class JobDispatcherService : IJobDispatcherService
     private readonly ISliceJobEventService _eventService;
     private readonly IUnifiedLoggingService _logger;
     private readonly IHttpClientFactory _httpClientFactory;
-        private readonly RetryOptions _retryOptions;
-    
+    private readonly RetryOptions _retryOptions;
+
     private static volatile int _lastAvailableWorkers;
     private static readonly System.Diagnostics.Metrics.Meter _meter = new("PrintFarmer.Slicing", "1.0.0");
     private static readonly System.Diagnostics.Metrics.Counter<int> _jobsDispatched = _meter.CreateCounter<int>("slicing_jobs_dispatched");
     private static readonly System.Diagnostics.Metrics.Counter<int> _jobsDispatchFailed = _meter.CreateCounter<int>("slicing_jobs_dispatch_failed");
     private static readonly System.Diagnostics.Metrics.Histogram<double> _dispatchDurationMs = _meter.CreateHistogram<double>("slicing_job_dispatch_duration_ms", unit: "ms", description: "Duration of job dispatch attempts");
-    private static readonly System.Diagnostics.Metrics.ObservableGauge<int> _availableWorkersGauge = _meter.CreateObservableGauge("slicing_available_workers", () => new System.Diagnostics.Metrics.Measurement<int>(_lastAvailableWorkers));
+    //private static readonly System.Diagnostics.Metrics.ObservableGauge<int> _availableWorkersGauge = _meter.CreateObservableGauge("slicing_available_workers", () => new System.Diagnostics.Metrics.Measurement<int>(_lastAvailableWorkers));
 
     public JobDispatcherService(
         ISliceJobRepository jobRepository,
         IWorkerRepository workerRepository,
         ISliceJobEventService eventService,
         IUnifiedLoggingService logger,
-            IHttpClientFactory httpClientFactory,
-            RetryOptions retryOptions)
+        IHttpClientFactory httpClientFactory,
+        RetryOptions retryOptions)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-            _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
+        _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
     }
 
     public async Task<bool> DispatchNextJobAsync(CancellationToken cancellationToken = default)
@@ -293,9 +293,9 @@ public class JobDispatcherService : IJobDispatcherService
 
     private async Task<bool> SendJobToWorkerAsync(Worker worker, SliceJob job, CancellationToken cancellationToken)
     {
-           int maxAttempts = _retryOptions.MaxAttempts;
-           int baseDelayMs = _retryOptions.BaseDelayMs;
-           double multiplier = _retryOptions.Multiplier;
+        int maxAttempts = _retryOptions.MaxAttempts;
+        int baseDelayMs = _retryOptions.BaseDelayMs;
+        double multiplier = _retryOptions.Multiplier;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -328,10 +328,10 @@ public class JobDispatcherService : IJobDispatcherService
                     // Transient error - retry
                     string error = await response.Content.ReadAsStringAsync(cancellationToken);
                     _logger.LogWarning($"Transient error from worker {worker.Id} for job {job.Id} (attempt {attempt}/{maxAttempts}): {response.StatusCode} - {error}");
-                    
+
                     if (attempt < maxAttempts)
                     {
-                            int delayMs = (int)(baseDelayMs * Math.Pow(multiplier, attempt - 1));
+                        int delayMs = (int)(baseDelayMs * Math.Pow(multiplier, attempt - 1));
                         await Task.Delay(delayMs, cancellationToken);
                         continue;
                     }
@@ -350,7 +350,7 @@ public class JobDispatcherService : IJobDispatcherService
                 _logger.LogWarning($"HTTP error sending job {job.Id} to worker {worker.Id} (attempt {attempt}/{maxAttempts}): {ex.Message}");
                 if (attempt < maxAttempts)
                 {
-                        int delayMs = (int)(baseDelayMs * Math.Pow(multiplier, attempt - 1));
+                    int delayMs = (int)(baseDelayMs * Math.Pow(multiplier, attempt - 1));
                     await Task.Delay(delayMs, cancellationToken);
                     continue;
                 }
