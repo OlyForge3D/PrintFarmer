@@ -229,7 +229,9 @@ generate_deployment_config() {
     fi
     
     # Run the generator
-    if "$generator_cmd" "${generator_args[@]}"; then
+    local elastic_env_value="${ENABLE_ELASTIC_STACK:-false}"
+
+    if ENABLE_ELASTIC_STACK="$elastic_env_value" "$generator_cmd" "${generator_args[@]}"; then
         print_success "Deployment configuration generated successfully"
         
         # Set the compose file path for the rest of the deployment script
@@ -1756,6 +1758,11 @@ configure_additional() {
     INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
     INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
     INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
+    ENABLE_ELASTIC_STACK=${ENABLE_ELASTIC_STACK:-}
+    local elastic_stack_from_env=""
+    if [ -n "$ENABLE_ELASTIC_STACK" ]; then
+        elastic_stack_from_env="true"
+    fi
     
     prompt_with_default "Environment [Development/Production]:" "Development" "ENVIRONMENT"
     
@@ -1782,6 +1789,58 @@ configure_additional() {
     else
         print_info "Monitoring stack enabled via CLI flag"
         INCLUDE_MONITORING="true"
+    fi
+
+    if [ "$INCLUDE_MONITORING" = "true" ]; then
+        local system_arch
+        system_arch=$(uname -m 2>/dev/null || echo "unknown")
+        local elastic_supported="true"
+        case "$system_arch" in
+            arm*|aarch64)
+                elastic_supported="false"
+                ;;
+        esac
+
+        local normalized_elastic=""
+        if [ -n "$ENABLE_ELASTIC_STACK" ]; then
+            normalized_elastic=$(printf '%s' "$ENABLE_ELASTIC_STACK" | tr '[:upper:]' '[:lower:]')
+        fi
+
+        if [ "$elastic_supported" != "true" ]; then
+            if [[ "$normalized_elastic" =~ ^(true|yes|1)$ ]]; then
+                print_warning "Elastic Stack is not supported on architecture $system_arch; ignoring ENABLE_ELASTIC_STACK request"
+            fi
+            ENABLE_ELASTIC_STACK="false"
+            print_info "Elastic Stack not available on architecture $system_arch; monitoring will include Prometheus and Grafana only"
+        else
+            if [[ "$normalized_elastic" =~ ^(true|yes|1)$ ]]; then
+                ENABLE_ELASTIC_STACK="true"
+                print_info "Elastic Stack enabled via ENABLE_ELASTIC_STACK environment configuration"
+            elif [[ "$normalized_elastic" =~ ^(false|no|0)$ ]]; then
+                ENABLE_ELASTIC_STACK="false"
+                if [ "$elastic_stack_from_env" = "true" ]; then
+                    print_info "Elastic Stack disabled via ENABLE_ELASTIC_STACK environment configuration"
+                fi
+            elif [ "$NON_INTERACTIVE" = "true" ] || [ "$CLI_INCLUDE_MONITORING" = "true" ]; then
+                ENABLE_ELASTIC_STACK="false"
+            else
+                echo
+                echo -e "${BLUE}Monitoring Stack Options${NC}"
+                echo "  1. Prometheus + Grafana (lightweight, recommended)"
+                echo "  2. Prometheus + Grafana + Elastic Stack (adds Elasticsearch, Logstash, Kibana)"
+                prompt_with_default "Select monitoring stack option [1-2]:" "1" "MONITORING_STACK_MODE"
+                case "$MONITORING_STACK_MODE" in
+                    2|elastic|Elastic)
+                        ENABLE_ELASTIC_STACK="true"
+                        ;;
+                    *)
+                        ENABLE_ELASTIC_STACK="false"
+                        ;;
+                esac
+            fi
+        fi
+    else
+        ENABLE_ELASTIC_STACK="false"
     fi
     
     if [ "$CLI_INCLUDE_TELEMETRY" = "false" ]; then

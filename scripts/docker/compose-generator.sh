@@ -13,26 +13,34 @@ CONFIGS_DIR="$DOCKER_DIR/configs"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SYSTEM_ARCH="${TARGET_ARCH:-$(uname -m)}"
 
-# Architecture capabilities
+# Elastic Stack capabilities (disabled by default)
 SUPPORTS_ELASTIC_STACK=false
+ELASTIC_STACK_REASON="disabled by default"
+
 if [[ -z "${ENABLE_ELASTIC_STACK:-}" ]]; then
     case "$SYSTEM_ARCH" in
         arm*|aarch64)
-            SUPPORTS_ELASTIC_STACK=false
+            ELASTIC_STACK_REASON="not supported on architecture $SYSTEM_ARCH"
             ;;
         *)
-            SUPPORTS_ELASTIC_STACK=false
+            ELASTIC_STACK_REASON="disabled by default"
             ;;
     esac
 else
-    case "${ENABLE_ELASTIC_STACK,,}" in
+    _elastic_stack_lower=$(printf '%s' "$ENABLE_ELASTIC_STACK" | tr '[:upper:]' '[:lower:]')
+    case "$_elastic_stack_lower" in
         true|yes|1)
             SUPPORTS_ELASTIC_STACK=true
+            ELASTIC_STACK_REASON=""
             ;;
         false|no|0)
-            SUPPORTS_ELASTIC_STACK=false
+            ELASTIC_STACK_REASON="explicitly disabled via ENABLE_ELASTIC_STACK=${ENABLE_ELASTIC_STACK}"
+            ;;
+        *)
+            ELASTIC_STACK_REASON="disabled (unrecognized ENABLE_ELASTIC_STACK value '${ENABLE_ELASTIC_STACK}')"
             ;;
     esac
+    unset _elastic_stack_lower
 fi
 
 # Colors for output
@@ -250,7 +258,12 @@ merge_addon_services() {
     if [[ "$addon_type" == "monitoring" && "$SUPPORTS_ELASTIC_STACK" != "true" ]]; then
         local lite_template="$TEMPLATES_DIR/docker-compose.monitoring.lite.yml"
         if [[ -f "$lite_template" ]]; then
-            log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH; using lightweight monitoring template"
+            local reason_message="${ELASTIC_STACK_REASON:-disabled}"
+            if [[ "$reason_message" == "not supported on architecture $SYSTEM_ARCH" ]]; then
+                log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH; using lightweight monitoring template"
+            else
+                log_info "Elastic Stack ${reason_message}; using lightweight monitoring template (set ENABLE_ELASTIC_STACK=true to enable Elasticsearch/Kibana/Logstash)"
+            fi
             addon_template="$lite_template"
         else
             log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH and no lightweight monitoring template found; skipping monitoring services"
