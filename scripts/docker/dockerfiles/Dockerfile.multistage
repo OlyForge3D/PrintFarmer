@@ -194,8 +194,8 @@ WORKDIR /app
 # Copy package files
 COPY src/Web/ReactApp/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (include dev deps so TypeScript compiler is available)
+RUN npm ci
 
 # Copy source code and build
 COPY src/Web/ReactApp/ ./
