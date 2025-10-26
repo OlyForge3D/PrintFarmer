@@ -339,7 +339,7 @@ test_all_database_providers() {
             "sqlserver")
                 assert_contains "$compose_content" "database:" "Should include database service"
                 assert_contains "$compose_content" "image: mcr.microsoft.com/mssql/server:" "Should use SQL Server image"
-                assert_contains "$compose_content" "SA_PASSWORD" "Should configure SQL Server password"
+                assert_contains "$compose_content" "MSSQL_SA_PASSWORD" "Should configure SQL Server password"
                 assert_contains "$compose_content" "database_data:" "Should have database volume"
                 ;;
             "mysql")
@@ -364,6 +364,33 @@ test_all_database_providers() {
         assert_not_contains "$compose_content" "redis_data:" "Should not contain Redis volume for $provider"
     done
     
+    pass_test
+}
+
+# Regression test: ensure generated .env / compose for sqlserver does not contain other providers' passwords
+test_provider_only_env_sqlserver() {
+    start_test "provider-only env emission for sqlserver"
+
+    local temp_dir="$TEST_TEMP_DIR/test-sqlserver-env"
+    mkdir -p "$temp_dir"
+
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider sqlserver --output-dir $temp_dir"
+    assert_file_exists "$temp_dir/docker-compose.yml"
+
+    # The composer writes variable references into the compose file; ensure only MSSQL/SQLSERVER vars are present
+    local compose_content=$(cat "$temp_dir/docker-compose.yml")
+
+    # Must contain SQL Server password variable
+    assert_contains "$compose_content" "MSSQL_SA_PASSWORD" "Should include MSSQL_SA_PASSWORD for SQL Server"
+
+    # Must not contain other providers' secret variables
+    assert_not_contains "$compose_content" "POSTGRES_PASSWORD" "Should not include Postgres password when sqlserver is selected"
+    assert_not_contains "$compose_content" "MYSQL_PASSWORD" "Should not include MySQL password when sqlserver is selected"
+
+    # Ensure ConnectionStrings__Default is present and points to a sqlserver-like DSN (mssql/sqlserver)
+    assert_contains "$compose_content" "ConnectionStrings__Default" "Should include default connection string"
+    assert_contains "$compose_content" "mssql" "Connection string should reference mssql or sqlserver scheme"
+
     pass_test
 }
 

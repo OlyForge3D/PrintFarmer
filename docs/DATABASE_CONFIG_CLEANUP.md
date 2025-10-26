@@ -17,7 +17,7 @@ Previously, all Docker Compose templates contained mixed environment variables f
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       ACCEPT_EULA: "Y"  # SQL Server specific
-      SA_PASSWORD: ${SA_PASSWORD:-YourStrong@Passw0rd}  # SQL Server specific
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong@Passw0rd}  # SQL Server specific
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}  # MySQL specific
       MYSQL_DATABASE: ${MYSQL_DATABASE:-farm}  # MySQL specific
     # ... hardcoded PostgreSQL health checks and volumes
@@ -69,9 +69,10 @@ Each database provider has its own template with appropriate:
    - Environment: `POSTGRES_*` variables
 
 2. **SQL Server** (`sqlserver`)
-   - Image: `mcr.microsoft.com/mssql/server:2022-latest`
-   - Port: 1433
-   - Environment: `SA_PASSWORD`, `ACCEPT_EULA`, `MSSQL_PID`
+  - Image: `mcr.microsoft.com/mssql/server:2022-latest`
+  - Port: 1433
+  - Environment: `MSSQL_SA_PASSWORD`, `ACCEPT_EULA`, `MSSQL_PID`
+  - Note: The deploy script will automatically generate a strong `MSSQL_SA_PASSWORD` if you do not provide one. The generated password is written to the generated `.env` file and displayed masked in the deploy script summary; protect the `.env` file accordingly.
 
 3. **MySQL** (`mysql`)
    - Image: `mysql:8.0`

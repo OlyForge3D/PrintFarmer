@@ -42,9 +42,10 @@ Environment variables:
 ```env
 DATABASE_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
 DATABASE_PORT=1433
-SA_PASSWORD=YourStrong!Passw0rd
+MSSQL_SA_PASSWORD=YourStrong!Passw0rd
 DB_PROVIDER=SqlServer
 ```
+Note: The deploy script now generates a strong `MSSQL_SA_PASSWORD` automatically if you don't provide one. The generated password is written to the generated `.env` file and is displayed masked by the deploy script summary; ensure the `.env` file is stored securely (chmod 600).
 
 ### **PostgreSQL (Default)**
 ```bash

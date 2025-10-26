@@ -175,7 +175,33 @@ remove_version_keys() {
     fi
 }
 
-        
+# Helper: generate a random strong password for database SA user
+generate_random_password() {
+    # Try openssl first for portability
+    if command -v openssl >/dev/null 2>&1; then
+        pw=$(openssl rand -base64 18 | tr -d '/+' | cut -c1-16)
+    else
+        pw=$(tr -dc 'A-Za-z0-9!@#$%&*()-_=+' </dev/urandom 2>/dev/null | head -c 16 || echo "Pfarm$(date +%s)")
+    fi
+
+    # Ensure basic complexity: at least one upper, one lower, one digit, one symbol
+    if ! echo "$pw" | grep -q '[A-Z]'; then
+        pw="A$pw"
+    fi
+    if ! echo "$pw" | grep -q '[a-z]'; then
+        pw="${pw}a"
+    fi
+    if ! echo "$pw" | grep -q '[0-9]'; then
+        pw="${pw}1"
+    fi
+    # Symbol = any non-alphanumeric
+    if ! echo "$pw" | grep -q '[^A-Za-z0-9]'; then
+        pw="${pw}!"
+    fi
+
+    echo "$pw"
+}
+
 generate_deployment_config() {
     local architecture="$1"
     local include_monitoring="${2:-false}"
@@ -1969,6 +1995,82 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 DB_PROVIDER=$DB_PROVIDER
 EOF
     
+    # Emit provider-specific database environment variables and derive canonical connection string
+    case "${DB_PROVIDER:-postgres}" in
+        postgres)
+            POSTGRES_DB=${POSTGRES_DB:-printfarmer}
+            POSTGRES_USER=${POSTGRES_USER:-postgres}
+            POSTGRES_PORT=${POSTGRES_PORT:-5432}
+            # Generate a random password if none supplied
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+            if [ -z "$POSTGRES_PASSWORD" ]; then
+                POSTGRES_PASSWORD=$(generate_random_password)
+                print_info "Generated random PostgreSQL password (saved to env file)"
+            fi
+            echo "POSTGRES_DB=$POSTGRES_DB" >> "$ENV_FILE"
+            echo "POSTGRES_USER=$POSTGRES_USER" >> "$ENV_FILE"
+            echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> "$ENV_FILE"
+            echo "POSTGRES_PORT=$POSTGRES_PORT" >> "$ENV_FILE"
+            CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+            ;;
+        sqlserver)
+            SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
+            # Prefer an explicitly provided SQLSERVER_PASSWORD, then DB_PASSWORD, otherwise generate one
+            SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-${DB_PASSWORD:-}}
+            SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
+
+            if [ -z "$SQLSERVER_PASSWORD" ]; then
+                # Generate a random strong password for SA
+                SQLSERVER_PASSWORD=$(generate_random_password)
+                print_info "Generated random SQL Server SA password (saved to env file)"
+            fi
+
+            # Use MSSQL_SA_PASSWORD as canonical key used across templates
+            MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:-$SQLSERVER_PASSWORD}
+
+            echo "SQLSERVER_DB=$SQLSERVER_DB" >> "$ENV_FILE"
+            echo "SQLSERVER_PASSWORD=$SQLSERVER_PASSWORD" >> "$ENV_FILE"
+            echo "SQLSERVER_PORT=$SQLSERVER_PORT" >> "$ENV_FILE"
+            echo "MSSQL_SA_PASSWORD=$MSSQL_SA_PASSWORD" >> "$ENV_FILE"
+            CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
+            ;;
+        mysql)
+            MYSQL_DB=${MYSQL_DB:-printfarmer}
+            MYSQL_USER=${MYSQL_USER:-root}
+            # Generate a random password if none supplied
+            MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+            if [ -z "$MYSQL_PASSWORD" ]; then
+                MYSQL_PASSWORD=$(generate_random_password)
+                print_info "Generated random MySQL password (saved to env file)"
+            fi
+            MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-$MYSQL_PASSWORD}
+            echo "MYSQL_DB=$MYSQL_DB" >> "$ENV_FILE"
+            echo "MYSQL_USER=$MYSQL_USER" >> "$ENV_FILE"
+            echo "MYSQL_PASSWORD=$MYSQL_PASSWORD" >> "$ENV_FILE"
+            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$ENV_FILE"
+            CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
+            ;;
+        external)
+            # External DB details were collected during configure_database() into EXT_DB_* variables
+            EXT_DB_TYPE=${EXT_DB_TYPE:-postgres}
+            echo "EXT_DB_TYPE=$EXT_DB_TYPE" >> "$ENV_FILE"
+            echo "EXT_DB_HOST=${EXT_DB_HOST:-}" >> "$ENV_FILE"
+            echo "EXT_DB_NAME=${EXT_DB_NAME:-}" >> "$ENV_FILE"
+            echo "EXT_DB_USER=${EXT_DB_USER:-}" >> "$ENV_FILE"
+            # Do not echo passwords to stdout here if empty; still include the var name for clarity
+            echo "EXT_DB_PASSWORD=${EXT_DB_PASSWORD:-}" >> "$ENV_FILE"
+            # Use connection string previously built in configure_database()
+            CONNECTION_STRING=${CONNECTION_STRING:-}
+            ;;
+        sqlite)
+            CONNECTION_STRING=${CONNECTION_STRING:-"Data Source=/data/farm.db"}
+            ;;
+        *)
+            # Unknown provider: fall back to any pre-derived CONNECTION_STRING
+            CONNECTION_STRING=${CONNECTION_STRING:-}
+            ;;
+    esac
+
     # Always expose a unified default connection string key consumed by Program.cs
     echo "ConnectionStrings__Default=$CONNECTION_STRING" >> "$ENV_FILE"
     
@@ -2002,6 +2104,55 @@ SPOOLMAN_PORT=$SPOOLMAN_PORT
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
 EOF
+
+    # Small summary for generated environment file: show which sensitive values were included
+    mask_secret() {
+        local s="$1"
+        if [ -z "$s" ]; then
+            echo "(not set)"
+            return
+        fi
+        local len=${#s}
+        if [ $len -le 8 ]; then
+            echo "$s"
+            return
+        fi
+        local head=${s:0:4}
+        local tail=${s: -4}
+        echo "${head}****${tail}"
+    }
+
+    print_header "📦 Environment file generated"
+    print_info "Environment file: $ENV_FILE"
+    print_info "Database provider: ${DB_PROVIDER:-postgres}"
+
+    case "${DB_PROVIDER:-postgres}" in
+        postgres)
+            print_info "PostgreSQL credentials included (masked):"
+            echo "  POSTGRES_USER=$(mask_secret "$POSTGRES_USER")"
+            echo "  POSTGRES_PASSWORD=$(mask_secret "$POSTGRES_PASSWORD")"
+            ;;
+        sqlserver)
+            print_info "SQL Server credentials included (masked):"
+            echo "  SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}"
+            echo "  MSSQL_SA_PASSWORD=$(mask_secret "$MSSQL_SA_PASSWORD")"
+            ;;
+        mysql)
+            print_info "MySQL credentials included (masked):"
+            echo "  MYSQL_USER=$(mask_secret "$MYSQL_USER")"
+            echo "  MYSQL_PASSWORD=$(mask_secret "$MYSQL_PASSWORD")"
+            ;;
+        external)
+            print_info "External DB configuration included (credentials not displayed)."
+            ;;
+        sqlite)
+            print_info "Using SQLite - no DB credentials included."
+            ;;
+    esac
+
+    print_warning "Generated passwords are sensitive. Store .env files securely and restrict access (chmod 600)."
+    print_info "To view the full credentials, run: grep 'POSTGRES_PASSWORD\|MSSQL_SA_PASSWORD\|MYSQL_PASSWORD' $ENV_FILE || true"
+
     
     if [ "$ARCHITECTURE" = "microservices" ]; then
         cat >> "$ENV_FILE" << EOF
@@ -2010,7 +2161,8 @@ API_PORT=$API_PORT
 EOF
     fi
     
-    if [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; then
+    # Emit SQL Server entries only if SQL Server is selected or explicitly requested
+    if [ "${DB_PROVIDER:-}" = "sqlserver" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; then
         cat >> "$ENV_FILE" << EOF
 
 # SQL Server Configuration
@@ -2023,7 +2175,8 @@ ACCEPT_EULA=Y
 EOF
     fi
     
-    if [ "${INCLUDE_MYSQL:-no}" = "yes" ]; then
+    # Emit MySQL entries only if MySQL is selected or explicitly requested
+    if [ "${DB_PROVIDER:-}" = "mysql" ] || [ "${INCLUDE_MYSQL:-no}" = "yes" ]; then
         cat >> "$ENV_FILE" << EOF
 
 # MySQL Configuration
@@ -2102,7 +2255,7 @@ EOF
       - POSTGRES_USER=\${POSTGRES_USER}
       - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+    - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

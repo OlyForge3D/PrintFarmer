@@ -438,6 +438,205 @@ test_multistage_build_integration() {
     pass_test
 }
 
+# End-to-end regression: ensure deploy script generates provider-only .env for SQL Server
+test_env_provider_only_end_to_end() {
+    start_test "deploy script generates provider-only .env for sqlserver"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create a minimal deploy-config forcing microservices + sqlserver
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=sqlserver
+EOF
+
+    # Run deploy in dry-run, batch mode so it generates files but doesn't start containers
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    local output=$(get_output)
+
+    # The script should mention environment file creation
+    assert_contains "$output" ".env" "Should mention .env creation"
+
+    # Expect the generated env file for microservices
+    assert_file_exists ".env.microservices" "Should have created .env.microservices"
+
+    # Inspect contents
+    local env_content
+    env_content=$(cat .env.microservices)
+
+    # Must include MSSQL canonical variable and SQLSERVER entries
+    assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should include MSSQL_SA_PASSWORD"
+    assert_contains "$env_content" "SQLSERVER_PASSWORD" "Env file should include SQLSERVER_PASSWORD"
+
+    # Must NOT include other providers' passwords
+    assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env file should not include POSTGRES_PASSWORD when sqlserver selected"
+    assert_not_contains "$env_content" "MYSQL_PASSWORD" "Env file should not include MYSQL_PASSWORD when sqlserver selected"
+
+    # Must include ConnectionStrings__Default and a sqlserver server indicator
+    assert_contains "$env_content" "ConnectionStrings__Default" "Env file should include ConnectionStrings__Default"
+    assert_contains "$env_content" "Server=sqlserver" "Connection string should reference sqlserver host"
+
+    # Also ensure the deploy script printed a masked summary for SQL Server credentials
+    assert_contains "$output" "SQL Server credentials included (masked):" "Deploy output should include masked SQL Server credentials header"
+    assert_contains "$output" "MSSQL_SA_PASSWORD" "Deploy output should print masked MSSQL_SA_PASSWORD"
+
+    # Clean up
+    rm -f .deploy-config .env.microservices .env || true
+
+    pass_test
+}
+
+# End-to-end: postgres provider-only env generation and masked summary
+test_env_provider_only_end_to_end_postgres() {
+    start_test "deploy script generates provider-only .env for postgres"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    local output=$(get_output)
+
+    assert_file_exists ".env.microservices" "Should have created .env.microservices for postgres"
+    local env_content
+    env_content=$(cat .env.microservices)
+
+    assert_contains "$env_content" "POSTGRES_PASSWORD" "Env file should include POSTGRES_PASSWORD"
+    assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should not include MSSQL_SA_PASSWORD when postgres selected"
+    assert_not_contains "$env_content" "MYSQL_PASSWORD" "Env file should not include MYSQL_PASSWORD when postgres selected"
+    assert_contains "$env_content" "ConnectionStrings__Default" "Env file should include ConnectionStrings__Default"
+
+    # Masked summary in output
+    assert_contains "$output" "PostgreSQL credentials included (masked):" "Deploy output should include masked Postgres credentials header"
+    assert_contains "$output" "POSTGRES_PASSWORD" "Deploy output should print masked POSTGRES_PASSWORD"
+
+    rm -f .deploy-config .env.microservices .env || true
+
+    pass_test
+}
+
+# End-to-end: mysql provider-only env generation and masked summary
+test_env_provider_only_end_to_end_mysql() {
+    start_test "deploy script generates provider-only .env for mysql"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=mysql
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    local output=$(get_output)
+
+    assert_file_exists ".env.microservices" "Should have created .env.microservices for mysql"
+    local env_content
+    env_content=$(cat .env.microservices)
+
+    assert_contains "$env_content" "MYSQL_PASSWORD" "Env file should include MYSQL_PASSWORD"
+    assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should not include MSSQL_SA_PASSWORD when mysql selected"
+    assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env file should not include POSTGRES_PASSWORD when mysql selected"
+    assert_contains "$env_content" "ConnectionStrings__Default" "Env file should include ConnectionStrings__Default"
+
+    # Masked summary in output
+    assert_contains "$output" "MySQL credentials included (masked):" "Deploy output should include masked MySQL credentials header"
+    assert_contains "$output" "MYSQL_PASSWORD" "Deploy output should print masked MYSQL_PASSWORD"
+
+    rm -f .deploy-config .env.microservices .env || true
+
+    pass_test
+}
+
+# End-to-end: monolithic provider-only env generation for providers
+test_env_provider_monolithic_providers() {
+    start_test "deploy script (monolithic) provider-only env generation"
+
+    cd "$TEST_TEMP_DIR"
+
+    local providers=("postgres" "sqlserver" "mysql")
+    for provider in "${providers[@]}"; do
+        cat > .deploy-config << EOF
+ARCHITECTURE=monolithic
+DB_PROVIDER=$provider
+EOF
+
+        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
+        local output=$(get_output)
+
+        # Expect .env.monolithic
+        assert_file_exists ".env.monolithic" "Should have created .env.monolithic for $provider"
+        local env_content
+        env_content=$(cat .env.monolithic)
+
+        case "$provider" in
+            postgres)
+                assert_contains "$env_content" "POSTGRES_PASSWORD" "Env should include POSTGRES_PASSWORD for monolithic+postgres"
+                assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should not include MSSQL_SA_PASSWORD for monolithic+postgres"
+                assert_contains "$output" "PostgreSQL credentials included (masked):" "Output should include masked Postgres header"
+                ;;
+            sqlserver)
+                assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for monolithic+sqlserver"
+                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for monolithic+sqlserver"
+                assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
+                ;;
+            mysql)
+                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for monolithic+mysql"
+                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for monolithic+mysql"
+                assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
+                ;;
+        esac
+
+        rm -f .deploy-config .env.monolithic .env || true
+    done
+
+    pass_test
+}
+
+# End-to-end: host-network provider-only env generation for providers
+test_env_provider_hostnetwork_providers() {
+    start_test "deploy script (host-network) provider-only env generation"
+
+    cd "$TEST_TEMP_DIR"
+
+    local providers=("postgres" "sqlserver" "mysql")
+    for provider in "${providers[@]}"; do
+        cat > .deploy-config << EOF
+ARCHITECTURE=host-network
+DB_PROVIDER=$provider
+EOF
+
+        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture host-network 2>&1 || true"
+        local output=$(get_output)
+
+        # Host-network uses .env.microservices
+        assert_file_exists ".env.microservices" "Should have created .env.microservices for host-network + $provider"
+        local env_content
+        env_content=$(cat .env.microservices)
+
+        case "$provider" in
+            postgres)
+                assert_contains "$env_content" "POSTGRES_PASSWORD" "Env should include POSTGRES_PASSWORD for host-network+postgres"
+                assert_contains "$output" "PostgreSQL credentials included (masked):" "Output should include masked Postgres header"
+                ;;
+            sqlserver)
+                assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for host-network+sqlserver"
+                assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
+                ;;
+            mysql)
+                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for host-network+mysql"
+                assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
+                ;;
+        esac
+
+        rm -f .deploy-config .env.microservices .env || true
+    done
+
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -461,6 +660,11 @@ run_all_tests() {
     test_configuration_persistence
     test_validation_logic
     test_multistage_build_integration
+    test_env_provider_only_end_to_end
+    test_env_provider_only_end_to_end_postgres
+    test_env_provider_only_end_to_end_mysql
+    test_env_provider_monolithic_providers
+    test_env_provider_hostnetwork_providers
     
     teardown
 }

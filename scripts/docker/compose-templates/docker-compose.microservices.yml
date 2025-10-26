@@ -4,16 +4,16 @@
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
-    image: ${DATABASE_IMAGE:-postgres:15-alpine}
+    image: ${POSTGRES_IMAGE:-postgres:15-alpine}
     container_name: printfarmer-database
     environment:
       # PostgreSQL (default)
-      POSTGRES_DB: ${DATABASE_NAME:-printfarmer}
-      POSTGRES_USER: ${DATABASE_USER:-printfarmer}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-printfarmer_password}
+      POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
+      POSTGRES_USER: ${POSTGRES_USER:-printfarmer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-printfarmer_password}
       # SQL Server (when using mcr.microsoft.com/mssql/server:2022-latest)
       ACCEPT_EULA: ${ACCEPT_EULA:-Y}
-      SA_PASSWORD: ${SA_PASSWORD:-}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-}
       MSSQL_PID: ${MSSQL_PID:-Developer}
       # MySQL (when using mysql:8.0)
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
@@ -21,13 +21,13 @@ services:
       MYSQL_USER: ${DATABASE_USER:-printfarmer}
       MYSQL_PASSWORD: ${DATABASE_PASSWORD:-printfarmer_password}
     ports:
-      - "${DATABASE_PORT:-5432}:${DATABASE_INTERNAL_PORT:-5432}"
+      - "${POSTGRES_PORT:-5432}:5432"
     networks:
       - printfarmer-network
     volumes:
       - database_data:/var/lib/postgresql/data  # Default path, override in production
     healthcheck:
-      test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U printfarmer -d printfarmer"]}
+      test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
       interval: 10s
       timeout: 5s
       retries: 5
