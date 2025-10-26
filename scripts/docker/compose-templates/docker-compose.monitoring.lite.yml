@@ -40,7 +40,3 @@ volumes:
   prometheus_data:
   grafana_data:
 
-networks:
-  printfarmer-network:
-    name: printfarmer-network
-    driver: bridge

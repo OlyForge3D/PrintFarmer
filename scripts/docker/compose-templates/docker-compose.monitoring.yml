@@ -90,8 +90,3 @@ volumes:
   prometheus_data:
   grafana_data:
   elasticsearch_data:
-
-networks:
-  printfarmer-network:
-    name: printfarmer-network
-    driver: bridge

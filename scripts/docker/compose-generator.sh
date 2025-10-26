@@ -86,142 +86,16 @@ EXAMPLES:
 
     # Generate for host network mode without any slicer workers
     $0 --architecture host-network --enable-orca-worker no
-
-    # Dry run to see what would be generated
-    $0 --architecture monolithic --dry-run
 EOF
+
 }
 
-# Default values
-ARCHITECTURE=""
-OUTPUT_DIR="$REPO_ROOT"
-INCLUDE_MONITORING=false
-INCLUDE_TELEMETRY=false
-INCLUDE_SECURITY=false
-INCLUDE_REGISTRY=false
-KEEP_GENERATED=${KEEP_GENERATED:-true}
-DRY_RUN=false
-ENABLE_ORCA_WORKER=""
-DB_PROVIDER=""
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --architecture)
-            ARCHITECTURE="$2"
-            shift 2
-            ;;
-        --output-dir)
-            OUTPUT_DIR="$2"
-            shift 2
-            ;;
-        --include-monitoring)
-            INCLUDE_MONITORING=true
-            shift
-            ;;
-        --include-telemetry)
-            INCLUDE_TELEMETRY=true
-            shift
-            ;;
-        --include-security)
-            INCLUDE_SECURITY=true
-            shift
-            ;;
-        --include-registry)
-            INCLUDE_REGISTRY=true
-            shift
-            ;;
-        --keep-generated)
-            KEEP_GENERATED=true
-            shift
-            ;;
-        --cleanup-generated)
-            KEEP_GENERATED=false
-            shift
-            ;;
-        --enable-orca-worker)
-            ENABLE_ORCA_WORKER="$2"
-            shift 2
-            ;;
-        --db-provider)
-            DB_PROVIDER="$2"
-            shift 2
-            ;;
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        --help)
-            show_usage
-            exit 0
-            ;;
-        *)
-            log_error "Unknown option: $1"
-            show_usage
-            exit 1
-            ;;
-    esac
-done
-
-# Validate required parameters
-if [[ -z "$ARCHITECTURE" ]]; then
-    log_error "Architecture must be specified"
-    show_usage
-    exit 1
-fi
-
-if [[ ! "$ARCHITECTURE" =~ ^(monolithic|microservices|host-network)$ ]]; then
-    log_error "Invalid architecture: $ARCHITECTURE. Must be one of: monolithic, microservices, host-network"
-    exit 1
-fi
-
-# Telemetry stack depends on the monitoring services (Prometheus/Grafana).
-# Auto-enable monitoring when telemetry is requested so the generated compose
-# file stays valid without duplicating service definitions.
-if [[ "$INCLUDE_TELEMETRY" == "true" && "$INCLUDE_MONITORING" != "true" ]]; then
-    log_info "Telemetry stack requested; enabling monitoring add-on automatically"
-    INCLUDE_MONITORING=true
-fi
-
-# Function to copy Dockerfiles based on architecture
-copy_dockerfiles() {
-    local arch="$1"
-    local output_dir="$2"
-    
-    log_info "Copying Dockerfiles for $arch architecture..."
-    
-    # Determine if workers are needed based on configuration or environment
-    local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    
-    # Parse yes/no and numeric values
-    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
-        need_orca_worker="true"
-    else
-        need_orca_worker="false"
-    fi
-    
-    case "$arch" in
-        "monolithic"|"microservices"|"host-network")
-            # All architectures now use multi-stage builds for efficiency
-            log_info "Using multi-stage Dockerfile for $arch architecture"
-            cp "$DOCKERFILES_DIR/Dockerfile.multistage" "$output_dir/"
-            
-            if [[ "$need_orca_worker" == "true" ]]; then
-                log_info "Including OrcaSlicer worker Dockerfiles (workers enabled)"
-                cp "$DOCKERFILES_DIR/Dockerfile.orcaslicer" "$output_dir/"
-                cp "$DOCKERFILES_DIR/Dockerfile.slicer-base" "$output_dir/"
-            fi
-            ;;
-    esac
-}
-
-# Function to generate database service configuration based on provider
 generate_database_config() {
-    local provider="${DB_PROVIDER:-postgres}"
-    local database_templates_dir="$DOCKER_DIR/database-templates"
-    local temp_file
-    
-    # Normalize provider name
+    # Determine provider from environment or default
+    local provider_raw="${DB_PROVIDER:-postgres}"
+    local provider="$(printf '%s' "$provider_raw" | tr '[:upper:]' '[:lower:]')"
+
     case "$provider" in
         "postgres"|"postgresql")
             provider="postgres"
@@ -237,16 +111,73 @@ generate_database_config() {
             provider="postgres"
             ;;
     esac
-    
-    local template_file="$database_templates_dir/$provider.yml"
-    
-    if [[ ! -f "$template_file" ]]; then
-        log_error "Database template not found: $template_file"
+
+    local db_template_file="$TEMPLATES_DIR/docker-compose.databases.yml"
+    if [[ ! -f "$db_template_file" ]]; then
+        log_error "Database templates file not found: $db_template_file"
         return 1
     fi
-    
+
     log_info "Using $provider database configuration"
-    cat "$template_file"
+
+    # Extract the provider service block from the databases template and rename the service to 'database'
+    # The databases file uses services: with two-space indented service names
+    awk -v prov="$provider" '
+    /^services:/ { in_services=1; next }
+    in_services && $0 ~ ("^  " prov ":") { printing=1; print; next }
+    printing && $0 ~ /^  [a-zA-Z]/ { exit }
+    printing { print }
+    ' "$db_template_file" | sed -E "s/^  ${provider}:/  database:/"
+}
+
+# Parse CLI arguments and set defaults
+parse_args() {
+    ARCHITECTURE=""
+    OUTPUT_DIR=""
+    INCLUDE_MONITORING="false"
+    INCLUDE_TELEMETRY="false"
+    INCLUDE_SECURITY="false"
+    INCLUDE_REGISTRY="false"
+    ENABLE_ORCA_WORKER=""
+    DB_PROVIDER="${DB_PROVIDER:-postgres}"
+    KEEP_GENERATED="true"
+    DRY_RUN="false"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --architecture)
+                ARCHITECTURE="$2"; shift 2 ;;
+            --output-dir)
+                OUTPUT_DIR="$2"; shift 2 ;;
+            --include-monitoring)
+                INCLUDE_MONITORING="true"; shift ;;
+            --include-telemetry)
+                INCLUDE_TELEMETRY="true"; shift ;;
+            --include-security)
+                INCLUDE_SECURITY="true"; shift ;;
+            --include-registry)
+                INCLUDE_REGISTRY="true"; shift ;;
+            --enable-orca-worker)
+                ENABLE_ORCA_WORKER="$2"; shift 2 ;;
+            --db-provider)
+                DB_PROVIDER="$2"; shift 2 ;;
+            --cleanup-generated)
+                KEEP_GENERATED="false"; shift ;;
+            --keep-generated)
+                KEEP_GENERATED="true"; shift ;;
+            --dry-run)
+                DRY_RUN="true"; shift ;;
+            --help|-h)
+                show_usage; exit 0 ;;
+            *)
+                # Ignore unknown args for forward-compat
+                shift ;;
+        esac
+    done
+
+    ARCHITECTURE="${ARCHITECTURE:-microservices}"
+    OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT}"
+    ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
 }
 
 # Function to merge addon services into the main compose file
@@ -271,120 +202,158 @@ merge_addon_services() {
         fi
     fi
     
-    if [[ ! -f "$addon_template" ]]; then
+    if [[ -f "$addon_template" ]]; then
+        # If ruamel.yaml based merge helper exists, use it for robust YAML-aware merging
+        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('ruamel') else 1)" >/dev/null 2>&1; then
+            # Use YAML-aware merge helper (ruamel.yaml must be available)
+            temp_combined=$(mktemp)
+            python3 "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$addon_template" > "$temp_combined"
+            mv "$temp_combined" "$compose_file"
+        else
+            # Fallback to the original (conservative) merging approach
+            # Create temporary files for merging
+            local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks
+            temp_merged="$(mktemp)"
+            temp_addon_services="$(mktemp)"
+            temp_addon_volumes="$(mktemp)"
+            temp_addon_networks="$(mktemp)"
+
+            # Extract services from addon template (excluding comments and metadata)
+            awk '
+            BEGIN { in_services=0 }
+            /^services:/ { in_services=1; next }
+            /^[a-zA-Z][^:]*:/ && !/^  / { in_services=0 }
+            in_services { print }
+            ' "$addon_template" > "$temp_addon_services"
+
+            # Simplified safe append of services (no dedupe)
+            if [[ -s "$temp_addon_services" ]]; then
+                # Filter out any addon services that already exist in the base compose
+                temp_filtered_services="$(mktemp)"
+                python3 - "$temp_addon_services" "$compose_file" "$temp_filtered_services" <<'PY'
+import sys,re
+addon_file=sys.argv[1]; base_file=sys.argv[2]; out_file=sys.argv[3]
+addon_lines=open(addon_file,'r').read().splitlines()
+base_txt=open(base_file,'r').read()
+
+# Parse addon services into blocks (each starts with two-space indent and name)
+blocks=[]
+cur=None
+for line in addon_lines:
+    m=re.match(r'^\s{2}([A-Za-z0-9_.-]+):\s*$', line)
+    if m:
+        if cur:
+            blocks.append(cur)
+        cur=[line]
+    elif cur is not None:
+        cur.append(line)
+if cur:
+    blocks.append(cur)
+
+kept=[]
+for b in blocks:
+    m=re.match(r'^\s{2}([A-Za-z0-9_.-]+):', b[0])
+    if not m:
+        continue
+    name=m.group(1)
+    # look for the service name in the base compose (under services:)
+    if re.search(r'^\s{2}'+re.escape(name)+r':\s*$', base_txt, flags=re.M):
+        # service already present in base - skip to avoid duplicate mapping key
+        continue
+    kept.extend(b)
+
+with open(out_file,'w') as f:
+    if kept:
+        f.write('\n'.join(kept))
+PY
+                # Insert services before the first root-level section (networks/volumes)
+                local volumes_line networks_line insertion_line file_length
+                volumes_line=$(grep -n '^volumes:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
+                networks_line=$(grep -n '^networks:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
+
+                insertion_line=""
+                if [[ -n "$networks_line" && "$networks_line" -gt 0 ]]; then
+                    insertion_line="$networks_line"
+                fi
+                if [[ -n "$volumes_line" && "$volumes_line" -gt 0 ]]; then
+                    if [[ -z "$insertion_line" || "$volumes_line" -lt "$insertion_line" ]]; then
+                        insertion_line="$volumes_line"
+                    fi
+                fi
+                if [[ -z "$insertion_line" ]]; then
+                    file_length=$(wc -l < "$compose_file")
+                    insertion_line=$((file_length + 1))
+                fi
+
+                if [[ "$insertion_line" -gt 1 ]]; then
+                    head -n "$((insertion_line - 1))" "$compose_file" > "$temp_merged"
+                    echo "" >> "$temp_merged"
+                    cat "$temp_filtered_services" >> "$temp_merged"
+                    echo "" >> "$temp_merged"
+                    tail -n +"$insertion_line" "$compose_file" >> "$temp_merged"
+                    mv "$temp_merged" "$compose_file"
+                else
+                    # Fallback: prepend to file
+                    cat "$temp_filtered_services" "$compose_file" > "$temp_merged"
+                    mv "$temp_merged" "$compose_file"
+                fi
+            fi
+            rm -f "$temp_filtered_services"
+
+            # Merge volumes section
+            awk '
+            BEGIN { in_volumes=0 }
+            /^volumes:/ { in_volumes=1; next }
+            /^[a-zA-Z][^:]*:/ && !/^  / { in_volumes=0 }
+            in_volumes { print }
+            ' "$addon_template" > "$temp_addon_volumes"
+
+            if [[ -s "$temp_addon_volumes" ]]; then
+                if grep -q '^volumes:' "$compose_file"; then
+                    awk -v addon_volumes="$temp_addon_volumes" '
+                    /^volumes:/ { print; while ((getline line < addon_volumes) > 0) print line; close(addon_volumes); next }
+                    { print }
+                    ' "$compose_file" > "$temp_merged"
+                    mv "$temp_merged" "$compose_file"
+                else
+                    echo "" >> "$compose_file"
+                    echo "volumes:" >> "$compose_file"
+                    cat "$temp_addon_volumes" >> "$compose_file"
+                fi
+            fi
+
+            # Merge networks section
+            awk '
+            BEGIN { in_networks=0 }
+            /^networks:/ { in_networks=1; next }
+            /^[a-zA-Z][^:]*:/ && !/^  / { in_networks=0 }
+            in_networks { print }
+            ' "$addon_template" > "$temp_addon_networks"
+
+            if [[ -s "$temp_addon_networks" ]]; then
+                if grep -q '^networks:' "$compose_file"; then
+                    awk -v addon_networks="$temp_addon_networks" '
+                    /^networks:/ { print; while ((getline line < addon_networks) > 0) print line; close(addon_networks); next }
+                    { print }
+                    ' "$compose_file" > "$temp_merged"
+                    mv "$temp_merged" "$compose_file"
+                else
+                    echo "" >> "$compose_file"
+                    echo "networks:" >> "$compose_file"
+                    cat "$temp_addon_networks" >> "$compose_file"
+                fi
+            fi
+
+            rm -f "$temp_merged" "$temp_addon_services" "$temp_addon_volumes" "$temp_addon_networks"
+        fi
+    else
         log_error "Addon template not found: $addon_template"
         return 1
     fi
-    
-    # Create temporary files for merging
-    local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks
-    temp_merged="$(mktemp)"
-    temp_addon_services="$(mktemp)"
-    temp_addon_volumes="$(mktemp)"
-    temp_addon_networks="$(mktemp)"
-    
-    # Extract services from addon template (excluding comments and metadata)
-    awk '
-    BEGIN { in_services=0 }
-    /^services:/ { in_services=1; next }
-    /^[a-zA-Z][^:]*:/ && !/^  / { in_services=0 }
-    in_services { print }
-    ' "$addon_template" > "$temp_addon_services"
-    
-    # Extract volumes from addon template
-    awk '
-    BEGIN { in_volumes=0 }
-    /^volumes:/ { in_volumes=1; next }
-    /^[a-zA-Z][^:]*:/ && !/^  / { in_volumes=0 }
-    in_volumes { print }
-    ' "$addon_template" > "$temp_addon_volumes"
-    
-    # Extract networks from addon template
-    awk '
-    BEGIN { in_networks=0 }
-    /^networks:/ { in_networks=1; next }
-    /^[a-zA-Z][^:]*:/ && !/^  / { in_networks=0 }
-    in_networks { print }
-    ' "$addon_template" > "$temp_addon_networks"
-    
-    # Merge services into main compose file
-    if [[ -s "$temp_addon_services" ]]; then
-        # Find the line after the last service definition
-        local last_service_line
-        last_service_line=$(grep -n '^  [a-zA-Z]' "$compose_file" | tail -1 | cut -d: -f1 | tr -d ' ')
-        
-        if [[ -n "$last_service_line" && "$last_service_line" -gt 0 ]]; then
-            # Insert services before the first root-level section (networks/volumes)
-            local volumes_line networks_line insertion_line file_length
-            volumes_line=$(grep -n '^volumes:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
-            networks_line=$(grep -n '^networks:' "$compose_file" | head -1 | cut -d: -f1 2>/dev/null || echo "")
 
-            insertion_line=""
-            if [[ -n "$networks_line" && "$networks_line" -gt 0 ]]; then
-                insertion_line="$networks_line"
-            fi
-            if [[ -n "$volumes_line" && "$volumes_line" -gt 0 ]]; then
-                if [[ -z "$insertion_line" || "$volumes_line" -lt "$insertion_line" ]]; then
-                    insertion_line="$volumes_line"
-                fi
-            fi
-            if [[ -z "$insertion_line" ]]; then
-                file_length=$(wc -l < "$compose_file")
-                insertion_line=$((file_length + 1))
-            fi
-
-            if [[ "$insertion_line" -gt 1 ]]; then
-                head -n "$((insertion_line - 1))" "$compose_file" > "$temp_merged"
-                echo "" >> "$temp_merged"
-                cat "$temp_addon_services" >> "$temp_merged"
-                echo "" >> "$temp_merged"
-                tail -n +"$insertion_line" "$compose_file" >> "$temp_merged"
-                mv "$temp_merged" "$compose_file"
-            else
-                # Fallback: prepend to file
-                cat "$temp_addon_services" "$compose_file" > "$temp_merged"
-                mv "$temp_merged" "$compose_file"
-            fi
-        fi
-    fi
-    
-    # Merge volumes section
-    if [[ -s "$temp_addon_volumes" ]]; then
-        if grep -q '^volumes:' "$compose_file"; then
-            # Append to existing volumes section
-            awk -v addon_volumes="$temp_addon_volumes" '
-            /^volumes:/ { print; while ((getline line < addon_volumes) > 0) print line; close(addon_volumes); next }
-            { print }
-            ' "$compose_file" > "$temp_merged"
-            mv "$temp_merged" "$compose_file"
-        else
-            # Add volumes section at the end
-            echo "" >> "$compose_file"
-            echo "volumes:" >> "$compose_file"
-            cat "$temp_addon_volumes" >> "$compose_file"
-        fi
-    fi
-    
-    # Merge networks section
-    if [[ -s "$temp_addon_networks" ]]; then
-        if grep -q '^networks:' "$compose_file"; then
-            # Append to existing networks section
-            awk -v addon_networks="$temp_addon_networks" '
-            /^networks:/ { print; while ((getline line < addon_networks) > 0) print line; close(addon_networks); next }
-            { print }
-            ' "$compose_file" > "$temp_merged"
-            mv "$temp_merged" "$compose_file"
-        else
-            # Add networks section at the end
-            echo "" >> "$compose_file"
-            echo "networks:" >> "$compose_file"
-            cat "$temp_addon_networks" >> "$compose_file"
-        fi
-    fi
-    
     # Clean up temporary files
     rm -f "$temp_merged" "$temp_addon_services" "$temp_addon_volumes" "$temp_addon_networks"
-    
+
     return 0
 }
 
@@ -466,6 +435,95 @@ generate_compose() {
         
         log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
     fi
+
+    # Merge provider top-level maps (volumes/networks) from databases template so volumes like postgres-data exist
+    merge_provider_maps() {
+        local provider="${DB_PROVIDER:-postgres}"
+        local db_template="$TEMPLATES_DIR/docker-compose.databases.yml"
+        if [[ ! -f "$db_template" ]]; then
+            return 0
+        fi
+
+        # Extract top-level volumes and networks sections from databases file using Python (more portable)
+        local temp_db_maps temp_merged_maps temp_vols temp_nets
+        temp_db_maps="$(mktemp)"
+        temp_merged_maps="$(mktemp)"
+        temp_vols="$(mktemp)"
+        temp_nets="$(mktemp)"
+
+        # Extract volumes and networks separately from the db template
+        # (use Python for portability and robust matching)
+        python3 - <<PY > "$temp_db_maps"
+import re
+path = "${db_template}"
+txt = open(path,'r').read()
+out_vol = ''
+out_net = ''
+mv = re.search(r'(^volumes:\n(?:^[ \t].*\n)*)', txt, re.M)
+if mv:
+    out_vol = mv.group(1)
+mn = re.search(r'(^networks:\n(?:^[ \t].*\n)*)', txt, re.M)
+if mn:
+    out_net = mn.group(1)
+print(out_vol + ('\n' + out_net if out_net else ''))
+PY
+
+        # split the captured maps into separate temp files for safe insertion
+        # extract just the contents under the header (no 'volumes:' line)
+        if grep -q '^volumes:' "$temp_db_maps"; then
+            grep '^volumes:' -A9999 "$temp_db_maps" | sed '1d' > "$temp_vols" || true
+        else
+            : > "$temp_vols"
+        fi
+        if grep -q '^networks:' "$temp_db_maps"; then
+            grep '^networks:' -A9999 "$temp_db_maps" | sed '1d' > "$temp_nets" || true
+        else
+            : > "$temp_nets"
+        fi
+
+        # If compose-merge.py exists and ruamel is available, use YAML-aware merge
+        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('ruamel') else 1)" >/dev/null 2>&1; then
+            # create a minimal addon file that only contains the temp maps for ruamel
+            temp_minimal_addon=$(mktemp)
+            echo "" > "$temp_minimal_addon"
+            if [[ -s "$temp_vols" ]]; then
+                echo "volumes:" >> "$temp_minimal_addon"
+                cat "$temp_vols" >> "$temp_minimal_addon"
+            fi
+            if [[ -s "$temp_nets" ]]; then
+                echo "" >> "$temp_minimal_addon"
+                echo "networks:" >> "$temp_minimal_addon"
+                cat "$temp_nets" >> "$temp_minimal_addon"
+            fi
+            python3 "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$temp_minimal_addon" > "$temp_merged_maps"
+            mv "$temp_merged_maps" "$compose_file"
+            rm -f "$temp_minimal_addon"
+        else
+            # Fallback: append volumes and networks contents conservatively
+            if [[ -s "$temp_vols" ]]; then
+                if grep -q '^volumes:' "$compose_file"; then
+                    awk -v addon="$temp_vols" '/^volumes:/ { print; while ((getline line < addon) > 0) print line; next } { print }' "$compose_file" > "$temp_merged_maps" && mv "$temp_merged_maps" "$compose_file"
+                else
+                    echo "" >> "$compose_file"
+                    echo "volumes:" >> "$compose_file"
+                    cat "$temp_vols" >> "$compose_file" || true
+                fi
+            fi
+            if [[ -s "$temp_nets" ]]; then
+                if grep -q '^networks:' "$compose_file"; then
+                    awk -v addon="$temp_nets" '/^networks:/ { print; while ((getline line < addon) > 0) print line; next } { print }' "$compose_file" > "$temp_merged_maps" && mv "$temp_merged_maps" "$compose_file"
+                else
+                    echo "" >> "$compose_file"
+                    echo "networks:" >> "$compose_file"
+                    cat "$temp_nets" >> "$compose_file" || true
+                fi
+            fi
+        fi
+
+    rm -f "$temp_db_maps" "$temp_merged_maps" "$temp_vols" "$temp_nets"
+    }
+
+    merge_provider_maps
     
     # Merge addon services into the compose file
     local addons_merged=false
@@ -519,6 +577,18 @@ generate_compose() {
     fi
 
     if [[ -n "$compose_validate_cmd" ]]; then
+        # If dedupe helper exists, run generated compose through it before validation
+        if [[ -x "$SCRIPT_DIR/compose-dedupe.sh" ]]; then
+            log_info "Post-processing generated compose file through compose-dedupe.sh"
+            tmp_dedup=$(mktemp)
+            if ! "$SCRIPT_DIR/compose-dedupe.sh" < "$compose_file" > "$tmp_dedup"; then
+                log_warning "compose-dedupe.sh failed; continuing with original compose file"
+                rm -f "$tmp_dedup"
+            else
+                mv "$tmp_dedup" "$compose_file"
+            fi
+        fi
+
         local validation_output=""
         if ! validation_output=$($compose_validate_cmd -f "$compose_file" config --quiet 2>&1); then
             log_warning "Generated compose file failed validation via '$compose_validate_cmd config':"
@@ -566,6 +636,20 @@ copy_configs() {
     
     if [[ "$INCLUDE_SECURITY" == "true" ]]; then
         [[ -f "$CONFIGS_DIR/security-config.json" ]] && cp "$CONFIGS_DIR/security-config.json" "$output_dir/"
+    fi
+}
+
+# Copy dockerfiles needed for builds into the output directory (tolerant noop if not present)
+copy_dockerfiles() {
+    local arch="$1"
+    local output_dir="$2"
+
+    log_info "Copying Dockerfiles for $arch into $output_dir"
+    if [[ -d "$DOCKERFILES_DIR" ]]; then
+        mkdir -p "$output_dir/dockerfiles"
+        cp -r "$DOCKERFILES_DIR"/* "$output_dir/dockerfiles/" 2>/dev/null || true
+    else
+        log_warning "No dockerfiles directory found at $DOCKERFILES_DIR; skipping copy"
     fi
 }
 
@@ -625,6 +709,7 @@ show_dry_run() {
 
 # Main execution
 main() {
+    parse_args "$@"
     log_info "Docker Compose Generator for PrintFarmer"
     log_info "Architecture: $ARCHITECTURE"
     log_info "Output directory: $OUTPUT_DIR"

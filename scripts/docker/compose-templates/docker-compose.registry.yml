@@ -13,19 +13,13 @@ services:
   # Override binary layer to use registry image
   orcaslicer-binaries:
     image: ${REGISTRY_HOST}/orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
-    build: null  # Disable build, use pre-built image from registry
-    
   # Override worker to use registry image  
   orcaslicer-worker:
     image: ${REGISTRY_HOST}/printfarmer-orcaslicer-worker:latest
-    build: null  # Disable build, use pre-built image from registry
-
   # Optional: Override API if you build and push it to registry
   api:
     image: ${REGISTRY_HOST}/printfarmer-api:latest
-    build: null  # Disable build, use pre-built image from registry
-
   # Optional: Override React frontend if you build and push it to registry  
   web:
     image: ${REGISTRY_HOST}/printfarmer-web:latest
-    build: null  # Disable build, use pre-built image from registry
+    # Use pre-built web image from registry; do not provide a build section

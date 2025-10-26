@@ -1,0 +1,91 @@
+name: Compose generation & validation
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'src/**'
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  validate-compose:
+    name: Validate generated docker-compose (matrix)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: microservices
+            architecture: microservices
+            flags: ""
+          - name: microservices-monitoring
+            architecture: microservices
+            flags: "--include-monitoring"
+          - name: microservices-monitoring-telemetry
+            architecture: microservices
+            flags: "--include-monitoring --include-telemetry"
+          - name: microservices-all
+            architecture: microservices
+            flags: "--include-monitoring --include-telemetry --include-security --include-registry"
+          - name: host-network
+            architecture: host-network
+            flags: ""
+          - name: host-network-all
+            architecture: host-network
+            flags: "--include-monitoring --include-telemetry --include-security --include-registry"
+          - name: monolithic
+            architecture: monolithic
+            flags: ""
+          - name: monolithic-all
+            architecture: monolithic
+            flags: "--include-monitoring --include-telemetry --include-security --include-registry"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure scripts are executable
+        run: |
+          chmod +x ./scripts/docker/compose-generator.sh || true
+          chmod +x ./scripts/docker/compose-dedupe.sh || true
+          chmod +x ./scripts/docker/compose-dedupe.py || true
+
+      - name: Install Python deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ruamel.yaml
+
+      - name: Provide default registry host env
+        run: echo "REGISTRY_HOST=local.registry:5000" >> $GITHUB_ENV
+
+      - name: Show Docker Compose version
+        run: docker compose version
+
+      - name: Generate docker-compose.yml
+        id: gen
+        run: |
+          set -euo pipefail
+          OUT_DIR=$(mktemp -d)
+          echo "OUT_DIR=$OUT_DIR"
+          ./scripts/docker/compose-generator.sh --architecture ${{ matrix.architecture }} --enable-orca-worker yes --output-dir "$OUT_DIR" ${{ matrix.flags }}
+          echo "OUT_DIR=$OUT_DIR" >> $GITHUB_ENV
+
+      - name: Validate generated compose
+        run: |
+          set -euo pipefail
+          echo "Validating: $OUT_DIR/docker-compose.yml"
+          docker compose -f "$OUT_DIR/docker-compose.yml" config
+
+      - name: Dump generator logs (on failure)
+        if: failure()
+        run: |
+          echo "=== Generator log ==="
+          if [[ -f "$OUT_DIR/generator.log" ]]; then
+            sed -n '1,400p' "$OUT_DIR/generator.log" || true
+          fi
+          echo "=== Compose error output ==="
+          sed -n '1,400p' "$OUT_DIR/compose.err" || true

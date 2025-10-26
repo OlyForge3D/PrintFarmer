@@ -531,7 +531,8 @@ prompt_yes_no() {
             fi
         fi
     else
-        echo -e "${YELLOW}$prompt [$default_text]${NC}"
+        echo -e "${YELLOW}$prompt${NC}"
+        echo -e "${BLUE}Default: $default_text${NC}"
         read -r input || true
         if [ -z "$input" ]; then
             input="$default"
@@ -1829,6 +1830,14 @@ configure_additional() {
     
     # Only offer monitoring/telemetry prompts if not already set by CLI flags
     if [ "$CLI_INCLUDE_MONITORING" = "false" ]; then
+        # If INCLUDE_MONITORING was previously set (e.g., from env/.env), use it to seed the interactive choice
+        if [ -z "${INCLUDE_MONITORING_CHOICE:-}" ] && [ -n "${INCLUDE_MONITORING:-}" ]; then
+            if [[ "${INCLUDE_MONITORING}" =~ ^(true|yes|1)$ ]]; then
+                INCLUDE_MONITORING_CHOICE="yes"
+            else
+                INCLUDE_MONITORING_CHOICE="no"
+            fi
+        fi
         prompt_yes_no "Enable monitoring stack (Prometheus, Grafana)?" "no" "INCLUDE_MONITORING_CHOICE"
         if [ "$INCLUDE_MONITORING_CHOICE" = "yes" ]; then
             INCLUDE_MONITORING="true"
@@ -1875,7 +1884,16 @@ configure_additional() {
                 echo -e "${BLUE}Monitoring Stack Options${NC}"
                 echo "  1. Prometheus + Grafana (lightweight, recommended)"
                 echo "  2. Prometheus + Grafana + Elastic Stack (adds Elasticsearch, Logstash, Kibana)"
-                prompt_with_default "Select monitoring stack option [1-2]:" "1" "MONITORING_STACK_MODE"
+                # Seed monitoring stack mode from an existing value if present so the prompt shows the previous selection
+                if [ -z "${MONITORING_STACK_MODE:-}" ] && [ -n "${MONITORING_STACK_MODE:-}" ]; then
+                    : # nothing to do (placeholder)
+                fi
+                if [ -n "${MONITORING_STACK_MODE:-}" ]; then
+                    default_monitoring_mode="${MONITORING_STACK_MODE}"
+                else
+                    default_monitoring_mode="1"
+                fi
+                prompt_with_default "Select monitoring stack option [1-2]:" "$default_monitoring_mode" "MONITORING_STACK_MODE"
                 case "$MONITORING_STACK_MODE" in
                     2|elastic|Elastic)
                         ENABLE_ELASTIC_STACK="true"
@@ -1891,6 +1909,14 @@ configure_additional() {
     fi
     
     if [ "$CLI_INCLUDE_TELEMETRY" = "false" ]; then
+        # Seed telemetry prompt from existing INCLUDE_TELEMETRY value if present
+        if [ -z "${INCLUDE_TELEMETRY_CHOICE:-}" ] && [ -n "${INCLUDE_TELEMETRY:-}" ]; then
+            if [[ "${INCLUDE_TELEMETRY}" =~ ^(true|yes|1)$ ]]; then
+                INCLUDE_TELEMETRY_CHOICE="yes"
+            else
+                INCLUDE_TELEMETRY_CHOICE="no"
+            fi
+        fi
         prompt_yes_no "Enable telemetry/observability (OpenTelemetry)?" "no" "INCLUDE_TELEMETRY_CHOICE"
         if [ "$INCLUDE_TELEMETRY_CHOICE" = "yes" ]; then
             INCLUDE_TELEMETRY="true"
@@ -1898,6 +1924,32 @@ configure_additional() {
     else
         print_info "Telemetry/observability enabled via CLI flag"
         INCLUDE_TELEMETRY="true"
+    fi
+
+    # Persist selection early so re-running the interactive flow picks up previous choices
+    persist_env_key() {
+        local key="$1"; local val="$2"
+        [ -n "$ENV_FILE" ] || return 0
+        # Ensure file exists
+        touch "$ENV_FILE"
+        # If key exists, replace; otherwise append
+        if grep -qE "^${key}=" "$ENV_FILE"; then
+            # Use awk to reliably replace the first occurrence
+            awk -v k="$key" -v v="$val" 'BEGIN{FS=OFS="="} $1==k {$2=v; print; next} {print}' "$ENV_FILE" > "${ENV_FILE}.tmp" && mv "${ENV_FILE}.tmp" "$ENV_FILE"
+        else
+            echo "${key}=${val}" >> "$ENV_FILE"
+        fi
+    }
+
+    # Save monitoring/telemetry choices so the next interactive run uses them as defaults
+    if [ -n "${INCLUDE_MONITORING:-}" ]; then
+        persist_env_key "INCLUDE_MONITORING" "${INCLUDE_MONITORING}"
+    fi
+    if [ -n "${INCLUDE_TELEMETRY:-}" ]; then
+        persist_env_key "INCLUDE_TELEMETRY" "${INCLUDE_TELEMETRY}"
+    fi
+    if [ -n "${MONITORING_STACK_MODE:-}" ]; then
+        persist_env_key "MONITORING_STACK_MODE" "${MONITORING_STACK_MODE}"
     fi
     
     if [ "$CLI_INCLUDE_SECURITY" = "false" ]; then
