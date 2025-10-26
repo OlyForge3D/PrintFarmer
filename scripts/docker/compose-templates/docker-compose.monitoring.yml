@@ -92,3 +92,6 @@ volumes:
   elasticsearch_data:
 
 networks:
+  printfarmer-network:
+    name: printfarmer-network
+    driver: bridge

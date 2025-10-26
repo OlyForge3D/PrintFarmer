@@ -1412,6 +1412,12 @@ configure_database() {
                 DB_PROVIDER="postgres"
                 prompt_with_default "PostgreSQL database name:" "${POSTGRES_DB:-printfarmer}" "POSTGRES_DB"
                 prompt_with_default "PostgreSQL username:" "${POSTGRES_USER:-postgres}" "POSTGRES_USER"
+                # If no password provided yet, generate a secure random password so interactive prompt shows it as the default
+                if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+                    POSTGRES_PASSWORD=$(generate_random_password)
+                    # Do not overwrite an explicitly provided DB_PASSWORD variable
+                    DB_PASSWORD=${DB_PASSWORD:-$POSTGRES_PASSWORD}
+                fi
                 prompt_with_default "PostgreSQL password:" "${POSTGRES_PASSWORD:-postgres}" "POSTGRES_PASSWORD"
                 DB_PASSWORD="$POSTGRES_PASSWORD"
                 CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
@@ -1452,6 +1458,11 @@ configure_database() {
                 print_info "Using SQL Server $SQLSERVER_EDITION edition"
                 echo
                 prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
+                # Pre-generate SQL Server SA password if none exists so interactive prompt shows a secure default
+                if [ -z "${SQLSERVER_PASSWORD:-}" ]; then
+                    SQLSERVER_PASSWORD=$(generate_random_password)
+                    DB_PASSWORD=${DB_PASSWORD:-$SQLSERVER_PASSWORD}
+                fi
                 prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
                 prompt_with_default "SQL Server host port (1433 is default, use different if port conflict):" "${SQLSERVER_PORT:-1433}" "SQLSERVER_PORT"
                 DB_PASSWORD="$SQLSERVER_PASSWORD"
@@ -1462,6 +1473,11 @@ configure_database() {
                 DB_PROVIDER="mysql"
                 prompt_with_default "MySQL database name:" "${MYSQL_DB:-printfarmer}" "MYSQL_DB"
                 prompt_with_default "MySQL username:" "${MYSQL_USER:-root}" "MYSQL_USER"
+                # Pre-generate MySQL password if none exists so interactive prompt shows a secure default
+                if [ -z "${MYSQL_PASSWORD:-}" ]; then
+                    MYSQL_PASSWORD=$(generate_random_password)
+                    DB_PASSWORD=${DB_PASSWORD:-$MYSQL_PASSWORD}
+                fi
                 prompt_with_default "MySQL password:" "${MYSQL_PASSWORD:-example}" "MYSQL_PASSWORD"
                 DB_PASSWORD="$MYSQL_PASSWORD"
                 CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"

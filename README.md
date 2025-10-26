@@ -199,9 +199,17 @@ ADMIN_PASSWORD=ChangeMeSuperStrong123!
 ```
 The application logs show success; remove these values immediately afterwards. Recommended approach is the CLI instead.
 
-Note on securing generated .env: after running `./scripts/deploy-docker.sh` the generated `.env` contains secrets — secure it with `chmod 600 .env`. To view the masked credentials printed by the deploy script, run:
+Note on securing generated .env: after running `./scripts/deploy-docker.sh` the generated `.env` contains secrets — secure it with:
 
-`grep -E "POSTGRES_PASSWORD|MSSQL_SA_PASSWORD|MYSQL_PASSWORD" .env || true`  # full credentials in .env; the deploy script prints a masked summary when generated
+```
+chmod 600 .env
+```
+
+To view the masked summary printed by the deploy/rotate scripts, inspect script output. To view the full credentials directly from the file (use with care):
+
+```
+grep -E "POSTGRES_PASSWORD|MSSQL_SA_PASSWORD|MYSQL_PASSWORD|ConnectionStrings__Default" .env || true
+```
 
 #### Admin CLI (Headless / Automation)
 

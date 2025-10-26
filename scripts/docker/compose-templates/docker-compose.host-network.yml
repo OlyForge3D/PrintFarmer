@@ -143,6 +143,7 @@ services:
 
 networks:
   printfarmer-network:
+    name: printfarmer-network
     driver: bridge
 
 volumes:
