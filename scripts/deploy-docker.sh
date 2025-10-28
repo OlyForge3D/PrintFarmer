@@ -2140,7 +2140,18 @@ EOF
     esac
 
     # Always expose a unified default connection string key consumed by Program.cs
-    echo "ConnectionStrings__Default=$CONNECTION_STRING" >> "$ENV_FILE"
+    # If we're deploying in host network mode, rewrite any Docker service hostnames
+    # (e.g., 'database', 'postgres', 'mysql', 'sqlserver') to 'localhost' so the
+    # API running in host network mode connects to the host services correctly.
+    if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+        # Use sed to conservatively replace common host keys while preserving the rest
+        CONNECTION_STRING_TO_WRITE=$(printf '%s' "$CONNECTION_STRING" | sed -E \
+            -e 's/([Hh]ost)=(database|postgres|postgresql)/\1=localhost/Ig' \
+            -e 's/([Ss]erver)=(mysql|sqlserver)/\1=localhost/Ig')
+    else
+        CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
+    fi
+    echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     
     cat >> "$ENV_FILE" << EOF
 

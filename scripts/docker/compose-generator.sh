@@ -567,6 +567,27 @@ PY
     if [[ "$addons_merged" == "true" ]]; then
         log_info "Successfully merged addon services into compose file"
     fi
+
+    # If we're generating for host-network mode, ensure any connection strings
+    # that reference a Docker service name (e.g., 'database', 'postgres', 'mysql', 'sqlserver')
+    # are rewritten to use localhost so the API can connect to host network services.
+    if [[ "$arch" == "host-network" ]]; then
+        log_info "Host network mode detected — rewriting connection string hosts to 'localhost' where applicable"
+        # Use Python to perform safe, whole-file replacements for common provider host keys
+    python3 - "$compose_file" <<'PY' > "$compose_file".tmp && mv "$compose_file".tmp "$compose_file" || true
+import io,sys,re
+path = sys.argv[1]
+txt = open(path,'r').read()
+# Replace Host=database or Host=postgres etc. with Host=localhost
+txt = re.sub(r'Host=(?:database|postgres|postgresql)[;:]', 'Host=localhost;', txt, flags=re.I)
+# Replace Server=mysql/sqlserver with Server=localhost
+txt = re.sub(r'Server=(?:mysql|sqlserver)[,;:]', 'Server=localhost;', txt, flags=re.I)
+# Also handle patterns where the connection string uses host= or server= in mixed case
+txt = re.sub(r'host=(?:database|postgres|postgresql)[;:]', 'host=localhost;', txt, flags=re.I)
+txt = re.sub(r'server=(?:mysql|sqlserver)[,;:]', 'server=localhost;', txt, flags=re.I)
+sys.stdout.write(txt)
+PY
+    fi
     
     # Validate the generated compose file when Docker Compose is available
     local compose_validate_cmd=""
