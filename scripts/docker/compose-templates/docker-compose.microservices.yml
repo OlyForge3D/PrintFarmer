@@ -4,7 +4,7 @@
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
-    image: ${POSTGRES_IMAGE:-postgres:15-alpine}
+    image: ${POSTGRES_IMAGE:-postgres:15}
     container_name: printfarmer-database
     environment:
       # PostgreSQL (default)
@@ -23,7 +23,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:
-      - printfarmer-network
+      printfarmer-network:
+        aliases:
+          - postgres
     volumes:
       - database_data:/var/lib/postgresql/data  # Default path, override in production
     healthcheck:

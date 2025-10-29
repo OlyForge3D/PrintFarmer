@@ -286,6 +286,22 @@ generate_deployment_config() {
                 GENERATED_FILES+=("Dockerfile.multistage")
                 ;;
         esac
+
+        # Ensure Dockerfile.multistage is available in the output directory. Many compose templates
+        # expect this file at the compose context root (docker compose build with context: .).
+        # Prefer the repo-local dockerfiles/ copy if present; copy it into the output dir so builds
+        # that use context '.' can find it.
+        if [ -f "$REPO_ROOT/dockerfiles/Dockerfile.multistage" ]; then
+            if [ ! -f "$output_dir/Dockerfile.multistage" ]; then
+                print_info "Copying dockerfiles/Dockerfile.multistage -> $output_dir/Dockerfile.multistage"
+                cp "$REPO_ROOT/dockerfiles/Dockerfile.multistage" "$output_dir/Dockerfile.multistage" || true
+            fi
+            # Ensure it's listed for potential cleanup
+            case " ${GENERATED_FILES[*]} " in
+                *" Dockerfile.multistage "*) : ;;
+                *) GENERATED_FILES+=("Dockerfile.multistage");;
+            esac
+        fi
         
         # Add optional config files
         [ "$include_monitoring" = "true" ] && GENERATED_FILES+=("prometheus.yml")
@@ -2327,8 +2343,8 @@ EOF
         
         if [ "${INCLUDE_POSTGRES:-no}" = "yes" ]; then
             cat >> docker-compose.override.yml << EOF
-  postgres:
-    image: postgres:15-alpine
+    postgres:
+        image: postgres:15
     environment:
       - POSTGRES_DB=\${POSTGRES_DB}
       - POSTGRES_USER=\${POSTGRES_USER}
@@ -2424,8 +2440,8 @@ MAINEOF
             postgres)
                 cat >> docker-compose.host-network.yml << 'DBEOF'
   # PostgreSQL Database
-  database:
-    image: postgres:15-alpine
+    database:
+        image: postgres:15
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
