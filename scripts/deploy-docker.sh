@@ -727,6 +727,11 @@ COMPOSE GENERATOR OPTIONS:
         --include-registry  Include local Docker registry
         --output-dir DIR    Output directory for generated files (default: repository root)
 
+VERIFY / UTILITY OPTIONS:
+    --verify-deployment   Run verification steps only against an existing deployment (no generation/start)
+    --env-file FILE       Use a specific .env file for verification or compose commands
+    --config-file FILE    Use a specific deployment config file instead of $REPO_ROOT/.deploy-config
+
 EXAMPLES:
     # Interactive deployment (recommended for first-time setup)
     ./scripts/deploy-docker.sh
@@ -736,12 +741,17 @@ EXAMPLES:
 
     # Tear down existing deployment and clean up
     ./scripts/deploy-docker.sh --tear-down
+    # Force tear down (skip typing 'yes' prompt)
+    ./scripts/deploy-docker.sh --tear-down --non-interactive
 
     # Validate configuration without deploying
     ./scripts/deploy-docker.sh --dry-run
 
     # Non-interactive deployment (for automation/CI)
     ./scripts/deploy-docker.sh --non-interactive
+
+    # Verify-only mode against an existing deployment (useful in CI)
+    ./scripts/deploy-docker.sh --verify-deployment --env-file .env --config-file .deploy-config
 
     # Deploy specific architecture with additional services
     ./scripts/deploy-docker.sh --architecture microservices --include-monitoring
