@@ -1,0 +1,212 @@
+# syntax=docker/dockerfile:1
+############################################################
+# Multi-Stage PrintFarmer Build
+# Builds all .NET projects once and creates efficient runtime containers
+# This approach avoids rebuilding shared libraries in each worker container
+############################################################
+
+# Global build arguments
+ARG ORCASLICER_VERSION=2.3.1
+ARG TARGETPLATFORM=linux/amd64
+
+############################################################
+# Shared Build Stage - Build all .NET projects once
+############################################################
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS shared-build
+WORKDIR /src
+
+# Copy all project files for dependency resolution
+COPY Directory.Build.props ./
+COPY global.json ./
+COPY src/shared/*.csproj ./shared/
+COPY src/infra/*.csproj ./infra/
+COPY src/import/*.csproj ./import/
+COPY src/api/*.csproj ./api/
+COPY src/worker-shared/*.csproj ./worker-shared/
+COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
+# Place proto at filesystem root so ../../proto from /src/api resolves
+COPY proto /proto
+
+# Restore all dependencies in one go
+RUN dotnet restore ./api/Farm.Web.Api.csproj && \
+    dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj
+
+# Copy all source code
+COPY src/ ./
+# Ensure proto still present at /proto
+COPY proto /proto
+
+# Build and publish API
+RUN dotnet publish ./api/Farm.Web.Api.csproj \
+    -c Release \
+    -o /app/publish/api \
+    --no-restore
+
+# Build and publish OrcaSlicer Worker
+RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj \
+    -c Release \
+    -o /app/publish/orcaslicer-worker \
+    --no-restore
+
+# Verify critical runtime files exist
+RUN test -s /app/publish/api/Farm.Web.Api.dll && \
+    test -s /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll && \
+    echo "All .NET builds completed successfully"
+
+############################################################
+# API Runtime Container
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS api-runtime
+WORKDIR /app
+EXPOSE 5000
+
+# Install network tools for enhanced Docker Desktop networking
+RUN apt-get update && \
+    apt-get install -y curl iputils-ping iproute2 net-tools dnsutils && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy API binaries from shared build stage
+COPY --from=shared-build /app/publish/api .
+
+# Create necessary directories
+RUN mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library
+
+# Set environment
+ENV ASPNETCORE_WEBROOT=/app/wwwroot
+ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
+    CMD curl -f http://localhost:5000/healthz || exit 1
+
+ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
+
+############################################################
+# OrcaSlicer Binary Layer (cached layer for binary assets)
+############################################################
+FROM alpine:3.19 AS orcaslicer-binaries
+ARG ORCASLICER_VERSION
+ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
+ARG ALLOW_STUB=true
+WORKDIR /tmp
+
+# Install required tools for binary downloading and extraction
+RUN apk add --no-cache curl ca-certificates jq file
+
+# Download and prepare OrcaSlicer binary
+RUN set -e; \
+    if [ "$ALLOW_STUB" = "true" ]; then \
+        echo "Creating OrcaSlicer stub binary"; \
+        mkdir -p /usr/local/bin; \
+        echo '#!/bin/sh\necho "OrcaSlicer stub binary - not functional"\nexit 1' > /usr/local/bin/orcaslicer; \
+        chmod +x /usr/local/bin/orcaslicer; \
+    else \
+        echo "Downloading OrcaSlicer from: $ORCASLICER_URL"; \
+        curl -L -o orcaslicer.AppImage "$ORCASLICER_URL"; \
+        chmod +x orcaslicer.AppImage; \
+        mkdir -p /usr/local/bin; \
+        mv orcaslicer.AppImage /usr/local/bin/orcaslicer; \
+    fi
+
+############################################################
+# Slicer Base Runtime (shared runtime for all workers)
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
+USER root
+WORKDIR /app
+
+# Avoid interactive prompts and install a minimal, compatible set of runtime
+# dependencies. Keep the list conservative to improve cross-distro compatibility
+# (some hosts/providers may not have exact versioned package names like libicu74).
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates \
+    libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 xvfb fuse \
+    squashfs-tools file p7zip-full && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for runtime
+RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --create-home appuser
+
+# Create necessary directories and set ownership
+RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
+
+USER appuser
+
+############################################################
+# OrcaSlicer Worker Runtime Container  
+############################################################
+FROM slicer-base AS orcaslicer-worker
+ARG ORCASLICER_VERSION
+ARG ALLOW_STUB
+USER root
+
+LABEL component="orcaslicer-worker" \
+      orcaslicer.version="${ORCASLICER_VERSION}" \
+      description="Dedicated OrcaSlicer worker container" \
+      security.sandbox="true"
+
+# Copy OrcaSlicer binaries from the binary layer
+COPY --from=orcaslicer-binaries /usr/local/bin/orcaslicer /usr/local/bin/orcaslicer
+
+# Copy OrcaSlicer Worker binaries from shared build stage
+COPY --from=shared-build /app/publish/orcaslicer-worker .
+
+# Verify binary installation
+RUN set -e; \
+    test -f /usr/local/bin/orcaslicer && \
+    test -s ./Farm.OrcaSlicer.Worker.dll && \
+    echo "OrcaSlicer worker setup completed successfully"
+
+# Switch to app user for security
+USER appuser
+
+# Set environment
+ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+ENV Worker__WorkingDirectory=/app/temp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
+
+############################################################
+# React Frontend Build Stage
+############################################################
+FROM node:18-alpine AS frontend-build
+WORKDIR /app
+
+# Copy package files
+COPY src/Web/ReactApp/package*.json ./
+
+# Install dependencies (include dev deps so TypeScript compiler is available)
+RUN npm ci
+
+# Copy source code and build
+COPY src/Web/ReactApp/ ./
+RUN npm run build
+
+############################################################
+# React Frontend Runtime Container
+############################################################
+FROM nginx:alpine AS frontend-runtime
+WORKDIR /usr/share/nginx/html
+
+# Copy built React app
+COPY --from=frontend-build /app/dist .
+
+# Copy nginx configuration
+COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:80/health || exit 1
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -3984,8 +3984,12 @@ if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
 
     # Basic compose file defaults when not set by config
     COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-    if [ -f docker-compose.host-network.yml ]; then
+    # Prefer host-network compose only when network mode is host and file exists
+    if [ "${NETWORK_MODE:-bridge}" = "host" ] && [ -f docker-compose.host-network.yml ]; then
         COMPOSE_FILE="docker-compose.host-network.yml"
+    # If architecture is microservices, prefer the microservices template when available
+    elif [ "${ARCHITECTURE:-}" = "microservices" ] && [ -f docker-compose.microservices.yml ]; then
+        COMPOSE_FILE="docker-compose.microservices.yml"
     fi
 
     print_header "🔍 Verify-only mode: running deployment verification"
