@@ -2171,6 +2171,19 @@ EOF
     else
         CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
     fi
+    # Also expose provider-specific canonical connection strings for consumers
+    case "${DB_PROVIDER:-postgres}" in
+        postgres)
+            echo "ConnectionStrings__Postgres=$CONNECTION_STRING" >> "$ENV_FILE"
+            ;;
+        sqlserver)
+            echo "ConnectionStrings__SqlServer=$CONNECTION_STRING" >> "$ENV_FILE"
+            ;;
+        mysql)
+            echo "ConnectionStrings__MySql=$CONNECTION_STRING" >> "$ENV_FILE"
+            ;;
+        *) ;;
+    esac
     echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     
     cat >> "$ENV_FILE" << EOF

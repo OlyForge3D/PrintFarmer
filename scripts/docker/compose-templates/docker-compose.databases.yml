@@ -28,7 +28,7 @@ services:
     environment:
       POSTGRES_DB: printfarmer
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -45,9 +45,9 @@ services:
     container_name: printfarmer-database-mysql
     environment:
       MYSQL_DATABASE: printfarmer
-      MYSQL_ROOT_PASSWORD: example
-      MYSQL_USER: printfarmer
-      MYSQL_PASSWORD: printfarmer
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER:-printfarmer}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
@@ -64,15 +64,15 @@ services:
     container_name: printfarmer-database-sqlserver
     environment:
       ACCEPT_EULA: Y
-      MSSQL_SA_PASSWORD: Your_password123
-      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: ${MSSQL_PID:-Developer}
     ports:
       - "1433:1433"
     volumes:
       - sqlserver-data:/var/opt/mssql
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P 'Your_password123' -Q 'SELECT 1'"]
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P '${MSSQL_SA_PASSWORD}' -Q 'SELECT 1'"]
       interval: 10s
       timeout: 5s
       retries: 5

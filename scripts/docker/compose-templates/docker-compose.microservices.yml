@@ -10,16 +10,16 @@ services:
       # PostgreSQL (default)
       POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
       POSTGRES_USER: ${POSTGRES_USER:-printfarmer}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-printfarmer_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       # SQL Server (when using mcr.microsoft.com/mssql/server:2022-latest)
       ACCEPT_EULA: ${ACCEPT_EULA:-Y}
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: ${MSSQL_PID:-Developer}
       # MySQL (when using mysql:8.0)
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DATABASE_NAME:-printfarmer}
       MYSQL_USER: ${DATABASE_USER:-printfarmer}
-      MYSQL_PASSWORD: ${DATABASE_PASSWORD:-printfarmer_password}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:
@@ -52,7 +52,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:8080
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
-      - ConnectionStrings__Default=${ConnectionStrings__Default:-Host=database;Database=printfarmer;Username=printfarmer;Password=printfarmer_password}
+      - ConnectionStrings__Default=${ConnectionStrings__Default}
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
       - DOCKER_HOST_NETWORK=${DOCKER_HOST_NETWORK:-false}
       - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
