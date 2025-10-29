@@ -3794,16 +3794,16 @@ main() {
     local include_registry="false"
     
     # Set from CLI flags or environment variables
-    if [ "$CLI_INCLUDE_MONITORING" = "true" ] || [ "${INCLUDE_MONITORING:-false}" = "true" ]; then
+    if [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ] || [ "${INCLUDE_MONITORING:-false}" = "true" ]; then
         include_monitoring="true"
     fi
-    if [ "$CLI_INCLUDE_TELEMETRY" = "true" ] || [ "${INCLUDE_TELEMETRY:-false}" = "true" ]; then
+    if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "true" ] || [ "${INCLUDE_TELEMETRY:-false}" = "true" ]; then
         include_telemetry="true"
     fi
-    if [ "$CLI_INCLUDE_SECURITY" = "true" ] || [ "${INCLUDE_SECURITY:-false}" = "true" ]; then
+    if [ "${CLI_INCLUDE_SECURITY:-false}" = "true" ] || [ "${INCLUDE_SECURITY:-false}" = "true" ]; then
         include_security="true"
     fi
-    if [ "$CLI_INCLUDE_REGISTRY" = "true" ] || [ "${INCLUDE_REGISTRY:-false}" = "true" ]; then
+    if [ "${CLI_INCLUDE_REGISTRY:-false}" = "true" ] || [ "${INCLUDE_REGISTRY:-false}" = "true" ]; then
         include_registry="true"
     fi
     
