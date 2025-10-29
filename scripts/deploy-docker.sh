@@ -23,129 +23,10 @@ COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 KEEP_GENERATED=${KEEP_GENERATED:-true}
 
  # Verify deployment
- verify_deployment() {
-     print_header "🔍 Verifying Deployment"
-
-     if [ "$DRY_RUN" = "true" ]; then
-         print_info "Dry-run mode: skipping live deployment verification."
-         return 0
-     fi
-
-     local api_url="http://localhost:$HTTP_PORT"
-     if [ "$ARCHITECTURE" = "microservices" ]; then
-         local direct_api_url="http://localhost:$API_PORT"
-     fi
-
-     # Choose the most direct base URL available (microservices local API wins)
-     local base_url
-     if [ -n "${direct_api_url:-}" ]; then
-         base_url="$direct_api_url"
-     else
-         base_url="$api_url"
-     fi
-
-     print_info "Checking container status..."
-     docker compose --env-file "$ENV_FILE" ps
-     echo
-
-     print_info "Running comprehensive health checks..."
-     local health_check_failed=false
-
-     # Make retries configurable to avoid premature warnings
-    local retries=${API_HEALTH_RETRIES:-60}    # default: 60 attempts
-     local interval=${API_HEALTH_INTERVAL:-5}   # default: 5s between attempts
-     local attempt=1
-
-     # Helper to perform a curl and return result in a variable
-     curl_health() {
-         local path="$1"
-         curl -s "$base_url$path" 2>/dev/null || true
-     }
-
-     # Test basic health endpoint with retries
-     print_info "Testing basic health endpoint (waiting up to $((retries * interval))s)..."
-     local basic_health=""
-     while [ $attempt -le $retries ]; do
-         basic_health=$(curl_health "/healthz")
-         if [ -n "$basic_health" ] && (echo "$basic_health" | grep -q '"status":"ok"' || echo "$basic_health" | grep -q '^OK$'); then
-             print_success "✓ Basic health check: OK (after ${attempt} attempt(s))"
-             break
-         fi
-
-         # Only print progress, avoid spamming warnings until retries exhausted
-         print_info "  Waiting for basic health... (attempt ${attempt}/${retries})"
-         attempt=$((attempt + 1))
-         sleep $interval
-     done
-
-     if [ $attempt -gt $retries ] && ! ( [ -n "$basic_health" ] && (echo "$basic_health" | grep -q '"status":"ok"' || echo "$basic_health" | grep -q '^OK$') ); then
-         print_warning "✗ Basic health check: FAILED after ${retries} attempts"
-         if [ -n "$basic_health" ]; then
-             print_info "Expected: JSON with \"status\":\"ok\" or plain OK"
-             print_info "Actual: $basic_health"
-         fi
-         health_check_failed=true
-     fi
-
-     # Test comprehensive health endpoint with retries
-     print_info "Testing comprehensive health endpoint (waiting up to $((retries * interval))s)..."
-     attempt=1
-     local health_json=""
-     while [ $attempt -le $retries ]; do
-         health_json=$(curl_health "/health")
-         if [ -n "$health_json" ]; then
-             # If JSON and healthy, succeed immediately
-             if echo "$health_json" | grep -q '^{'; then
-                 local health_status
-                 health_status=$(echo "$health_json" | grep -o '"status":"[^\"]*"' | head -1 | cut -d '"' -f4 || true)
-                 if [ "$health_status" = "Healthy" ]; then
-                     print_success "✓ Comprehensive health check: Healthy (after ${attempt} attempt(s))"
-                     if command -v jq >/dev/null 2>&1; then
-                         print_info "Health check details:"
-                         echo "$health_json" | jq -r '
-                            .results | to_entries[] | 
-                            "  • \(.key): \(.value.description // .value.status // \"OK\")"
-                         ' 2>/dev/null || true
-                     fi
-                     break
-                 fi
-             elif echo "$health_json" | grep -q '^OK$'; then
-                 print_success "✓ Comprehensive health check: OK (after ${attempt} attempt(s))"
-                 break
-             fi
-         fi
-
-         print_info "  Waiting for comprehensive health... (attempt ${attempt}/${retries})"
-         attempt=$((attempt + 1))
-         sleep $interval
-     done
-
-     if [ $attempt -gt $retries ]; then
-         # Final evaluation: if we have a response, show expected vs actual
-         if [ -n "$health_json" ]; then
-             if echo "$health_json" | grep -q '^{'; then
-                 local final_status
-                 final_status=$(echo "$health_json" | grep -o '"status":"[^\"]*"' | head -1 | cut -d '"' -f4 || true)
-                 print_warning "✗ Comprehensive health check: Status = ${final_status:-unknown} (after ${retries} attempts)"
-                 print_info "Actual response:"
-                 if command -v jq >/dev/null 2>&1; then
-                     echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
-                 else
-                     echo "$health_json"
-                 fi
-             elif echo "$health_json" | grep -q '^OK$'; then
-                 print_success "✓ Comprehensive health check: OK (unexpected formatting, but received OK)"
-             else
-                 print_warning "✗ Comprehensive health check: Unexpected response after ${retries} attempts"
-                 print_info "Full health check result:"
-                 echo "$health_json"
-             fi
-         else
-             print_warning "✗ Comprehensive health check: FAILED (no response after ${retries} attempts)"
-             print_info "Tip: Run 'docker compose --env-file $ENV_FILE logs api' to see API logs"
-         fi
-         health_check_failed=true
-     fi
+# Note: verify_deployment() is defined later in this script. The older/duplicate
+# implementation that previously appeared here was removed to avoid function
+# shadowing. Keep a single canonical implementation (the later one) so behavior
+# is deterministic.
 
 # Global guard: disable all slicer-related automatic builds when requested
 if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" = "1" ]; then
@@ -3959,6 +3840,60 @@ main() {
         exit 1
     fi
 }
+
+# Support a verify-only CLI mode so callers can run only the verification
+# steps against an existing deployment (without generating files or starting
+# containers). This parses a single long flag '--verify-deployment' and
+# executes the `verify_deployment` function using the existing
+# $CONFIG_FILE and/or .env if present.
+VERIFY_DEPLOYMENT=false
+_ARGS_KEEP=()
+for _arg in "$@"; do
+    case "$_arg" in
+        --verify-deployment)
+            VERIFY_DEPLOYMENT=true
+            ;;
+        *)
+            _ARGS_KEEP+=("$_arg")
+            ;;
+    esac
+done
+set -- "${_ARGS_KEEP[@]:-}"
+
+# If verify-only requested, load existing config and environment and run verification
+if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
+    # Ensure CONFIG_FILE points to repo-local config if not already set
+    CONFIG_FILE="${CONFIG_FILE:-$REPO_ROOT/.deploy-config}"
+    if [ -f "$CONFIG_FILE" ]; then
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE" || true
+    fi
+
+    # Prefer an explicit .env file if present
+    if [ -f .env ]; then
+        ENV_FILE=".env"
+    else
+        ENV_FILE="${ENV_FILE:-.env}"
+    fi
+
+    # Basic compose file defaults when not set by config
+    COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+    if [ -f docker-compose.host-network.yml ]; then
+        COMPOSE_FILE="docker-compose.host-network.yml"
+    fi
+
+    print_header "🔍 Verify-only mode: running deployment verification"
+    # Ensure dry-run is false so verify_deployment performs live checks
+    DRY_RUN=false
+
+    if verify_deployment; then
+        print_success "Verify-only: deployment verification succeeded"
+        exit 0
+    else
+        print_error "Verify-only: deployment verification failed"
+        exit 2
+    fi
+fi
 
 # Run main function only when script is executed directly (not when sourced)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
