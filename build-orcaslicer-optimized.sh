@@ -13,10 +13,17 @@ echo "Version: $ORCASLICER_VERSION"
 # Build the binary layer first - this will be cached and reused
 echo "Building orcaslicer-binaries:$ORCASLICER_VERSION..."
 ORCA_BIN_CMD=(docker build)
+ORCA_DOCKERFILE=${ORCA_DOCKERFILE:-"./scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries"}
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BIN_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi
-ORCA_BIN_CMD+=( -f Dockerfile.orcaslicer-binaries \
+if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
+    echo "Generating Dockerfile.orcaslicer-binaries for optimized build"
+    ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries || echo "[warning] generator failed"
+    _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+fi
+
+ORCA_BIN_CMD+=( -f "./Dockerfile.orcaslicer-binaries" \
     -t orcaslicer-binaries:$ORCASLICER_VERSION \
     -t orcaslicer-binaries:latest \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \

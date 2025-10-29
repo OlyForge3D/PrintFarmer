@@ -32,8 +32,18 @@ graph TD
 
 ## Files
 
-- **`Dockerfile.orcaslicer-binaries`** - Binary-only layer with optimized extraction logic
-- **`Dockerfile.orcaslicer`** - Modified worker Dockerfile using cached binaries
+- **Canonical Dockerfile Location**
+
+  The canonical Dockerfile sources for OrcaSlicer are maintained under:
+
+  - `scripts/docker/dockerfiles/`
+
+  This directory contains authoritative Dockerfiles and fragments such as `Dockerfile.orcaslicer-binaries` and `Dockerfile.orcaslicer`.
+
+  Prefer using the generator utility `scripts/docker/dockerfile-generator.sh --generate-config` to emit a working Dockerfile in your current directory prior to running `docker build`. This centralizes maintenance and avoids accidental divergence between copies.
+
+- **`Dockerfile.orcaslicer-binaries`** - Binary-only layer with optimized extraction logic (canonical copy under `scripts/docker/dockerfiles/`)
+- **`Dockerfile.orcaslicer`** - Modified worker Dockerfile using cached binaries (canonical copy under `scripts/docker/dockerfiles/`)
 - **`build-orcaslicer-optimized.sh`** - Build script demonstrating optimal workflow
 - **`docker-compose.yml`** - Updated with binary layer service
 
@@ -52,9 +62,18 @@ ORCASLICER_VERSION=2.3.1 ./build-orcaslicer-optimized.sh
 GITHUB_TOKEN=your_token ./build-orcaslicer-optimized.sh
 ```
 
-### Option 2: Manual Docker Commands
+### Option 2: Manual Docker Commands (preferred via generator)
+
+The canonical Dockerfiles live in `scripts/docker/dockerfiles/`. Use the generator to emit a merged or copied Dockerfile into your working directory and then run the normal `docker build` command.
 
 ```bash
+# Generate a Dockerfile in the current directory based on deploy-like flags
+./scripts/docker/dockerfile-generator.sh --generate-config \
+  --architecture amd64 \
+  --enable-orca-worker yes \
+  --include-monitoring no \
+  --out ./Dockerfile.orcaslicer-binaries
+
 # Step 1: Build binary layer (slow, but cached)
 docker build -f Dockerfile.orcaslicer-binaries \
   -t orcaslicer-binaries:2.3.1 \
@@ -67,6 +86,8 @@ docker build -f Dockerfile.orcaslicer \
   --build-arg ORCASLICER_VERSION=2.3.1 \
   .
 ```
+
+If you prefer the legacy approach, the canonical files are available at `scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries` and can be copied manually. The generator approach is recommended for reproducibility and to ensure you get the correct merged fragments for the selected configuration.
 
 ### Option 3: Docker Compose
 

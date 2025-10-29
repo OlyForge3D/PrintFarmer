@@ -29,8 +29,14 @@ docker rmi printfarmer-orcaslicer-worker 2>/dev/null || true
 echo ""
 
 echo "📦 Phase 1: Initial build (binary layer + worker)"
+if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
+    echo "Generating Dockerfile.orcaslicer-binaries for test"
+    ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries || echo "[warning] generator failed"
+    _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+fi
+
 time_command "Building binary layer (this will be slow initially)" \
-    docker build -f Dockerfile.orcaslicer-binaries \
+    docker build -f "./Dockerfile.orcaslicer-binaries" \
     -t orcaslicer-binaries:$ORCASLICER_VERSION \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
@@ -67,3 +73,8 @@ echo "• Development iteration time dramatically improved"
 echo ""
 echo "🔍 Verify images created:"
 docker images | grep -E "(orcaslicer-binaries|printfarmer-orcaslicer-worker)"
+
+# Cleanup generated Dockerfile if we created it
+if [ "${_PF_CREATED_ROOT_ORCA_DOCKERFILE:-0}" = "1" ]; then
+    rm -f ./Dockerfile.orcaslicer-binaries || true
+fi

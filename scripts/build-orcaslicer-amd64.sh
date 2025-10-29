@@ -16,10 +16,16 @@ fi
 ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
 
 echo "[buildx] Building orcaslicer-binaries:${ORCA_VERSION} for linux/amd64 (cached layer)";
+if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
+  echo "Generating Dockerfile.orcaslicer-binaries for buildx amd64"
+  ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries || echo "[warning] generator failed"
+  _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+fi
+
 DOCKER_BUILDKIT=1 docker buildx build \
   --platform linux/amd64 \
   -t "orcaslicer-binaries:${ORCA_VERSION}" \
-  -f Dockerfile.orcaslicer-binaries \
+  -f ./Dockerfile.orcaslicer-binaries \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
   --build-arg ALLOW_STUB=false \
   --load .

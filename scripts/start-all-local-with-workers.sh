@@ -619,12 +619,22 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BIN_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
   fi
-  ORCA_BIN_CMD+=(-f Dockerfile.orcaslicer-binaries \
+  # Generate Dockerfile.orcaslicer-binaries for local builds if generator exists
+  if [ -x "$ROOT_DIR/scripts/docker/dockerfile-generator.sh" ]; then
+    info "Generating Dockerfile.orcaslicer-binaries for local build"
+    (cd "$ROOT_DIR" && ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries) || info "Generator failed; falling back to canonical"
+    _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+  fi
+  ORCA_DOCKERFILE=${ORCA_DOCKERFILE:-"./scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries"}
+  if [ -f "$ROOT_DIR/Dockerfile.orcaslicer-binaries" ]; then
+    ORCA_DOCKERFILE="$ROOT_DIR/Dockerfile.orcaslicer-binaries"
+  fi
+  ORCA_BIN_CMD+=(-f "$ORCA_DOCKERFILE" \
     -t "orcaslicer-binaries:${ORCA_VERSION}" \
     -t "orcaslicer-binaries:latest" \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
     --build-arg ALLOW_STUB=false \
-    .
+    .)
   "${ORCA_BIN_CMD[@]}"
   
   # Build worker using cached binaries (fast)

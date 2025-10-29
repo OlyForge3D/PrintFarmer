@@ -29,7 +29,14 @@ ORCA_BUILD_CMD=(docker build)
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi
-ORCA_BUILD_CMD+=( -f Dockerfile.orcaslicer-binaries \
+# Generate a merged Dockerfile for this build scenario (creates ./Dockerfile.orcaslicer-binaries)
+if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
+    echo "Generating Dockerfile.orcaslicer-binaries via dockerfile-generator.sh"
+    ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries || echo "[warning] generator failed, falling back to canonical file"
+    _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+fi
+
+ORCA_BUILD_CMD+=( -f ./Dockerfile.orcaslicer-binaries \
     -t "orcaslicer-binaries:$ORCASLICER_VERSION" \
     -t "orcaslicer-binaries:latest" \
     -t "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION" \

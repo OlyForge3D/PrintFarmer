@@ -2868,6 +2868,38 @@ deploy_containers() {
         BUILD_CTX_DIR="./.tmp_build_context"
         mkdir -p "$BUILD_CTX_DIR"
 
+        # Canonical path for orcaslicer binaries Dockerfile (keep canonical copy under scripts/docker/dockerfiles)
+        CANONICAL_ORCA_DOCKERFILE="./scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries"
+        ROOT_ORCA_DOCKERFILE="./Dockerfile.orcaslicer-binaries"
+
+        # Helper: ensure a Dockerfile.orcaslicer-binaries exists at repo root for build commands that expect it
+        ensure_root_dockerfile() {
+            if [ -f "$CANONICAL_ORCA_DOCKERFILE" ]; then
+                if [ ! -f "$ROOT_ORCA_DOCKERFILE" ]; then
+                    print_info "Creating $ROOT_ORCA_DOCKERFILE from canonical template"
+                    cp "$CANONICAL_ORCA_DOCKERFILE" "$ROOT_ORCA_DOCKERFILE" || {
+                        print_warning "Failed to copy $CANONICAL_ORCA_DOCKERFILE to root; build may fail"
+                    }
+                    # Mark that we created it so cleanup can remove it
+                    export _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+                else
+                    # Root file already present; leave as-is
+                    export _PF_CREATED_ROOT_ORCA_DOCKERFILE=0
+                fi
+            else
+                print_warning "Canonical Dockerfile $CANONICAL_ORCA_DOCKERFILE not found; continuing without creating root copy"
+            fi
+        }
+
+        # Helper: cleanup root Dockerfile if we created it
+        cleanup_root_dockerfile() {
+            if [ "${_PF_CREATED_ROOT_ORCA_DOCKERFILE:-0}" = "1" ] && [ -f "$ROOT_ORCA_DOCKERFILE" ]; then
+                print_info "Removing temporary $ROOT_ORCA_DOCKERFILE"
+                rm -f "$ROOT_ORCA_DOCKERFILE" || print_warning "Failed to remove $ROOT_ORCA_DOCKERFILE"
+                unset _PF_CREATED_ROOT_ORCA_DOCKERFILE
+            fi
+        }
+
         if [ -n "$ORCA_ASSET_IMAGE" ]; then
             print_info "Using Orca assets image: $ORCA_ASSET_IMAGE"
             docker pull "$ORCA_ASSET_IMAGE" || print_warning "Failed to pull $ORCA_ASSET_IMAGE; continuing and hoping it's local"
@@ -2910,6 +2942,29 @@ deploy_containers() {
                 BUILD_ARGS="$BUILD_ARGS --build-arg GITHUB_TOKEN=${GITHUB_TOKEN}"
             fi
             
+            # Ensure a root-level Dockerfile.orcaslicer-binaries exists for compatibility with existing build invocations
+            # Prefer using the dockerfile-generator utility to create a merged/generated Dockerfile for this scenario
+            if [ -x "./scripts/docker/dockerfile-generator.sh" ]; then
+                print_info "Generating $ROOT_ORCA_DOCKERFILE from configuration via dockerfile-generator"
+                ./scripts/docker/dockerfile-generator.sh --generate-config \
+                    --architecture "${CLI_ARCHITECTURE:-}" \
+                    --enable-orca-worker "${ENABLE_ORCA_WORKER:-no}" \
+                    --include-monitoring "${CLI_INCLUDE_MONITORING:-false}" \
+                    --include-telemetry "${CLI_INCLUDE_TELEMETRY:-false}" \
+                    --include-security "${CLI_INCLUDE_SECURITY:-false}" \
+                    --include-registry "${CLI_INCLUDE_REGISTRY:-false}" \
+                    --db-provider "${DB_PROVIDER:-}" --out "$ROOT_ORCA_DOCKERFILE" || {
+                    print_warning "dockerfile-generator failed; falling back to direct copy"
+                    ensure_root_dockerfile
+                }
+                # mark as created so cleanup removes it
+                if [ -f "$ROOT_ORCA_DOCKERFILE" ]; then
+                    export _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+                fi
+            else
+                ensure_root_dockerfile
+            fi
+
             ORCA_BUILD_CMD=(docker build)
             if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
                 ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
@@ -2920,8 +2975,12 @@ deploy_containers() {
             else
                 print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
                 print_error "This layer contains the OrcaSlicer binary and will be cached for optimal build performance"
+                cleanup_root_dockerfile
                 exit 1
             fi
+
+            # Cleanup temporary root Dockerfile if we created one
+            cleanup_root_dockerfile
         fi
 
         # Build slicer-base first if workers are enabled (required dependency)

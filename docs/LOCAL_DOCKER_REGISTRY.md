@@ -61,6 +61,14 @@ ifconfig | grep "inet " | grep -v 127.0.0.1
 ### Build and Push OrcaSlicer Images
 
 ```bash
+# Preferred: generate Dockerfile from canonical sources then build
+
+# Generate the Dockerfile for the current scenario (writes ./Dockerfile.orcaslicer-binaries)
+./scripts/docker/dockerfile-generator.sh --generate-config \
+  --architecture amd64 \
+  --enable-orca-worker yes \
+  --out ./Dockerfile.orcaslicer-binaries
+
 # 1. Build the optimized binary layer
 docker build -f Dockerfile.orcaslicer-binaries \
   -t localhost:5000/orcaslicer-binaries:2.3.1 \
@@ -82,6 +90,10 @@ docker push localhost:5000/printfarmer-orcaslicer-worker:latest
 # 5. Tag as latest for easy reference
 docker tag localhost:5000/orcaslicer-binaries:2.3.1 localhost:5000/orcaslicer-binaries:latest
 docker push localhost:5000/orcaslicer-binaries:latest
+
+# Legacy note: The canonical Dockerfile files are stored under
+# `scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries` and may be copied manually
+# if you need to reference them directly. Using the generator is recommended.
 ```
 
 ### Deploy on Another Server
