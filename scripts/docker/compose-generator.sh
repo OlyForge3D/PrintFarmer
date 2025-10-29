@@ -186,19 +186,23 @@ merge_addon_services() {
     local addon_type="$2"
     local addon_template="$TEMPLATES_DIR/docker-compose.$addon_type.yml"
 
-    if [[ "$addon_type" == "monitoring" && "$SUPPORTS_ELASTIC_STACK" != "true" ]]; then
-        local lite_template="$TEMPLATES_DIR/docker-compose.monitoring.lite.yml"
-        if [[ -f "$lite_template" ]]; then
-            local reason_message="${ELASTIC_STACK_REASON:-disabled}"
-            if [[ "$reason_message" == "not supported on architecture $SYSTEM_ARCH" ]]; then
-                log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH; using lightweight monitoring template"
-            else
-                log_info "Elastic Stack ${reason_message}; using lightweight monitoring template (set ENABLE_ELASTIC_STACK=true to enable Elasticsearch/Kibana/Logstash)"
+    if [[ "$addon_type" == "monitoring" ]]; then
+        # If user explicitly disabled elastic stack, prefer the lite template when available
+        if [[ -n "${ENABLE_ELASTIC_STACK:-}" ]]; then
+            _elastic_lower=$(printf '%s' "$ENABLE_ELASTIC_STACK" | tr '[:upper:]' '[:lower:]')
+            if [[ "$_elastic_lower" == "false" || "$_elastic_lower" == "0" || "$_elastic_lower" == "no" ]]; then
+                local lite_template="$TEMPLATES_DIR/docker-compose.monitoring.lite.yml"
+                if [[ -f "$lite_template" ]]; then
+                    log_info "ENABLE_ELASTIC_STACK explicitly set to false; using lightweight monitoring template"
+                    addon_template="$lite_template"
+                else
+                    log_warning "ENABLE_ELASTIC_STACK is false but no lite template found; proceeding with full monitoring template if available"
+                fi
             fi
-            addon_template="$lite_template"
+            unset _elastic_lower
         else
-            log_warning "Elastic Stack is not supported on architecture $SYSTEM_ARCH and no lightweight monitoring template found; skipping monitoring services"
-            return 0
+            # No explicit user override: use full monitoring template when requested
+            :
         fi
     fi
     
@@ -666,11 +670,23 @@ copy_dockerfiles() {
     local output_dir="$2"
 
     log_info "Copying Dockerfiles for $arch into $output_dir"
+    # Prefer dockerfiles under scripts/docker/dockerfiles, but fall back to repository-level dockerfiles/
+    local src_dir=""
     if [[ -d "$DOCKERFILES_DIR" ]]; then
+        src_dir="$DOCKERFILES_DIR"
+    elif [[ -d "$REPO_ROOT/dockerfiles" ]]; then
+        src_dir="$REPO_ROOT/dockerfiles"
+    fi
+
+    if [[ -n "$src_dir" && -d "$src_dir" ]]; then
         mkdir -p "$output_dir/dockerfiles"
-        cp -r "$DOCKERFILES_DIR"/* "$output_dir/dockerfiles/" 2>/dev/null || true
+        cp -r "$src_dir"/* "$output_dir/dockerfiles/" 2>/dev/null || true
+        # Ensure Dockerfile.multistage is also available at the output root (some tests expect this)
+        if [[ -f "$src_dir/Dockerfile.multistage" ]]; then
+            cp "$src_dir/Dockerfile.multistage" "$output_dir/Dockerfile.multistage" 2>/dev/null || true
+        fi
     else
-        log_warning "No dockerfiles directory found at $DOCKERFILES_DIR; skipping copy"
+        log_warning "No dockerfiles directory found at $DOCKERFILES_DIR or $REPO_ROOT/dockerfiles; skipping copy"
     fi
 }
 

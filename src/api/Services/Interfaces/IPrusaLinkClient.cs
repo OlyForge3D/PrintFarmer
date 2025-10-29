@@ -69,4 +69,10 @@ public interface IPrusaLinkClient
     /// <returns>A task containing an array of G-code file names</returns>
     Task<string[]> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
     Task<string[]> GetFileListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets detailed printer information from a PrusaLink printer (name, firmware, capabilities, etc.)
+    /// </summary>
+    Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
 }

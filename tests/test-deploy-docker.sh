@@ -303,6 +303,111 @@ EOF
     pass_test
 }
 
+# Test that generated DB password is included and propagated into ConnectionStrings__Default
+test_generated_db_password_propagation() {
+    start_test "generated DB password propagation"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Run deploy script in dry-run batch mode to generate env file
+    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch)"
+    local output=$(get_output)
+
+    # Determine expected env file
+    local env_file="$TEST_TEMP_DIR/.env.microservices"
+
+    # The deploy script copies .env to repo root; it also writes the output in working dir
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    assert_file_exists "$env_file" "Expected generated env file $env_file"
+
+    local pg_pw
+    pg_pw=$(grep -E '^POSTGRES_PASSWORD=' "$env_file" | tail -1 | cut -d= -f2- || true)
+    local conn
+    conn=$(grep -E '^ConnectionStrings__Default=' "$env_file" | tail -1 | cut -d= -f2- || true)
+
+    assert_not_equals "" "$pg_pw" "POSTGRES_PASSWORD should be generated and present"
+    assert_not_equals "" "$conn" "ConnectionStrings__Default should be present"
+
+    # Verify password is included in connection string
+    if [[ "$conn" != *"$pg_pw"* ]]; then
+        fail_test "Connection string does not contain generated POSTGRES_PASSWORD"
+    else
+        pass_test
+    fi
+}
+
+# Test SQL Server password propagation
+test_generated_sqlserver_password_propagation() {
+    start_test "generated SQL Server password propagation"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Run deploy script in dry-run batch mode selecting sqlserver
+    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch --env DB_PROVIDER=sqlserver)"
+    local output=$(get_output)
+
+    local env_file="$TEST_TEMP_DIR/.env.microservices"
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    assert_file_exists "$env_file" "Expected generated env file $env_file"
+
+    local sql_pw
+    sql_pw=$(grep -E '^SQLSERVER_PASSWORD=' "$env_file" | tail -1 | cut -d= -f2- || true)
+    local conn
+    conn=$(grep -E '^ConnectionStrings__Default=' "$env_file" | tail -1 | cut -d= -f2- || true)
+
+    assert_not_equals "" "$sql_pw" "SQLSERVER_PASSWORD should be generated and present"
+    assert_not_equals "" "$conn" "ConnectionStrings__Default should be present"
+
+    # For SQL Server the connection string typically includes 'Password=' value
+    if ! echo "$conn" | grep -qi "Password="$sql_pw""; then
+        # case-insensitive best-effort: check presence of password substring
+        if [[ "$conn" != *"$sql_pw"* ]]; then
+            fail_test "Connection string does not contain generated SQLSERVER_PASSWORD"
+            return
+        fi
+    fi
+
+    pass_test
+}
+
+# Test MySQL password propagation
+test_generated_mysql_password_propagation() {
+    start_test "generated MySQL password propagation"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Run deploy script in dry-run batch mode selecting mysql
+    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch --env DB_PROVIDER=mysql)"
+    local output=$(get_output)
+
+    local env_file="$TEST_TEMP_DIR/.env.microservices"
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    assert_file_exists "$env_file" "Expected generated env file $env_file"
+
+    local my_pw
+    my_pw=$(grep -E '^MYSQL_ROOT_PASSWORD=' "$env_file" | tail -1 | cut -d= -f2- || true)
+    local conn
+    conn=$(grep -E '^ConnectionStrings__Default=' "$env_file" | tail -1 | cut -d= -f2- || true)
+
+    assert_not_equals "" "$my_pw" "MYSQL_ROOT_PASSWORD should be generated and present"
+    assert_not_equals "" "$conn" "ConnectionStrings__Default should be present"
+
+    if [[ "$conn" != *"$my_pw"* ]]; then
+        fail_test "Connection string does not contain generated MYSQL_ROOT_PASSWORD"
+    else
+        pass_test
+    fi
+}
+
 # Test all database providers with all architectures
 test_all_database_architecture_combinations() {
     start_test "all database and architecture combinations"

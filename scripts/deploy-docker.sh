@@ -122,6 +122,8 @@ if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" =
     ORCA_WORKER_COUNT=0
 fi
 
+# Defaults for Orca worker flags
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -922,6 +924,8 @@ ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
 EOF
+
+    # (Prusa worker support removed) — no Prusa defaults are written for modern deployments
 
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
@@ -2292,6 +2296,135 @@ EOF
     fi
 }
 
+# Detect credential divergence between generated env and existing DB container
+# Non-destructive by default: warns and exits in non-interactive mode if mismatch found.
+detect_db_credential_divergence() {
+    # Skip detection during dry-run or when DB provider is external/sqlite
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+        return 0
+    fi
+
+    local provider="${DB_PROVIDER:-postgres}"
+    if [ "$provider" = "external" ] || [ "$provider" = "sqlite" ]; then
+        return 0
+    fi
+
+    # Helper to compare a container env var
+    compare_container_env() {
+        local container_name_pattern="$1"
+        local env_key="$2"
+        local generated_value="$3"
+
+        # Find a matching container
+        local cid
+        cid=$(docker ps -aq --filter "name=$container_name_pattern" | head -n1 || true)
+        if [ -z "$cid" ]; then
+            return 1
+        fi
+
+        # Read env from container inspect
+        local container_env
+        container_env=$(docker inspect "$cid" --format '{{json .Config.Env}}' 2>/dev/null || true)
+        if [ -z "$container_env" ]; then
+            return 1
+        fi
+
+        # Extract value
+        local val
+        val=$(echo "$container_env" | tr -d '[]"' | tr ',' '\n' | sed -n "s/^${env_key}=\(.*\)/\1/p" | tail -1 || true)
+        if [ -z "$val" ]; then
+            return 2
+        fi
+
+        if [ "$val" != "$generated_value" ]; then
+            echo "$cid:$env_key:$val"
+            return 0
+        fi
+        return 3
+    }
+
+    # Get generated passwords from env file if set
+    local gen_pg_pw gen_sql_pw gen_mysql_pw
+    gen_pg_pw=$(get_env_value "POSTGRES_PASSWORD" || true)
+    gen_sql_pw=$(get_env_value "SQLSERVER_PASSWORD" || get_env_value "MSSQL_SA_PASSWORD" || true)
+    gen_mysql_pw=$(get_env_value "MYSQL_ROOT_PASSWORD" || get_env_value "MYSQL_PASSWORD" || true)
+
+    local mismatch_info=""
+
+    case "$provider" in
+        postgres)
+            if [ -n "$gen_pg_pw" ]; then
+                # check typical container names
+                for pattern in "printfarmer-database-postgres" "printfarmer-database" "pfarm-postgres"; do
+                    local result
+                    result=$(compare_container_env "$pattern" "POSTGRES_PASSWORD" "$gen_pg_pw" ) || true
+                    if [ -n "$result" ]; then
+                        mismatch_info="$result"
+                        break
+                    fi
+                done
+            fi
+            ;;
+        sqlserver)
+            if [ -n "$gen_sql_pw" ]; then
+                for pattern in "printfarmer-database-sqlserver" "printfarmer-database" "pfarm-sqlserver"; do
+                    local result
+                    result=$(compare_container_env "$pattern" "MSSQL_SA_PASSWORD" "$gen_sql_pw" ) || true
+                    if [ -n "$result" ]; then
+                        mismatch_info="$result"
+                        break
+                    fi
+                done
+            fi
+            ;;
+        mysql)
+            if [ -n "$gen_mysql_pw" ]; then
+                for pattern in "printfarmer-database-mysql" "printfarmer-database" "pfarm-mysql"; do
+                    local result
+                    result=$(compare_container_env "$pattern" "MYSQL_ROOT_PASSWORD" "$gen_mysql_pw" ) || true
+                    if [ -n "$result" ]; then
+                        mismatch_info="$result"
+                        break
+                    fi
+                done
+            fi
+            ;;
+        *)
+            ;; 
+    esac
+
+    if [ -n "$mismatch_info" ]; then
+        print_warning "Detected a mismatch between generated DB credentials and an existing DB container: $mismatch_info"
+        print_warning "This usually means the DB volume was initialized earlier with a different password."
+        print_info "Options:"
+        echo "  1) Run ALTER USER inside DB to sync the password (non-destructive)"
+        echo "  2) Backup DB, remove volume and recreate stack (destructive)"
+        echo "  3) Abort deployment and investigate manually"
+
+        if [ "${NON_INTERACTIVE:-false}" = "true" ]; then
+            print_error "Non-interactive mode: aborting due to credential divergence. Use --force-sync-db-password or --recreate-db to auto-resolve."
+            exit 1
+        fi
+
+        # Prompt user for action
+        echo
+        read -p "Choose action [1=ALTER USER, 2=Recreate DB (destructive), 3=Abort] (default 3): " action || true
+        action=${action:-3}
+        case "$action" in
+            1)
+                print_info "You chose ALTER USER. To proceed, run the following command manually or rerun with --force-sync-db-password to attempt automatic sync."
+                ;;
+            2)
+                print_warning "You chose to recreate the DB: this will remove volumes and reinitialize the database."
+                ;;
+            *)
+                print_info "Aborting deployment. No changes made."
+                exit 1
+                ;;
+        esac
+    fi
+}
+
 # Generate React .env.production file for Docker builds
 generate_react_env_production() {
     local react_dir=""
@@ -3326,6 +3459,7 @@ display_final_info() {
     if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
         echo -e "${BLUE}  • Orca Workers: $ORCA_WORKER_COUNT (enabled: $ENABLE_ORCA_WORKER)${NC}"
     fi
+
     
     echo -e "${GREEN}Configuration Files:${NC}"
     echo -e "${BLUE}  • Environment: $ENV_FILE${NC}"
@@ -3550,5 +3684,7 @@ main() {
     fi
 }
 
-# Run main function
-main "$@"
+# Run main function only when script is executed directly (not when sourced)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

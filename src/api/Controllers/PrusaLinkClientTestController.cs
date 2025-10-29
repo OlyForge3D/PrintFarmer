@@ -26,7 +26,7 @@ public class PrusaLinkClientTestController(
     [ProducesResponseType(500)]
     public async Task<IActionResult> TestGetPrinterInfoAsync(
         [FromQuery] string serverUrl,
-        [FromQuery] string? apiKey,
+        [FromQuery] string? apiKey = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(serverUrl))
@@ -56,7 +56,7 @@ public class PrusaLinkClientTestController(
     [ProducesResponseType(500)]
     public async Task<IActionResult> TestGetFileListAsync(
         [FromQuery] string serverUrl,
-        [FromQuery] string? apiKey,
+        [FromQuery] string? apiKey = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(serverUrl))

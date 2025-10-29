@@ -319,12 +319,18 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         }
         builder.ConfigureAppConfiguration((context, config) =>
         {
+            // Ensure artifact storage during tests is redirected to the repo-local test-artifacts
+            // directory so generated .gcode/.png files are written into a path that is gitignored.
+            var artifactRoot = Path.GetFullPath(TestArtifactsDirectory);
+
             var dict = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = $"Data Source={_dbPath}",
                 ["ConnectionStrings:Sqlite"] = $"Data Source={_dbPath}",
                 // Avoid running EF Core Migrate() in tests when using ad-hoc SQLite files; rely on startup safety + EnsureCreated
-                ["DISABLE_EF_MIGRATIONS"] = "true"
+                ["DISABLE_EF_MIGRATIONS"] = "true",
+                // Force artifact root path to the test artifacts directory (absolute) during tests
+                ["ArtifactStorage:RootPath"] = artifactRoot
             };
             config.AddInMemoryCollection(dict!);
         });
@@ -431,16 +437,22 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         }
                     }
 
-                    // Ensure the env flag so startup doesn't double-seed
-                    Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
+                        // Only mark startup to skip DB init when the shared fixture actually
+                        // provided the connection (i.e. an external fixture seeded the DB).
+                        // If we created the connection ourselves we will decide to skip
+                        // startup seeding only after a successful pre-seed below.
+                        if (Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection != null)
+                        {
+                            Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
+                        }
 
-                    // Register into DI if not already present
-                    try
-                    {
-                        services.AddSingleton<Microsoft.Data.Sqlite.SqliteConnection>(earlyConn);
-                        services.AddSingleton<System.Data.Common.DbConnection>(earlyConn);
-                    }
-                    catch { }
+                        // Register into DI if not already present
+                        try
+                        {
+                            services.AddSingleton<Microsoft.Data.Sqlite.SqliteConnection>(earlyConn);
+                            services.AddSingleton<System.Data.Common.DbConnection>(earlyConn);
+                        }
+                        catch { }
                 }
             }
             catch { }
@@ -1051,9 +1063,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             }
 
             // Dump DB table counts and sample rows to test output for debugging missing FK issues
+            // This is noisy in normal test runs; enable only when TEST_ENABLE_DB_DUMP=true
             try
             {
-                DumpDatabaseState(db);
+                if (IsDbDumpEnabled())
+                {
+                    DumpDatabaseState(db);
+                }
             }
             catch (Exception ex)
             {
@@ -1172,7 +1188,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                             catch { }
                             // Also dump a small DB state to help triage
                             try
-                            { DumpDatabaseState(verifyDb); }
+                            {
+                                if (IsDbDumpEnabled())
+                                {
+                                    DumpDatabaseState(verifyDb);
+                                }
+                            }
                             catch { }
                             throw new InvalidOperationException("AuthAudit diagnostic self-check failed: audit writes are not visible across scopes. This typically indicates AppDbContext/connection mismatch in test DI registration.");
                         }
@@ -1435,6 +1456,19 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         catch (Exception ex)
         {
             Console.WriteLine($"DumpDatabaseState failed: {ex}");
+        }
+    }
+
+    private static bool IsDbDumpEnabled()
+    {
+        try
+        {
+            var v = Environment.GetEnvironmentVariable("TEST_ENABLE_DB_DUMP");
+            return string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(v, "1", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 

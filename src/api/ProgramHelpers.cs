@@ -198,8 +198,21 @@ namespace Farm.Web.Api
                             startupLogger?.LogInformation("[JWT][OnTokenValidated] user: {User} roles: {Roles}", sub, roles);
                         }
 
-                        // Check if token has been revoked
-                        string? token = context.SecurityToken?.ToString();
+                        // Check if token has been revoked. Prefer the raw token extracted from the Authorization header
+                        // (context.Token) because that matches the original JWT string used to compute the stored token hash.
+                        // Try to read raw token from Authorization header to ensure we compute the same hash
+                        string? token = null;
+                        try
+                        {
+                            string authHeader = context.HttpContext.Request.Headers["Authorization"].ToString();
+                            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                token = authHeader["Bearer ".Length..].Trim();
+                            }
+                        }
+                        catch { }
+
+                        token ??= context.SecurityToken?.ToString();
                         if (!string.IsNullOrEmpty(token))
                         {
                             var tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();

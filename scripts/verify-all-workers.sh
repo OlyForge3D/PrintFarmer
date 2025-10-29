@@ -52,9 +52,8 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 GLOBAL_MODE=allow-stub
-PRUSA_MODE=""
 ORCA_MODE=""
-WORKERS=${ALL_WORKERS:-"prusa,orca"}
+WORKERS=${ALL_WORKERS:-"orca"}
 FAIL_FAST=false
 SKIP_MISSING=false
 SUMMARY_ONLY=false
@@ -66,7 +65,6 @@ DETECT_IMAGES=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) GLOBAL_MODE="${2:?mode requires value}"; shift 2;;
-    --prusa-mode) PRUSA_MODE="${2:?prusa-mode requires value}"; shift 2;;
     --orca-mode) ORCA_MODE="${2:?orca-mode requires value}"; shift 2;;
     --workers) WORKERS="${2:?workers requires value}"; shift 2;;
     --fail-fast) FAIL_FAST=true; shift;;
@@ -96,7 +94,6 @@ DOCKER_IMAGES=$(docker images --format '{{.Repository}}:{{.Tag}}')
 find_candidate_image() {
   local worker="$1"; local candidate=""; local patterns=()
   case "$worker" in
-    prusa) patterns=("prusaslicer-worker:latest" "prusaslicer-worker-test:latest" "prusaslicer-worker-dev:latest" "prusaslicer-worker" "prusaslicer-worker-test" "prusaslicer-worker-dev");;
     orca)  patterns=("orcaslicer-worker:latest" "orcaslicer-worker-test:latest" "orcaslicer-worker-dev:latest" "orcaslicer-worker" "orcaslicer-worker-test" "orcaslicer-worker-dev");;
     *) return 1;;
   esac
@@ -124,7 +121,6 @@ run_worker() {
   local mode_to_use
   local resolved_image=""
   case "$worker" in
-    prusa) script="$(dirname "$0")/verify-prusaslicer-worker.sh"; mode_to_use="${mode_override:-${GLOBAL_MODE}}";;
     orca)  script="$(dirname "$0")/verify-orcaslicer-worker.sh"; mode_to_use="${mode_override:-${GLOBAL_MODE}}";;
     *) err "Unsupported worker identifier: $worker"; RESULTS["$worker"]=UNKNOWN; EXITCODES["$worker"]=65; return 65;;
   esac
@@ -132,8 +128,8 @@ run_worker() {
   # Determine image from env or script default (by inspecting help header if needed)
   local image_env_var
   case "$worker" in
-    prusa) image_env_var="PRUSA_IMAGE";;
     orca)  image_env_var="ORCA_IMAGE";;
+    *) image_env_var="";;
   esac
   local image="${!image_env_var:-}" # may be empty; script has its own default
 
@@ -200,9 +196,8 @@ overall_rc=0
 for w in "${WORKER_LIST[@]}"; do
   rc=0
   case "$w" in
-    prusa) run_worker prusa "$PRUSA_MODE" || rc=$?;;
     orca)  run_worker orca  "$ORCA_MODE"  || rc=$?;;
-    *) err "Unknown worker '$w' (skipping)"; RESULTS["$w"]=UNKNOWN; EXITCODES["$w"]=67; rc=67;;
+    *) err "Unknown or unsupported worker '$w' (skipping)"; RESULTS["$w"]=UNKNOWN; EXITCODES["$w"]=67; rc=67;;
   esac
   if [ $rc -ne 0 ]; then overall_rc=$rc; fi
   if $FAIL_FAST && [ $overall_rc -ne 0 ]; then break; fi

@@ -241,7 +241,13 @@ public class TokenRevocationService : ITokenRevocationService
         {
             var handler = new JwtSecurityTokenHandler();
             var jwtToken = handler.ReadJwtToken(token);
-            var userIdClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == "sub" || c.Type == "userId");
+            // Tokens are issued with ClaimTypes.NameIdentifier by AuthenticationService.
+            // Also accept common JWT claim names (sub, userId) for compatibility.
+            var userIdClaim = jwtToken.Claims.FirstOrDefault(c =>
+                c.Type == System.Security.Claims.ClaimTypes.NameIdentifier ||
+                string.Equals(c.Type, "sub", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Type, "userId", StringComparison.OrdinalIgnoreCase)
+            );
 
             if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
             {

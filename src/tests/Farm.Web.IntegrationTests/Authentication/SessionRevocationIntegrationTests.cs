@@ -111,13 +111,15 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         // Act - Get revocation history
         var response = await client.GetAsync($"/api/users/{userId}/revoked-tokens");
 
-        // Assert
-        response.IsSuccessStatusCode.Should().BeTrue();
-        var revocations = await response.Content.ReadFromJsonAsync<List<RevokedTokenDto>>();
-        revocations.Should().NotBeNull();
-        revocations!.Should().NotBeEmpty();
-        revocations.First().Reason.Should().Contain("Test revocation for history");
-        revocations.First().RevokedByUserId.Should().Be(adminUserId);
+    // Assert
+    response.IsSuccessStatusCode.Should().BeTrue();
+        var revocations = (await response.Content.ReadFromJsonAsync<List<RevokedTokenDto>>()) ?? new List<RevokedTokenDto>();
+        revocations.Should().NotBeEmpty();
+        // Guarded use of FirstOrDefault() with explicit NotBeNull assertion to satisfy static analysis
+        var first = revocations.FirstOrDefault();
+        first.Should().NotBeNull();
+        first!.Reason.Should().Contain("Test revocation for history");
+        first.RevokedByUserId.Should().Be(adminUserId);
     }
 
     [Fact]
@@ -127,6 +129,23 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userId = Guid.NewGuid();
+
+        // Ensure the user exists so RevokedToken FK constraints are satisfied
+        var existingUser = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (existingUser == null)
+        {
+            db.Users.Add(new User
+            {
+                Id = userId,
+                Username = $"revocation_{userId}",
+                Email = $"revocation_{userId}@example.com",
+                IsActive = true,
+                EmailConfirmed = true,
+                CreatedAt = DateTime.UtcNow,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Password123!")
+            });
+            await db.SaveChangesAsync();
+        }
 
         // Create an expired revocation record (already past expiration)
         var expiredRevocation = new RevokedToken

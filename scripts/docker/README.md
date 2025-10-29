@@ -12,7 +12,7 @@ scripts/docker/
 │   ├── Dockerfile.api       # API service (microservices)
 │   ├── Dockerfile.frontend* # Frontend variants
 │   ├── Dockerfile.orca*     # OrcaSlicer worker variants
-│   ├── Dockerfile.prusa*    # PrusaSlicer worker variants
+│   ├── Dockerfile.prusa*    # (PrusaSlicer worker variants removed)
 │   └── Dockerfile.slicer-base # Base slicer image
 ├── compose-templates/       # Docker Compose template files
 │   ├── docker-compose.yml                # Main template

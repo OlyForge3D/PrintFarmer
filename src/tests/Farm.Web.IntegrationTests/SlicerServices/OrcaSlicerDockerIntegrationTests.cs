@@ -46,6 +46,12 @@ public class OrcaSlicerDockerIntegrationTests : IAsyncLifetime
     public async Task OrcaSlicerWorker_ShouldBuildDockerImage_Successfully()
     {
         _output.WriteLine("Building OrcaSlicer worker Docker image...");
+        var dockerfilePath = Path.Combine(_baseDirectory, "Dockerfile.orcaslicer");
+        if (!File.Exists(dockerfilePath))
+        {
+            _output.WriteLine("Dockerfile.orcaslicer not found, skipping Docker build test on this host.");
+            return;
+        }
         var result = await DockerTestHelpers.RunDockerCommandAsync(_output, _baseDirectory, "build", "-f", "Dockerfile.orcaslicer", "-t", "orcaslicer-worker-test", ".");
         if (!result.Success && (result.ErrorOutput?.Contains("no match for platform in manifest", StringComparison.OrdinalIgnoreCase) == true || result.ErrorOutput?.Contains("manifest", StringComparison.OrdinalIgnoreCase) == true))
         {

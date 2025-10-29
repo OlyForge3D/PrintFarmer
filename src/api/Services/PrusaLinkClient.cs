@@ -323,6 +323,12 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
         }
     }
 
+    public Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetPrinterInformationAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+    }
+
     public async Task<StorageInformation[]> GetStorageInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         try

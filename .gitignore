@@ -87,3 +87,8 @@ prusa_preseed/
 # Test-generated artifacts directory (cleaned by tests). Safe to ignore.
 src/test-artifacts/
 
+# Ignore API artifact storage folders created during tests or local runs
+# Test runs now redirect artifact storage to src/test-artifacts/ by default,
+# but ignore src/api/artifacts/ as a safety-net for leftover files.
+src/api/artifacts/
+
