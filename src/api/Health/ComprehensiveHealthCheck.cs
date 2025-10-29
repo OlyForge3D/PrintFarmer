@@ -75,6 +75,27 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         baseUrl = baseUrl.TrimEnd('/');
                     }
 
+                    // Normalize hosts like 0.0.0.0, ::, * or + which are "listen on all" and
+                    // are not valid targets for outbound HTTP calls. Replace them with
+                    // localhost so internal health probes target the local loopback.
+                    try
+                    {
+                        if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsed))
+                        {
+                            string host = parsed.Host ?? string.Empty;
+                            if (string.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(host, "::", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(host, "*", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(host, "+", StringComparison.OrdinalIgnoreCase))
+                            {
+                                int port = parsed.IsDefaultPort ? -1 : parsed.Port;
+                                string scheme = string.IsNullOrEmpty(parsed.Scheme) ? "http" : parsed.Scheme;
+                                baseUrl = port > 0 ? $"{scheme}://localhost:{port}" : $"{scheme}://localhost";
+                            }
+                        }
+                    }
+                    catch { /* best-effort normalization - ignore failures and fall back to original baseUrl */ }
+
                     // Catalog API endpoint check (internal HTTP call)
                     try
                     {
