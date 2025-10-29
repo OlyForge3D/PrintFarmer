@@ -5,6 +5,8 @@
 
 set -euo pipefail
 
+# Pre-process args to support verify-only mode with optional env/config file overrides.
+# Accept both '--flag value' and '--flag=value' forms.
 # Source shared Docker utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -44,6 +46,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 # Print colored output
+
 print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 print_success() { echo -e "${GREEN}✅ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
@@ -1164,7 +1167,7 @@ choose_architecture() {
     print_header "🏗️  Deployment Architecture"
     
     # Check if architecture was specified via CLI
-    if [ -n "$CLI_ARCHITECTURE" ]; then
+    if [ -n "${CLI_ARCHITECTURE:-}" ]; then
         case "$CLI_ARCHITECTURE" in
             monolithic|mono)
                 ARCHITECTURE="monolithic"
@@ -1871,7 +1874,7 @@ configure_additional() {
     echo "PrintFarmer supports optional monitoring and telemetry stacks for production deployments."
     
     # Only offer monitoring/telemetry prompts if not already set by CLI flags
-    if [ "$CLI_INCLUDE_MONITORING" = "false" ]; then
+    if [ "${CLI_INCLUDE_MONITORING:-false}" = "false" ]; then
         # If INCLUDE_MONITORING was previously set (e.g., from env/.env), use it to seed the interactive choice
         if [ -z "${INCLUDE_MONITORING_CHOICE:-}" ] && [ -n "${INCLUDE_MONITORING:-}" ]; then
             if [[ "${INCLUDE_MONITORING}" =~ ^(true|yes|1)$ ]]; then
@@ -1919,7 +1922,7 @@ configure_additional() {
                 if [ "$elastic_stack_from_env" = "true" ]; then
                     print_info "Elastic Stack disabled via ENABLE_ELASTIC_STACK environment configuration"
                 fi
-            elif [ "$NON_INTERACTIVE" = "true" ] || [ "$CLI_INCLUDE_MONITORING" = "true" ]; then
+            elif [ "$NON_INTERACTIVE" = "true" ] || [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ]; then
                 ENABLE_ELASTIC_STACK="false"
             else
                 echo
@@ -1950,7 +1953,7 @@ configure_additional() {
         ENABLE_ELASTIC_STACK="false"
     fi
     
-    if [ "$CLI_INCLUDE_TELEMETRY" = "false" ]; then
+    if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "false" ]; then
         # Seed telemetry prompt from existing INCLUDE_TELEMETRY value if present
         if [ -z "${INCLUDE_TELEMETRY_CHOICE:-}" ] && [ -n "${INCLUDE_TELEMETRY:-}" ]; then
             if [[ "${INCLUDE_TELEMETRY}" =~ ^(true|yes|1)$ ]]; then
@@ -1994,7 +1997,7 @@ configure_additional() {
         persist_env_key "MONITORING_STACK_MODE" "${MONITORING_STACK_MODE}"
     fi
     
-    if [ "$CLI_INCLUDE_SECURITY" = "false" ]; then
+    if [ "${CLI_INCLUDE_SECURITY:-false}" = "false" ]; then
         prompt_yes_no "Enable security configurations (enhanced security headers, HTTPS)?" "no" "INCLUDE_SECURITY_CHOICE"
         if [ "$INCLUDE_SECURITY_CHOICE" = "yes" ]; then
             INCLUDE_SECURITY="true"
@@ -2004,7 +2007,7 @@ configure_additional() {
         INCLUDE_SECURITY="true"
     fi
     
-    if [ "$CLI_INCLUDE_REGISTRY" = "false" ]; then
+    if [ "${CLI_INCLUDE_REGISTRY:-false}" = "false" ]; then
         prompt_yes_no "Enable local Docker registry (for development/air-gapped deployments)?" "no" "INCLUDE_REGISTRY_CHOICE"
         if [ "$INCLUDE_REGISTRY_CHOICE" = "yes" ]; then
             INCLUDE_REGISTRY="true"
@@ -3848,16 +3851,49 @@ main() {
 # $CONFIG_FILE and/or .env if present.
 VERIFY_DEPLOYMENT=false
 _ARGS_KEEP=()
-for _arg in "$@"; do
-    case "$_arg" in
+
+# Parse leftover CLI args to capture optional verify-only parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
         --verify-deployment)
             VERIFY_DEPLOYMENT=true
+            shift
+            ;;
+        --env-file)
+            if [ -n "${2:-}" ]; then
+                ENV_FILE="$2"
+                shift 2
+            else
+                echo "Missing value for --env-file" >&2; exit 2
+            fi
+            ;;
+        --env-file=*)
+            ENV_FILE="${1#--env-file=}"
+            shift
+            ;;
+        --config-file)
+            if [ -n "${2:-}" ]; then
+                CONFIG_FILE="$2"
+                shift 2
+            else
+                echo "Missing value for --config-file" >&2; exit 2
+            fi
+            ;;
+        --config-file=*)
+            CONFIG_FILE="${1#--config-file=}"
+            shift
+            ;;
+        --)
+            shift
+            break
             ;;
         *)
-            _ARGS_KEEP+=("$_arg")
+            _ARGS_KEEP+=("$1")
+            shift
             ;;
     esac
 done
+
 set -- "${_ARGS_KEEP[@]:-}"
 
 # If verify-only requested, load existing config and environment and run verification
