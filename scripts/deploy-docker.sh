@@ -529,14 +529,14 @@ tear_down_deployment() {
 
             for svc in "${ordered_services[@]}"; do
                 # Check if the service exists in this compose file
-                if docker compose "${env_arg[@]}" -f "$compose_file" ps --services 2>/dev/null | grep -qx "$svc"; then
+                if docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -qx "$svc"; then
                     print_info "Stopping service: $svc"
                     # Attempt a graceful stop first
-                    docker compose "${env_arg[@]}" -f "$compose_file" stop -t 20 "$svc" || true
+                    docker compose "${env_arg[@]:-}" -f "$compose_file" stop -t 20 "$svc" || true
 
                     # Wait up to 20s for container(s) to exit
                     for i in $(seq 1 10); do
-                        running=$(docker compose "${env_arg[@]}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
+                        running=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
                         if [ -z "$running" ]; then
                             print_success "Service $svc stopped"
                             break
@@ -545,15 +545,15 @@ tear_down_deployment() {
                     done
 
                     # If still present, attempt docker kill then rm -f
-                    running_now=$(docker compose "${env_arg[@]}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
+                    running_now=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
                     if [ -n "$running_now" ]; then
                         print_warning "Service $svc did not stop cleanly; killing container(s)"
                         # Get container ids for the service (compose project-scoped names)
-                        docker compose "${env_arg[@]}" -f "$compose_file" ps --quiet "$svc" | xargs -r docker kill || true
-                        docker compose "${env_arg[@]}" -f "$compose_file" rm -f -v "$svc" || true
+                        docker compose "${env_arg[@]:-}" -f "$compose_file" ps --quiet "$svc" | xargs -r docker kill || true
+                        docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" || true
                     else
                         # Remove the stopped service to clean up networks/volumes when possible
-                        docker compose "${env_arg[@]}" -f "$compose_file" rm -f -v "$svc" 2>/dev/null || true
+                        docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" 2>/dev/null || true
                     fi
                 fi
             done
@@ -3855,6 +3855,66 @@ _ARGS_KEEP=()
 # Parse leftover CLI args to capture optional verify-only parameters
 while [ $# -gt 0 ]; do
     case "$1" in
+        -h|--help)
+            SHOW_HELP=true
+            shift
+            ;;
+        -n|--dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -b|--batch|--non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        --redeploy)
+            REDEPLOY=true
+            shift
+            ;;
+        --tear-down|--teardown|--clean)
+            TEAR_DOWN=true
+            shift
+            ;;
+        --architecture)
+            if [ -n "${2:-}" ]; then
+                CLI_ARCHITECTURE="$2"
+                shift 2
+            else
+                echo "Missing value for --architecture" >&2; exit 2
+            fi
+            ;;
+        --architecture=*)
+            CLI_ARCHITECTURE="${1#--architecture=}"
+            shift
+            ;;
+        --include-monitoring)
+            CLI_INCLUDE_MONITORING=true
+            shift
+            ;;
+        --include-telemetry)
+            CLI_INCLUDE_TELEMETRY=true
+            shift
+            ;;
+        --include-security)
+            CLI_INCLUDE_SECURITY=true
+            shift
+            ;;
+        --include-registry)
+            CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --output-dir)
+            if [ -n "${2:-}" ]; then
+                CLI_OUTPUT_DIR="$2"
+                shift 2
+            else
+                echo "Missing value for --output-dir" >&2; exit 2
+            fi
+            ;;
+        --output-dir=*)
+            CLI_OUTPUT_DIR="${1#--output-dir=}"
+            shift
+            ;;
         --verify-deployment)
             VERIFY_DEPLOYMENT=true
             shift
