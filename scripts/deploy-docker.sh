@@ -902,6 +902,33 @@ save_deployment_config() {
     
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
     
+    # Decide which DB include flags to persist. Only persist flags for the
+    # actively selected DB provider to avoid accidentally saving unrelated
+    # database credentials or enabling other DB containers in future runs.
+    SAVE_INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
+    SAVE_INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
+    SAVE_INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
+    case "${DB_PROVIDER:-}" in
+        postgres)
+            SAVE_INCLUDE_POSTGRES=yes
+            SAVE_INCLUDE_SQLSERVER=no
+            SAVE_INCLUDE_MYSQL=no
+            ;;
+        sqlserver)
+            SAVE_INCLUDE_POSTGRES=no
+            SAVE_INCLUDE_SQLSERVER=yes
+            SAVE_INCLUDE_MYSQL=no
+            ;;
+        mysql)
+            SAVE_INCLUDE_POSTGRES=no
+            SAVE_INCLUDE_SQLSERVER=no
+            SAVE_INCLUDE_MYSQL=yes
+            ;;
+        *)
+            # Leave provided values as-is for unknown/external providers
+            ;;
+    esac
+
     cat > "$CONFIG_FILE" << EOF
 # PrintFarmer Deployment Configuration
 # Generated on $(date)
@@ -919,9 +946,12 @@ COMPOSE_FILE=$COMPOSE_FILE
 # Database Configuration
 DB_PROVIDER=$DB_PROVIDER
 DB_PASSWORD=${DB_PASSWORD:-}
-INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
-INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
-INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
+
+# Persist include flags only for the selected provider to avoid leaking
+# unrelated DB credentials or enabling unintended DB containers later.
+INCLUDE_POSTGRES=$SAVE_INCLUDE_POSTGRES
+INCLUDE_SQLSERVER=$SAVE_INCLUDE_SQLSERVER
+INCLUDE_MYSQL=$SAVE_INCLUDE_MYSQL
 CONNECTION_STRING=$(printf '%q' "$CONNECTION_STRING")
 
 # PostgreSQL Configuration
@@ -2136,8 +2166,14 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 DB_PROVIDER=$DB_PROVIDER
 EOF
     
+    # Clear provider include flags to avoid accidental emission of other DB secrets
+    INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
+    INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
+    INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
+
     # Emit provider-specific database environment variables and derive canonical connection string
-    case "${DB_PROVIDER:-postgres}" in
+    # NOTE: do not default to 'postgres' here — if DB_PROVIDER is not explicitly set, skip provider-specific secrets
+    case "${DB_PROVIDER:-}" in
         postgres)
             POSTGRES_DB=${POSTGRES_DB:-printfarmer}
             POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -2225,7 +2261,8 @@ EOF
         CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
     fi
     # Also expose provider-specific canonical connection strings for consumers
-    case "${DB_PROVIDER:-postgres}" in
+    # If DB_PROVIDER is empty, avoid writing provider-specific connection keys
+    case "${DB_PROVIDER:-}" in
         postgres)
             echo "ConnectionStrings__Postgres=$CONNECTION_STRING" >> "$ENV_FILE"
             ;;

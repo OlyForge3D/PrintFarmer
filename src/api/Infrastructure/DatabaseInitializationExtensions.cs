@@ -122,20 +122,41 @@ public static class DatabaseInitializationExtensions
                 // Diagnostic: ensure key domain tables exist before running shadow-column checks or seed queries
                 try
                 {
-                    var conn = db.Database.GetDbConnection();
-                    await conn.OpenAsync();
-                    using var cmd = conn.CreateCommand();
-                    // Query sqlite_master for core tables (works for SQLite; other providers will still return rows or throw if unsupported)
-                    cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Manufacturers','FilamentTypes','SystemLogs')";
-                    var tables = new List<string>();
-                    using var reader = await cmd.ExecuteReaderAsync();
-                    while (await reader.ReadAsync())
+                    // Only run SQLite-specific diagnostics when the provider is SQLite. Previously
+                    // this block unconditionally executed a SELECT against sqlite_master which
+                    // caused errors on other providers (for example Postgres). Use both the
+                    // EF provider name and the DB_PROVIDER env var as signals to be robust
+                    // in a variety of deployment/test setups.
+                    var providerName = db.Database.ProviderName ?? string.Empty;
+                    string envProvider = Environment.GetEnvironmentVariable("DB_PROVIDER") ?? string.Empty;
+                    if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) ||
+                        envProvider.Equals("sqlite", StringComparison.OrdinalIgnoreCase))
                     {
-                        tables.Add(reader.GetString(0));
-                    }
-                    if (!tables.Contains("Manufacturers") || !tables.Contains("FilamentTypes"))
-                    {
-                        logger.LogWarning("[Startup][DB] Core domain tables not present yet: {Tables}. Will attempt seeding but this may fail. TablesFound={TablesFound}", string.Join(',', tables), tables.Count);
+                        var conn = db.Database.GetDbConnection();
+                        await conn.OpenAsync();
+                        try
+                        {
+                            using var cmd = conn.CreateCommand();
+                            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Manufacturers','FilamentTypes','SystemLogs')";
+                            var tables = new List<string>();
+                            using var reader = await cmd.ExecuteReaderAsync();
+                            while (await reader.ReadAsync())
+                            {
+                                tables.Add(reader.GetString(0));
+                            }
+                            if (!tables.Contains("Manufacturers") || !tables.Contains("FilamentTypes"))
+                            {
+                                logger.LogWarning("[Startup][DB] Core domain tables not present yet: {Tables}. Will attempt seeding but this may fail. TablesFound={TablesFound}", string.Join(',', tables), tables.Count);
+                            }
+                            else
+                            {
+                                logger.LogInformation("[Startup][DB] Core tables detected before seeding.");
+                            }
+                        }
+                        finally
+                        {
+                            await conn.CloseAsync();
+                        }
                     }
                 }
                 catch (Exception diagEx)
