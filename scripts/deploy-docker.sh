@@ -864,8 +864,9 @@ EOF
     exit 0
 }
 
-# Configuration file location
-CONFIG_FILE=".deploy-config"
+# Configuration file location (always stored in the repository root)
+# Use an absolute path so the script loads the same config regardless of CWD
+CONFIG_FILE="$REPO_ROOT/.deploy-config"
 
 # Load previous configuration if it exists
 load_previous_config() {
@@ -875,6 +876,10 @@ load_previous_config() {
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
+
+        # Mark that we loaded values from disk so downstream logic can
+        # treat redacted placeholders as "not set" when necessary.
+        LOADED_DEPLOY_CONFIG=true
         
         print_success "Loaded configuration from $CONFIG_FILE"
         
@@ -952,24 +957,8 @@ DB_PASSWORD=${DB_PASSWORD:-}
 INCLUDE_POSTGRES=$SAVE_INCLUDE_POSTGRES
 INCLUDE_SQLSERVER=$SAVE_INCLUDE_SQLSERVER
 INCLUDE_MYSQL=$SAVE_INCLUDE_MYSQL
+# Connection string (generic)
 CONNECTION_STRING=$(printf '%q' "$CONNECTION_STRING")
-
-# PostgreSQL Configuration
-POSTGRES_DB=${POSTGRES_DB:-printfarmer}
-POSTGRES_USER=${POSTGRES_USER:-postgres}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
-
-# SQL Server Configuration
-SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
-SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
-SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
-SQLSERVER_EDITION=${SQLSERVER_EDITION:-Developer}
-
-# MySQL Configuration
-MYSQL_DB=${MYSQL_DB:-printfarmer}
-MYSQL_USER=${MYSQL_USER:-root}
-MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
-
 # Network Configuration
 ENABLE_DISCOVERY=$ENABLE_DISCOVERY
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
@@ -981,6 +970,41 @@ HTTP_PORT=$HTTP_PORT
 PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}
 PFARM__NetworkDiscovery__DiscoverySubnets=$(printf '%q' "$NETWORK_RANGES")
 EOF
+
+    # Persist provider-specific DB variables only for the selected provider
+    case "${DB_PROVIDER:-}" in
+        postgres)
+            cat >> "$CONFIG_FILE" << EOF
+
+# PostgreSQL Configuration
+POSTGRES_DB=${POSTGRES_DB:-printfarmer}
+POSTGRES_USER=${POSTGRES_USER:-postgres}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+EOF
+            ;;
+        sqlserver)
+            cat >> "$CONFIG_FILE" << EOF
+
+# SQL Server Configuration
+SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
+SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
+SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
+SQLSERVER_EDITION=${SQLSERVER_EDITION:-Developer}
+EOF
+            ;;
+        mysql)
+            cat >> "$CONFIG_FILE" << EOF
+
+# MySQL Configuration
+MYSQL_DB=${MYSQL_DB:-printfarmer}
+MYSQL_USER=${MYSQL_USER:-root}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+EOF
+            ;;
+        *)
+            # external or unknown provider: persist the generic connection string and leave provider-specifics out
+            ;;
+    esac
 
     if [ "$ARCHITECTURE" = "microservices" ]; then
         echo "API_PORT=$API_PORT" >> "$CONFIG_FILE"
