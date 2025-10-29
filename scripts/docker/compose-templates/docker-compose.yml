@@ -76,10 +76,14 @@ services:
       context: .
       dockerfile: Dockerfile.multistage
       target: frontend-runtime
+      args:
+        VITE_API_BASE_URL: "http://localhost:${API_PORT:-5245}/api"
+        VITE_SIGNALR_PRINTERS_URL: "http://localhost:${API_PORT:-5245}/hubs/printers"
+        VITE_SIGNALR_HARVEST_URL: "http://localhost:${API_PORT:-5245}/hubs/harvest"
     image: printfarmer-frontend-multistage
     container_name: printfarmer-frontend
     ports:
-      - "3000:80"
+      - "${HTTP_PORT:-3000}:80"
     environment:
       # Point directly at API (no nginx proxy needed in local dev stack script)
       - VITE_API_BASE_URL=http://localhost:5245/api

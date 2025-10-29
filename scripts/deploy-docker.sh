@@ -22,97 +22,130 @@ COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 # Generated files are retained by default; allow env override for CI
 KEEP_GENERATED=${KEEP_GENERATED:-true}
 
-# New compose-generator option flags
-CLI_ARCHITECTURE=""
-CLI_INCLUDE_MONITORING=false
-CLI_INCLUDE_TELEMETRY=false
-CLI_INCLUDE_SECURITY=false
-CLI_INCLUDE_REGISTRY=false
-CLI_OUTPUT_DIR=""
-# Optional explicit docker build platform (e.g. linux/amd64). Empty means use host default.
-DOCKER_BUILD_PLATFORM="${DOCKER_BUILD_PLATFORM:-}"
+ # Verify deployment
+ verify_deployment() {
+     print_header "🔍 Verifying Deployment"
 
+     if [ "$DRY_RUN" = "true" ]; then
+         print_info "Dry-run mode: skipping live deployment verification."
+         return 0
+     fi
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --dry-run|-n)
-            DRY_RUN=true
-            shift
-            ;;
-        --non-interactive|--batch|-b)
-            NON_INTERACTIVE=true
-            shift
-            ;;
-        --remove-orphans)
-            COMPOSE_REMOVE_ORPHANS=true
-            shift
-            ;;
-        --no-remove-orphans)
-            COMPOSE_REMOVE_ORPHANS=false
-            shift
-            ;;
-        --tear-down|--teardown|--clean)
-            TEAR_DOWN=true
-            shift
-            ;;
-        --help|-h)
-            SHOW_HELP=true
-            shift
-            ;;
-        --redeploy)
-            REDEPLOY=true
-            NON_INTERACTIVE=true  # Redeploy is always non-interactive
-            shift
-            ;;
-        --keep-generated)
-            KEEP_GENERATED=true
-            shift
-            ;;
-        --cleanup-generated)
-            KEEP_GENERATED=false
-            shift
-            ;;
-        --architecture)
-            CLI_ARCHITECTURE="$2"
-            shift 2
-            ;;
-        --include-monitoring)
-            CLI_INCLUDE_MONITORING=true
-            shift
-            ;;
-        --include-telemetry)
-            CLI_INCLUDE_TELEMETRY=true
-            shift
-            ;;
-        --include-security)
-            CLI_INCLUDE_SECURITY=true
-            shift
-            ;;
-        --include-registry)
-            CLI_INCLUDE_REGISTRY=true
-            shift
-            ;;
-        --output-dir)
-            CLI_OUTPUT_DIR="$2"
-            shift 2
-            ;;
-        --build-platform)
-            DOCKER_BUILD_PLATFORM="$2"
-            shift 2
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            print_info "Use --help to see available options"
-            exit 1
-            ;;
-    esac
-done
+     local api_url="http://localhost:$HTTP_PORT"
+     if [ "$ARCHITECTURE" = "microservices" ]; then
+         local direct_api_url="http://localhost:$API_PORT"
+     fi
 
-# Allow env override for automated pipelines
-if [ "${NON_INTERACTIVE:-}" = "1" ]; then
-    NON_INTERACTIVE=true
-fi
+     # Choose the most direct base URL available (microservices local API wins)
+     local base_url
+     if [ -n "${direct_api_url:-}" ]; then
+         base_url="$direct_api_url"
+     else
+         base_url="$api_url"
+     fi
+
+     print_info "Checking container status..."
+     docker compose --env-file "$ENV_FILE" ps
+     echo
+
+     print_info "Running comprehensive health checks..."
+     local health_check_failed=false
+
+     # Make retries configurable to avoid premature warnings
+    local retries=${API_HEALTH_RETRIES:-60}    # default: 60 attempts
+     local interval=${API_HEALTH_INTERVAL:-5}   # default: 5s between attempts
+     local attempt=1
+
+     # Helper to perform a curl and return result in a variable
+     curl_health() {
+         local path="$1"
+         curl -s "$base_url$path" 2>/dev/null || true
+     }
+
+     # Test basic health endpoint with retries
+     print_info "Testing basic health endpoint (waiting up to $((retries * interval))s)..."
+     local basic_health=""
+     while [ $attempt -le $retries ]; do
+         basic_health=$(curl_health "/healthz")
+         if [ -n "$basic_health" ] && (echo "$basic_health" | grep -q '"status":"ok"' || echo "$basic_health" | grep -q '^OK$'); then
+             print_success "✓ Basic health check: OK (after ${attempt} attempt(s))"
+             break
+         fi
+
+         # Only print progress, avoid spamming warnings until retries exhausted
+         print_info "  Waiting for basic health... (attempt ${attempt}/${retries})"
+         attempt=$((attempt + 1))
+         sleep $interval
+     done
+
+     if [ $attempt -gt $retries ] && ! ( [ -n "$basic_health" ] && (echo "$basic_health" | grep -q '"status":"ok"' || echo "$basic_health" | grep -q '^OK$') ); then
+         print_warning "✗ Basic health check: FAILED after ${retries} attempts"
+         if [ -n "$basic_health" ]; then
+             print_info "Expected: JSON with \"status\":\"ok\" or plain OK"
+             print_info "Actual: $basic_health"
+         fi
+         health_check_failed=true
+     fi
+
+     # Test comprehensive health endpoint with retries
+     print_info "Testing comprehensive health endpoint (waiting up to $((retries * interval))s)..."
+     attempt=1
+     local health_json=""
+     while [ $attempt -le $retries ]; do
+         health_json=$(curl_health "/health")
+         if [ -n "$health_json" ]; then
+             # If JSON and healthy, succeed immediately
+             if echo "$health_json" | grep -q '^{'; then
+                 local health_status
+                 health_status=$(echo "$health_json" | grep -o '"status":"[^\"]*"' | head -1 | cut -d '"' -f4 || true)
+                 if [ "$health_status" = "Healthy" ]; then
+                     print_success "✓ Comprehensive health check: Healthy (after ${attempt} attempt(s))"
+                     if command -v jq >/dev/null 2>&1; then
+                         print_info "Health check details:"
+                         echo "$health_json" | jq -r '
+                            .results | to_entries[] | 
+                            "  • \(.key): \(.value.description // .value.status // \"OK\")"
+                         ' 2>/dev/null || true
+                     fi
+                     break
+                 fi
+             elif echo "$health_json" | grep -q '^OK$'; then
+                 print_success "✓ Comprehensive health check: OK (after ${attempt} attempt(s))"
+                 break
+             fi
+         fi
+
+         print_info "  Waiting for comprehensive health... (attempt ${attempt}/${retries})"
+         attempt=$((attempt + 1))
+         sleep $interval
+     done
+
+     if [ $attempt -gt $retries ]; then
+         # Final evaluation: if we have a response, show expected vs actual
+         if [ -n "$health_json" ]; then
+             if echo "$health_json" | grep -q '^{'; then
+                 local final_status
+                 final_status=$(echo "$health_json" | grep -o '"status":"[^\"]*"' | head -1 | cut -d '"' -f4 || true)
+                 print_warning "✗ Comprehensive health check: Status = ${final_status:-unknown} (after ${retries} attempts)"
+                 print_info "Actual response:"
+                 if command -v jq >/dev/null 2>&1; then
+                     echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
+                 else
+                     echo "$health_json"
+                 fi
+             elif echo "$health_json" | grep -q '^OK$'; then
+                 print_success "✓ Comprehensive health check: OK (unexpected formatting, but received OK)"
+             else
+                 print_warning "✗ Comprehensive health check: Unexpected response after ${retries} attempts"
+                 print_info "Full health check result:"
+                 echo "$health_json"
+             fi
+         else
+             print_warning "✗ Comprehensive health check: FAILED (no response after ${retries} attempts)"
+             print_info "Tip: Run 'docker compose --env-file $ENV_FILE logs api' to see API logs"
+         fi
+         health_check_failed=true
+     fi
 
 # Global guard: disable all slicer-related automatic builds when requested
 if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" = "1" ]; then
@@ -965,6 +998,7 @@ ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
 NETWORK_RANGES=$(printf '%q' "$NETWORK_RANGES")
 NETWORK_MODE=${NETWORK_MODE:-bridge}
 HTTP_PORT=$HTTP_PORT
+SERVER_HOST=${SERVER_HOST:-localhost}
 
 # Application Settings - Pre-populate Setup Wizard  
 PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}
@@ -3463,7 +3497,8 @@ verify_deployment() {
     else
         print_warning "✗ Basic health check: FAILED (endpoint not responding or unexpected response)"
         if [ -n "$basic_health" ]; then
-            print_info "Response received: $basic_health"
+            print_info "Expected: JSON with \"status\":\"ok\" or plain OK"
+            print_info "Actual: $basic_health"
         fi
         health_check_failed=true
     fi
@@ -3491,7 +3526,8 @@ verify_deployment() {
                 fi
             else
                 print_warning "✗ Comprehensive health check: Status = ${health_status:-unknown}"
-                print_info "Full health check result:"
+                print_info "Expected: JSON with \"status\":\"Healthy\" and detailed results"
+                print_info "Actual response:"
                 if command -v jq >/dev/null 2>&1; then
                     echo "$health_json" | jq '.' 2>/dev/null || echo "$health_json"
                 else
@@ -3545,6 +3581,60 @@ verify_deployment() {
         fi
     fi
     
+
+    # Browser-origin / Proxy health check: ensure the public-facing origin proxies /api to the API
+    # Use SERVER_HOST if set, otherwise default to localhost
+    local proxy_host=${SERVER_HOST:-localhost}
+    local proxy_port=${HTTP_PORT:-8080}
+    local proxy_url="http://$proxy_host:$proxy_port"
+
+    print_info "Verifying browser-origin proxy: $proxy_url/api/setup/status"
+    local proxy_retries=${API_HEALTH_RETRIES:-60}
+    local proxy_interval=${API_HEALTH_INTERVAL:-5}
+    local p_attempt=1
+    local proxy_ok=false
+    while [ $p_attempt -le $proxy_retries ]; do
+        # Use short timeout to keep checks responsive
+        # Capture HTTP status and Content-Type header for better diagnostics
+        proxy_status=$(curl -s -o /tmp/_proxy_body -w "%{http_code}" -m 3 "$proxy_url/api/setup/status" 2>/dev/null || echo "000")
+        proxy_ct=$(curl -sI -m 3 "$proxy_url/api/setup/status" 2>/dev/null | tr -d '\r' | awk -F": " '/Content-Type/{print $2; exit}') || proxy_ct=""
+
+        if [ "$proxy_status" = "000" ]; then
+            print_info "  No response from proxy (attempt ${p_attempt}/${proxy_retries})"
+        else
+            # Read a small snippet of the body for diagnostics
+            proxy_snippet=$(head -c 1024 /tmp/_proxy_body | sed -n '1,20p' | sed -e 's/\x0/ /g') || proxy_snippet=""
+            if echo "$proxy_snippet" | grep -q '^{'; then
+                proxy_ok=true
+                print_success "✓ Browser-origin proxy responding with JSON (HTTP ${proxy_status}, after ${p_attempt} attempt(s))"
+                break
+            else
+                if echo "$proxy_snippet" | grep -qi '^<!doctype\|^<html'; then
+                    print_info "  Proxy returned HTML (SPA) - proxy may be serving static site instead of routing /api (HTTP ${proxy_status}, Content-Type: ${proxy_ct})"
+                else
+                    print_info "  Proxy returned non-JSON response (HTTP ${proxy_status}, Content-Type: ${proxy_ct})"
+                fi
+                if [ -n "$proxy_snippet" ]; then
+                    print_info "  Response snippet (first 1KB):"
+                    echo "$proxy_snippet" | sed 's/^/    /'
+                fi
+            fi
+        fi
+
+        p_attempt=$((p_attempt + 1))
+        sleep $proxy_interval
+    done
+
+    if [ "$proxy_ok" = false ]; then
+        print_warning "✗ Browser-origin proxy did not return JSON after ${proxy_retries} attempts"
+        print_info "Tip: Ensure the frontend/proxy is bound to host port $proxy_port and is routing /api to the API. Example host URL: http://$proxy_host:$proxy_port/api/setup/status"
+        print_info "Common fixes:"
+        print_info "  • If you're using microservices, ensure nginx-proxy is started and bound to the host port and that its config proxies /api -> api:8080."
+        print_info "  • If nginx-proxy is not present, access the API directly on API port: http://<host>:$API_PORT/api/setup/status"
+        print_info "  • If you see HTML, the request is hitting the frontend directly; either remap ports so nginx-proxy wins or configure frontend to not bind host ports in microservices mode."
+        health_check_failed=true
+    fi
+
 
     
     echo

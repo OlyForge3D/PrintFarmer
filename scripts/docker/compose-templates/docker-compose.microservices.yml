@@ -160,16 +160,23 @@ services:
       context: .
       dockerfile: Dockerfile.multistage
       target: frontend-runtime
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_SIGNALR_PRINTERS_URL: /hubs/printers
+        VITE_SIGNALR_HARVEST_URL: /hubs/harvest
     image: printfarmer-frontend-multistage
     container_name: printfarmer-frontend
-    ports:
-      - "3000:80"
+    # In microservices architecture the frontend is served internally and proxied
+    # by the nginx-proxy service. Avoid binding the frontend directly to the
+    # host to prevent port conflicts; nginx-proxy will be bound to the host.
     networks:
       - printfarmer-network
     environment:
-      - VITE_API_BASE_URL=http://localhost:5001/api
-      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5001/hubs/printers
-      - VITE_SIGNALR_HARVEST_URL=http://localhost:5001/hubs/harvest
+      # In microservices deployments the browser should use the proxy origin
+      # so configure the frontend to use same-origin (relative) API and SignalR paths.
+      - VITE_API_BASE_URL=/api
+      - VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+      - VITE_SIGNALR_HARVEST_URL=/hubs/harvest
       - NGINX_PROXY_API=http://api:8080
     depends_on:
       api:
@@ -185,7 +192,7 @@ services:
     profiles:
       - proxy
     ports:
-      - "8080:8080"
+      - "${HTTP_PORT:-8080}:8080"
     volumes:
       - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
     depends_on:
