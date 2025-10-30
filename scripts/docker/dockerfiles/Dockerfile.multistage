@@ -12,7 +12,7 @@ ARG TARGETPLATFORM=linux/amd64
 ############################################################
 # Shared Build Stage - Build all .NET projects once
 ############################################################
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS shared-build
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/sdk:9.0 AS shared-build
 WORKDIR /src
 
 # Copy all project files for dependency resolution
@@ -56,7 +56,7 @@ RUN test -s /app/publish/api/Farm.Web.Api.dll && \
 ############################################################
 # API Runtime Container
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS api-runtime
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
@@ -85,7 +85,7 @@ ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)
 ############################################################
-FROM alpine:3.19 AS orcaslicer-binaries
+FROM --platform=${TARGETPLATFORM} alpine:3.19 AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
@@ -112,7 +112,7 @@ RUN set -e; \
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
 USER root
 WORKDIR /app
 
@@ -136,7 +136,7 @@ USER appuser
 ############################################################
 # OrcaSlicer Worker Runtime Container  
 ############################################################
-FROM slicer-base AS orcaslicer-worker
+FROM --platform=${TARGETPLATFORM} slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
 USER root
@@ -178,7 +178,7 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 ############################################################
 # React Frontend Build Stage
 ############################################################
-FROM node:18-alpine AS frontend-build
+FROM --platform=${TARGETPLATFORM} node:18-alpine AS frontend-build
 WORKDIR /app
 
 # Copy package files
@@ -194,7 +194,7 @@ RUN npm run build
 ############################################################
 # React Frontend Runtime Container
 ############################################################
-FROM nginx:alpine AS frontend-runtime
+FROM --platform=${TARGETPLATFORM} nginx:alpine AS frontend-runtime
 WORKDIR /usr/share/nginx/html
 
 # Copy built React app

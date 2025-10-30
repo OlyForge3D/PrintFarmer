@@ -38,7 +38,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.multistage
+      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: api-runtime
       args:
         TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
@@ -84,7 +84,7 @@ services:
   orcaslicer-binaries:
     build:
       context: .
-      dockerfile: Dockerfile.multistage
+      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: orcaslicer-binaries
       args:
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
@@ -98,7 +98,7 @@ services:
   orcaslicer-worker:
     build:
       context: .
-      dockerfile: Dockerfile.multistage
+      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: orcaslicer-worker
       args:
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
@@ -158,7 +158,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.multistage
+      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: frontend-runtime
       args:
         VITE_API_BASE_URL: /api
