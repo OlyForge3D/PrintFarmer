@@ -26,10 +26,10 @@ services:
     image: printfarmer-api-multistage
     container_name: printfarmer-api
     ports:
-      - "5245:5000" # HTTP API / SignalR (corrected port mapping)
+      - "5245:5245" # HTTP API / SignalR (bind host 5245 -> container 5245)
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:5000
+      - ASPNETCORE_URLS=http://+:5245
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5245}
@@ -64,7 +64,7 @@ services:
     networks:
       - printfarmer-network
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:5000/healthz && curl -f http://localhost:5000/health | grep -q 'Healthy' && curl -f http://localhost:5000/api/signalrtest/connection-stats"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:5245/healthz && curl -f http://localhost:5245/health | grep -q 'Healthy' && curl -f http://localhost:5245/api/signalrtest/connection-stats"]
       interval: 30s
       timeout: 15s
       retries: 5
