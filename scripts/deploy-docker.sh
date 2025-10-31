@@ -186,6 +186,13 @@ generate_deployment_config() {
         
         # Set the compose file path for the rest of the deployment script
         COMPOSE_FILE="docker-compose.yml"
+
+        # Helper: consistently invoke docker compose with the active env file and compose file
+        # Usage: dc <docker-compose subcommand and args...>
+        dc() {
+            # forward all args to docker compose while ensuring env and compose file are applied
+            docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" "$@"
+        }
         
         # Record generated files for cleanup
         GENERATED_FILES=(
@@ -309,18 +316,18 @@ run_api_diagnostics() {
     fi
 
     print_info "Container status snapshot:"
-    docker compose --env-file "$ENV_FILE" ps || true
+    dc ps || true
 
     if [ "$ARCHITECTURE" = "microservices" ]; then
-        print_info "Database container status:"
-        docker compose --env-file "$ENV_FILE" ps database || true
+    print_info "Database container status:"
+    dc ps database || true
     fi
 
     local provider=$(echo "${DB_PROVIDER:-postgres}" | tr '[:upper:]' '[:lower:]')
 
     case "$provider" in
         postgres)
-            if docker compose --env-file "$ENV_FILE" ps --services 2>/dev/null | grep -q '^database$'; then
+            if dc --format json ps --services 2>/dev/null | grep -q '^database$'; then
                 local pg_user pg_db pg_password
                 pg_user=$(get_env_value "POSTGRES_USER"); pg_user=${pg_user:-postgres}
                 pg_db=$(get_env_value "POSTGRES_DB"); pg_db=${pg_db:-printfarmer}
@@ -328,30 +335,30 @@ run_api_diagnostics() {
 
                 if [ -n "$pg_password" ]; then
                     print_info "PostgreSQL readiness (pg_isready):"
-                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "PGPASSWORD=\"$pg_password\" pg_isready -U \"$pg_user\" -d \"$pg_db\"" || true
+                    dc exec -T database sh -c "PGPASSWORD=\"$pg_password\" pg_isready -U \"$pg_user\" -d \"$pg_db\"" || true
                     print_info "Sample database tables:"
-                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "PGPASSWORD=\"$pg_password\" psql -U \"$pg_user\" -d \"$pg_db\" -At -c \"SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name LIMIT 5;\"" || true
+                    dc exec -T database sh -c "PGPASSWORD=\"$pg_password\" psql -U \"$pg_user\" -d \"$pg_db\" -At -c \"SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name LIMIT 5;\"" || true
                 else
                     print_warning "POSTGRES_PASSWORD not set; skipping Postgres connectivity diagnostics."
                 fi
             fi
             ;;
         sqlserver)
-            if docker compose --env-file "$ENV_FILE" ps --services 2>/dev/null | grep -q '^database$'; then
+            if dc --format json ps --services 2>/dev/null | grep -q '^database$'; then
                 local sql_password sql_db
                 sql_password=$(get_env_value "SQLSERVER_PASSWORD"); sql_password=${sql_password:-$(get_env_value "DB_PASSWORD")}
                 sql_db=$(get_env_value "SQLSERVER_DB"); sql_db=${sql_db:-printfarmer}
 
-                if [ -n "$sql_password" ]; then
+                    if [ -n "$sql_password" ]; then
                     print_info "SQL Server ping (sqlcmd):"
-                    docker compose --env-file "$ENV_FILE" exec -T database /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$sql_password" -Q "SELECT name FROM sys.databases;" || true
+                    dc exec -T database /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$sql_password" -Q "SELECT name FROM sys.databases;" || true
                 else
                     print_warning "SQLSERVER_PASSWORD not found; skipping SQL Server diagnostics."
                 fi
             fi
             ;;
         mysql)
-            if docker compose --env-file "$ENV_FILE" ps --services 2>/dev/null | grep -q '^database$'; then
+            if dc --format json ps --services 2>/dev/null | grep -q '^database$'; then
                 local mysql_user mysql_password mysql_db
                 mysql_user=$(get_env_value "MYSQL_USER"); mysql_user=${mysql_user:-root}
                 mysql_password=$(get_env_value "MYSQL_ROOT_PASSWORD")
@@ -360,11 +367,11 @@ run_api_diagnostics() {
                 fi
                 mysql_db=$(get_env_value "MYSQL_DB"); mysql_db=${mysql_db:-printfarmer}
 
-                if [ -n "$mysql_password" ]; then
+                    if [ -n "$mysql_password" ]; then
                     print_info "MySQL ping (mysqladmin):"
-                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "mysqladmin ping -h 127.0.0.1 -u \"$mysql_user\" --password=\"$mysql_password\"" || true
+                    dc exec -T database sh -c "mysqladmin ping -h 127.0.0.1 -u \"$mysql_user\" --password=\"$mysql_password\"" || true
                     print_info "Sample database tables:"
-                    docker compose --env-file "$ENV_FILE" exec -T database sh -c "mysql -u \"$mysql_user\" --password=\"$mysql_password\" $mysql_db -e \"SHOW TABLES;\" | head -n 10" || true
+                    dc exec -T database sh -c "mysql -u \"$mysql_user\" --password=\"$mysql_password\" $mysql_db -e \"SHOW TABLES;\" | head -n 10" || true
                 else
                     print_warning "MySQL password not found; skipping MySQL diagnostics."
                 fi
@@ -396,7 +403,7 @@ run_api_diagnostics() {
 
         if [ -n "$db_host" ] && [ "$host_network_enabled" = "false" ]; then
             local api_running
-            api_running=$(docker compose --env-file "$ENV_FILE" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep 'api ' || true)
+            api_running=$(dc ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep 'api ' || true)
             if echo "$api_running" | grep -qi 'running'; then
                 print_info "DNS reachability from API container (ping $db_host):"
                 docker compose --env-file "$ENV_FILE" exec -T api sh -c "ping -c 1 -W 1 $db_host" || true
@@ -405,7 +412,7 @@ run_api_diagnostics() {
     fi
 
     print_info "Recent API logs (last 40 lines):"
-    docker compose --env-file "$ENV_FILE" logs api --tail 40 || true
+    dc logs api --tail 40 || true
 }
 
 # Note: force_remove_matching_containers is now provided by docker-utils.sh
@@ -2503,7 +2510,21 @@ generate_react_env_production() {
 
     print_info "Creating React production environment file"
 
-    cat > "$react_dir/.env.production" << 'EOF'
+    # If we're running in host network mode, build the frontend to call the API on localhost:API_PORT
+    if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+        local api_host_port=${API_PORT:-5245}
+        cat > "$react_dir/.env.production" << EOF
+# React Production Build Configuration (host network)
+# Auto-generated by deploy-docker.sh
+# Frontend will call the API on the host (localhost) when running in host network mode
+VITE_API_BASE_URL=http://localhost:${api_host_port}/api
+
+# SignalR hub URLs (point to host)
+VITE_SIGNALR_PRINTERS_URL=http://localhost:${api_host_port}/hubs/printers
+VITE_SIGNALR_HARVEST_URL=http://localhost:${api_host_port}/hubs/harvest
+EOF
+    else
+        cat > "$react_dir/.env.production" << 'EOF'
 # React Production Build Configuration
 # Auto-generated by deploy-docker.sh
 # These relative URLs work through the Nginx proxy in Docker deployment
@@ -2513,7 +2534,9 @@ VITE_API_BASE_URL=/api
 
 # SignalR hub URL - relative path routes through Nginx
 VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 EOF
+    fi
     
     print_success "React production environment configured: $react_dir/.env.production"
 }
@@ -2925,10 +2948,23 @@ deploy_containers() {
             
             # Build binary layer with automatic download and extraction
             BUILD_ARGS="--build-arg ORCASLICER_VERSION=${ORCA_VERSION} --build-arg ALLOW_STUB=false"
-            
+
             # Add GitHub token if available (to avoid rate limits)
             if [ -n "${GITHUB_TOKEN:-}" ]; then
                 BUILD_ARGS="$BUILD_ARGS --build-arg GITHUB_TOKEN=${GITHUB_TOKEN}"
+            fi
+
+            # If caller supplied a prebuilt ORCA_ASSET_IMAGE and it exists locally, tag and skip building
+            if [ -n "${ORCA_ASSET_IMAGE:-}" ]; then
+                if docker image inspect "${ORCA_ASSET_IMAGE}" >/dev/null 2>&1; then
+                    print_info "Found local ORCA_ASSET_IMAGE: ${ORCA_ASSET_IMAGE} - tagging for use and skipping build"
+                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:${ORCA_VERSION}" || true
+                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:latest" || true
+                    # Mark to skip the build step
+                    export _PF_SKIP_ORCA_BUILD=1
+                else
+                    print_info "ORCA_ASSET_IMAGE set to ${ORCA_ASSET_IMAGE} but image not found locally; will attempt build"
+                fi
             fi
             
             # Ensure a root-level Dockerfile.orcaslicer-binaries exists for compatibility with existing build invocations
@@ -2959,13 +2995,18 @@ deploy_containers() {
                 ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
             fi
             ORCA_BUILD_CMD+=(-f Dockerfile.orcaslicer-binaries -t "orcaslicer-binaries:${ORCA_VERSION}" -t "orcaslicer-binaries:latest" $BUILD_ARGS .)
-            if "${ORCA_BUILD_CMD[@]}"; then
-                print_success "orcaslicer-binaries:${ORCA_VERSION} layer built successfully (cached for future builds)"
+
+            if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
+                print_success "Skipping orcaslicer-binaries build (using prebuilt image)"
             else
-                print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
-                print_error "This layer contains the OrcaSlicer binary and will be cached for optimal build performance"
-                cleanup_root_dockerfile
-                exit 1
+                if "${ORCA_BUILD_CMD[@]}"; then
+                    print_success "orcaslicer-binaries:${ORCA_VERSION} layer built successfully (cached for future builds)"
+                else
+                    print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
+                    print_error "This layer contains the OrcaSlicer binary and will be cached for optimal build performance"
+                    cleanup_root_dockerfile
+                    exit 1
+                fi
             fi
 
             # Cleanup temporary root Dockerfile if we created one
@@ -3159,7 +3200,7 @@ deploy_containers() {
         
         while [ $elapsed -lt $max_wait ]; do
             # Check if all containers are healthy
-            local unhealthy_count=$(docker compose --env-file "$ENV_FILE" ps --format json 2>/dev/null | grep -E '"Health":"(starting|unhealthy)"' | wc -l | tr -d ' ')
+        local unhealthy_count=$(dc ps --format json 2>/dev/null | grep -E '"Health":"(starting|unhealthy)"' | wc -l | tr -d ' ')
             
             if [ "$unhealthy_count" -eq 0 ]; then
                 all_healthy=true
@@ -3170,7 +3211,7 @@ deploy_containers() {
             # Show progress
             if [ $((elapsed % 15)) -eq 0 ]; then
                 print_info "Still waiting for services to become healthy... ($elapsed seconds elapsed)"
-                docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy" || true
+                dc ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy" || true
             fi
             
             sleep $wait_interval
@@ -3203,7 +3244,7 @@ wait_for_database() {
         # Use docker compose ps JSON to look for Health or rely on container's port availability
         # Prefer checking container health status if available
         local health_state
-        health_state=$(docker compose --env-file "$ENV_FILE" ps --format json 2>/dev/null | grep -o '"Name":"[^"]*' | grep -o '[^\"]*$' | while read -r name; do
+        health_state=$(dc ps --format json 2>/dev/null | grep -o '"Name":"[^\"]*' | grep -o '[^\"]*$' | while read -r name; do
             # Match service by suffix
             if echo "$name" | grep -q "$db_service"; then
                 docker inspect --format='{{json .State.Health.Status}}' "$name" 2>/dev/null || echo "unknown"
@@ -3236,7 +3277,7 @@ wait_for_database() {
 
         if [ $((elapsed % 15)) -eq 0 ]; then
             print_info "Still waiting for DB to become available... ($elapsed/$timeout seconds)"
-            docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy|health" || true
+            dc ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy|health" || true
         fi
 
         sleep $interval
@@ -3331,7 +3372,7 @@ wait_for_api() {
 
         if [ $((elapsed % 15)) -eq 0 ]; then
             print_info "Still waiting for API to be healthy... ($elapsed/$timeout seconds)"
-            docker compose --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer" || true
+            dc ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer" || true
         fi
 
         sleep $interval
@@ -3377,7 +3418,7 @@ verify_deployment() {
     fi
     
     print_info "Checking container status..."
-    docker compose --env-file "$ENV_FILE" ps
+    dc ps
     echo
     
     print_info "Running comprehensive health checks..."
