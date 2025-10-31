@@ -45,12 +45,12 @@ services:
     image: printfarmer-api-multistage
     container_name: printfarmer-api
     ports:
-      - "${API_PORT:-5001}:8080"
+      - "${API_PORT:-5245}:5245"
     networks:
       - printfarmer-network
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
-      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_URLS=http://+:5245
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
       - ConnectionStrings__Default=${ConnectionStrings__Default}
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
@@ -74,7 +74,7 @@ services:
       database:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:5245/healthz"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -114,7 +114,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - Worker__StorageEndpoint=http://api:8080
+      - Worker__StorageEndpoint=http://api:5245
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
@@ -177,7 +177,7 @@ services:
       - VITE_API_BASE_URL=/api
       - VITE_SIGNALR_PRINTERS_URL=/hubs/printers
       - VITE_SIGNALR_HARVEST_URL=/hubs/harvest
-      - NGINX_PROXY_API=http://api:8080
+      - NGINX_PROXY_API=http://api:5245
     depends_on:
       api:
         condition: service_healthy

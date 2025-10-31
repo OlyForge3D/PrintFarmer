@@ -81,7 +81,7 @@ Slicing operations are computationally intensive and can benefit significantly f
 #### OrcaSlicer Microservice
 ```dockerfile
 # docker/orcaslicer.dockerfile
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Install OrcaSlicer and dependencies
 RUN apt-get update && apt-get install -y \

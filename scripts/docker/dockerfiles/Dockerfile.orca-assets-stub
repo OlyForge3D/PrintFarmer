@@ -1,7 +1,7 @@
 # Stub assets image for OrcaSlicer when no AppImage is available
 # Creates a minimal stub that allows the build to proceed
 ARG ORCASLICER_VERSION=stub
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 ARG ORCASLICER_VERSION
 LABEL orcaslicer.version="${ORCASLICER_VERSION}"
 WORKDIR /tmp

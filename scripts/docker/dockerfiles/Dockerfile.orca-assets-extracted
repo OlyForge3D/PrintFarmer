@@ -1,6 +1,6 @@
 # Build an assets image from already-extracted AppImage content (orca7z)
 ARG ORCASLICER_VERSION=2.3.1
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 ARG ORCASLICER_VERSION
 LABEL orcaslicer.version="${ORCASLICER_VERSION}"
 WORKDIR /tmp

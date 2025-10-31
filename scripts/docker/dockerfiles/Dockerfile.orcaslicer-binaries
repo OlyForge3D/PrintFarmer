@@ -20,7 +20,7 @@ ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${
 ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
 
-FROM ubuntu:22.04 AS downloader
+FROM ubuntu:24.04 AS downloader
 ARG ORCASLICER_VERSION
 ARG ORCASLICER_URL
 ARG ALLOW_STUB
