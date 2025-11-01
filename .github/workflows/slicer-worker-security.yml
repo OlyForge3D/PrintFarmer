@@ -49,7 +49,10 @@ jobs:
         id: build-base
         run: |
           echo "Building slicer-base for security scanning"
-          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:scan-${{ github.sha }} .
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA='${{ github.sha }}'
+          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:scan-${{ github.sha }} \
+            --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" .
           echo "image=printfarmer-slicer-base:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Scan slicer-base with Trivy (table output)
@@ -114,10 +117,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Building OrcaSlicer worker (stub mode for CI efficiency)"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA='${{ github.sha }}'
           docker build --platform linux/amd64 \
             --build-arg ORCASLICER_VERSION=${{ env.ORCASLICER_VERSION }} \
             --build-arg ALLOW_STUB=true \
             --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
+            --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
             -f Dockerfile.orcaslicer \
             -t orcaslicer-worker:scan-${{ github.sha }} .
           echo "image=orcaslicer-worker:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
@@ -195,10 +201,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Building PrusaSlicer worker (stub mode for CI efficiency)"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA='${{ github.sha }}'
           docker build --platform linux/amd64 \
             --build-arg PRUSASLICER_VERSION=${{ env.PRUSASLICER_VERSION }} \
             --build-arg ALLOW_STUB=true \
             --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
+            --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
             -f Dockerfile.prusaslicer \
             -t prusaslicer-worker:scan-${{ github.sha }} .
           echo "image=prusaslicer-worker:scan-${{ github.sha }}" >> $GITHUB_OUTPUT

@@ -1,0 +1,9 @@
+{
+  "name": "PrintFarmer (GHCR devcontainer)",
+  "image": "ghcr.io/jpapiez/printfarmer-devcontainer:latest",
+  "postCreateCommand": ".devcontainer/post-create.sh --verify",
+  "forwardPorts": [5245,3000],
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  }
+}

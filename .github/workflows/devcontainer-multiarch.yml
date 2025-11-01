@@ -1,0 +1,158 @@
+name: Devcontainer Multi-Arch Build & Push
+
+on:
+  push:
+    branches: [ main ]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional semver tag to apply to the built image (e.g. v1.2.3)'
+        required: false
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        env:
+          IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer
+        run: |
+          set -e
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer
+          # Determine tag / release notes (supports: release event, manual input, or tag push)
+          INPUT_TAG='${{ github.event.inputs.tag }}'
+          RELEASE_TAG=''
+          if [ "${{ github.event_name }}" = "release" ]; then
+            RELEASE_TAG='${{ github.event.release.tag_name }}'
+          fi
+          # If workflow was triggered by a tag push, extract it from GITHUB_REF
+          if echo "${GITHUB_REF:-}" | grep -q '^refs/tags/'; then
+            TAG_FROM_REF=${GITHUB_REF#refs/tags/}
+          else
+            TAG_FROM_REF=''
+          fi
+          TAG=${RELEASE_TAG:-$INPUT_TAG:-$TAG_FROM_REF}
+
+          # Try to obtain release notes/body for the chosen tag (if any)
+          RELEASE_BODY=''
+          TOKEN='${{ secrets.GITHUB_TOKEN }}'
+          if [ "${{ github.event_name }}" = "release" ]; then
+            RELEASE_BODY='${{ github.event.release.body }}'
+          elif [ -n "$TAG" ]; then
+            echo "Fetching release notes for tag: $TAG"
+            RELEASE_JSON=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/tags/$TAG" || true)
+            RELEASE_BODY=$(echo "$RELEASE_JSON" | jq -r '.body // ""' 2>/dev/null || true)
+          fi
+
+          # Sanitize and truncate release notes for image label usage (remove newlines, escape quotes)
+          if [ -n "$RELEASE_BODY" ]; then
+            RELEASE_BODY_SANITIZED=$(printf "%s" "$RELEASE_BODY" | tr '\n' ' ' | sed 's/"/'"'"'/g' | cut -c1-2000)
+          else
+            RELEASE_BODY_SANITIZED=''
+          fi
+
+          # Common labels
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA='${{ github.sha }}'
+          VERSION_LABEL=${TAG:-$SHA}
+
+          echo "Building and pushing images (sha:${SHA}, tag:${VERSION_LABEL:-none})"
+
+          # Always push SHA and latest with release metadata labels (if available)
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t $IMAGE_NAME:${SHA} \
+            -t $IMAGE_NAME:latest \
+            --label "org.opencontainers.image.title=PrintFarmer Devcontainer" \
+            --label "org.opencontainers.image.version=${VERSION_LABEL}" \
+            --label "org.opencontainers.image.revision=${SHA}" \
+            --label "org.opencontainers.image.created=${TIMESTAMP}" \
+            --label "org.opencontainers.image.url=https://github.com/${{ github.repository }}/releases${TAG:+/tag/${TAG}}" \
+            $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
+            --push .devcontainer
+
+          # If a semver/release tag was provided, also push that tag with same metadata
+          if [ -n "$TAG" ]; then
+            echo "Also tagging with semver tag: $TAG"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -t $IMAGE_NAME:$TAG \
+              --label "org.opencontainers.image.title=PrintFarmer Devcontainer" \
+              --label "org.opencontainers.image.version=${TAG}" \
+              --label "org.opencontainers.image.revision=${SHA}" \
+              --label "org.opencontainers.image.created=${TIMESTAMP}" \
+              --label "org.opencontainers.image.url=https://github.com/${{ github.repository }}/releases/tag/${TAG}" \
+              $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
+              --push .devcontainer
+          fi
+
+      - name: Inspect pushed devcontainer manifests and upload labels
+        if: success()
+        run: |
+          set -e
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer
+          SHA='${{ github.sha }}'
+          # Inspect SHA and latest
+          echo "Inspecting ${IMAGE_NAME}:${SHA}"
+          docker manifest inspect ${IMAGE_NAME}:${SHA} > manifest-${SHA}.json || true
+          jq -r '.[0].annotations // {}' manifest-${SHA}.json > image-labels-devcontainer-${SHA}.json || echo '{}' > image-labels-devcontainer-${SHA}.json
+          echo "Inspecting ${IMAGE_NAME}:latest"
+          docker manifest inspect ${IMAGE_NAME}:latest > manifest-latest.json || true
+          jq -r '.[0].annotations // {}' manifest-latest.json > image-labels-devcontainer-latest.json || echo '{}' > image-labels-devcontainer-latest.json
+          # If semver tag present, attempt inspect
+          if [ -n "$TAG" ]; then
+            echo "Inspecting ${IMAGE_NAME}:$TAG"
+            docker manifest inspect ${IMAGE_NAME}:$TAG > manifest-${TAG}.json || true
+            jq -r '.[0].annotations // {}' manifest-${TAG}.json > image-labels-devcontainer-${TAG}.json || echo '{}' > image-labels-devcontainer-${TAG}.json
+          fi
+
+      - name: Upload devcontainer image labels artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devcontainer-image-labels
+          path: |
+            image-labels-devcontainer-*.json
+
+      - name: Set GHCR package visibility to public (first publish)
+        if: success()
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          PACKAGE_NAME: printfarmer-devcontainer
+        run: |
+          # Attempt to set package visibility to public; ignore errors if already public or unsupported
+          echo "Setting GHCR package visibility to public (if supported)"
+          API_URL="https://api.github.com/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/visibility"
+          # Try org-level endpoint first (works for orgs). If repo owner is a user, use user-level endpoint.
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          set -e
+          # Try org endpoint
+          HTTP_STATUS=0
+          curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            -d '{"visibility":"public"}' "https://api.github.com/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/visibility" || true
+          # Also attempt user-level (in case OWNER is a user)
+          curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            -d '{"visibility":"public"}' "https://api.github.com/user/packages/container/${PACKAGE_NAME}/visibility" || true

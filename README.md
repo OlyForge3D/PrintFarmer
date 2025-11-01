@@ -7,6 +7,10 @@
 ![Scorecard](https://img.shields.io/ossf-scorecard/github.com/jpapiez/PrintFarmer?label=openssf-scorecard)
 ![CodeQL](https://github.com/jpapiez/PrintFarmer/actions/workflows/codeql.yml/badge.svg)
 
+![Devcontainer](https://img.shields.io/badge/devcontainer-ready-brightgreen)
+[![Open in Codespaces](https://img.shields.io/badge/Open%20in-Codespaces-blue?logo=github)](https://github.com/codespaces/new?repo=jpapiez/PrintFarmer&devcontainer_path=.devcontainer)
+[![GHCR Image](https://img.shields.io/badge/GHCR-printfarmer--devcontainer-lightgrey)](https://github.com/orgs/jpapiez/packages/container/package/printfarmer-devcontainer)
+
 A React TypeScript dashboard for managing multiple 3D printers.
 
 ## Documentation
@@ -76,10 +80,47 @@ To stop later:
 ```bash
 ./scripts/pf-dev.sh stop
 ```
+
+> Tip: For reproducible contributor environments use the included VS Code DevContainer (see `LOCAL_DEVELOPMENT.md` → "Use Devcontainer").
+
+Published devcontainer image
+
+If CI publishes the built devcontainer image to GitHub Container Registry (GHCR), you can pull it directly instead of building locally:
+
+```bash
+# Replace <owner> with the repository owner (example: jpapiez)
+docker pull ghcr.io/<owner>/printfarmer-devcontainer:latest
+```
 Direct development on your machine without containers (fastest inner loop & full WiFi device discovery).
 
 ### 📖 **Detailed Guidance**
 **Not sure which approach to use?** See our comprehensive [Deployment Overview](DEPLOYMENT_OVERVIEW.md) that helps you choose based on your specific needs.
+
+### Pulling the published DevContainer image (GHCR)
+
+If the devcontainer image is published to GHCR you can pull it directly. For private packages authenticate first (PAT with read:packages).
+
+```bash
+# Login (private packages)
+echo "${PAT}" | docker login ghcr.io -u "<github-username>" --password-stdin
+
+# Pull image
+docker pull ghcr.io/<owner>/printfarmer-devcontainer:latest
+
+# Run interactively (forward common dev ports)
+docker run --rm -it -p 5245:5245 -p 3000:3000 ghcr.io/<owner>/printfarmer-devcontainer:latest /bin/bash
+```
+
+For VS Code DevContainers, point `.devcontainer/devcontainer.json` at the GHCR image and reopen in container. If the image is private, ensure the host Docker is authenticated to `ghcr.io`.
+
+If you'd like the devcontainer to prefer the published GHCR image but fall back to building locally when the image is not present, run the helper before reopening in container:
+
+```bash
+# from repository root
+chmod +x .devcontainer/select-devcontainer.sh
+.devcontainer/select-devcontainer.sh
+# Then open in container (VS Code "Reopen in Container")
+```
 
 ## Architecture
 

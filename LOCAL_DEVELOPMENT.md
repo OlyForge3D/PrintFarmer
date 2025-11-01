@@ -188,6 +188,73 @@ bash ./scripts/bootstrap-macos.sh
 .\scripts\bootstrap-windows.ps1
 ```
 
+Windows options and recommended usage
+
+If you prefer the script to automatically re-launch elevated (skip the interactive prompt), pass the `-ForceElevated` or `--elevate` flag. Example:
+
+```powershell
+# Re-run the script elevated immediately (skips prompt)
+.\scripts\bootstrap-windows.ps1 -ForceElevated
+
+# Or perform installs but also run verification afterwards
+.\scripts\bootstrap-windows.ps1 -ForceElevated -Verify
+```
+
+## Use Devcontainer (recommended for contributors)
+
+If you use VS Code, the included `.devcontainer/` configuration provides a reproducible development environment with Node.js, .NET 9.0.302, Docker/Docker-in-Docker support and the workspace post-create provisioning scripted in `.devcontainer/post-create.sh`.
+
+Quick steps:
+
+1. Open the repo in VS Code.
+2. When prompted to "Reopen in Container", accept. If not prompted, open the command palette (Ctrl+Shift+P) and run: "Remote-Containers: Reopen in Container".
+3. The container will run the `postCreateCommand` which restores the .NET solution, runs `npm ci` for the React app, installs common dotnet global tools, and creates helpful aliases.
+
+Optional verification: re-open the container using the `--verify` flag or set the env var `DEVCONTAINER_VERIFY=1` to run lightweight smoke-tests during provisioning:
+
+```bash
+# From your host (when using devcontainer CLI or launching via VS Code), set env var before reopening
+export DEVCONTAINER_VERIFY=1
+# Or pass the flag to the post-create script (when iterating locally inside container)
+.devcontainer/post-create.sh --verify
+```
+
+Benefits of using the devcontainer:
+
+- Reproducible environment across contributors and CI.
+- Pinned .NET SDK matching `global.json` and preinstalled Node.js/npm.
+- Ports for the API (5245) and Vite (3000) are forwarded automatically.
+
+## Troubleshooting checklist (devcontainer & devices)
+
+If you encounter issues running PrintFarmer inside the devcontainer, try these quick checks:
+
+- Networking / forwarded ports:
+	- Verify VS Code forwarded ports (view `Ports` in the Remote-Containers panel) and ensure 5245 (API) and 3000 (Vite) are forwarded to your localhost.
+	- Use `curl http://localhost:5245/healthz` from your host and from inside the container (`devcontainer exec -- curl ...`) to confirm both sides.
+
+- SignalR / WebSocket connectivity:
+	- Confirm the Vite dev server is proxying to `http://localhost:5245` (container env VITE_API_BASE_URL is set). If the client cannot connect to `/hubs/printers` check browser console for CORS or endpoint errors.
+	- If SignalR cannot connect from the host to container, ensure `requireLocalPort: false` is set or that the forwarded port is open on the host.
+
+- Device access (USB/camera/printer discovery):
+	- Containers generally do not get direct access to USB devices by default. For cameras or USB printers you may need to run the container with `--device` flags or use host networking in a dedicated Docker run.
+	- For network discovery (mDNS/SSDP) behavior can be limited inside containers. If device discovery is required, prefer running the API on the host or use a VM with bridged networking.
+
+- File permissions & volumes:
+	- Confirm the `node_modules` volume mount (`printfarmer-node-modules`) is mounted correctly; if you see module resolution problems, try deleting the docker volume and running `npm ci` again inside the container.
+
+- Devcontainer provisioning failures:
+	- Reopen the container (Command Palette → Remote-Containers: Reopen in Container) to re-run `postCreateCommand`.
+	- Inspect the container logs (VS Code `Dev Containers` output) and the `.devcontainer/post-create.sh` output for errors.
+
+- If all else fails:
+	- Try the host bootstrap (Ubuntu/macOS/Windows) on a local VM or machine. The host scripts now detect when you are inside a devcontainer and will skip redundant installs.
+
+
+If you run the script without elevation it will prompt you with options to re-run elevated, continue and elevate individual commands as-needed, or exit. The `-Verify` / `--verify` flag runs small verification checks (dotnet/node/npm/git) and a small dotnet build smoke-test when possible.
+
+
 
 ### Install Missing Prerequisites
 

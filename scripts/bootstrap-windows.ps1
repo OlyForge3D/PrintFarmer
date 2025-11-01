@@ -10,9 +10,11 @@ param()
 # Support a -Verify switch to run dotnet/node verification and a small build smoke-test
 # Simple CLI flag parsing for -Verify / --verify
 $Verify = $false
+$ForceElevated = $false
 if ($args -ne $null) {
     foreach ($a in $args) {
         if ($a -ieq '-Verify' -or $a -ieq '--verify') { $Verify = $true }
+        if ($a -ieq '-ForceElevated' -or $a -ieq '--elevate' -or $a -ieq '-Elevate') { $ForceElevated = $true }
     }
 }
 
@@ -20,11 +22,67 @@ function Write-Info([string]$m) { Write-Host "[bootstrap] $m" -ForegroundColor C
 function Write-Success([string]$m) { Write-Host "[bootstrap] $m" -ForegroundColor Green }
 function Write-Warn([string]$m) { Write-Host "[bootstrap] $m" -ForegroundColor Yellow }
 
-# Ensure script runs elevated
-$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warn "This script must be run as Administrator. Re-run PowerShell as Administrator and re-run this script."
-    exit 1
+function Test-IsElevated {
+    $current = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($current)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-RunElevated {
+    param(
+        [Parameter(Mandatory=$true)][string]$Command,
+        [string[]]$ExtraArgs = @()
+    )
+    # Start a new PowerShell process elevated to run the provided command.
+    $argLine = $ExtraArgs -join ' '
+    $psArgs = "-NoProfile -ExecutionPolicy Bypass -Command &{ $Command $argLine }"
+    try {
+        Start-Process -FilePath pwsh -ArgumentList $psArgs -Verb RunAs -WindowStyle Hidden -Wait
+    } catch {
+        # Fall back to powershell.exe if pwsh not present
+        Start-Process -FilePath powershell -ArgumentList $psArgs -Verb RunAs -WindowStyle Hidden -Wait
+    }
+}
+
+# Ensure script runs elevated or prompt user for action
+if (-not (Test-IsElevated)) {
+    if ($ForceElevated) {
+        Write-Info "-ForceElevated specified — re-running script elevated..."
+        $scriptPath = $MyInvocation.MyCommand.Definition
+        try {
+            Start-Process -FilePath pwsh -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+        } catch {
+            Start-Process -FilePath powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+        }
+        exit $LASTEXITCODE
+    }
+
+    Write-Warn "This script is not running as Administrator. Some install steps require elevation."
+    Write-Host "Options: [R]e-run elevated, [C]ontinue (attempt per-command elevation), [E]xit" -ForegroundColor Yellow
+    $choice = Read-Host "Choose an option (R/C/E)"
+    switch ($choice.ToUpper()) {
+        'R' {
+            Write-Info "Re-running script elevated..."
+            $scriptPath = $MyInvocation.MyCommand.Definition
+            try {
+                Start-Process -FilePath pwsh -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+            } catch {
+                Start-Process -FilePath powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+            }
+            exit $LASTEXITCODE
+        }
+        'C' {
+            Write-Warn "Continuing without full elevation. The script will attempt to elevate individual commands when needed."
+            # set a flag so callers know to attempt Run-Elevated where appropriate
+            $global:AllowPerCommandElevation = $true
+        }
+        default {
+            Write-Warn "Exiting. Re-run PowerShell as Administrator and re-run this script if you need installs."
+            exit 1
+        }
+    }
+} else {
+    $global:AllowPerCommandElevation = $false
 }
 
 $REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '9.0.302'
@@ -40,21 +98,33 @@ if ($haveWinget) {
     Write-Info "winget found — using winget to install packages"
     try {
         Write-Info "Installing .NET SDK (9.x)"
-        winget install --id Microsoft.DotNet.SDK.9 -e --accept-package-agreements --accept-source-agreements -h
+        if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
+            Invoke-RunElevated -Command 'winget' -ExtraArgs @('install','--id','Microsoft.DotNet.SDK.9','-e','--accept-package-agreements','--accept-source-agreements','-h')
+        } else {
+            winget install --id Microsoft.DotNet.SDK.9 -e --accept-package-agreements --accept-source-agreements -h
+        }
     } catch {
         Write-Warn "winget install of .NET SDK failed; will try fallback installer"
     }
 
     try {
         Write-Info "Installing Node.js $REQ_NODE_MAJOR"
-        winget install --id OpenJS.NodeJS.$REQ_NODE_MAJOR -e --accept-package-agreements --accept-source-agreements -h
+        if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
+            Invoke-RunElevated -Command 'winget' -ExtraArgs @('install','--id',"OpenJS.NodeJS.$REQ_NODE_MAJOR",'-e','--accept-package-agreements','--accept-source-agreements','-h')
+        } else {
+            winget install --id OpenJS.NodeJS.$REQ_NODE_MAJOR -e --accept-package-agreements --accept-source-agreements -h
+        }
     } catch {
         Write-Warn "winget install of Node.js failed; will try fallback"
     }
 
     try {
         Write-Info "Installing Git"
-        winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements -h
+        if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
+            Invoke-RunElevated -Command 'winget' -ExtraArgs @('install','--id','Git.Git','-e','--accept-package-agreements','--accept-source-agreements','-h')
+        } else {
+            winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements -h
+        }
     } catch {
         Write-Warn "winget install of Git failed; continuing"
     }
@@ -64,13 +134,21 @@ if ($haveWinget) {
         Write-Info "Chocolatey found — using choco to install packages"
         try {
             Write-Info "Installing Node.js $REQ_NODE_MAJOR via choco"
-            choco install nodejs-lts -y --no-progress
+                if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
+                    Invoke-RunElevated -Command 'choco' -ExtraArgs @('install','nodejs-lts','-y','--no-progress')
+                } else {
+                    choco install nodejs-lts -y --no-progress
+                }
         } catch {
             Write-Warn "choco install of Node.js failed: $_"
         }
         try {
             Write-Info "Installing Git via choco"
-            choco install git -y --no-progress
+            if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
+                Invoke-RunElevated -Command 'choco' -ExtraArgs @('install','git','-y','--no-progress')
+            } else {
+                choco install git -y --no-progress
+            }
         } catch {
             Write-Warn "choco install of Git failed: $_"
         }
@@ -87,7 +165,12 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     $tmp = Join-Path $env:TEMP 'dotnet-install.ps1'
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $installScriptUrl -OutFile $tmp -ErrorAction Stop
-        powershell -NoProfile -ExecutionPolicy Bypass -File $tmp -Version $REQ_DOTNET_VERSION
+        if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
+            Write-Info "Running dotnet-install.ps1 elevated"
+            Invoke-RunElevated -Command 'powershell' -ExtraArgs @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$tmp`"",'-Version',$REQ_DOTNET_VERSION)
+        } else {
+            powershell -NoProfile -ExecutionPolicy Bypass -File $tmp -Version $REQ_DOTNET_VERSION
+        }
         Write-Success ".NET install attempted via dotnet-install.ps1"
     } catch {
         Write-Warn "Automatic dotnet install failed: $_"
