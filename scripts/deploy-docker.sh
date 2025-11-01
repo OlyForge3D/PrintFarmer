@@ -588,6 +588,13 @@ tear_down_deployment() {
         docker compose -f docker-compose.yml down --volumes --rmi all || true
     fi
 
+    # Ensure standalone host-mode nginx proxy (if created by script) is removed
+    if docker ps -a --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
+        print_info "Removing standalone host-mode nginx proxy container: printfarmer-nginx-proxy"
+        docker rm -f printfarmer-nginx-proxy || true
+        print_success "Removed printfarmer-nginx-proxy"
+    fi
+
     # 1. Stop all remaining running containers (fallback)
     print_info "Step 1/7: Stopping any remaining running Docker containers..."
     if [ -n "$(docker ps -q)" ]; then
@@ -1744,7 +1751,7 @@ generate_host_network_nginx_config() {
     # Create the custom Nginx config with host.docker.internal and actual API port
     cat > deploy/nginx/conf.d.host/frontend-app.conf << NGINXEOF
 server {
-    listen 80;
+    listen ${HTTP_PORT:-8080};
     server_name localhost;
     root /usr/share/nginx/html;
     index index.html;
@@ -1812,6 +1819,67 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
+
+# Start an nginx proxy container in host network mode using the generated host config
+start_host_mode_nginx_proxy() {
+    print_info "Ensuring host-mode nginx proxy is running..."
+
+    # If a container with the expected name exists and is running, nothing to do
+    if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
+        print_info "Host-mode nginx proxy container already running: printfarmer-nginx-proxy"
+        return 0
+    fi
+
+    # Build a lightweight nginx image that uses the generated host configs
+    # Use a temporary Dockerfile to reference the generated confs
+    local tmp_dockerfile=".tmp.Dockerfile.nginx.host"
+    cat > "$tmp_dockerfile" <<EOF
+FROM nginx:alpine
+COPY deploy/nginx/nginx-frontend.conf /etc/nginx/nginx.conf
+COPY deploy/nginx/conf.d.host/*.conf /etc/nginx/conf.d/
+RUN rm -f /etc/nginx/conf.d/default.conf || true
+EOF
+
+    local image_name="printfarmer-nginx-host:latest"
+    if docker build -t "$image_name" -f "$tmp_dockerfile" .; then
+        print_success "Built host-mode nginx image: $image_name"
+    else
+        print_warning "Failed to build host-mode nginx image; attempting to run nginx:alpine with mounted config"
+        image_name="nginx:alpine"
+    fi
+
+    rm -f "$tmp_dockerfile" || true
+
+    # Remove an existing container with the same name if present but not running
+    if docker ps -a --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
+        print_info "Removing stale nginx proxy container"
+        docker rm -f printfarmer-nginx-proxy || true
+    fi
+
+    # Run the container in host network mode so it binds the requested HTTP port on the host
+    # Use --network host for Linux; on macOS/Docker Desktop this is a no-op and will fall back to bridge
+    if docker run -d --name printfarmer-nginx-proxy --network host \
+        -v "${PWD}/deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro" \
+        -v "${PWD}/deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro" \
+        "$image_name" >/dev/null; then
+        print_success "Started host-mode nginx proxy: printfarmer-nginx-proxy"
+        return 0
+    else
+        print_warning "Failed to start host-mode nginx proxy container"
+        print_info "Attempting fallback: start nginx image with port mapping"
+        # Fallback: start default nginx with explicit port mapping (best-effort)
+        if docker run -d --name printfarmer-nginx-proxy -p "${HTTP_PORT:-8080}:80" \
+            -v "${PWD}/deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro" \
+            -v "${PWD}/deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine >/dev/null; then
+            print_success "Started nginx-proxy (fallback port mapped): printfarmer-nginx-proxy"
+            return 0
+        else
+            print_error "Unable to start an nginx-proxy container in host or mapped mode. Please start one manually or check Docker permissions."
+            return 1
+        fi
+    fi
 }
 NGINXEOF
     
@@ -2820,20 +2888,36 @@ DBEOF
       interval: 30s
       timeout: 10s
       retries: 3
+    # Nginx proxy (host-mode)
+    nginx-proxy:
+        image: printfarmer-nginx-host:latest
+        container_name: printfarmer-nginx-proxy
+        # Run in host network mode so it binds host ports directly
+        network_mode: "host"
+        # Use the generated host nginx config (bind mounts from repo when running compose)
+        volumes:
+            - ./deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro
+            - ./deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
 
 networks:
-  printfarmer-network:
-    driver: bridge
+    printfarmer-network:
+        driver: bridge
 
 volumes:
-  postgres_data:
-  sqlserver_data:
-  mysql_data:
-  app_data:
-  model_uploads:
-  gcode_storage:
-  slicer_profiles:
-  orcaslicer_temp:
+    postgres_data:
+    sqlserver_data:
+    mysql_data:
+    app_data:
+    model_uploads:
+    gcode_storage:
+    slicer_profiles:
+    orcaslicer_temp:
 RESTEOF
         
         print_success "Host network compose file created: docker-compose.host-network.yml"
@@ -3165,7 +3249,16 @@ deploy_containers() {
             # Now start the remaining services (frontend, workers, etc.)
             if "${final_compose_cmd[@]}" up -d; then
                 print_success "All containers started successfully"
-                # Quick check: verify nginx-proxy is forwarding /api to the API service
+                # If we're running in host network mode and using the host-network compose,
+                # ensure a host-mode nginx proxy is present. The host-network compose
+                # may use a frontend that expects to be proxied; for consistency we'll
+                # create an explicit nginx-proxy running in host network mode that
+                # uses the generated host config so health checks behave like bridge-mode.
+                if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+                    start_host_mode_nginx_proxy || true
+                fi
+
+                # Quick check: verify nginx-proxy or host-mode frontend is forwarding /api to the API service
                 if check_nginx_proxy; then
                     print_info "nginx proxy verification passed"
                 else
@@ -3422,6 +3515,40 @@ check_nginx_proxy() {
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port/api/healthz"
     print_info "Verifying nginx proxy forwards /api to API: $proxy_url"
+
+    # If we're running in host network mode, the host-network compose
+    # intentionally does not include an nginx-proxy service. In that
+    # case verify the frontend/proxy endpoint directly instead of
+    # expecting a container named printfarmer-nginx-proxy.
+    if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+        print_info "Host network mode detected - verifying frontend/proxy on host (${proxy_url})"
+        local retries_h=${PROXY_VERIFY_RETRIES:-6}
+        local interval_h=${PROXY_VERIFY_INTERVAL:-5}
+        local attempt_h=1
+        while [ $attempt_h -le $retries_h ]; do
+            if curl -sf --max-time 3 "$proxy_url" >/tmp/_proxy_check 2>/dev/null; then
+                if grep -q '"status"' /tmp/_proxy_check || grep -q '^OK$' /tmp/_proxy_check; then
+                    print_success "✓ Host-mode frontend/proxy appears to forward /api to API (HTTP ${proxy_port})"
+                    rm -f /tmp/_proxy_check || true
+                    return 0
+                else
+                    print_info "  Host-mode proxy returned non-JSON/OK response (attempt ${attempt_h}/${retries_h})"
+                    sed -n '1,40p' /tmp/_proxy_check || true
+                fi
+            else
+                print_info "  No response from host-mode proxy (attempt ${attempt_h}/${retries_h})"
+            fi
+            attempt_h=$((attempt_h + 1))
+            sleep $interval_h
+        done
+
+        print_warning "✗ Host-mode frontend/proxy check failed after ${retries_h} attempts. Check frontend logs and host networking." 
+        print_info "Example checks:"
+        print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE ps"
+        print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend --tail 50"
+        print_info "  curl -v $proxy_url"
+        return 1
+    fi
 
     local retries=${PROXY_VERIFY_RETRIES:-6}
     local interval=${PROXY_VERIFY_INTERVAL:-5}
