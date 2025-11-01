@@ -10,12 +10,35 @@ NODE_VERSION=${NODE_VERSION:-18}
 
 print() { echo -e "[bootstrap] $*"; }
 
+# CLI flags
+VERIFY=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --verify)
+      VERIFY=true
+      shift
+      ;;
+    *) shift ;;
+  esac
+done
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Helper to run commands with sudo when necessary
 run_priv() {
   if [ "$(id -u)" -eq 0 ]; then
     eval "$*"
   else
     sudo bash -c "$*"
+  fi
+}
+
+run_as_user() {
+  local cmd="$*"
+  if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER:-}" != "root" ]; then
+    sudo -u "$SUDO_USER" bash -lc "$cmd"
+  else
+    bash -lc "$cmd"
   fi
 }
 
@@ -92,3 +115,14 @@ dotnet build ./farm-web.sln -c Debug
 EOF
 
 print "Done."
+
+if [ "$VERIFY" = true ]; then
+  print "Running verification (--verify) checks as non-root user"
+  run_as_user "export PATH=\"$HOME/.dotnet:$PATH\"; dotnet --info || true; node --version || true; npm --version || true; git --version || true"
+  if [ -f "$REPO_ROOT/src/api/Farm.Web.Api.csproj" ]; then
+    run_as_user "cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
+  else
+    print "API project not found for smoke test; skipping build"
+  fi
+  print "Verification complete"
+fi

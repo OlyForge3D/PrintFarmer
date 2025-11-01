@@ -7,6 +7,15 @@ Run this script from an elevated PowerShell (Run as Administrator).
 
 param()
 
+# Support a -Verify switch to run dotnet/node verification and a small build smoke-test
+# Simple CLI flag parsing for -Verify / --verify
+$Verify = $false
+if ($args -ne $null) {
+    foreach ($a in $args) {
+        if ($a -ieq '-Verify' -or $a -ieq '--verify') { $Verify = $true }
+    }
+}
+
 function Write-Info([string]$m) { Write-Host "[bootstrap] $m" -ForegroundColor Cyan }
 function Write-Success([string]$m) { Write-Host "[bootstrap] $m" -ForegroundColor Green }
 function Write-Warn([string]$m) { Write-Host "[bootstrap] $m" -ForegroundColor Yellow }
@@ -132,3 +141,26 @@ Write-Host "    dotnet restore ./farm-web.sln"
 Write-Host "    dotnet build ./farm-web.sln -c Debug"
 
 Write-Success "Done."
+
+if ($Verify) {
+    Write-Info "Running verification (--Verify) checks"
+    try {
+        dotnet --info
+    } catch { Write-Warn "dotnet verification failed: $_" }
+    try { node --version } catch { Write-Warn "node verification failed: $_" }
+    try { npm --version } catch { Write-Warn "npm verification failed: $_" }
+    try { git --version } catch { Write-Warn "git verification failed: $_" }
+
+    # Small smoke test: attempt to build the API project if present
+    $repoRoot = Resolve-Path -Path (Join-Path $PSScriptRoot '..')
+    $apiProj = Join-Path $repoRoot 'src\api\Farm.Web.Api.csproj'
+    if (Test-Path $apiProj) {
+        Write-Info "Running small dotnet build smoke test (API project)"
+        Push-Location (Join-Path $repoRoot 'src')
+        dotnet restore ./farm-web.sln
+        dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore
+        Pop-Location
+    } else {
+        Write-Info "API project not found for smoke test; skipping build"
+    }
+}

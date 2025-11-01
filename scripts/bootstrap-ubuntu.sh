@@ -5,6 +5,23 @@
 
 set -euo pipefail
 
+# CLI flags
+VERIFY=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --verify)
+      VERIFY=true
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Repository root for smoke-tests
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
 NODE_VERSION=${NODE_VERSION:-18}
 
@@ -17,6 +34,16 @@ run_priv() {
     eval "$*"
   else
     sudo bash -c "$*"
+  fi
+}
+
+# Run a command as the unprivileged invoking user (if the script was called via sudo)
+run_as_user() {
+  local cmd="$*"
+  if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER:-}" != "root" ]; then
+    sudo -u "$SUDO_USER" bash -lc "$cmd"
+  else
+    bash -lc "$cmd"
   fi
 }
 
@@ -121,3 +148,17 @@ dotnet build ./farm-web.sln -c Debug
 EOF
 
 print "Done."
+
+# If requested, run verification/smoke tests as the non-root user
+if [ "$VERIFY" = true ]; then
+  print "Running verification (--verify) checks as non-root user"
+  run_as_user "export PATH=\"$HOME/.dotnet:$PATH\"; dotnet --info || true; node --version || true; npm --version || true; git --version || true"
+  # Small smoke test: build the API project only
+  if [ -f "$REPO_ROOT/src/api/Farm.Web.Api.csproj" ]; then
+    print "Running small dotnet build smoke test (API project)"
+    run_as_user "cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
+  else
+    print "API project not found for smoke test; skipping build"
+  fi
+  print "Verification complete"
+fi
