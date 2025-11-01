@@ -1853,6 +1853,36 @@ EOF
 
     rm -f "$tmp_dockerfile" || true
 
+    # Ensure host HTTP port is available before attempting to start nginx.
+    local http_port="${HTTP_PORT:-8080}"
+    # If the port is bound, try to identify a Docker container that owns it and stop it (with prompt)
+    if ss -ltn "sport = :${http_port}" >/dev/null 2>&1; then
+        # Try to find a container that exposes this host port
+        occupier=$(docker ps --format '{{.Names}}\t{{.Ports}}' | grep ":${http_port}->" | awk -F'\t' '{print $1}' | head -1 || true)
+        if [ -n "${occupier}" ]; then
+            print_warning "Host port ${http_port} is already bound by container: ${occupier}"
+            # If non-interactive, stop it automatically; otherwise ask the user
+            if [ "${NON_INTERACTIVE:-false}" = "true" ]; then
+                print_info "Non-interactive mode: stopping container ${occupier} to free port ${http_port}"
+                docker stop "${occupier}" || true
+                docker rm -f "${occupier}" || true
+            else
+                prompt_yes_no "Host port ${http_port} is in use by container ${occupier}. Stop it so nginx can bind ${http_port}?" "n" "STOP_FRONTEND_CONFIRM"
+                if [ "${STOP_FRONTEND_CONFIRM:-no}" = "yes" ]; then
+                    print_info "Stopping container ${occupier} as requested"
+                    docker stop "${occupier}" || true
+                    docker rm -f "${occupier}" || true
+                else
+                    print_error "Cannot start nginx proxy because port ${http_port} is in use by ${occupier}. Aborting start_host_mode_nginx_proxy."
+                    return 1
+                fi
+            fi
+        else
+            print_error "Host port ${http_port} appears in use by a non-container process. Please free it and retry."
+            return 1
+        fi
+    fi
+
     # Remove an existing container with the same name if present but not running
     if docker ps -a --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
         print_info "Removing stale nginx proxy container"
@@ -1886,7 +1916,7 @@ EOF
             print_warning "API did not become available; fallback nginx may fail to proxy."
         fi
 
-        if docker run -d --name printfarmer-nginx-proxy -p "${HTTP_PORT:-8080}:80" \
+        if docker run -d --name printfarmer-nginx-proxy --add-host=host.docker.internal:host-gateway -p "${HTTP_PORT:-8080}:80" \
             -v "${PWD}/deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro" \
             -v "${PWD}/deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro" \
             nginx:alpine >/dev/null; then

@@ -629,7 +629,7 @@ PY
     if [[ "$arch" == "microservices" ]]; then
         log_info "Applying microservices host-mode adjustments: API -> host network, nginx -> extra_hosts host-gateway"
 
-        python3 - "$compose_file" <<'PY'
+    python3 - "$compose_file" <<'PY'
 import sys
 path = sys.argv[1]
 txt = open(path,'r').read().splitlines()
@@ -666,6 +666,17 @@ def remove_ports(block_lines):
                 skip = False
         out.append(l)
     return out
+
+# Pre-check: ensure frontend is not exposing host ports. If it is, abort and ask operator to remove port mappings
+f_start, f_end = find_block(txt, 'frontend')
+if f_start is not None:
+    frontend_block = txt[f_start:f_end]
+    # Detect a 'ports:' line at 4-space indent inside frontend block
+    for line in frontend_block:
+        if line.lstrip().startswith('ports:') and line.startswith('    '):
+            sys.stderr.write('ERROR: Detected frontend service exposing host ports in microservices template.\n')
+            sys.stderr.write('To avoid runtime port conflicts, remove the frontend ports mapping before generating API host-mode.\n')
+            sys.exit(2)
 
 start, end = find_block(txt, 'api')
 if start is not None:
