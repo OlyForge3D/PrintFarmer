@@ -28,7 +28,7 @@ Shared variables are defined centrally in `docs/slicer/worker-environment.md` (a
 | (Host port mapping)        | External host port via compose           | 8081 -> 8080 (example)           |
 | `Worker__OrcaSlicerPath`   | Orca binary path override                | `/usr/local/bin/orcaslicer`      |
 | `Worker__WorkingDirectory` | Temp working dir for jobs                | `/app/temp`                      |
-| `Worker__StorageEndpoint`  | API endpoint for artifact uploads        | `http://api:8080` (compose net)  |
+| `Worker__StorageEndpoint`  | API endpoint for artifact uploads        | `http://api:5245` (compose net)  |
 | `Worker__MaxConcurrentJobs`| Maximum concurrent slicing jobs          | `1`                              |
 | `ConnectionStrings__Redis` | Redis connection (job queue, pub/sub)    | `redis:6379` in compose / local  |
 

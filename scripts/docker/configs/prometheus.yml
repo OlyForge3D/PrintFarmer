@@ -10,7 +10,7 @@ scrape_configs:
   # PrintFarmer API metrics
   - job_name: 'printfarmer-api'
     static_configs:
-      - targets: ['api:8080']
+      - targets: ['api:5245']
     metrics_path: '/metrics'
     scrape_interval: 10s
 

@@ -11,7 +11,7 @@ This reference lists environment variables common to all per-engine slicing work
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `ConnectionStrings__Redis` | Yes (for distributed slicing) | (none) | Redis endpoint used for job queue operations and status pub/sub. |
-| `Worker__StorageEndpoint` | Yes | `http://api:8080` (compose) | Base URL of API / storage service for artifact upload callbacks (e.g. G-code). |
+| `Worker__StorageEndpoint` | Yes | `http://api:5245` (compose) | Base URL of API / storage service for artifact upload callbacks (e.g. G-code). |
 
 ## Worker Identity & Queueing
 | Variable | Required | Default | Purpose |
@@ -59,7 +59,7 @@ Change the host port by updating compose or deployment manifests—do not change
 At minimum set:
 ```
 ConnectionStrings__Redis=redis:6379
-Worker__StorageEndpoint=http://api:8080
+Worker__StorageEndpoint=http://api:5245
 Worker__QueueName=<engine-queue-name>
 ```
 Optional but recommended:

@@ -26,7 +26,7 @@ Shared worker variables are defined in `docs/slicer/worker-environment.md`. Only
 | (Host port mapping)        | External port via compose             | 8082 -> 8080 (example)            |
 | `Worker__PrusaSlicerPath`  | Prusa binary path override            | `/usr/local/bin/prusa-slicer`     |
 | `Worker__WorkingDirectory` | Temp working dir for jobs             | `/app/temp`                       |
-| `Worker__StorageEndpoint`  | API endpoint for artifact uploads     | `http://api:8080` (compose net)   |
+| `Worker__StorageEndpoint`  | API endpoint for artifact uploads     | `http://api:5245` (compose net)   |
 | `ConnectionStrings__Redis` | Redis connection (queue + pub/sub)    | `redis:6379` (compose)            |
 
 ## Health Endpoints

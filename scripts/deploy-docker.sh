@@ -18,6 +18,7 @@ NON_INTERACTIVE=false
 TEAR_DOWN=false
 SHOW_HELP=false
 REDEPLOY=false
+PREPULL=false
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
@@ -2839,7 +2840,7 @@ RESTEOF
         # Ensure no top-level `version:` key remains in generated host-network file
         remove_version_keys "docker-compose.host-network.yml"
         print_warning "API will bind directly to host port ${API_PORT:-5245}"
-    print_warning "Database accessible on localhost (host networking)"
+        print_warning "Database accessible on localhost (host networking)"
         print_info "Workers and frontend use bridge network, API uses host network"
         print_info "This file is standalone - do NOT combine with docker-compose.microservices.yml"
     fi
@@ -2931,8 +2932,6 @@ deploy_containers() {
             mkdir -p "$BUILD_CTX_DIR/orca" && curl -fsSL "$ORCA_ASSET_URL" -o "$BUILD_CTX_DIR/orca/orca_asset" || print_warning "Download failed"
             # Extraction logic could be added here depending on asset type
         fi
-
-
 
         # If we prepared files into .tmp_build_context, make them available to docker-compose by copying into repo root under build_context/
         if [ -d "$BUILD_CTX_DIR" ]; then
@@ -3166,6 +3165,13 @@ deploy_containers() {
             # Now start the remaining services (frontend, workers, etc.)
             if "${final_compose_cmd[@]}" up -d; then
                 print_success "All containers started successfully"
+                # Quick check: verify nginx-proxy is forwarding /api to the API service
+                if check_nginx_proxy; then
+                    print_info "nginx proxy verification passed"
+                else
+                    print_error "nginx proxy verification FAILED - aborting deployment"
+                    exit 2
+                fi
             else
                 print_error "Failed to start containers"
                 exit 1
@@ -3403,6 +3409,49 @@ wait_for_api() {
     return 1
 }
 
+# Lightweight check to validate that the browser-facing origin (nginx-proxy)
+# correctly forwards /api requests to the API service. This is useful to
+# catch misconfigured nginx upstreams (e.g. stale 8080 references) early.
+check_nginx_proxy() {
+    # Only check for microservices deployments where nginx-proxy is expected
+    if [ "$ARCHITECTURE" != "microservices" ]; then
+        return 0
+    fi
+
+    local proxy_host=${SERVER_HOST:-localhost}
+    local proxy_port=${HTTP_PORT:-8080}
+    local proxy_url="http://$proxy_host:$proxy_port/api/healthz"
+    print_info "Verifying nginx proxy forwards /api to API: $proxy_url"
+
+    local retries=${PROXY_VERIFY_RETRIES:-6}
+    local interval=${PROXY_VERIFY_INTERVAL:-5}
+    local attempt=1
+
+    while [ $attempt -le $retries ]; do
+        if curl -sf --max-time 3 "$proxy_url" >/tmp/_proxy_check 2>/dev/null; then
+            if grep -q '"status"' /tmp/_proxy_check || grep -q '^OK$' /tmp/_proxy_check; then
+                print_success "✓ nginx proxy appears to forward /api to API (HTTP ${proxy_port})"
+                rm -f /tmp/_proxy_check || true
+                return 0
+            else
+                print_info "  Proxy returned non-JSON/OK response (attempt ${attempt}/${retries})"
+                sed -n '1,40p' /tmp/_proxy_check || true
+            fi
+        else
+            print_info "  No response from proxy (attempt ${attempt}/${retries})"
+        fi
+        attempt=$((attempt + 1))
+        sleep $interval
+    done
+
+    print_warning "✗ nginx proxy check failed after ${retries} attempts. Check /deploy/nginx/nginx-microservices.conf and ensure upstream points to api:5245"
+    print_info "Example checks:"
+    print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE ps"
+    print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE logs nginx-proxy --tail 50"
+    print_info "  docker exec printfarmer-nginx-proxy nginx -T | sed -n '1,200p'"
+    return 1
+}
+
 # Verify deployment
 verify_deployment() {
     print_header "🔍 Verifying Deployment"
@@ -3516,7 +3565,6 @@ verify_deployment() {
         fi
     fi
     
-
     # Browser-origin / Proxy health check: ensure the public-facing origin proxies /api to the API
     # Use SERVER_HOST if set, otherwise default to localhost
     local proxy_host=${SERVER_HOST:-localhost}
@@ -3564,14 +3612,12 @@ verify_deployment() {
         print_warning "✗ Browser-origin proxy did not return JSON after ${proxy_retries} attempts"
         print_info "Tip: Ensure the frontend/proxy is bound to host port $proxy_port and is routing /api to the API. Example host URL: http://$proxy_host:$proxy_port/api/setup/status"
         print_info "Common fixes:"
-        print_info "  • If you're using microservices, ensure nginx-proxy is started and bound to the host port and that its config proxies /api -> api:8080."
+        print_info "  • If you're using microservices, ensure nginx-proxy is started and bound to the host port and that its config proxies /api -> api:5245."
         print_info "  • If nginx-proxy is not present, access the API directly on API port: http://<host>:$API_PORT/api/setup/status"
         print_info "  • If you see HTML, the request is hitting the frontend directly; either remap ports so nginx-proxy wins or configure frontend to not bind host ports in microservices mode."
         health_check_failed=true
     fi
 
-
-    
     echo
     if [ "$health_check_failed" = true ]; then
         run_api_diagnostics "🩺 API Health Diagnostics"
@@ -3874,6 +3920,36 @@ main() {
         generate_compose_override
         generate_host_network_override
     fi
+
+    # Optional prepull for Apple Silicon or slow networks: pull common base images
+    prepull_images() {
+        if [ "${PREPULL:-false}" != "true" ]; then
+            return 0
+        fi
+
+        print_info "Pre-pulling common images to speed builds on Apple Silicon (amd64)"
+        # Respect DOCKER_DEFAULT_PLATFORM if set; otherwise default to linux/amd64 for arm64 hosts
+        local platform_arg=""
+        if [ -n "${DOCKER_DEFAULT_PLATFORM:-}" ]; then
+            platform_arg="--platform ${DOCKER_DEFAULT_PLATFORM}"
+        else
+            platform_arg="--platform linux/amd64"
+        fi
+
+        # Minimal set of images used in compose; expand as needed
+        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim" "node:18-alpine")
+        for img in "${images[@]}"; do
+            print_info "Pulling $img ($platform_arg)"
+            if docker pull $platform_arg "$img"; then
+                print_success "Pulled $img"
+            else
+                print_warning "Failed pulling $img; continuing"
+            fi
+        done
+    }
+
+    # Run prepull step if requested
+    prepull_images
     
     deploy_containers
     
@@ -3989,6 +4065,10 @@ while [ $# -gt 0 ]; do
             else
                 echo "Missing value for --config-file" >&2; exit 2
             fi
+            ;;
+        --prepull)
+            PREPULL=true
+            shift
             ;;
         --config-file=*)
             CONFIG_FILE="${1#--config-file=}"

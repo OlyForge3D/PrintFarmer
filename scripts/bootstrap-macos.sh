@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Bootstrap script for macOS (Monterey/Big Sur/Apple Silicon/Intel)
+# Installs Homebrew (if missing), .NET 9.x (via dotnet-install or Homebrew), Node.js 18+, git
+# Designed to be idempotent.
+
+set -euo pipefail
+
+REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
+NODE_VERSION=${NODE_VERSION:-18}
+
+print() { echo -e "[bootstrap] $*"; }
+
+# Helper to run commands with sudo when necessary
+run_priv() {
+  if [ "$(id -u)" -eq 0 ]; then
+    eval "$*"
+  else
+    sudo bash -c "$*"
+  fi
+}
+
+# Ensure we have a package manager (Homebrew)
+if ! command -v brew >/dev/null 2>&1; then
+  print "Homebrew not found — installing Homebrew"
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  # On Apple Silicon, add brew to PATH for this session
+  if [ -d /opt/homebrew/bin ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -d /usr/local/bin ]; then
+    eval "$(/usr/local/bin/brew shellenv)" || true
+  fi
+else
+  print "Homebrew found: $(brew --version | head -n1)"
+fi
+
+print "Updating Homebrew"
+brew update || true
+
+# Install Node.js 18 via Homebrew
+if ! command -v node >/dev/null 2>&1 || [[ "$(node -v)" != v${NODE_VERSION}* ]]; then
+  print "Installing Node.js ${NODE_VERSION} via Homebrew"
+  run_priv "brew install node@${NODE_VERSION}"
+  # Link into PATH
+  run_priv "brew link --force --overwrite node@${NODE_VERSION} || true"
+else
+  print "Node.js present: $(node -v)"
+fi
+
+# Git
+if ! command -v git >/dev/null 2>&1; then
+  print "Installing Git via Homebrew"
+  run_priv "brew install git"
+else
+  print "git present: $(git --version)"
+fi
+
+# Try Homebrew dotnet first (may not have exact pinned versions). If not available
+# or if you prefer a pinned version, use the repo-local dotnet-install script.
+if ! command -v dotnet >/dev/null 2>&1; then
+  print "Attempting to install .NET SDK ${REQ_DOTNET_VERSION} using dotnet-install script"
+  if [ -f "${REPO_ROOT:-$(pwd)}/dotnet-install.sh" ]; then
+    bash "${REPO_ROOT:-$(pwd)}/dotnet-install.sh" --version ${REQ_DOTNET_VERSION}
+    export PATH="$HOME/.dotnet:$PATH"
+    print ".NET installed via dotnet-install.sh"
+  else
+    print "dotnet-install.sh not found in repo root. Trying Homebrew (may install latest dotnet)."
+  run_priv "brew install --cask dotnet-sdk || brew install dotnet-sdk || true"
+    if command -v dotnet >/dev/null 2>&1; then
+      print ".NET installed: $(dotnet --info | head -n1)"
+    else
+      print "Failed to install dotnet via Homebrew. Please install manually from https://dotnet.microsoft.com/download"
+    fi
+  fi
+else
+  print ".NET present: $(dotnet --info 2>/dev/null | head -n1 || true)"
+fi
+
+print "Bootstrap complete. Please run the following as your normal user (if PATH was modified by dotnet-install.sh):"
+cat <<'EOF'
+export PATH="$HOME/.dotnet:$PATH"
+
+# Verify
+dotnet --info
+node --version
+npm --version
+git --version
+
+# Build repository
+cd src
+dotnet restore ./farm-web.sln
+dotnet build ./farm-web.sln -c Debug
+EOF
+
+print "Done."

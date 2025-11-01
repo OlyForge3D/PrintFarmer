@@ -132,6 +132,30 @@ This guide covers running PrintFarmer locally on your development machine **with
 
 **Note:** The automated setup script will install Homebrew and GNU coreutils automatically if missing.
 
+### Apple Silicon (M1/M2) Docker notes
+
+On Apple Silicon (arm64) Macs some prebuilt Docker images or native toolchains used by the build (for example certain native build tools or precompiled binaries) may only be available for linux/amd64. To avoid runtime and build-time failures you can force Docker to use the amd64 platform when building or pulling images.
+
+Recommended short guidance:
+
+```bash
+# Use the amd64 platform for builds and pulls when on Apple Silicon
+export DOCKER_DEFAULT_PLATFORM=linux/amd64
+
+# Build the API runtime image (example)
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build \
+	--progress=plain -f scripts/docker/dockerfiles/Dockerfile.multistage \
+	--target api-runtime -t printfarmer-api-multistage:local .
+
+# Or set the env var globally for the shell session
+export DOCKER_DEFAULT_PLATFORM=linux/amd64
+docker compose --env-file .env.microservices -f scripts/docker/compose-templates/docker-compose.microservices.yml up -d
+```
+
+Notes:
+- For development you can set `DOCKER_DEFAULT_PLATFORM` in your shell profile (`~/.zshrc`) while working on PrintFarmer. Remember to unset it if you switch back to native-arm builds for other projects.
+- The deploy script respects `TARGETPLATFORM` and `DOCKER_DEFAULT_PLATFORM` build args where applicable; consult `scripts/docker/dockerfiles/Dockerfile.multistage` for details.
+
 ### Verify Installation
 ```bash
 # Check .NET version (should show 9.0.302)
@@ -141,6 +165,29 @@ dotnet --info
 node --version
 npm --version
 ```
+
+### One-line bootstrap commands (per OS)
+
+If you want a quick, one-line way to install the required dependencies on a fresh machine, use the appropriate command below. These call the helper scripts in `scripts/` and are the recommended starting point.
+
+- Ubuntu (run as root):
+
+```bash
+sudo bash ./scripts/bootstrap-ubuntu.sh
+```
+
+- macOS (run as your user; Homebrew will be installed if missing):
+
+```bash
+bash ./scripts/bootstrap-macos.sh
+```
+
+- Windows (PowerShell as Administrator):
+
+```powershell
+.\scripts\bootstrap-windows.ps1
+```
+
 
 ### Install Missing Prerequisites
 
