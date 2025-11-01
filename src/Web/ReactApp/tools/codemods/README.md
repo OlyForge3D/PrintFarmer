@@ -3,8 +3,8 @@ wrap-console-and-renderunknown codemod
 This directory contains a jscodeshift codemod to help automate wrapping noisy console.* calls
 and replacing raw JSX JSON dumps with a safer `renderUnknown(...)` render helper.
 
-Prerequisites
-- Node.js 18+ (already used by the project)
+- Prerequisites
+- Node.js >=20.19 (already used by the project)
 - Install jscodeshift globally or use npx (recommended)
 
 Dry-run (recommended):

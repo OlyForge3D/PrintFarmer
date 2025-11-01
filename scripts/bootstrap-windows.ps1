@@ -1,6 +1,6 @@
 <#
 Bootstrap script for Windows (PowerShell)
-Installs prerequisites to build and run PrintFarmer: .NET SDK 9.x, Node.js 18.x, npm, git.
+Installs prerequisites to build and run PrintFarmer: .NET SDK 9.x, Node.js (recommended v20.19.0), npm, git.
 Uses winget when available, falls back to direct installer using the Microsoft dotnet-install.ps1 if needed.
 Run this script from an elevated PowerShell (Run as Administrator).
 #>
@@ -86,7 +86,8 @@ if (-not (Test-IsElevated)) {
 }
 
 $REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '9.0.302'
-$REQ_NODE_MAJOR = $env:NODE_VERSION -or '18'
+# Default to Node 20 major for frontend toolchain
+$REQ_NODE_MAJOR = $env:NODE_VERSION -or '20'
 
 # Check for winget and Chocolatey availability
 Write-Info "Checking winget availability..."
@@ -184,13 +185,13 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 }
 
 # Verify Node
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Info "Node.js not found — trying to install via winget if available"
     if ($haveWinget) {
         try { winget install --id OpenJS.NodeJS.$REQ_NODE_MAJOR -e --accept-package-agreements --accept-source-agreements -h; } catch { Write-Warn "winget node install failed" }
     }
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Warn "Node.js still not installed. Please install Node.js 18+ from https://nodejs.org/ and re-run."
+        Write-Warn "Node.js still not installed. Please install Node.js (v20.19.0 or later) from https://nodejs.org/ and re-run."
     }
 } else {
     Write-Info "node present: $(node -v)"

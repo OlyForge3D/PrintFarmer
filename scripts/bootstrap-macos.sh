@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Bootstrap script for macOS (Monterey/Big Sur/Apple Silicon/Intel)
-# Installs Homebrew (if missing), .NET 9.x (via dotnet-install or Homebrew), Node.js 18+, git
+# Installs Homebrew (if missing), .NET 9.x (via dotnet-install or Homebrew), Node.js >=20.19 (recommended v20.19.0), git
 # Designed to be idempotent.
 
 set -euo pipefail
 
 REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
-NODE_VERSION=${NODE_VERSION:-18}
+# Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
+NODE_VERSION=${NODE_VERSION:-20}
 
 # If running inside a VS Code devcontainer, skip host-level package installation.
 if [ -n "${DEVCONTAINER:-}" ] || [ -f "/.devcontainer" ] || [ -d ".devcontainer" ]; then
@@ -66,7 +67,8 @@ fi
 print "Updating Homebrew"
 brew update || true
 
-# Install Node.js 18 via Homebrew
+# Install Node.js via Homebrew (default major is 20). For per-user pinning prefer nvm as documented in LOCAL_DEVELOPMENT.md
+# Default NODE_VERSION is 20.
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v)" != v${NODE_VERSION}* ]]; then
   print "Installing Node.js ${NODE_VERSION} via Homebrew"
   run_priv "brew install node@${NODE_VERSION}"

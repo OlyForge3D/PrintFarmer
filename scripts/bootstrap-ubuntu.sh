@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap script for Ubuntu (20.04/22.04/24.04)
-# Installs prerequisites to build and run PrintFarmer (dotnet 9.0.302, Node.js 18+, npm, git, build-essential)
+# Installs prerequisites to build and run PrintFarmer (dotnet 9.0.302, Node.js >=20.19, npm, git, build-essential)
 # Designed to be idempotent and safe to run multiple times.
 
 set -euo pipefail
@@ -31,7 +31,8 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
-NODE_VERSION=${NODE_VERSION:-18}
+# Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
+NODE_VERSION=${NODE_VERSION:-20}
 
 print() { echo -e "[bootstrap] $*"; }
 print() { echo -e "[bootstrap] $*"; }
@@ -70,7 +71,7 @@ run_priv "apt-get install -y --no-install-recommends \
   git \
   wget \
   unzip \
-  locales || true
+  locales" || true
 
 # Ensure locale to avoid warning in some dotnet installers
 if ! locale -a | grep -q "en_US.utf8"; then
@@ -78,9 +79,12 @@ if ! locale -a | grep -q "en_US.utf8"; then
 fi
 export LANG=en_US.UTF-8
 
-# Install Node.js 18.x (NodeSource)
+# Install Node.js (NodeSource) or skip if present. Default NODE_VERSION is 20.
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v)" != v${NODE_VERSION}* ]]; then
   print "Installing Node.js ${NODE_VERSION} (NodeSource)"
+  # This installs the matching Node major (e.g. 20.x). For precise pinning (20.19.0)
+  # prefer using nvm as documented in LOCAL_DEVELOPMENT.md. NodeSource provides
+  # system-wide Node packages which are suitable for CI/VMs.
   curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | sudo bash -
   run_priv "apt-get install -y nodejs"
 else

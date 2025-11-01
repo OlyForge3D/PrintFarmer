@@ -23,7 +23,7 @@
 #
 # Requirements:
 #   - .NET SDK 9.0.302+
-#   - Node.js 18+
+#   - Node.js >=20.19
 #   - Docker (for worker containers)
 #   - Docker images: printfarmer/orcaslicer-worker
 
@@ -563,7 +563,7 @@ fi
 # Verify Node.js version
 node_version=$(node --version | sed 's/v//')
 if ! printf '%s\n18.0.0\n' "$node_version" | sort -V | head -1 | grep -q "^18"; then
-  error "Node.js 18+ required. Current version: $node_version"
+  error "Node.js >=20.19 required. Current version: $node_version"
 fi
 
 success "Prerequisites check passed"

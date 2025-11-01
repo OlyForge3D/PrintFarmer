@@ -191,7 +191,7 @@ Graceful shutdown: workers finish active jobs then exit (shutdown timeout manage
 
 ### Local Development
 - **.NET SDK 9.0+** (exactly 9.0.302 as specified in global.json)
-- **Node.js 18+** and npm (for React frontend)
+- **Node.js >=20.19 (recommend v20.19.0)** and npm (for React frontend)
 - **macOS/Windows/Linux** (macOS recommended for WiFi device access)
 
 **Additional macOS Requirements:**

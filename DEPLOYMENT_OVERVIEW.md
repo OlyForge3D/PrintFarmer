@@ -53,7 +53,7 @@ cd Web/ReactApp && npm run dev
 
 ### Requirements
 - .NET 9.0.302 SDK
-- Node.js 18+
+- Node.js >=20.19 (recommend v20.19.0)
 - 2GB+ RAM
 
 📖 **Detailed Guide**: [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md)

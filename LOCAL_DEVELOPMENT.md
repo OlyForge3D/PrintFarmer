@@ -123,7 +123,7 @@ This guide covers running PrintFarmer locally on your development machine **with
 
 ### Required Software
 - **.NET SDK 9.0+** (exactly 9.0.302 as specified in global.json)
-- **Node.js 18+** and npm (for React frontend)
+- **Node.js >=20.19 (recommend v20.19.0)** and npm (for React frontend)
 - **Git** for source control
 
 ### Additional macOS Requirements
@@ -161,7 +161,7 @@ Notes:
 # Check .NET version (should show 9.0.302)
 dotnet --info
 
-# Check Node.js version (should be 18+)
+# Check Node.js version (should be >=20.19, e.g. v20.19.0)
 node --version
 npm --version
 ```
@@ -269,12 +269,21 @@ export PATH="$HOME/.dotnet:$PATH"
 # Or download from: https://dotnet.microsoft.com/download/dotnet/9.0
 ```
 
-**Install Node.js 18+ (if needed):**
-```bash
-# macOS with Homebrew
-brew install node@18
+**Install Node.js >=20.19 (if needed):**
+Prefer installing via nvm so contributors can switch Node versions per-project without affecting system packages.
 
-# Or download from: https://nodejs.org/
+```bash
+# Install nvm (if not already installed) and use it to install Node 20.19.0 (recommended)
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.4/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+source "$NVM_DIR/nvm.sh"
+nvm install 20.19.0
+nvm use 20.19.0
+
+# macOS Homebrew alternative (not recommended over nvm):
+# brew install node@20
+
+# Or download from: https://nodejs.org/ (choose v20.19.0 or later)
 ```
 
 ## Architecture Overview
