@@ -1820,6 +1820,8 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 }
+# Close the here-doc for the generated Nginx config
+NGINXEOF
 
 # Start an nginx proxy container in host network mode using the generated host config
 start_host_mode_nginx_proxy() {
@@ -1881,7 +1883,6 @@ EOF
         fi
     fi
 }
-NGINXEOF
     
     print_success "Created host-network Nginx config at deploy/nginx/conf.d.host/frontend-app.conf"
     
