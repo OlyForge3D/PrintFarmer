@@ -2,7 +2,6 @@
 
 # compose-generator.sh - Generate deployment-specific docker-compose.yml files
 # This script combines compose templates based on deployment architecture and configuration
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -622,6 +621,97 @@ PY
         fi
     else
         log_info "Docker Compose validation skipped (command not available)"
+    fi
+
+    # When generating microservices deployment, allow API to run in host network mode
+    # while keeping other services on the bridge network. Use a small Python snippet
+    # to perform the rewriting in a robust and portable way (avoids awk dialect issues).
+    if [[ "$arch" == "microservices" ]]; then
+        log_info "Applying microservices host-mode adjustments: API -> host network, nginx -> extra_hosts host-gateway"
+
+        python3 - "$compose_file" <<'PY'
+import sys
+path = sys.argv[1]
+txt = open(path,'r').read().splitlines()
+
+def find_block(lines, name):
+    # returns (start_index, end_index) of block starting with '  name:' (inclusive)
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith('  ' + name + ':'):
+            start = i
+            break
+    if start is None:
+        return None, None
+    # scan until next top-level service (two-space indent + word + ':') or EOF
+    end = len(lines)
+    for j in range(start+1, len(lines)):
+        if lines[j].startswith('  ') and not lines[j].startswith('    '):
+            end = j
+            break
+    return start, end
+
+def remove_ports(block_lines):
+    out = []
+    skip = False
+    for l in block_lines:
+        if l.lstrip().startswith('ports:') and l.startswith('    '):
+            skip = True
+            continue
+        if skip:
+            # continue skipping indented port entries
+            if l.startswith('      -') or l.startswith('      "') or l.startswith('      '):
+                continue
+            else:
+                skip = False
+        out.append(l)
+    return out
+
+start, end = find_block(txt, 'api')
+if start is not None:
+    block = txt[start:end]
+    # remove ports entries under api
+    new_block = remove_ports(block)
+    # ensure network_mode: "host" exists under api
+    if not any(l.strip().startswith('network_mode:') for l in new_block[1:3]):
+        # insert after header line
+        new_block.insert(1, '    network_mode: "host"')
+    # replace
+    txt = txt[:start] + new_block + txt[end:]
+
+    # Also remove any stray literal port mapping for API that may remain (guard against template artifacts)
+    # e.g. lines like: - "${API_PORT:-5245}:5245"
+    start2, end2 = find_block(txt, 'api')
+    if start2 is not None:
+        cleaned = []
+        for l in txt[start2:end2]:
+            if l.strip() == '- "${API_PORT:-5245}:5245"' or l.strip() == "- \"${API_PORT:-5245}:5245\"":
+                # skip stray port mapping
+                continue
+            cleaned.append(l)
+        txt = txt[:start2] + cleaned + txt[end2:]
+
+start, end = find_block(txt, 'nginx-proxy')
+if start is not None:
+    block = txt[start:end]
+    # check if extra_hosts exists
+    if not any('extra_hosts:' in l for l in block):
+        # try to insert before volumes/ports/environment if present
+        inserted = False
+        for idx in range(1, len(block)):
+            if block[idx].lstrip().startswith('volumes:') or block[idx].lstrip().startswith('ports:') or block[idx].lstrip().startswith('environment:'):
+                block.insert(idx, '    extra_hosts:')
+                block.insert(idx+1, '      - "host.docker.internal:host-gateway"')
+                inserted = True
+                break
+        if not inserted:
+            # append at end of block (before next service)
+            block.append('    extra_hosts:')
+            block.append('      - "host.docker.internal:host-gateway"')
+    txt = txt[:start] + block + txt[end:]
+
+open(path,'w').write('\n'.join(txt) + '\n')
+PY
     fi
     
     return 0
