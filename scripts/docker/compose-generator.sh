@@ -377,15 +377,13 @@ PY
                 fi
             fi
 
+            # Clean up temporary files (only created in fallback path)
             rm -f "$temp_merged" "$temp_addon_services" "$temp_addon_volumes" "$temp_addon_networks"
         fi
     else
         log_error "Addon template not found: $addon_template"
         return 1
     fi
-
-    # Clean up temporary files
-    rm -f "$temp_merged" "$temp_addon_services" "$temp_addon_volumes" "$temp_addon_networks"
 
     return 0
 }
