@@ -239,7 +239,7 @@ merge_addon_services() {
         local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks temp_combined
         
         # If ruamel.yaml based merge helper exists, use it for robust YAML-aware merging
-        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('ruamel') else 1)" >/dev/null 2>&1; then
+        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import ruamel.yaml" >/dev/null 2>&1; then
             # Use YAML-aware merge helper (ruamel.yaml must be available)
             temp_combined=$(mktemp)
             python3 "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$addon_template" > "$temp_combined"
@@ -428,183 +428,72 @@ generate_compose() {
     # Check if architecture needs a database service (skip monolithic as it uses SQLite)
     if [[ "$arch" == "microservices" || "$arch" == "host-network" ]]; then
         # Generate provider-specific database config
-        local db_config
+        local db_config python_succeeded=false
         if ! db_config="$(generate_database_config)"; then
             log_error "Failed to generate database configuration"
             return 1
         fi
         
-        # Create temporary files
-        local temp_before temp_after temp_new_compose
-        temp_before="$(mktemp)"
-        temp_after="$(mktemp)"
-        temp_new_compose="$(mktemp)"
-        
-        # Split the compose file: everything before database service, and everything after
-        awk '/^  database:/{exit} {print}' "$compose_file" > "$temp_before"
-        
-        # Find everything after the database service (skip until next service or volumes/networks)
-        awk '
-        BEGIN { found_db=0; skip=0 }
-        /^  database:/ { found_db=1; skip=1; next }
-        found_db && skip && /^  [a-zA-Z]/ { skip=0 }
-        found_db && skip && /^(volumes|networks|version):/ { skip=0 }
-        found_db && !skip { print }
-        ' "$compose_file" > "$temp_after"
-        
-        # Combine: before + new database config + after
-        cat "$temp_before" > "$temp_new_compose"
-        echo "$db_config" >> "$temp_new_compose"
-        cat "$temp_after" >> "$temp_new_compose"
-        
-        # Replace the original file
-        if ! mv "$temp_new_compose" "$compose_file"; then
-            log_error "Failed to update compose file with new database configuration"
-            rm -f "$temp_before" "$temp_after" "$temp_new_compose"
-            return 1
+        # Use Python YAML-aware replacement to avoid awk escaping issues
+        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-replace-db.py" ]]; then
+            local temp_replaced py_error
+            temp_replaced="$(mktemp)"
+            py_error="$(mktemp)"
+            if python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
+                mv "$temp_replaced" "$compose_file"
+                log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration (Python merge)"
+                # DEBUG: Show what's in the file after Python replacement
+                # sed -n '/^  database:/,/^  [a-z]/p' "$compose_file" | head -5 > /tmp/debug_after_python.txt
+                python_succeeded=true
+            else
+                log_warning "Python-based database replacement failed; attempting fallback"
+                if [[ -s "$py_error" ]]; then
+                    log_warning "Python error details: $(head -1 "$py_error")"
+                fi
+                rm -f "$temp_replaced" "$py_error"
+                # Fall through to awk-based approach below
+            fi
         fi
         
-        # Clean up temporary files
-        rm -f "$temp_before" "$temp_after"
-        
-        log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
+        # Fallback: awk-based replacement (when Python unavailable or fails)
+        if [[ "$python_succeeded" == "false" ]]; then
+            log_info "Using AWK fallback for database service replacement"
+            local temp_before temp_after temp_new_compose
+            temp_before="$(mktemp)"
+            temp_after="$(mktemp)"
+            temp_new_compose="$(mktemp)"
+            
+            # Split the compose file: everything before database service, and everything after
+            awk '/^  database:/{exit} {print}' "$compose_file" > "$temp_before"
+            
+            # Find everything after the database service (skip until next service or volumes/networks)
+            awk '
+            BEGIN { found_db=0; skip=0 }
+            /^  database:/ { found_db=1; skip=1; next }
+            found_db && skip && /^  [a-zA-Z]/ { skip=0 }
+            found_db && skip && /^(volumes|networks|version):/ { skip=0 }
+            found_db && !skip { print }
+            ' "$compose_file" > "$temp_after"
+            
+            # Combine: before + new database config + after
+            cat "$temp_before" > "$temp_new_compose"
+            echo "$db_config" >> "$temp_new_compose"
+            cat "$temp_after" >> "$temp_new_compose"
+            
+            # Replace the original file
+            if ! mv "$temp_new_compose" "$compose_file"; then
+                log_error "Failed to update compose file with new database configuration"
+                rm -f "$temp_before" "$temp_after" "$temp_new_compose"
+                return 1
+            fi
+            
+            # Clean up temporary files
+            rm -f "$temp_before" "$temp_after"
+            
+            log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration (AWK fallback)"
+        fi
     fi
 
-    # Merge provider top-level maps (volumes/networks) from databases template so volumes like postgres-data exist
-    merge_provider_maps() {
-        local provider="${DB_PROVIDER:-postgres}"
-        local db_template="$TEMPLATES_DIR/docker-compose.databases.yml"
-        if [[ ! -f "$db_template" ]]; then
-            return 0
-        fi
-
-        # Extract top-level volumes and networks sections from databases file using Python (more portable)
-        local temp_db_maps temp_merged_maps temp_vols temp_nets
-        temp_db_maps="$(mktemp)"
-        temp_merged_maps="$(mktemp)"
-        temp_vols="$(mktemp)"
-        temp_nets="$(mktemp)"
-
-        # Extract volumes and networks separately from the db template
-        # (use Python for portability and robust matching)
-        python3 - <<PY > "$temp_db_maps"
-import re
-path = "${db_template}"
-txt = open(path,'r').read()
-out_vol = ''
-out_net = ''
-mv = re.search(r'(^volumes:\n(?:^[ \t].*\n)*)', txt, re.M)
-if mv:
-    out_vol = mv.group(1)
-mn = re.search(r'(^networks:\n(?:^[ \t].*\n)*)', txt, re.M)
-if mn:
-    out_net = mn.group(1)
-print(out_vol + ('\n' + out_net if out_net else ''))
-PY
-
-        # split the captured maps into separate temp files for safe insertion
-        # extract just the contents under the header (no 'volumes:' line)
-        if grep -q '^volumes:' "$temp_db_maps"; then
-            grep '^volumes:' -A9999 "$temp_db_maps" | sed '1d' > "$temp_vols" || true
-        else
-            : > "$temp_vols"
-        fi
-        if grep -q '^networks:' "$temp_db_maps"; then
-            grep '^networks:' -A9999 "$temp_db_maps" | sed '1d' > "$temp_nets" || true
-        else
-            : > "$temp_nets"
-        fi
-
-        # If compose-merge.py exists and ruamel is available, use YAML-aware merge
-        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('ruamel') else 1)" >/dev/null 2>&1; then
-            # create a minimal addon file that only contains the temp maps for ruamel
-            temp_minimal_addon=$(mktemp)
-            echo "" > "$temp_minimal_addon"
-            if [[ -s "$temp_vols" ]]; then
-                echo "volumes:" >> "$temp_minimal_addon"
-                cat "$temp_vols" >> "$temp_minimal_addon"
-            fi
-            if [[ -s "$temp_nets" ]]; then
-                echo "" >> "$temp_minimal_addon"
-                echo "networks:" >> "$temp_minimal_addon"
-                cat "$temp_nets" >> "$temp_minimal_addon"
-            fi
-            python3 "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$temp_minimal_addon" > "$temp_merged_maps"
-            mv "$temp_merged_maps" "$compose_file"
-            rm -f "$temp_minimal_addon"
-        else
-            # Fallback: use Python to safely merge volumes and networks into existing sections
-            python3 - "$compose_file" "$temp_vols" "$temp_nets" <<'PYMERGE'
-import sys
-compose_file = sys.argv[1]
-temp_vols = sys.argv[2]
-temp_nets = sys.argv[3]
-
-txt = open(compose_file, 'r').read()
-
-# Merge volumes: find the volumes: section and append new volumes
-if open(temp_vols, 'r').read().strip():
-    addon_vols = open(temp_vols, 'r').read().strip().split('\n')
-    lines = txt.split('\n')
-    out = []
-    i = 0
-    while i < len(lines):
-        out.append(lines[i])
-        if lines[i].startswith('volumes:'):
-            # Found volumes section, append addon volumes
-            i += 1
-            # Copy existing volume entries
-            while i < len(lines) and (lines[i].startswith('  ') or lines[i].strip() == ''):
-                if not lines[i].strip().startswith(('volumes:', 'networks:', 'services:', 'version:')):
-                    out.append(lines[i])
-                    i += 1
-                else:
-                    break
-            # Append addon volumes
-            for vol in addon_vols:
-                out.append(vol)
-            # Don't increment i; we'll add the current line normally
-            continue
-        i += 1
-    txt = '\n'.join(out)
-
-# Similar logic for networks
-if open(temp_nets, 'r').read().strip():
-    addon_nets = open(temp_nets, 'r').read().strip().split('\n')
-    lines = txt.split('\n')
-    out = []
-    i = 0
-    while i < len(lines):
-        out.append(lines[i])
-        if lines[i].startswith('networks:'):
-            # Found networks section, append addon networks
-            i += 1
-            # Copy existing network entries
-            while i < len(lines) and (lines[i].startswith('  ') or lines[i].strip() == ''):
-                if not lines[i].strip().startswith(('networks:', 'services:', 'version:')):
-                    out.append(lines[i])
-                    i += 1
-                else:
-                    break
-            # Append addon networks
-            for net in addon_nets:
-                out.append(net)
-            continue
-        i += 1
-    txt = '\n'.join(out)
-
-open(compose_file, 'w').write(txt)
-PYMERGE
-        fi
-
-    rm -f "$temp_db_maps" "$temp_merged_maps" "$temp_vols" "$temp_nets"
-    }
-
-    # DISABLED: merge_provider_maps is no longer needed.
-    # All templates now use a generic "printfarmer-database" volume instead of provider-specific volumes.
-    # This simplifies deployment and eliminates the risk of duplicate volume definitions.
-    # merge_provider_maps
-    
     # Merge addon services into the compose file
     local addons_merged=false
     

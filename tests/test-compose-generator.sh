@@ -1377,6 +1377,84 @@ test_output_file_permissions() {
     fi
 }
 
+# Test: host_network_sqlserver_configuration (PHASE 3 - REGRESSION TEST)
+# Regression test for bug: duplicate volumes keys in generated compose files
+# Configuration: host-network architecture + sqlserver database provider
+# Bug Report: yaml: unmarshal errors: line 148: mapping key "volumes" already defined at line 25
+# Root Cause: ruamel.yaml detection was failing, causing fallback awk merge to create duplicate YAML keys
+test_host_network_sqlserver_configuration() {
+    start_test "host-network + sqlserver configuration (duplicate volumes regression)"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Generate configuration with the exact combination that triggered the bug
+    assert_command_success "$COMPOSE_GENERATOR --architecture host-network --db-provider sqlserver --output-dir $TEST_TEMP_DIR/test-host-net-ss"
+    
+    local compose_file="$TEST_TEMP_DIR/test-host-net-ss/docker-compose.yml"
+    
+    # Check 1: File exists
+    if [[ ! -f "$compose_file" ]]; then
+        fail_test "docker-compose.yml not generated"
+        return 1
+    fi
+    
+    # Check 2: No duplicate top-level 'volumes:' keys (the bug)
+    local volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
+    if [[ "$volumes_count" -ne 1 ]]; then
+        test_info "ERROR: Found $volumes_count 'volumes:' declarations (expected 1)"
+        test_info "Duplicate keys at lines:"
+        grep -n "^volumes:" "$compose_file" 2>/dev/null || true
+        fail_test "Duplicate volumes keys detected"
+        return 1
+    fi
+    
+    test_info "✓ Single volumes: declaration confirmed (no duplicates)"
+    
+    # Check 3: Validate YAML structure with docker compose if available
+    if command -v docker >/dev/null 2>&1; then
+        local config_output
+        config_output=$(cd "$TEST_TEMP_DIR/test-host-net-ss" && docker compose config 2>&1 || true)
+        
+        if echo "$config_output" | grep -q "mapping key.*already defined"; then
+            test_info "ERROR: YAML duplicate key error detected"
+            test_info "$config_output"
+            fail_test "Docker compose validation failed"
+            return 1
+        fi
+        
+        if echo "$config_output" | grep -q "error\|Error\|ERROR"; then
+            # Filter out expected warnings (missing environment variables)
+            if echo "$config_output" | grep -v "POSTGRES_PASSWORD\|ConnectionStrings__Default" | grep -q "error\|Error\|ERROR"; then
+                test_info "ERROR: Unexpected YAML error detected"
+                test_info "$config_output"
+                fail_test "Docker compose validation failed"
+                return 1
+            fi
+        fi
+        
+        test_info "✓ Docker compose configuration valid (YAML structure correct)"
+    else
+        test_info "⚠ docker not available, skipping docker compose validation"
+    fi
+    
+    # Check 4: Verify .env file was generated
+    local env_file="$TEST_TEMP_DIR/test-host-net-ss/.env"
+    if [[ ! -f "$env_file" ]]; then
+        fail_test ".env file not generated"
+        return 1
+    fi
+    
+    test_info "✓ .env file generated"
+    
+    # Check 5: Verify sqlserver-specific configuration
+    if grep -q "DB_PROVIDER" "$env_file" 2>/dev/null; then
+        test_info "✓ Database provider configured in .env"
+    fi
+    
+    test_info "✓ All regression test checks passed"
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -1435,6 +1513,7 @@ run_all_tests() {
     test_special_characters_in_values
     test_rollback_on_validation_failure
     test_output_file_permissions
+    test_host_network_sqlserver_configuration
     
     teardown
 }
