@@ -70,6 +70,19 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     string? baseUrl = Environment.GetEnvironmentVariable("API_URL")
                         ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
                         ?? DefaultApiBaseUrl;
+
+                    if (string.IsNullOrWhiteSpace(baseUrl))
+                    {
+                        baseUrl = DefaultApiBaseUrl;
+                    }
+
+                    // ASPNETCORE_URLS can contain multiple URLs separated by semicolons.
+                    // Extract just the first one for internal health probing.
+                    if (baseUrl.Contains(';'))
+                    {
+                        baseUrl = baseUrl.Split(';')[0].Trim();
+                    }
+
                     if (baseUrl.EndsWith('/'))
                     {
                         baseUrl = baseUrl.TrimEnd('/');
@@ -93,8 +106,19 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                                 baseUrl = port > 0 ? $"{scheme}://localhost:{port}" : $"{scheme}://localhost";
                             }
                         }
+                        else
+                        {
+                            // Uri.TryCreate failed - baseUrl is malformed. Use default.
+                            baseUrl = DefaultApiBaseUrl;
+                        }
                     }
-                    catch { /* best-effort normalization - ignore failures and fall back to original baseUrl */ }
+#pragma warning disable CS0168 // Variable declared but never used
+                    catch (Exception)
+#pragma warning restore CS0168 
+                    {
+                        // best-effort normalization - ignore failures and fall back to default
+                        baseUrl = DefaultApiBaseUrl;
+                    }
 
                     // Catalog API endpoint check (internal HTTP call)
                     try

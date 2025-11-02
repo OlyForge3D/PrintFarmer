@@ -2441,6 +2441,9 @@ PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
 
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
+# API_URL for health checks (used by ComprehensiveHealthCheck to probe internal endpoints)
+# This must be a valid loopback address that can be reached from within the container
+API_URL=http://localhost:5245
 EOF
 
     # Small summary for generated environment file: show which sensitive values were included
