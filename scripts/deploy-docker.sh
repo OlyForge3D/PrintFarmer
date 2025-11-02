@@ -3322,7 +3322,10 @@ deploy_containers() {
             fi
 
             # Wait for DB health/readiness
-            wait_for_database || true
+            if ! wait_for_database; then
+                print_error "Database failed to become healthy. Cannot proceed with deployment."
+                return 1
+            fi
 
             # Detect orphan containers left by compose and suggest removal if any exist
             local orphan_list
