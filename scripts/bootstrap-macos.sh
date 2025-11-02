@@ -10,7 +10,8 @@ REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
 NODE_VERSION=${NODE_VERSION:-20}
 
 # If running inside a VS Code devcontainer, skip host-level package installation.
-if [ -n "${DEVCONTAINER:-}" ] || [ -f "/.devcontainer" ] || [ -d ".devcontainer" ]; then
+# NOTE: Check for DEVCONTAINER env var OR /.devcontainer at container root (NOT .devcontainer in repo!)
+if [ -n "${DEVCONTAINER:-}" ] || [ -f "/.devcontainer" ]; then
   echo "[bootstrap] Detected devcontainer environment — skipping host bootstrap steps."
   echo "[bootstrap] Reopen the repository in the devcontainer (VS Code Remote - Containers) to provision the workspace."
   exit 0

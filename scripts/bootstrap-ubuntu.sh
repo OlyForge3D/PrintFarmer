@@ -7,7 +7,8 @@ set -euo pipefail
 
 # If running inside a VS Code devcontainer, skip host-level package installation.
 # Devcontainers already provision the container image with dotnet/node and run post-create steps.
-if [ -n "${DEVCONTAINER:-}" ] || [ -f "/.devcontainer" ] || [ -d ".devcontainer" ]; then
+# NOTE: Check for DEVCONTAINER env var OR /.devcontainer at container root (NOT .devcontainer in repo!)
+if [ -n "${DEVCONTAINER:-}" ] || [ -f "/.devcontainer" ]; then
   echo "[bootstrap] Detected devcontainer environment — skipping host bootstrap steps."
   echo "[bootstrap] Use the devcontainer postCreateCommand or reopen in container to provision the workspace."
   exit 0
