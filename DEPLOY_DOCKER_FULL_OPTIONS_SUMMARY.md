@@ -34,7 +34,7 @@ Successfully enhanced the `deploy-docker.sh` script to support **all** compose-g
 
 ### **2. New CLI Variables**
 ```bash
-CLI_ARCHITECTURE=""           # --architecture (monolithic|microservices|host-network)
+CLI_ARCHITECTURE=""           # --architecture (monolithic|microservices)
 CLI_INCLUDE_MONITORING=false  # --include-monitoring
 CLI_INCLUDE_TELEMETRY=false   # --include-telemetry  
 CLI_INCLUDE_SECURITY=false    # --include-security
@@ -45,7 +45,7 @@ CLI_OUTPUT_DIR=""             # --output-dir
 ### **3. Architecture Selection Enhancement**
 - **CLI takes precedence** over interactive prompts
 - **Validates** architecture values with clear error messages
-- **Supports** all three architectures: `monolithic`, `microservices`, `host-network`
+- **Supports** two architectures: `monolithic`, `microservices`
 - **Auto-configures** environment files and compose file names
 - **Maintains** interactive flow when no CLI option provided
 
@@ -79,10 +79,10 @@ fi
 # ✅ Result: Shows "Includes monitoring stack" and "Includes telemetry/observability"
 ```
 
-**3. Host Network Architecture:**
+**3. Microservices Architecture:**
 ```bash
-./scripts/deploy-docker.sh --architecture host-network --include-registry --dry-run --non-interactive  
-# ✅ Result: "Using CLI option: Host-network deployment" with "Includes local registry"
+./scripts/deploy-docker.sh --architecture microservices --include-registry --dry-run --non-interactive  
+# ✅ Result: "Using CLI option: Microservices deployment" with "Includes local registry"
 ```
 
 **4. Error Handling:**

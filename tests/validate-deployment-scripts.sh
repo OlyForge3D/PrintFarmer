@@ -36,41 +36,15 @@ check_result() {
 echo
 echo "Test 1: Architecture options validation"
 help_output=$("$REPO_ROOT/scripts/deploy-docker.sh" --help 2>&1 || true)
-if echo "$help_output" | grep -q "monolithic|microservices|host-network" && ! echo "$help_output" | grep -q "multistage"; then
+if echo "$help_output" | grep -q "monolithic|microservices" && ! echo "$help_output" | grep -q "host-network" && ! echo "$help_output" | grep -q "multistage"; then
     check_result "Architecture options show correct choices without multistage"
 else
     check_result "Architecture options validation" || true
 fi
 
-# Test 2: Host-network compose template is present and tracked
+# Test 2: Compose generator creates files with multistage dockerfile
 echo
-echo "Test 2: Host-network compose template availability"
-TEMPLATE_PATH="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.host-network.yml"
-template_checks_pass=true
-
-if [ ! -f "$TEMPLATE_PATH" ]; then
-    template_checks_pass=false
-    echo -e "${YELLOW}⚠️  Host-network compose template missing at $TEMPLATE_PATH${NC}"
-fi
-
-if command -v git >/dev/null 2>&1; then
-    if git -C "$REPO_ROOT" check-ignore -q -- "scripts/docker/compose-templates/docker-compose.host-network.yml"; then
-        template_checks_pass=false
-        echo -e "${YELLOW}⚠️  Host-network compose template is ignored by git${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠️  git not available; skipping tracked-status validation${NC}"
-fi
-
-if [ "$template_checks_pass" = true ]; then
-    check_result "Host-network compose template available and tracked"
-else
-    check_result "Host-network compose template availability" || true
-fi
-
-# Test 3: Compose generator creates files with multistage dockerfile
-echo
-echo "Test 3: Compose generator creates multistage files"
+echo "Test 2: Compose generator creates multistage files"
 TEST2_DIR="$TEMP_DIR/test2-compose"
 rm -rf "$TEST2_DIR" 2>/dev/null || true
 mkdir -p "$TEST2_DIR"
@@ -161,13 +135,13 @@ else
 fi
 popd >/dev/null
 
-# Test 7: Host-network microservices dry-run generates expected config
+# Test 7: Microservices dry-run generates expected config
 echo
-echo "Test 7: Host-network microservices dry-run generates expected config"
-HOST_DIR="$TEMP_DIR/host-dryrun"
-rm -rf "$HOST_DIR" 2>/dev/null || true
-mkdir -p "$HOST_DIR/src/Web/ReactApp"
-pushd "$HOST_DIR" >/dev/null
+echo "Test 7: Microservices dry-run generates expected config"
+MS_DIR="$TEMP_DIR/microservices-dryrun"
+rm -rf "$MS_DIR" 2>/dev/null || true
+mkdir -p "$MS_DIR/src/Web/ReactApp"
+pushd "$MS_DIR" >/dev/null
 cat > ".deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 ENVIRONMENT=Development
@@ -177,8 +151,8 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 DB_PASSWORD=postgres
 INCLUDE_POSTGRES=yes
-CONNECTION_STRING=Host=postgres;Database=printfarmer;Username=postgres;Password=postgres
-NETWORK_MODE=host
+CONNECTION_STRING=Host=database;Database=printfarmer;Username=postgres;Password=postgres
+NETWORK_MODE=bridge
 ALLOW_LOCAL_NETWORK=true
 NETWORK_RANGES=192.168.0.0/16
 ALLOWED_NETWORK_RANGES=192.168.0.0/16
@@ -196,47 +170,42 @@ EOF
 if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" --dry-run --batch 2>&1); then
     host_checks_pass=true
 
-    if [ ! -f ".env.microservices" ]; then
+    if [ ! -f ".env" ]; then
         host_checks_pass=false
-        echo -e "${YELLOW}⚠️  .env.microservices not generated${NC}"
-    elif ! grep -q 'ConnectionStrings__Default=Host=localhost;Database=printfarmer;Username=postgres;Password=postgres' ".env.microservices" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  .env not generated${NC}"
+    elif ! grep -q 'DB_PROVIDER=postgres' ".env" 2>/dev/null; then
         host_checks_pass=false
-        echo -e "${YELLOW}⚠️  Host-network connection string not rewritten to localhost${NC}"
+        echo -e "${YELLOW}⚠️  Database provider not set in .env${NC}"
     fi
 
-    react_env_path="$HOST_DIR/src/Web/ReactApp/.env.production"
+    react_env_path="$MS_DIR/src/Web/ReactApp/.env.production"
     if [ ! -f "$react_env_path" ]; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  React production .env not generated at $react_env_path${NC}"
     fi
 
-    if [[ "$host_output" != *"Host network mode detected – generating host-network compose configuration"* ]]; then
-        host_checks_pass=false
-        echo -e "${YELLOW}⚠️  Host-network compose generator not triggered (log missing)${NC}"
-    fi
-
     if [ "$host_checks_pass" = true ]; then
-        check_result "Host-network microservices dry-run generates expected config"
+        check_result "Microservices dry-run generates expected config"
     else
-        check_result "Host-network configuration validation" || true
+        check_result "Microservices configuration validation" || true
     fi
 else
     echo "$host_output"
-    check_result "Host-network dry-run execution" || true
+    check_result "Microservices dry-run execution" || true
 fi
 popd >/dev/null
 
 # Test 8: Generated compose files contain no Redis services
 echo
 echo "Test 8: Generated compose files contain no Redis services"
-HOST_COMPOSE_DIR="$TEMP_DIR/host-compose"
-rm -rf "$HOST_COMPOSE_DIR" 2>/dev/null || true
-mkdir -p "$HOST_COMPOSE_DIR"
-if ! "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture host-network --output-dir "$HOST_COMPOSE_DIR" >/dev/null 2>&1; then
-    check_result "Host-network compose generation" || true
+MS_COMPOSE_DIR="$TEMP_DIR/ms-compose"
+rm -rf "$MS_COMPOSE_DIR" 2>/dev/null || true
+mkdir -p "$MS_COMPOSE_DIR"
+if ! "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture microservices --output-dir "$MS_COMPOSE_DIR" >/dev/null 2>&1; then
+    check_result "Microservices compose generation" || true
 else
     redis_check_pass=true
-    for compose_path in "$TEST2_DIR/docker-compose.yml" "$HOST_COMPOSE_DIR/docker-compose.yml"; do
+    for compose_path in "$TEST2_DIR/docker-compose.yml" "$MS_COMPOSE_DIR/docker-compose.yml"; do
         if [ -f "$compose_path" ] && grep -qi "redis:" "$compose_path" 2>/dev/null; then
             redis_check_pass=false
             echo -e "${YELLOW}⚠️  Found Redis reference in $(basename "$compose_path")${NC}"
@@ -304,5 +273,5 @@ echo "• Multi-stage builds integrated into all architectures"
 echo "• Redis services and references completely removed"
 echo "• PrusaSlicer references completely removed"
 echo "• Deployment pipeline generates valid configurations"
-echo "• Architecture options correctly show monolithic|microservices|host-network"
-echo "• Dry-run covers monolithic and host-network microservices defaults"
+echo "• Architecture options correctly show monolithic|microservices"
+echo "• Dry-run covers monolithic and microservices defaults"

@@ -54,7 +54,8 @@ test_help_output() {
     assert_contains "$output" "PrintFarmer Docker Deployment Script" "Help should contain script title"
     assert_contains "$output" "USAGE:" "Help should contain usage section"
     assert_contains "$output" "--architecture" "Help should mention architecture option"
-    assert_contains "$output" "monolithic|microservices|host-network" "Help should list architecture options"
+    assert_contains "$output" "monolithic|microservices" "Help should list architecture options"
+    assert_not_contains "$output" "host-network" "Help should not mention host-network architecture"
     assert_not_contains "$output" "multistage" "Help should not contain multistage as architecture option"
     
     pass_test
@@ -414,7 +415,7 @@ test_all_database_architecture_combinations() {
     
     cd "$TEST_TEMP_DIR"
     
-    local architectures=("monolithic" "microservices" "host-network")
+    local architectures=("monolithic" "microservices")
     local databases=("postgres" "sqlserver" "mysql")
     
     for arch in "${architectures[@]}"; do
@@ -701,43 +702,43 @@ EOF
     pass_test
 }
 
-# End-to-end: host-network provider-only env generation for providers
-test_env_provider_hostnetwork_providers() {
-    start_test "deploy script (host-network) provider-only env generation"
+# End-to-end: microservices provider-only env generation for providers
+test_env_provider_microservices_providers() {
+    start_test "deploy script (microservices) provider-only env generation"
 
     cd "$TEST_TEMP_DIR"
 
     local providers=("postgres" "sqlserver" "mysql")
     for provider in "${providers[@]}"; do
         cat > .deploy-config << EOF
-ARCHITECTURE=host-network
+ARCHITECTURE=microservices
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture host-network --config-file ./.deploy-config 2>&1 || true"
+        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true"
         local output=$(get_output)
 
-        # Host-network uses .env.microservices
-        assert_file_exists ".env.microservices" "Should have created .env.microservices for host-network + $provider"
+        # Microservices uses .env
+        assert_file_exists ".env" "Should have created .env for microservices + $provider"
         local env_content
-        env_content=$(cat .env.microservices)
+        env_content=$(cat .env)
 
         case "$provider" in
             postgres)
-                assert_contains "$env_content" "POSTGRES_PASSWORD" "Env should include POSTGRES_PASSWORD for host-network+postgres"
+                assert_contains "$env_content" "POSTGRES_PASSWORD" "Env should include POSTGRES_PASSWORD for microservices+postgres"
                 assert_contains "$output" "PostgreSQL credentials included (masked):" "Output should include masked Postgres header"
                 ;;
             sqlserver)
-                assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for host-network+sqlserver"
+                assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for microservices+sqlserver"
                 assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
                 ;;
             mysql)
-                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for host-network+mysql"
+                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for microservices+mysql"
                 assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
                 ;;
         esac
 
-        rm -f .deploy-config .env.microservices .env || true
+        rm -f .deploy-config .env || true
     done
 
     pass_test

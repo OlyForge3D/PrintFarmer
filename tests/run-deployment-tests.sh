@@ -194,14 +194,14 @@ run_quick_tests() {
     fi
     ((TESTS_RUN++))
     
-    # Test 2: Host-network generation
+    # Test 2: Monolithic generation (moved up from later)
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
-        --architecture host-network \
+        --architecture monolithic \
         --output-dir "$test_temp_dir/test1" >/dev/null 2>&1; then
-        log_success "Host-network compose generation works"
+        log_success "Monolithic compose generation works"
         ((TESTS_PASSED++))
     else
-        log_error "Host-network compose generation failed"
+        log_error "Monolithic compose generation failed"
         ((TESTS_FAILED++))
     fi
     ((TESTS_RUN++))
@@ -218,26 +218,14 @@ run_quick_tests() {
     fi
     ((TESTS_RUN++))
     
-    # Test 4: Monolithic generation
-    if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
-        --architecture monolithic \
-        --output-dir "$test_temp_dir/test3" >/dev/null 2>&1; then
-        log_success "Monolithic compose generation works"
-        ((TESTS_PASSED++))
-    else
-        log_error "Monolithic compose generation failed"
-        ((TESTS_FAILED++))
-    fi
-    ((TESTS_RUN++))
-    
-    # Test 5: No duplicate volumes in generated files
+    # Test 4: No duplicate volumes in generated files
     log_subsection "YAML Validation (No Duplicate Volumes)"
     
     local compose_file="$test_temp_dir/test1/docker-compose.yml"
     if [[ -f "$compose_file" ]]; then
         local volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
         if [[ "$volumes_count" -eq 1 ]]; then
-            log_success "No duplicate volumes in host-network compose"
+            log_success "No duplicate volumes in monolithic compose"
             ((TESTS_PASSED++))
         else
             log_error "Found $volumes_count 'volumes:' sections (expected 1)"
@@ -245,6 +233,25 @@ run_quick_tests() {
         fi
     else
         log_error "Compose file not generated"
+        ((TESTS_FAILED++))
+    fi
+    ((TESTS_RUN++))
+    
+    # Test 5: No duplicate volumes in generated files
+    log_subsection "YAML Validation (No Duplicate Volumes)"
+    
+    compose_file="$test_temp_dir/test2/docker-compose.yml"
+    if [[ -f "$compose_file" ]]; then
+        volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
+        if [[ "$volumes_count" -eq 1 ]]; then
+            log_success "No duplicate volumes in microservices compose"
+            ((TESTS_PASSED++))
+        else
+            log_error "Found $volumes_count 'volumes:' sections (expected 1)"
+            ((TESTS_FAILED++))
+        fi
+    else
+        log_error "Microservices compose file not generated"
         ((TESTS_FAILED++))
     fi
     ((TESTS_RUN++))

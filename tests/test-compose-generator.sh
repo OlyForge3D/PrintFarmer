@@ -633,7 +633,7 @@ test_architecture_database_combinations() {
             
             # Architecture-specific checks
             if [ "$arch" = "microservices" ]; then
-                assert_contains "$compose_content" "network_mode:" "Host-network should use host networking for $db"
+                assert_contains "$compose_content" "services:" "Microservices should have services defined for $db"
             fi
         done
     done

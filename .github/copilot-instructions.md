@@ -283,7 +283,7 @@ npm run dev
 10. **Missing ruamel.yaml Python module (CRITICAL)**: The deployment scripts require the `ruamel.yaml` Python module for proper Docker Compose YAML generation. Without it, database service configuration will be malformed and deployments will fail with "services must be a mapping" error.
     - **Fix**: `pip install ruamel.yaml` or `apt-get install python3-ruamel.yaml`
     - **Details**: See `docs/RUAMEL_YAML_DEPENDENCY.md`
-    - **Impact**: Microservices and host-network architectures with non-SQLite databases (PostgreSQL, SQL Server, MySQL) will fail
+    - **Impact**: Microservices architecture with non-SQLite databases (PostgreSQL, SQL Server, MySQL) will fail
     - **Prevention**: Tests check for this dependency and fail loudly if missing
 
 ## Project Architecture & Layout
@@ -470,9 +470,8 @@ npm run dev
 - **Expected**: ✅ ALL TESTS PASSED - Ready to commit!
 - **Details**: See `docs/DEPLOYMENT_TESTING_CHECKLIST.md` for step-by-step guide
 - **Components Tested**: 
-  - All 3 architectures (monolithic, microservices, host-network)
+  - Both architectures (monolithic, microservices)
   - All 3 database providers (PostgreSQL, SQL Server, MySQL)
-  - User's exact scenario (host-network + sqlserver + orcaslicer + spoolman)
   - YAML validation, no duplicate keys, Docker compose config validation
 - **Individual Tests**: `test-compose-generator.sh`, `test-deploy-docker.sh`, `test-user-scenario-complete.sh`
 - **Copilot Action**: Always run tests after generating deployment script changes and report results

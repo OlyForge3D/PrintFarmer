@@ -51,9 +51,6 @@ validate_compose_structure() {
             assert_contains "$content" "api:" "Microservices should have api service"
             assert_contains "$content" "database:" "Microservices should have database service"
             ;;
-        "host-network")
-            assert_contains "$content" "network_mode:" "Host-network should have network_mode configuration"
-            ;;
     esac
 }
 
@@ -117,11 +114,6 @@ validate_service_dependencies() {
     if grep -q "api:" "$compose_file"; then
         local api_section=$(sed -n '/^  api:/,/^  [a-zA-Z]/p' "$compose_file")
         
-        # Skip dependency check for host-network mode (uses host network directly)
-        if echo "$api_section" | grep -q "network_mode.*host"; then
-            return 0  # Host network mode doesn't use depends_on
-        fi
-        
         # API should depend on database in microservices mode
         if echo "$content" | grep -q "database:"; then
             # If database service exists, API should depend on it
@@ -151,12 +143,9 @@ validate_network_configuration() {
     local content=$(cat "$compose_file")
     
     case "$architecture" in
-        "host-network")
-            assert_contains "$content" "network_mode:" "Host-network should have network mode configuration"
-            ;;
         "microservices"|"monolithic")
             if ! echo "$content" | grep -q "network_mode: host"; then
-                assert_contains "$content" "networks:" "Non-host network should have networks section"
+                assert_contains "$content" "networks:" "Should have networks section"
             fi
             ;;
     esac
@@ -241,12 +230,12 @@ test_host_network_content_validation() {
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
     assert_file_exists "$compose_file"
     
-    validate_compose_structure "$compose_file" "host-network"
+    validate_compose_structure "$compose_file" "microservices"
     validate_multistage_targets "$compose_file"
-    validate_environment_variables "$compose_file" "host-network"
+    validate_environment_variables "$compose_file" "microservices"
     validate_service_dependencies "$compose_file"
     validate_volume_configuration "$compose_file"
-    validate_network_configuration "$compose_file" "host-network"
+    validate_network_configuration "$compose_file" "microservices"
     validate_health_checks "$compose_file"
     
     pass_test

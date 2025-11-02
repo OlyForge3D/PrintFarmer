@@ -735,7 +735,7 @@ OPTIONS:
         --keep-generated    Preserve generated files (default; retained for compatibility)
 
 COMPOSE GENERATOR OPTIONS:
-        --architecture ARCH Architecture to deploy (monolithic|microservices|host-network)
+        --architecture ARCH Architecture to deploy (monolithic|microservices)
         --include-monitoring Include monitoring stack (Prometheus, Grafana)
         --include-telemetry Include telemetry/observability (OpenTelemetry)
         --include-security  Include security configurations

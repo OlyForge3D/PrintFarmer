@@ -17,7 +17,6 @@ scripts/docker/
 ├── compose-templates/       # Docker Compose template files
 │   ├── docker-compose.yml                # Main template
 │   ├── docker-compose.microservices.yml  # Microservices architecture
-│   ├── docker-compose.host-network.yml   # Host network mode
 │   ├── docker-compose.override.yml       # Development overrides
 │   ├── docker-compose.databases.yml      # Database services
 │   ├── docker-compose.monitoring.yml     # Monitoring stack
@@ -35,7 +34,7 @@ scripts/docker/
 
 The deployment script (`../deploy-docker.sh`) now:
 
-1. **Analyzes** the target deployment architecture (monolithic, microservices, host-network)
+1. **Analyzes** the target deployment architecture (monolithic, microservices)
 2. **Copies** the appropriate Dockerfiles to the repository root
 3. **Generates** a single `docker-compose.yml` tailored to the architecture
 4. **Copies** required configuration files to the root
@@ -82,9 +81,6 @@ The deployment script handles all file management automatically:
 ```bash
 # Deploy microservices architecture
 ./scripts/deploy-docker.sh --architecture microservices
-
-# Deploy host network mode
-./scripts/deploy-docker.sh --architecture host-network  
 
 # Deploy monolithic mode
 ./scripts/deploy-docker.sh --architecture monolithic
