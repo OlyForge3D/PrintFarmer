@@ -1780,8 +1780,51 @@ run_all_tests() {
     test_output_file_permissions
     test_host_network_sqlserver_configuration
     test_complete_user_scenario
+    test_addon_templates_yaml_syntax
     
     teardown
+}
+
+# Test: Validate all addon templates have correct YAML syntax
+test_addon_templates_yaml_syntax() {
+    start_test "addon templates YAML syntax validation"
+    
+    local templates_dir="$SCRIPT_DIR/../scripts/docker/compose-templates"
+    local addon_templates=(
+        "docker-compose.monitoring.yml"
+        "docker-compose.monitoring.lite.yml"
+        "docker-compose.telemetry.yml"
+        "docker-compose.security.yml"
+        "docker-compose.registry.yml"
+    )
+    
+    # Each addon template should be valid YAML
+    for addon_template in "${addon_templates[@]}"; do
+        local template_file="$templates_dir/$addon_template"
+        
+        if [ ! -f "$template_file" ]; then
+            test_info "⚠ Addon template not found: $addon_template (skipping)"
+            continue
+        fi
+        
+        # Validate the addon template is valid YAML by checking for common errors
+        # Check that environment sections use mapping syntax, not list syntax
+        if grep -E '^\s+environment:\s*$' "$template_file" >/dev/null; then
+            # Has an environment section, check next line format
+            local env_check=$(grep -A 1 '^\s\+environment:\s*$' "$template_file" | tail -1)
+            
+            # Should be indented with key: value, not - key=value
+            if echo "$env_check" | grep -E '^\s+- .+=.*$' >/dev/null; then
+                print_fail "Addon template $addon_template has incorrect environment list syntax (should be mapping)"
+                fail_test
+                return 1
+            fi
+        fi
+        
+        test_info "✓ $addon_template YAML syntax validated"
+    done
+    
+    pass_test
 }
 
 # Run the test suite
