@@ -671,17 +671,41 @@ test_generated_compose_file_is_valid_yaml() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Generate for all architectures
+    # Check if docker + docker compose are available
+    # This is CRITICAL - without it, tests will silently pass even if YAML is malformed
+    if ! skip_test_if_docker_compose_missing "YAML validation (requires Docker Compose)"; then
+        test_info "INCONCLUSIVE: Cannot validate YAML structure without docker compose"
+        test_info "To fix: Install Docker Engine 20.10+ or docker-compose CLI tool"
+        pass_test  # Skip rather than fail
+        return 0
+    fi
+    
+    # Generate for all architectures AND all database providers
+    # This ensures database service YAML is properly formatted for all combinations
     local architectures=("monolithic" "microservices" "host-network")
+    local providers=("postgres" "sqlserver" "mysql")
+    
     for arch in "${architectures[@]}"; do
-        assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $TEST_TEMP_DIR/test-$arch"
-        
-        # Verify compose file exists
-        assert_file_exists "$TEST_TEMP_DIR/test-$arch/docker-compose.yml" "Should create compose file for $arch"
-        
-        # CRITICAL: Verify compose file is valid YAML using docker compose config
-        # This catches syntax errors, duplicate keys, invalid references, etc.
-        assert_command_success "docker compose --file $TEST_TEMP_DIR/test-$arch/docker-compose.yml config --quiet" "Compose file for $arch should pass validation"
+        # Monolithic uses SQLite, skip database providers
+        if [[ "$arch" == "monolithic" ]]; then
+            assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $TEST_TEMP_DIR/test-$arch"
+            assert_file_exists "$TEST_TEMP_DIR/test-$arch/docker-compose.yml" "Should create compose file for $arch"
+            assert_command_success "docker compose --file $TEST_TEMP_DIR/test-$arch/docker-compose.yml config --quiet" "Compose file for $arch should pass validation"
+        else
+            # Microservices and host-network need database provider validation
+            for provider in "${providers[@]}"; do
+                local test_subdir="$TEST_TEMP_DIR/test-${arch}-${provider}"
+                assert_command_success "$COMPOSE_GENERATOR --architecture $arch --db-provider $provider --output-dir $test_subdir" "Should generate $arch architecture with $provider database"
+                
+                # Verify compose file exists
+                assert_file_exists "$test_subdir/docker-compose.yml" "Should create compose file for $arch with $provider"
+                
+                # CRITICAL: Verify compose file is valid YAML using docker compose config
+                # This catches syntax errors, duplicate keys, malformed YAML structure, etc.
+                # This validation is especially important for database service YAML which is generated from templates
+                assert_command_success "docker compose --file $test_subdir/docker-compose.yml config --quiet" "Compose file for $arch with $provider should pass Docker Compose validation (detects YAML structure errors)"
+            done
+        fi
     done
     
     pass_test

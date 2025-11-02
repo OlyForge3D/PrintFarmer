@@ -115,7 +115,7 @@ generate_database_config() {
 
     # Use dedicated database provider template file instead of extraction
     # This eliminates parsing complexity and the previous duplicate volumes bug
-    # Each provider has its own clean template file with only that provider's service
+    # Each provider has its own clean template file with only that provider's service configuration
     local db_template_file="$TEMPLATES_DIR/docker-compose.database.${provider}.yml"
     
     if [[ ! -f "$db_template_file" ]]; then
@@ -124,9 +124,12 @@ generate_database_config() {
         return 1
     fi
 
-    # Simply output the dedicated template file
-    # No parsing, no extraction, no chance of dangling keys
-    cat "$db_template_file"
+    # Wrap the template content in "database:" key for proper YAML structure
+    # The template contains only the service configuration (indented content)
+    # We need to wrap it in a "database:" key so it can be properly merged
+    # Skip comment lines (lines starting with #) to keep YAML clean
+    echo "database:"
+    grep -v '^\s*#' "$db_template_file" | sed 's/^/  /'
 }
 
 # Parse CLI arguments and set defaults

@@ -257,6 +257,72 @@ get_compose_generator_command() {
 }
 
 # Setup and teardown helpers
+check_tool_available() {
+    local tool="$1"
+    local message="${2:-Tool '$tool' is required but not available}"
+    
+    if command -v "$tool" &>/dev/null; then
+        return 0
+    else
+        test_warning "INCONCLUSIVE: $message"
+        return 1
+    fi
+}
+
+skip_test_if_tool_missing() {
+    local tool="$1"
+    local test_name="${2:-current test}"
+    
+    if ! check_tool_available "$tool" "Tool '$tool' required for $test_name"; then
+        test_warning "Skipping $test_name (requires $tool)"
+        return 1
+    fi
+    return 0
+}
+
+# Check if docker command exists and compose subcommand is available
+check_docker_compose_available() {
+    if ! check_tool_available "docker" "docker CLI is required for Docker Compose validation"; then
+        return 1
+    fi
+    
+    if ! docker compose version &>/dev/null 2>&1; then
+        test_warning "INCONCLUSIVE: docker compose subcommand not available (requires Docker Engine 20.10+ or separate docker-compose binary)"
+        return 1
+    fi
+    
+    return 0
+}
+
+skip_test_if_docker_compose_missing() {
+    local test_name="${1:-current test}"
+    
+    if ! check_docker_compose_available; then
+        test_warning "Skipping $test_name (requires docker + docker compose)"
+        return 1
+    fi
+    return 0
+}
+
+# Safe wrapper for docker compose config validation
+# Returns 0 if valid, 1 if invalid, 2 if docker compose not available
+validate_compose_file_safe() {
+    local compose_file="$1"
+    local test_message="${2:-Compose file validation}"
+    
+    if ! check_docker_compose_available; then
+        test_warning "INCONCLUSIVE: Cannot validate $compose_file ($test_message) - docker compose not available"
+        return 2
+    fi
+    
+    if docker compose --file "$compose_file" config --quiet >/dev/null 2>&1; then
+        return 0
+    else
+        test_fail "Compose file validation failed: $test_message"
+        return 1
+    fi
+}
+
 setup_test_environment() {
     # Override any environment variables that might interfere with tests
     export TESTING=1

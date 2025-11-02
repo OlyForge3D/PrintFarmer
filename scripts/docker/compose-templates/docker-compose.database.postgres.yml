@@ -1,22 +1,20 @@
 # PostgreSQL database service for PrintFarmer
 # Single-provider template for use in multi-database deployments
-# NOTE: This file contains just the service definition without 'services:' wrapper
-# It will be inserted under services.database: in the main compose file
+# NOTE: This file contains just the service configuration to be inserted under services.database:
 
-database:
-  image: postgres:15-alpine
-  container_name: printfarmer-database-postgres
-  environment:
-    POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
-    POSTGRES_USER: ${POSTGRES_USER:-postgres}
-    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-  ports:
-    - "5432:5432"
-  volumes:
-    - printfarmer-database:/var/lib/postgresql/data
-  restart: unless-stopped
-  healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-printfarmer}"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
+image: postgres:15-alpine
+container_name: printfarmer-database-postgres
+environment:
+  POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+ports:
+  - "5432:5432"
+volumes:
+  - printfarmer-database:/var/lib/postgresql/data
+restart: unless-stopped
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-printfarmer}"]
+  interval: 10s
+  timeout: 5s
+  retries: 5

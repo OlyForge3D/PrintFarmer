@@ -1,22 +1,20 @@
 # SQL Server database service for PrintFarmer
 # Single-provider template for use in multi-database deployments
-# NOTE: This file contains just the service definition without 'services:' wrapper
-# It will be inserted under services.database: in the main compose file
+# NOTE: This file contains just the service configuration to be inserted under services.database:
 
-database:
-  image: mcr.microsoft.com/mssql/server:2022-latest
-  container_name: printfarmer-database-sqlserver
-  environment:
-    ACCEPT_EULA: Y
-    MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
-    MSSQL_PID: ${MSSQL_PID:-Developer}
-  ports:
-    - "1433:1433"
-  volumes:
-    - printfarmer-database:/var/opt/mssql
-  restart: unless-stopped
-  healthcheck:
-    test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P '${MSSQL_SA_PASSWORD}' -Q 'SELECT 1'"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
+image: mcr.microsoft.com/mssql/server:2022-latest
+container_name: printfarmer-database-sqlserver
+environment:
+  ACCEPT_EULA: Y
+  MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+  MSSQL_PID: ${MSSQL_PID:-Developer}
+ports:
+  - "1433:1433"
+volumes:
+  - printfarmer-database:/var/opt/mssql
+restart: unless-stopped
+healthcheck:
+  test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P '${MSSQL_SA_PASSWORD}' -Q 'SELECT 1'"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
