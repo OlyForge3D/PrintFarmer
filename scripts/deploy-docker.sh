@@ -1575,20 +1575,50 @@ configure_database() {
 configure_networking() {
     print_header "🌐 Network Configuration"
     
-    # Determine network mode first (affects discovery configuration)
-    echo -e "${BLUE}Network Mode for API Container:${NC}"
-    echo -e "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
-    echo -e "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
-    echo
-    
-    if [ "$OS" != "linux" ]; then
-        print_warning "Host network mode only works on Linux."
-        print_warning "Current OS: $OS (detected)"
+    # For microservices, networking is fixed:
+    # - API always runs in host mode (for network discovery and direct port binding)
+    # - All other services run in bridge mode (on docker network)
+    if [ "$ARCHITECTURE" = "microservices" ]; then
+        print_success "Microservices architecture: API in host mode, other services in bridge mode (fixed)"
+        NETWORK_MODE="host"
+        print_info "API will bind to port ${API_PORT:-5245} on the host"
+        print_info "Other services (frontend, nginx-proxy, workers, etc.) run on docker network"
+    else
+        # For monolithic, allow user to choose network mode
+        echo -e "${BLUE}Network Mode for Container:${NC}"
+        echo -e "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
+        echo -e "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
         echo
-        prompt_yes_no "Are you deploying to a Linux server (not this machine)?" "no" "DEPLOYING_TO_LINUX"
         
-        if [ "$DEPLOYING_TO_LINUX" = "yes" ]; then
-            print_info "Generating configuration for Linux target deployment"
+        if [ "$OS" != "linux" ]; then
+            print_warning "Host network mode only works on Linux."
+            print_warning "Current OS: $OS (detected)"
+            echo
+            prompt_yes_no "Are you deploying to a Linux server (not this machine)?" "no" "DEPLOYING_TO_LINUX"
+            
+            if [ "$DEPLOYING_TO_LINUX" = "yes" ]; then
+                print_info "Generating configuration for Linux target deployment"
+                echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
+                echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
+                echo
+                prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
+                
+                case "$NETWORK_MODE_CHOICE" in
+                    2|host|Host)
+                        NETWORK_MODE="host"
+                        print_success "Using host network mode for full discovery support"
+                        print_info "Container will bind to port ${API_PORT:-5245} on the host"
+                        ;;
+                    *)
+                        NETWORK_MODE="bridge"
+                        print_info "Using bridge mode (cross-platform compatible)"
+                        ;;
+                esac
+            else
+                print_info "Forcing bridge mode for $OS deployment"
+                NETWORK_MODE="bridge"
+            fi
+        else
             echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
             echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
             echo
@@ -1598,34 +1628,14 @@ configure_networking() {
                 2|host|Host)
                     NETWORK_MODE="host"
                     print_success "Using host network mode for full discovery support"
-                    print_info "API will bind to port ${API_PORT:-5245} on the host"
+                    print_info "Container will bind to port ${API_PORT:-5245} on the host"
                     ;;
                 *)
                     NETWORK_MODE="bridge"
                     print_info "Using bridge mode (cross-platform compatible)"
                     ;;
             esac
-        else
-            print_info "Forcing bridge mode for $OS deployment"
-            NETWORK_MODE="bridge"
         fi
-    else
-        echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
-        echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
-        echo
-        prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
-        
-        case "$NETWORK_MODE_CHOICE" in
-            2|host|Host)
-                NETWORK_MODE="host"
-                print_success "Using host network mode for full discovery support"
-                print_info "API will bind to port ${API_PORT:-5245} on the host"
-                ;;
-            *)
-                NETWORK_MODE="bridge"
-                print_info "Using bridge mode (cross-platform compatible)"
-                ;;
-        esac
     fi
     
     echo
@@ -3360,21 +3370,27 @@ deploy_containers() {
             # Now start the remaining services (frontend, workers, etc.)
             if "${final_compose_cmd[@]}" up -d; then
                 print_success "All containers started successfully"
-                # If we're running in host network mode and using the host-network compose,
-                # ensure a host-mode nginx proxy is present. The host-network compose
-                # may use a frontend that expects to be proxied; for consistency we'll
-                # create an explicit nginx-proxy running in host network mode that
-                # uses the generated host config so health checks behave like bridge-mode.
-                if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+                
+                # For microservices architecture, nginx-proxy is part of the docker-compose stack
+                # and runs on the docker network in bridge mode. Don't try to start a host-mode proxy.
+                # For monolithic with host mode, we may need a separate host-mode nginx proxy.
+                if [ "$ARCHITECTURE" = "microservices" ]; then
+                    # For microservices, just verify the docker-compose nginx-proxy is working
+                    if check_nginx_proxy; then
+                        print_info "nginx proxy verification passed"
+                    else
+                        print_error "nginx proxy verification FAILED - aborting deployment"
+                        exit 2
+                    fi
+                elif [ "${NETWORK_MODE:-bridge}" = "host" ]; then
+                    # For monolithic with host mode, start a host-mode nginx proxy
                     start_host_mode_nginx_proxy || true
-                fi
-
-                # Quick check: verify nginx-proxy or host-mode frontend is forwarding /api to the API service
-                if check_nginx_proxy; then
-                    print_info "nginx proxy verification passed"
-                else
-                    print_error "nginx proxy verification FAILED - aborting deployment"
-                    exit 2
+                    if check_nginx_proxy; then
+                        print_info "nginx proxy verification passed"
+                    else
+                        print_error "nginx proxy verification FAILED - aborting deployment"
+                        exit 2
+                    fi
                 fi
             else
                 print_error "Failed to start containers"
@@ -3668,45 +3684,13 @@ check_nginx_proxy() {
         return 0
     fi
 
-    local proxy_host=${SERVER_HOST:-localhost}
+    local proxy_host="localhost"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port/api/healthz"
     print_info "Verifying nginx proxy forwards /api to API: $proxy_url"
 
-    # If we're running in host network mode, the host-network compose
-    # intentionally does not include an nginx-proxy service. In that
-    # case verify the frontend/proxy endpoint directly instead of
-    # expecting a container named printfarmer-nginx-proxy.
-    if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
-        print_info "Host network mode detected - verifying frontend/proxy on host (${proxy_url})"
-        local retries_h=${PROXY_VERIFY_RETRIES:-6}
-        local interval_h=${PROXY_VERIFY_INTERVAL:-5}
-        local attempt_h=1
-        while [ $attempt_h -le $retries_h ]; do
-            if curl -sf --max-time 3 "$proxy_url" >/tmp/_proxy_check 2>/dev/null; then
-                if grep -q '"status"' /tmp/_proxy_check || grep -q '^OK$' /tmp/_proxy_check; then
-                    print_success "✓ Host-mode frontend/proxy appears to forward /api to API (HTTP ${proxy_port})"
-                    rm -f /tmp/_proxy_check || true
-                    return 0
-                else
-                    print_info "  Host-mode proxy returned non-JSON/OK response (attempt ${attempt_h}/${retries_h})"
-                    sed -n '1,40p' /tmp/_proxy_check || true
-                fi
-            else
-                print_info "  No response from host-mode proxy (attempt ${attempt_h}/${retries_h})"
-            fi
-            attempt_h=$((attempt_h + 1))
-            sleep $interval_h
-        done
-
-        print_warning "✗ Host-mode frontend/proxy check failed after ${retries_h} attempts. Check frontend logs and host networking." 
-        print_info "Example checks:"
-        print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE ps"
-        print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend --tail 50"
-        print_info "  curl -v $proxy_url"
-        return 1
-    fi
-
+    # For microservices in bridge mode, verify the docker-compose nginx-proxy
+    # (which is what we're using for microservices deployments)
     local retries=${PROXY_VERIFY_RETRIES:-6}
     local interval=${PROXY_VERIFY_INTERVAL:-5}
     local attempt=1
