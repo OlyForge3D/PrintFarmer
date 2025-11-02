@@ -466,7 +466,7 @@ npm run dev
 **Deployment Script Testing** ⚠️ **CRITICAL BEFORE COMMITTING**:
 - **When**: Modify any Docker deployment scripts (`scripts/docker/compose-generator.sh`, `scripts/deploy-docker.sh`, `scripts/docker/compose-templates/*`)
 - **What**: Run comprehensive test suite before committing
-- **How**: `./tests/run-deployment-tests.sh` (full: 3-5 min) or `./tests/run-deployment-tests.sh --quick` (quick: 30-60 sec)
+- **How**: `./tests/run-deployment-tests.sh` (full: 3-5 min)
 - **Expected**: ✅ ALL TESTS PASSED - Ready to commit!
 - **Details**: See `docs/DEPLOYMENT_TESTING_CHECKLIST.md` for step-by-step guide
 - **Components Tested**: 
