@@ -3037,6 +3037,20 @@ RESTEOF
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
     
+    # Source the .env file into the current shell so that environment variables
+    # are available to the script and are properly passed to docker compose.
+    # This ensures that health check commands can access variables like MSSQL_SA_PASSWORD.
+    if [ -f "$ENV_FILE" ]; then
+        print_info "Loading environment variables from $ENV_FILE"
+        set -a
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+        set +a
+        print_info "Environment loaded successfully"
+    else
+        print_warning "Environment file $ENV_FILE not found; some variables may be missing"
+    fi
+    
     print_info "Step 1/3: Building Docker images..."
     print_info "This may take several minutes on first run..."
     # Always include selected compose file
