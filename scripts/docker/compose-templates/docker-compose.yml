@@ -1,20 +1,4 @@
 services:
-  # Base image builder for slicer workers (not actually run)
-  slicer-base:
-    build:
-      context: .
-      dockerfile: Dockerfile.multistage
-      target: slicer-base
-    image: printfarmer-slicer-base-multistage
-    profiles:
-      - orca
-    entrypoint: ["/bin/true"]
-    healthcheck:
-      test: ["CMD", "true"]
-      interval: 1m
-      timeout: 5s
-      retries: 1
-      start_period: 5s
   # .NET API Backend - Multi-stage build for efficiency
   api:
     build:
@@ -111,8 +95,6 @@ services:
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
     image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
-    profiles:
-      - orca
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
@@ -154,12 +136,10 @@ services:
           cpus: "0.25"
           memory: 256M
 
-  # Optional: Load balancer for production
+  # Optional: Load balancer / Reverse proxy
   nginx-proxy:
     image: nginx:alpine
     container_name: printfarmer-nginx-proxy
-    profiles:
-      - proxy
     ports:
       - "8080:8080"
     volumes:

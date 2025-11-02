@@ -89,8 +89,6 @@ services:
       args:
         ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
         ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
-    profiles:
-      - orca
     image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
     ports:
