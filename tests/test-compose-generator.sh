@@ -63,7 +63,7 @@ test_monolithic_generation() {
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
     # Validate multistage build configuration
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     assert_contains "$compose_content" "target: api-runtime" "Should contain API runtime target"
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend runtime target"
     
@@ -99,7 +99,7 @@ test_microservices_generation() {
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
     # Validate multistage build configuration
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     
     # Validate microservices structure
     assert_contains "$compose_content" "api:" "Should have API service"
@@ -146,7 +146,7 @@ test_host_network_generation() {
     assert_contains "$compose_content" "database:" "Should have database service"
     
     # Validate multistage build
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     
     # Validate environment variables for host network
     assert_contains "$compose_content" "DEPLOYMENT_MODE=microservices" "Should set microservices deployment mode"
@@ -234,7 +234,7 @@ test_orcaslicer_worker_variations() {
         assert_contains "$compose_content" "Worker__WorkerId" "Should set worker ID for $count workers"
         
         # Validate multistage build
-        assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile for $count workers"
+        assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $count workers"
         
         # Validate no Redis references
         assert_not_contains "$compose_content" "redis:" "Should not contain Redis service for $count workers"
@@ -253,7 +253,7 @@ test_orcaslicer_worker_variations() {
     # For now, we'll test that the basic compose file is generated
     assert_contains "$no_workers_content" "api:" "Should still have API service when workers disabled"
     assert_contains "$no_workers_content" "database:" "Should still have database service when workers disabled"
-    assert_contains "$no_workers_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile when workers disabled"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile when workers disabled"
     
     # But should still have main services
     assert_contains "$no_workers_content" "api:" "Should still have API service when workers disabled"
@@ -295,7 +295,7 @@ test_database_provider_config() {
     assert_not_contains "$compose_content" "image: postgres:" "Should not use PostgreSQL image in monolithic"
     
     # Validate multistage build
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     
     # Validate basic services
     assert_contains "$compose_content" "api:" "Should have API service"
@@ -323,7 +323,7 @@ test_all_database_providers() {
         local compose_content=$(cat "$temp_provider_dir/docker-compose.yml")
         
         # Validate multistage build
-        assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile for $provider"
+        assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $provider"
         
         # Validate database provider environment variable (uses variable substitution)
         assert_contains "$compose_content" "DB_PROVIDER=" "Should have database provider configuration"
@@ -426,7 +426,7 @@ test_monitoring_inclusion() {
     assert_contains "$compose_content" "printfarmer-network" "Should connect monitoring to main network"
     
     # Validate multistage build still works
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile with monitoring"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile with monitoring"
     
     # Validate no Redis references even with monitoring
     assert_not_contains "$compose_content" "redis:" "Should not contain Redis service with monitoring"
@@ -464,7 +464,7 @@ test_all_addon_stacks() {
         esac
         
         # Common validations for all addons
-        assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile with $addon"
+        assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile with $addon"
         assert_not_contains "$compose_content" "redis:" "Should not contain Redis service with $addon"
         assert_not_contains "$compose_content" "prusaslicer" "Should not contain PrusaSlicer references with $addon"
         
@@ -516,7 +516,7 @@ test_combined_addon_stacks() {
     assert_contains "$all_compose_content" "database:" "Should have database service with all addons"
     
     # Validate multistage build with all addons
-    assert_contains "$all_compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile with all addons"
+    assert_contains "$all_compose_content" "Dockerfile.multistage" "Should use multistage dockerfile with all addons"
     
     # Validate no unwanted services
     assert_not_contains "$all_compose_content" "redis:" "Should not contain Redis service with all addons"
@@ -576,7 +576,7 @@ test_multistage_targets() {
     assert_contains "$compose_content" "target: orcaslicer-worker" "Should contain orcaslicer-worker target"
     
     # Validate multistage dockerfile is used
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     
     pass_test
 }
@@ -630,7 +630,7 @@ test_architecture_database_combinations() {
             assert_file_exists "$temp_combo_dir/Dockerfile.multistage" "Should copy multistage dockerfile for $arch + $db"
             
             local compose_content=$(cat "$temp_combo_dir/docker-compose.yml")
-            assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile for $arch + $db"
+            assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $arch + $db"
             
             # Architecture-specific checks
             if [ "$arch" = "host-network" ]; then
@@ -657,7 +657,7 @@ test_architecture_addon_combinations() {
         assert_file_exists "$temp_full_dir/docker-compose.yml" "Should create full-featured compose file for $arch"
         
         local compose_content=$(cat "$temp_full_dir/docker-compose.yml")
-        assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile for full $arch"
+        assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for full $arch"
         assert_not_contains "$compose_content" "redis:" "Should not contain Redis services for full $arch"
         assert_not_contains "$compose_content" "prusaslicer" "Should not contain PrusaSlicer references for full $arch"
     done

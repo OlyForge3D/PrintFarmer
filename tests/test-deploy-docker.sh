@@ -556,7 +556,8 @@ DB_PROVIDER=sqlserver
 EOF
 
     # Run deploy in dry-run, batch mode so it generates files but doesn't start containers
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    # Use --config-file to explicitly point to the temp directory's config
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     # The script should mention environment file creation
@@ -602,7 +603,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     assert_file_exists ".env.microservices" "Should have created .env.microservices for postgres"
@@ -634,7 +635,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=mysql
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     assert_file_exists ".env.microservices" "Should have created .env.microservices for mysql"
@@ -668,7 +669,7 @@ ARCHITECTURE=monolithic
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
+        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic --config-file .deploy-config 2>&1 || true"
         local output=$(get_output)
 
         # Expect .env.monolithic
@@ -713,7 +714,7 @@ ARCHITECTURE=host-network
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture host-network 2>&1 || true"
+        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture host-network --config-file ./.deploy-config 2>&1 || true"
         local output=$(get_output)
 
         # Host-network uses .env.microservices

@@ -4305,6 +4305,18 @@ while [ $# -gt 0 ]; do
             CONFIG_FILE="${1#--config-file=}"
             shift
             ;;
+        --env)
+            if [ -n "${2:-}" ]; then
+                export "${2}"
+                shift 2
+            else
+                echo "Missing value for --env" >&2; exit 2
+            fi
+            ;;
+        --env=*)
+            export "${1#--env=}"
+            shift
+            ;;
         --)
             shift
             break

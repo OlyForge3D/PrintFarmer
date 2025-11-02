@@ -121,12 +121,13 @@ generate_database_config() {
 
     # Extract the provider service block from the databases template and rename the service to 'database'
     # The databases file uses services: with two-space indented service names
+    # Also rewrite any provider-specific volume references (postgres-data, mysql-data, sqlserver-data) to printfarmer-database
     awk -v prov="$provider" '
     /^services:/ { in_services=1; next }
     in_services && $0 ~ ("^  " prov ":") { printing=1; print; next }
     printing && $0 ~ /^  [a-zA-Z]/ { exit }
     printing { print }
-    ' "$db_template_file" | sed -E "s/^  ${provider}:/  database:/"
+    ' "$db_template_file" | sed -E "s/^  ${provider}:/  database:/" | sed -E 's/(postgres-data|mysql-data|sqlserver-data):/printfarmer-database:/g'
 }
 
 # Parse CLI arguments and set defaults
@@ -206,6 +207,9 @@ merge_addon_services() {
     fi
     
     if [[ -f "$addon_template" ]]; then
+        # Initialize temp files at function level so cleanup works regardless of code path
+        local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks temp_combined
+        
         # If ruamel.yaml based merge helper exists, use it for robust YAML-aware merging
         if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('ruamel') else 1)" >/dev/null 2>&1; then
             # Use YAML-aware merge helper (ruamel.yaml must be available)
@@ -215,7 +219,6 @@ merge_addon_services() {
         else
             # Fallback to the original (conservative) merging approach
             # Create temporary files for merging
-            local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks
             temp_merged="$(mktemp)"
             temp_addon_services="$(mktemp)"
             temp_addon_volumes="$(mktemp)"
