@@ -1636,7 +1636,7 @@ configure_networking() {
     if [ "$NETWORK_MODE" = "host" ]; then
         # Host mode: Auto-enable discovery with sensible defaults
         print_success "Network discovery automatically enabled with host networking"
-        ENABLE_DISCOVERY="yes"
+        ENABLE_DISCOVERY="true"
         ALLOW_LOCAL_NETWORK="true"
         
         echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
