@@ -111,23 +111,22 @@ generate_database_config() {
             ;;
     esac
 
-    local db_template_file="$TEMPLATES_DIR/docker-compose.databases.yml"
+    log_info "Using $provider database configuration"
+
+    # Use dedicated database provider template file instead of extraction
+    # This eliminates parsing complexity and the previous duplicate volumes bug
+    # Each provider has its own clean template file with only that provider's service
+    local db_template_file="$TEMPLATES_DIR/docker-compose.database.${provider}.yml"
+    
     if [[ ! -f "$db_template_file" ]]; then
-        log_error "Database templates file not found: $db_template_file"
+        log_error "Database template file not found: $db_template_file"
+        log_error "Expected: $db_template_file"
         return 1
     fi
 
-    log_info "Using $provider database configuration"
-
-    # Extract the provider service block from the databases template and rename the service to 'database'
-    # The databases file uses services: with two-space indented service names
-    # Also rewrite any provider-specific volume references (postgres-data, mysql-data, sqlserver-data) to printfarmer-database
-    awk -v prov="$provider" '
-    /^services:/ { in_services=1; next }
-    in_services && $0 ~ ("^  " prov ":") { printing=1; print; next }
-    printing && $0 ~ /^  [a-zA-Z]/ { exit }
-    printing { print }
-    ' "$db_template_file" | sed -E "s/^  ${provider}:/  database:/" | sed -E 's/(postgres-data|mysql-data|sqlserver-data):/printfarmer-database:/g'
+    # Simply output the dedicated template file
+    # No parsing, no extraction, no chance of dangling keys
+    cat "$db_template_file"
 }
 
 # Parse CLI arguments and set defaults
