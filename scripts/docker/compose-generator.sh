@@ -139,6 +139,7 @@ parse_args() {
     INCLUDE_SECURITY="false"
     INCLUDE_REGISTRY="false"
     ENABLE_ORCA_WORKER=""
+    API_PORT=""
     DB_PROVIDER="${DB_PROVIDER:-postgres}"
     KEEP_GENERATED="true"
     DRY_RUN="false"
@@ -149,6 +150,8 @@ parse_args() {
                 ARCHITECTURE="$2"; shift 2 ;;
             --output-dir)
                 OUTPUT_DIR="$2"; shift 2 ;;
+            --api-port)
+                API_PORT="$2"; shift 2 ;;
             --include-monitoring)
                 INCLUDE_MONITORING="true"; shift ;;
             --include-telemetry)
@@ -178,6 +181,31 @@ parse_args() {
     ARCHITECTURE="${ARCHITECTURE:-microservices}"
     OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT}"
     ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+}
+
+# Function to validate port numbers
+validate_port() {
+    local port="$1"
+    local port_name="${2:-port}"
+    
+    # Check if empty
+    if [[ -z "$port" ]]; then
+        return 0  # Empty is OK (will use default)
+    fi
+    
+    # Check if it's a valid number
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        log_error "Invalid $port_name: '$port' is not a valid number"
+        return 1
+    fi
+    
+    # Check if port is in valid range (1-65535)
+    if [[ $port -lt 1 || $port -gt 65535 ]]; then
+        log_error "Invalid $port_name: $port is out of valid range (1-65535)"
+        return 1
+    fi
+    
+    return 0
 }
 
 # Function to merge addon services into the main compose file
@@ -954,6 +982,11 @@ main() {
             return 1
             ;;
     esac
+    
+    # Validate port numbers
+    if ! validate_port "$API_PORT" "API port"; then
+        return 1
+    fi
     
     if [[ "$DRY_RUN" == "true" ]]; then
         show_dry_run "$ARCHITECTURE"
