@@ -3489,7 +3489,53 @@ wait_for_database() {
         elapsed=$((elapsed + interval))
     done
 
-    print_warning "Timeout waiting for database to be healthy after ${timeout}s. Proceeding, but API may log connection errors until DB is ready."
+    # Timeout reached - provide detailed diagnostics
+    print_error "🔴 DATABASE HEALTH CHECK FAILED"
+    print_error "Database did not become healthy within ${timeout}s timeout."
+    print_error ""
+    print_error "📊 DIAGNOSTIC INFORMATION:"
+    print_error ""
+    
+    # Show container status
+    print_error "Container Status:"
+    dc ps --format "table {{.Name}}\t{{.Status}}\t{{.Health}}" 2>/dev/null || true
+    print_error ""
+    
+    # Show logs from database container
+    print_error "Recent Database Logs (last 50 lines):"
+    dc logs database --tail 50 2>/dev/null || true
+    print_error ""
+    
+    # SQL Server specific diagnostics
+    if [ "${DB_PROVIDER:-postgres}" = "sqlserver" ]; then
+        print_error "🔍 SQL SERVER SPECIFIC CHECKS:"
+        print_error "- SA password complexity: Ensure MSSQL_SA_PASSWORD meets requirements"
+        print_error "  (minimum 8 chars, uppercase, lowercase, number, special char)"
+        print_error "- Check if port 1433 is in use: sudo lsof -i :1433"
+        print_error "- Verify SA_PASSWORD in .env is correct: grep MSSQL_SA_PASSWORD .env"
+        print_error ""
+        print_error "Try restarting with a new strong password:"
+        print_error "  rm .env docker-compose.override.yml 2>/dev/null"
+        print_error "  ./scripts/deploy-docker.sh  # Let script generate new password"
+    fi
+    
+    # Generic diagnostics
+    print_error "🔧 TROUBLESHOOTING STEPS:"
+    print_error "1. Check available disk space: df -h"
+    print_error "2. Verify Docker daemon is running: docker ps"
+    print_error "3. Check for port conflicts:"
+    print_error "   - PostgreSQL: sudo lsof -i :5432"
+    print_error "   - SQL Server: sudo lsof -i :1433"
+    print_error "   - MySQL: sudo lsof -i :3306"
+    print_error "4. Check Docker logs for the database container:"
+    print_error "   docker compose logs database"
+    print_error "5. Increase timeout if on slow system:"
+    print_error "   DB_WAIT_TIMEOUT=600 ./scripts/deploy-docker.sh"
+    print_error "6. Clean up and retry:"
+    print_error "   docker compose down -v"
+    print_error "   ./scripts/deploy-docker.sh"
+    print_error ""
+    
     return 1
 }
 
