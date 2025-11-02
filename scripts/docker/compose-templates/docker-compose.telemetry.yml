@@ -15,7 +15,6 @@ services:
       - "8889:8889"   # Prometheus metrics (collector internal)
     depends_on:
       - jaeger
-      - prometheus
     environment:
       - OTEL_LOG_LEVEL=debug
 

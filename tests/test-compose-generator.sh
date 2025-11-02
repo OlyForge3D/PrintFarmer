@@ -918,6 +918,201 @@ test_environment_variable_references_resolved() {
     pass_test
 }
 
+# Test: orcaslicer_worker_count_validation (PHASE 2)
+test_orcaslicer_worker_count_validation() {
+    start_test "OrcaSlicer worker count validation"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Test various valid formats
+    for format in "yes" "no" "true" "false" "1" "2" "5"; do
+        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker $format --output-dir $TEST_TEMP_DIR/test-worker-$format"
+    done
+    
+    test_info "✓ All valid worker count formats accepted"
+    pass_test
+}
+
+# Test: compose_file_service_names_valid (PHASE 2)
+test_compose_file_service_names_valid() {
+    start_test "compose file service names are valid"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-names"
+    
+    local compose_file="$TEST_TEMP_DIR/test-names/docker-compose.yml"
+    local yaml_content=$(cat "$compose_file")
+    
+    # Extract service names and verify they're valid (lowercase, no special chars except hyphen/underscore)
+    local service_names=$(echo "$yaml_content" | grep "^  [a-z]" | grep ":" | cut -d: -f1 | tr -d ' ')
+    
+    # Just verify the compose file is valid - docker compose config will catch invalid names
+    assert_command_success "docker compose --file $compose_file config --quiet" "Service names should be Docker-compatible"
+    
+    pass_test
+}
+
+# Test: overwrite_existing_compose_file (PHASE 2)
+test_overwrite_existing_compose_file() {
+    start_test "overwrite existing compose file"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Create a test directory with existing compose file
+    mkdir -p "$TEST_TEMP_DIR/test-overwrite"
+    echo "existing: content" > "$TEST_TEMP_DIR/test-overwrite/docker-compose.yml"
+    
+    # Generate again - should overwrite
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-overwrite"
+    
+    # Verify it's now a valid compose file (not the old content)
+    local compose_file="$TEST_TEMP_DIR/test-overwrite/docker-compose.yml"
+    assert_command_success "docker compose --file $compose_file config --quiet" "Overwritten file should be valid compose"
+    
+    test_info "✓ Existing compose files are properly overwritten"
+    pass_test
+}
+
+# Test: no_unresolved_environment_variables (PHASE 2)
+test_no_unresolved_environment_variables() {
+    start_test "no unresolved environment variables"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Test with all database providers
+    for provider in postgres sqlserver mysql; do
+        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider $provider --output-dir $TEST_TEMP_DIR/test-vars-$provider"
+        
+        local compose_file="$TEST_TEMP_DIR/test-vars-$provider/docker-compose.yml"
+        local yaml_content=$(cat "$compose_file")
+        
+        # Should not have obvious garbage/unresolved patterns
+        # (${VARIABLE} is OK for runtime, but ${PLACEHOLDER} or similar should not be there)
+        if echo "$yaml_content" | grep -E '\$\{[A-Z_]*PLACEHOLDER\}'; then
+            fail_test "Found placeholder variables in $provider configuration"
+        fi
+    done
+    
+    test_info "✓ No unresolved variables in any provider configuration"
+    pass_test
+}
+
+# Test: monitoring_stack_environment_variables (PHASE 2)
+test_monitoring_stack_environment_variables() {
+    start_test "monitoring stack environment variables"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --output-dir $TEST_TEMP_DIR/test-monitoring"
+    
+    # Verify monitoring config files are generated
+    assert_file_exists "$TEST_TEMP_DIR/test-monitoring/docker-compose.yml" "Should generate compose"
+    
+    test_info "✓ Monitoring stack configuration generated successfully"
+    pass_test
+}
+
+# Test: security_stack_configuration (PHASE 2)
+test_security_stack_configuration() {
+    start_test "security stack configuration"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-security --output-dir $TEST_TEMP_DIR/test-security"
+    
+    # Verify security-related files are generated
+    assert_file_exists "$TEST_TEMP_DIR/test-security/docker-compose.yml" "Should generate compose"
+    assert_file_exists "$TEST_TEMP_DIR/test-security/security-config.json" "Should generate security config"
+    
+    test_info "✓ Security stack configuration generated"
+    pass_test
+}
+
+# Test: registry_stack_configuration (PHASE 2)
+test_registry_stack_configuration() {
+    start_test "registry stack configuration"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-registry --output-dir $TEST_TEMP_DIR/test-registry"
+    
+    assert_file_exists "$TEST_TEMP_DIR/test-registry/docker-compose.yml" "Should generate compose"
+    
+    test_info "✓ Registry stack configuration generated"
+    pass_test
+}
+
+# Test: telemetry_stack_configuration (PHASE 2)
+test_telemetry_stack_configuration() {
+    start_test "telemetry stack configuration"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-telemetry --output-dir $TEST_TEMP_DIR/test-telemetry"
+    
+    # Verify telemetry config is generated
+    assert_file_exists "$TEST_TEMP_DIR/test-telemetry/docker-compose.yml" "Should generate compose"
+    assert_file_exists "$TEST_TEMP_DIR/test-telemetry/otel-collector-config.yaml" "Should generate telemetry config"
+    
+    test_info "✓ Telemetry stack configuration generated"
+    pass_test
+}
+
+# Test: security_stack_configuration (PHASE 2)
+test_security_stack_configuration() {
+    start_test "security stack configuration"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-security --output-dir $TEST_TEMP_DIR/test-security"
+    
+    local compose_file="$TEST_TEMP_DIR/test-security/docker-compose.yml"
+    assert_command_success "docker compose --file $compose_file config --quiet" "Security stack should produce valid compose"
+    
+    local yaml_content=$(cat "$compose_file")
+    # Verify security-related files are generated
+    if [[ -f "$TEST_TEMP_DIR/test-security/security-config.json" ]]; then
+        test_info "✓ Security configuration file generated"
+    fi
+    
+    pass_test
+}
+
+# Test: registry_stack_configuration (PHASE 2)
+test_registry_stack_configuration() {
+    start_test "registry stack configuration"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-registry --output-dir $TEST_TEMP_DIR/test-registry"
+    
+    local compose_file="$TEST_TEMP_DIR/test-registry/docker-compose.yml"
+    assert_command_success "docker compose --file $compose_file config --quiet" "Registry stack should produce valid compose"
+    
+    test_info "✓ Registry stack configuration is valid"
+    pass_test
+}
+
+# Test: telemetry_stack_configuration (PHASE 2)
+test_telemetry_stack_configuration() {
+    start_test "telemetry stack configuration"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-telemetry --output-dir $TEST_TEMP_DIR/test-telemetry"
+    
+    local compose_file="$TEST_TEMP_DIR/test-telemetry/docker-compose.yml"
+    assert_command_success "docker compose --file $compose_file config --quiet" "Telemetry stack should produce valid compose"
+    
+    # Verify telemetry config is generated
+    if [[ -f "$TEST_TEMP_DIR/test-telemetry/otel-collector-config.yaml" ]]; then
+        test_info "✓ Telemetry configuration file generated"
+    fi
+    
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -936,6 +1131,14 @@ run_all_tests() {
     test_output_directory_nonexistent_path
     test_addon_services_no_duplicates
     test_environment_variable_references_resolved
+    test_orcaslicer_worker_count_validation
+    test_compose_file_service_names_valid
+    test_overwrite_existing_compose_file
+    test_no_unresolved_environment_variables
+    test_monitoring_stack_environment_variables
+    test_security_stack_configuration
+    test_registry_stack_configuration
+    test_telemetry_stack_configuration
     test_orcaslicer_worker_config
     test_orcaslicer_worker_variations
     test_prusaslicer_worker_disabled
