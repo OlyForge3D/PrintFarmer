@@ -113,6 +113,8 @@ services:
     profiles:
       - orca
       - orca-binaries
+    networks:
+      - printfarmer-network
 
   # OrcaSlicer Worker for distributed slicing - Multi-stage build
   orcaslicer-worker:
