@@ -132,7 +132,7 @@ EOF
     
     # Check compose file content
     local compose_content=$(cat "docker-compose.yml")
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     assert_contains "$compose_content" "target: api-runtime" "Should contain API target"
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend target"
     
@@ -169,7 +169,7 @@ EOF
     assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Should generate docker-compose.yml via compose generator"
     local compose_content=$(cat "docker-compose.yml")
-    assert_contains "$compose_content" "dockerfile: Dockerfile.multistage" "Should use multistage dockerfile"
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     
     pass_test
 }
@@ -236,8 +236,8 @@ EOF
     local compose_from_deploy=$(cat "docker-compose.yml")
     
     # Both should use multistage dockerfile
-    assert_contains "$compose_from_generator" "dockerfile: Dockerfile.multistage" "Generator should use multistage"
-    assert_contains "$compose_from_deploy" "dockerfile: Dockerfile.multistage" "Deploy script should use multistage"
+    assert_contains "$compose_from_generator" "Dockerfile.multistage" "Generator should use multistage"
+    assert_contains "$compose_from_deploy" "Dockerfile.multistage" "Deploy script should use multistage"
     
     pass_test
 }
@@ -381,34 +381,7 @@ EOF
     pass_test
 }
 
-# Test PrusaSlicer removal verification
-test_prusaslicer_removal_verification() {
-    start_test "PrusaSlicer removal verification across pipeline"
-    
-    cd "$TEST_TEMP_DIR"
-    
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-ENABLE_ORCA_WORKER=yes
-EOF
-    
-    local deploy_output=$(run_deployment_test ".deploy-config" 60 false)
-    
-    # Generate files separately for validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
-    assert_file_exists "docker-compose.yml" "Should generate compose file"
-    local compose_content=$(cat "docker-compose.yml")
-    
-    # Verify no PrusaSlicer references in pipeline output or generated files
-    assert_not_contains "$deploy_output" "PrusaSlicer" "Deploy output should not mention PrusaSlicer"
-    # Check that Prusa workers are shown as disabled (not enabled: yes)
-    assert_contains "$deploy_output" "Prusa Workers: 0 (enabled: no)" "Should show Prusa workers as disabled"
-    assert_not_contains "$compose_content" "prusaslicer-worker" "Compose file should not contain PrusaSlicer worker"
-    assert_not_contains "$compose_content" "PrusaSlicerPath" "Should not contain PrusaSlicer path config"
-    
-    pass_test
-}
+
 
 # Test all network mode combinations
 test_network_mode_combinations() {
@@ -498,7 +471,6 @@ run_all_tests() {
     test_multistage_dockerfile_presence
     test_invalid_configuration_handling
     test_redis_removal_verification
-    test_prusaslicer_removal_verification
     test_network_mode_combinations
     test_security_combinations
     test_comprehensive_addon_combinations

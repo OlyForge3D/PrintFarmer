@@ -457,6 +457,20 @@ npm run dev
 - Shared: Models/DTOs used by both client and server
 - Configuration: AppSettings validation and multi-database configuration
 
+**Deployment Script Testing** ⚠️ **CRITICAL BEFORE COMMITTING**:
+- **When**: Modify any Docker deployment scripts (`scripts/docker/compose-generator.sh`, `scripts/deploy-docker.sh`, `scripts/docker/compose-templates/*`)
+- **What**: Run comprehensive test suite before committing
+- **How**: `./tests/run-deployment-tests.sh` (full: 3-5 min) or `./tests/run-deployment-tests.sh --quick` (quick: 30-60 sec)
+- **Expected**: ✅ ALL TESTS PASSED - Ready to commit!
+- **Details**: See `docs/DEPLOYMENT_TESTING_CHECKLIST.md` for step-by-step guide
+- **Components Tested**: 
+  - All 3 architectures (monolithic, microservices, host-network)
+  - All 3 database providers (PostgreSQL, SQL Server, MySQL)
+  - User's exact scenario (host-network + sqlserver + orcaslicer + spoolman)
+  - YAML validation, no duplicate keys, Docker compose config validation
+- **Individual Tests**: `test-compose-generator.sh`, `test-deploy-docker.sh`, `test-user-scenario-complete.sh`
+- **Copilot Action**: Always run tests after generating deployment script changes and report results
+
 **Docker Support:**
 - Multi-stage Dockerfile for production builds
 - Multi-container setup: separate API and web (Nginx) containers
