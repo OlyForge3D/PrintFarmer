@@ -667,16 +667,13 @@ def remove_ports(block_lines):
         out.append(l)
     return out
 
-# Pre-check: ensure frontend is not exposing host ports. If it is, abort and ask operator to remove port mappings
+# Remove frontend ports to avoid conflicts with nginx-proxy.
+# In microservices mode, nginx-proxy is the only service that should bind the host port.
 f_start, f_end = find_block(txt, 'frontend')
 if f_start is not None:
     frontend_block = txt[f_start:f_end]
-    # Detect a 'ports:' line at 4-space indent inside frontend block
-    for line in frontend_block:
-        if line.lstrip().startswith('ports:') and line.startswith('    '):
-            sys.stderr.write('ERROR: Detected frontend service exposing host ports in microservices template.\n')
-            sys.stderr.write('To avoid runtime port conflicts, remove the frontend ports mapping before generating API host-mode.\n')
-            sys.exit(2)
+    new_frontend_block = remove_ports(frontend_block)
+    txt = txt[:f_start] + new_frontend_block + txt[f_end:]
 
 start, end = find_block(txt, 'api')
 if start is not None:
