@@ -46,6 +46,12 @@ using Swashbuckle.AspNetCore.Swagger;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+// Explicitly add environment variables with "PFARM__" prefix to configuration.
+// This allows settings like PFARM__Spoolman__BaseUrl to be recognized by the
+// configuration binding system. The "__" separator becomes ":" in the configuration hierarchy.
+// Example: PFARM__Spoolman__BaseUrl → Spoolman:BaseUrl configuration section
+builder.Configuration.AddEnvironmentVariables("PFARM__");
+
 // When running tests that use the shared in-memory SQLite fixture we may need
 // to register test-only services (pre-seed, fallback DbContextFactory, etc.)
 // before host build-time DI validation runs. Disable ValidateOnBuild in that

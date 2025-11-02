@@ -3830,12 +3830,24 @@ verify_deployment() {
         fi
     fi
     
-    # Test API endpoints
+    # Test API endpoints (catalog endpoint - reliable and doesn't require printers to exist)
     print_info "Testing API endpoints..."
-    if curl -sf "$api_url/api/printers" >/dev/null 2>&1; then
-        print_success "✓ API endpoints: OK (/api/printers responding)"
+    local endpoint_response=$(curl -s -w "\n%{http_code}" "$api_url/api/catalog/manufacturers" 2>&1)
+    local endpoint_body=$(echo "$endpoint_response" | head -n -1)
+    local endpoint_status=$(echo "$endpoint_response" | tail -n 1)
+    
+    if [ "$endpoint_status" = "200" ]; then
+        # Count manufacturers to verify data is present
+        local mfr_count=$(echo "$endpoint_body" | jq 'length' 2>/dev/null || echo "?")
+        print_success "✓ API endpoints: OK (/api/catalog/manufacturers - $mfr_count manufacturers)"
     else
-        print_warning "✗ API endpoints: Not ready yet"
+        print_warning "✗ API endpoints: Failed"
+        print_info "  HTTP Status: $endpoint_status"
+        if [ -n "$endpoint_body" ]; then
+            # Show first line of error response
+            local error_line=$(echo "$endpoint_body" | head -n 1)
+            print_info "  Response: ${error_line:0:120}"
+        fi
         health_check_failed=true
     fi
     
