@@ -830,6 +830,237 @@ EOFTEST
     pass_test
 }
 
+# Test: PFARM__Spoolman__BaseUrl is written to .env when Spoolman is enabled
+test_pfarm_spoolman_baseurl_in_env() {
+    start_test "PFARM__Spoolman__BaseUrl written to .env when Spoolman enabled"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create config with Spoolman enabled AND configured with a URL
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_SPOOLMAN=yes
+SPOOLMAN_BASE_URL=http://spoolman.local:7912
+EOF
+
+    # Run deploy script in dry-run, batch mode
+    capture_output "timeout 90 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    # Check output for errors or completion
+    if echo "$output" | grep -q "error\|Error\|ERROR" && ! echo "$output" | grep -q "completed"; then
+        test_info "Deploy script output: $output"
+    fi
+
+    # Determine expected env file - .env.microservices is used
+    local env_file=""
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    elif [ -f ".env.microservices" ]; then
+        env_file=".env.microservices"
+    elif [ -f ".env" ]; then
+        env_file=".env"
+    fi
+
+    if [ -z "$env_file" ] || [ ! -f "$env_file" ]; then
+        test_info "Available files in repo root: $(ls -la "$REPO_ROOT"/.env* 2>/dev/null || echo 'none')"
+        test_info "Available files in TEST_TEMP_DIR: $(ls -la "$TEST_TEMP_DIR"/.env* 2>/dev/null || echo 'none')"
+        fail_test "Could not find generated .env file"
+        return
+    fi
+    
+    local env_content
+    env_content=$(cat "$env_file")
+
+    # CRITICAL: Verify PFARM__Spoolman__BaseUrl is in the env file (this is the fix we added)
+    # This variable should be present for the API to read Spoolman configuration
+    if echo "$env_content" | grep -q "PFARM__Spoolman__BaseUrl"; then
+        pass_test
+    else
+        test_info "Env file location: $env_file"
+        test_info "Env file content:\n$env_content"
+        fail_test "PFARM__Spoolman__BaseUrl not found in env file - the fix to deploy-docker.sh may not be working"
+    fi
+
+    # Clean up
+    rm -f .deploy-config "$env_file" 2>/dev/null || true
+
+}
+
+# Test: PFARM__NetworkDiscovery__EnableDiscovery is written to .env when discovery is enabled
+test_pfarm_network_discovery_enable_in_env() {
+    start_test "PFARM__NetworkDiscovery__EnableDiscovery written to .env"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create config with discovery enabled
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISCOVERY=yes
+NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    local env_file=".env.microservices"
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    assert_file_exists "$env_file" "Should create env file with discovery config"
+    
+    local env_content
+    env_content=$(cat "$env_file")
+
+    # Verify PFARM__NetworkDiscovery__EnableDiscovery is in the env file
+    assert_contains "$env_content" "PFARM__NetworkDiscovery__EnableDiscovery=" "PFARM__NetworkDiscovery__EnableDiscovery should be in env file"
+
+    # Clean up
+    rm -f .deploy-config "$env_file" || true
+
+    pass_test
+}
+
+# Test: PFARM__NetworkDiscovery__DiscoverySubnets is written to .env and maps from NETWORK_RANGES
+test_pfarm_network_discovery_subnets_in_env() {
+    start_test "PFARM__NetworkDiscovery__DiscoverySubnets maps from NETWORK_RANGES"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create config with specific discovery ranges
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISCOVERY=yes
+NETWORK_RANGES=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    local env_file=".env.microservices"
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    assert_file_exists "$env_file" "Should create env file with discovery subnets"
+    
+    local env_content
+    env_content=$(cat "$env_file")
+
+    # Verify PFARM__NetworkDiscovery__DiscoverySubnets is present and matches NETWORK_RANGES
+    assert_contains "$env_content" "PFARM__NetworkDiscovery__DiscoverySubnets=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12" "PFARM__NetworkDiscovery__DiscoverySubnets should map from NETWORK_RANGES"
+
+    # Clean up
+    rm -f .deploy-config "$env_file" || true
+
+    pass_test
+}
+
+# Test: All PFARM variables are present together in the same .env file
+test_pfarm_variables_complete_set() {
+    start_test "All PFARM variables present together in .env file"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create full config with both Spoolman and Discovery
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_SPOOLMAN=yes
+SPOOLMAN_BASE_URL=http://spoolman.local:7912
+ENABLE_DISCOVERY=yes
+NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    local env_file=".env.microservices"
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    assert_file_exists "$env_file" "Should create env file with full PFARM configuration"
+    
+    local env_content
+    env_content=$(cat "$env_file")
+
+    # Verify all three PFARM__ variables are present (these are the critical application settings)
+    assert_contains "$env_content" "PFARM__Spoolman__BaseUrl=" "Should include PFARM__Spoolman__BaseUrl for API Spoolman integration"
+    assert_contains "$env_content" "PFARM__NetworkDiscovery__EnableDiscovery=" "Should include PFARM__NetworkDiscovery__EnableDiscovery for API discovery feature"
+    assert_contains "$env_content" "PFARM__NetworkDiscovery__DiscoverySubnets=" "Should include PFARM__NetworkDiscovery__DiscoverySubnets for API network discovery"
+
+    # Also verify critical source variables that should be present
+    assert_contains "$env_content" "SPOOLMAN_BASE_URL=" "Should include SPOOLMAN_BASE_URL for Docker compose"
+    assert_contains "$env_content" "ALLOWED_NETWORK_RANGES=" "Should include ALLOWED_NETWORK_RANGES for Docker configuration"
+
+    # Clean up
+    rm -f .deploy-config "$env_file" || true
+
+    pass_test
+}
+
+# Test: PFARM variables can be sourced without bash errors
+test_pfarm_variables_sourcing() {
+    start_test "PFARM variables can be sourced without bash errors"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create config
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_SPOOLMAN=yes
+SPOOLMAN_BASE_URL=http://spoolman.local:7912
+ENABLE_DISCOVERY=yes
+NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    local env_file=".env.microservices"
+    if [ -f "$REPO_ROOT/.env.microservices" ]; then
+        env_file="$REPO_ROOT/.env.microservices"
+    fi
+
+    # Create a test script to source the .env file
+    cat > "$TEST_TEMP_DIR/test_pfarm_source.sh" << 'EOFTEST'
+#!/bin/bash
+set -euo pipefail
+set -a
+source "$1"
+set +a
+echo "SOURCE_SUCCESS=true"
+echo "PFARM__Spoolman__BaseUrl=$PFARM__Spoolman__BaseUrl"
+echo "PFARM__NetworkDiscovery__EnableDiscovery=$PFARM__NetworkDiscovery__EnableDiscovery"
+echo "PFARM__NetworkDiscovery__DiscoverySubnets=$PFARM__NetworkDiscovery__DiscoverySubnets"
+EOFTEST
+    chmod +x "$TEST_TEMP_DIR/test_pfarm_source.sh"
+
+    # Run the source test
+    capture_output "$TEST_TEMP_DIR/test_pfarm_source.sh $env_file 2>&1"
+    local output=$(get_output)
+
+    # Verify no bash syntax errors
+    assert_not_contains "$output" "command not found" "PFARM variables should not cause bash parsing errors"
+    assert_not_contains "$output" "syntax error" "PFARM variables should not cause bash syntax errors"
+
+    # Verify the variables were sourced correctly
+    assert_contains "$output" "SOURCE_SUCCESS=true" "Source operation should succeed"
+    assert_contains "$output" "PFARM__Spoolman__BaseUrl=http://spoolman.local:7912" "PFARM__Spoolman__BaseUrl should be sourced correctly"
+    assert_contains "$output" "PFARM__NetworkDiscovery__EnableDiscovery=" "PFARM__NetworkDiscovery__EnableDiscovery should be sourced"
+
+    # Clean up
+    rm -f .deploy-config "$env_file" "$TEST_TEMP_DIR/test_pfarm_source.sh" || true
+
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -859,6 +1090,11 @@ run_all_tests() {
     test_env_provider_only_end_to_end_mysql
     test_env_provider_monolithic_providers
     test_env_file_sourcing_with_connection_strings
+    test_pfarm_spoolman_baseurl_in_env
+    test_pfarm_network_discovery_enable_in_env
+    test_pfarm_network_discovery_subnets_in_env
+    test_pfarm_variables_complete_set
+    test_pfarm_variables_sourcing
     
     teardown
 }

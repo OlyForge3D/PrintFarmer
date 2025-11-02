@@ -2434,6 +2434,11 @@ SPOOLMAN_ENABLED=$ENABLE_SPOOLMAN
 SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
 SPOOLMAN_PORT=$SPOOLMAN_PORT
 
+# Application Settings - PFARM Configuration
+PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
+PFARM__NetworkDiscovery__EnableDiscovery=$ENABLE_DISCOVERY
+PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
+
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
 EOF
