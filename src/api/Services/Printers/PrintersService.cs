@@ -1485,5 +1485,80 @@ namespace Farm.Web.Api.Services.Printers
                 return trimmed;
             }
         }
+
+        /// <summary>
+        /// Bulk creates multiple printers with duplicate handling.
+        /// </summary>
+        /// <param name="printers">Array of printer DTOs to create</param>
+        /// <param name="duplicateHandling">How to handle duplicates: 'skip', 'overwrite', or 'error'</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Response object with import counts and results</returns>
+        public async Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(printers);
+
+            var createdPrinters = new List<PrinterDto>();
+            var errorResults = new Dictionary<int, string>();
+            var skippedCount = 0;
+
+            for (int i = 0; i < printers.Length; i++)
+            {
+                try
+                {
+                    var printerDto = printers[i];
+
+                    // Check for duplicates
+                    bool exists = await ExistsByNameOrServerUrlAsync(printerDto.Name, printerDto.ServerUrl, ct);
+                    if (exists)
+                    {
+                        if ((duplicateHandling ?? "skip") == "skip")
+                        {
+                            _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name}");
+                            skippedCount++;
+                            continue;
+                        }
+                        else if ((duplicateHandling ?? "skip") == "overwrite")
+                        {
+                            // Find and delete existing printer
+                            var allPrinters = await GetAllAsync(ct);
+                            var existing = allPrinters.FirstOrDefault(p =>
+                                p.Name == printerDto.Name ||
+                                p.ServerUrl == printerDto.ServerUrl);
+                            if (existing != null)
+                            {
+                                _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existing.Name}");
+                                await RemoveAsync(existing, ct);
+                                await SaveChangesAsync(ct);
+                            }
+                        }
+                        else if ((duplicateHandling ?? "skip") == "error")
+                        {
+                            errorResults[i] = $"Duplicate printer: {printerDto.Name} already exists";
+                            continue;
+                        }
+                    }
+
+                    // Create the printer
+                    var createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
+                    await SaveChangesAsync(ct);
+                    createdPrinters.Add(createdDto);
+                    _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
+                }
+                catch (Exception ex)
+                {
+                    errorResults[i] = $"Failed to create printer: {ex.Message}";
+                    _logger.LogWarning($"[BulkCreate] Error creating printer at index {i}: {ex.Message}");
+                }
+            }
+
+            return new
+            {
+                importedCount = createdPrinters.Count,
+                skippedCount = skippedCount,
+                failureCount = errorResults.Count,
+                results = createdPrinters,
+                errors = errorResults.Count > 0 ? errorResults : null
+            };
+        }
     }
 }

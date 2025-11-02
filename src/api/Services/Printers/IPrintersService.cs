@@ -71,5 +71,8 @@ namespace Farm.Web.Api.Services.Printers
         Task<bool> StartPrintAsync(Guid id, string filename, CancellationToken ct);
         Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct);
         Task<string[]> GetFileListAsync(Guid id, CancellationToken ct);
+
+        // Bulk operations
+        Task<object> BulkCreatePrintersAsync(Farm.Web.Shared.CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
     }
 }

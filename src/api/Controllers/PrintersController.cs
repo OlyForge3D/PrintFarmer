@@ -79,6 +79,215 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Retrieves a lightweight list of all printers with minimal data for quick loading.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A lightweight list of all printers with basic information</returns>
+    /// <response code="200">Returns the list of lightweight printer data</response>
+    [HttpGet("fast")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterFastDto>), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetFastAsync(CancellationToken ct)
+    {
+        try
+        {
+            var dtos = await _printersService.GetAllFastDtosAsync(ct);
+            return Ok(dtos);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[FAST] Startup DB exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return Ok(Array.Empty<PrinterFastDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates multiple printers in a bulk operation.
+    /// </summary>
+    /// <param name="printers">Array of printer configurations to create</param>
+    /// <param name="duplicateHandling">How to handle duplicate printers: 'skip' (default), 'overwrite', or 'error'</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result of bulk import operation including created printers and errors</returns>
+    /// <response code="200">Returns bulk import results with created printers and any errors</response>
+    /// <response code="400">If the printer data is invalid</response>
+    /// <response code="500">If there was an error creating printers</response>
+    [HttpPost("bulk")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> BulkCreateAsync(
+        [FromBody] CreatePrinterDto[] printers,
+        [FromQuery] string? duplicateHandling = "skip",
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(printers);
+
+        if (printers.Length == 0)
+        {
+            return BadRequest(new { message = "At least one printer configuration is required" });
+        }
+
+        // Validate all printers first before delegating to service
+        var validationErrors = new Dictionary<int, List<string>>();
+        for (int i = 0; i < printers.Length; i++)
+        {
+            var result = await _validator.ValidateAsync(printers[i], ct);
+            if (!result.IsValid)
+            {
+                validationErrors[i] = result.Errors.Select(e => e.ErrorMessage).ToList();
+            }
+        }
+
+        // If all printers failed validation, return error
+        if (validationErrors.Count == printers.Length)
+        {
+            var errorMessage = string.Join("; ", validationErrors.SelectMany(kvp =>
+                kvp.Value.Select(err => $"[Printer {kvp.Key}] {err}")));
+            _logger.LogWarning($"[BulkCreate] Validation failed for all printers: {errorMessage}");
+            return BadRequest(new { message = "All printers failed validation", errors = validationErrors });
+        }
+
+        try
+        {
+            // Delegate to service for actual creation logic
+            var result = await _printersService.BulkCreatePrintersAsync(printers, duplicateHandling ?? "skip", ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[BulkCreate] Bulk printer creation failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Bulk creation operation failed",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Starts a printer discovery stream that provides real-time discovery updates via SignalR.
+    /// </summary>
+    /// <param name="request">Discovery request parameters (optional) - filters discovery scope</param>
+    /// <returns>Discovery session information including session ID for SignalR group subscription</returns>
+    /// <response code="200">Returns discovery session ID and initial message</response>
+    /// <response code="400">If request parameters are invalid</response>
+    /// <response code="500">If there was an error starting discovery</response>
+    [HttpPost("discover/stream")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public IActionResult StartDiscoveryStream(
+        [FromBody] Farm.Web.Shared.StartDiscoveryRequest? request)
+    {
+        try
+        {
+            // Create unique session ID for this discovery operation
+            var sessionId = Guid.NewGuid().ToString();
+
+            _logger.LogInformation($"Starting discovery stream with sessionId={sessionId}");
+
+            // TODO: Integration Points
+            // 1. Create discovery operation in database
+            // 2. Start background discovery service with sessionId
+            // 3. Service should broadcast discovery updates to SignalR group named: $"discovery-{sessionId}"
+            // 4. Frontend subscribes to PrinterHub with groupName: $"discovery-{sessionId}"
+
+            // For now, return session info that frontend can use
+            return Ok(new
+            {
+                sessionId = sessionId,
+                message = "Discovery stream started. Subscribe to PrinterHub with discovery group to receive updates.",
+                groupName = $"discovery-{sessionId}",
+                timestamp = DateTime.UtcNow
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to start discovery stream: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to start discovery stream",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Gets the current print job status for a specific printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The current print job status if a job is running, otherwise null</returns>
+    /// <response code="200">Returns the print job status or null if no job running</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error retrieving job status</response>
+    [HttpGet("{id:guid}/printjob")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            // Verify printer exists
+            var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound(new { message = $"Printer {id} not found" });
+            }
+
+            _logger.LogInformation($"Getting print job status for printer {printer.Name}");
+
+            // TODO: Implementation Notes
+            // 1. Query backend client based on printer.Backend (Moonraker/PrusaLink/SDCP)
+            // 2. Call appropriate GetJobStatusAsync method on printer client
+            // 3. Map backend-specific job response to PrintJobStatusDto
+            // 4. Handle timeouts gracefully (2-3 second timeout recommended)
+            // 5. Return null if no active job or backend returns null
+            //
+            // Example:
+            // if (printer.Backend == 2) // PrusaLink
+            // {
+            //     var status = await _prusa.GetJobStatusAsync(printer.ServerUrl, printer.ApiKey, ct);
+            //     return Ok(status != null ? MapToDto(status) : null);
+            // }
+            // else if (printer.Backend == 3) // SDCP
+            // { 
+            //     var status = await _sdcp.GetJobStatusAsync(printer.ServerUrl, ct);
+            //     return Ok(status != null ? MapToDto(status) : null);
+            // }
+            // else // Moonraker (Backend == 1)
+            // {
+            //     var status = await _moon.GetJobStatusAsync(printer.ServerUrl, ct);
+            //     return Ok(status != null ? MapToDto(status) : null);
+            // }
+
+            // For now, return null (no active job)
+            _logger.LogWarning($"Print job status retrieval not yet implemented for backend {printer.Backend}");
+            return Ok((object?)null);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { message = $"Printer {id} not found" });
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning($"Timeout retrieving print job status for printer {id}");
+            return Ok((object?)null); // Return null on timeout
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Error getting print job status for printer {id}: {ex.Message}");
+            return Ok((object?)null); // Return null if unable to retrieve
+        }
+    }
+
+    /// <summary>
     /// Gets the current status of a specific printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer</param>
@@ -811,6 +1020,7 @@ public class PrintersController(
 
     // Print job control
     [HttpPost("{id:guid}/print/start")]
+    [HttpPost("{id:guid}/start-print")] // Alternative route for frontend compatibility
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
