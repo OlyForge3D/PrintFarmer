@@ -2,7 +2,7 @@
 
 # test-user-scenario-complete.sh
 # Comprehensive test for user's exact deployment scenario:
-# - Architecture: host-network
+# - Architecture: microservices
 # - Database: SQL Server
 # - Workers: OrcaSlicer (1 instance)
 # - Integrations: Spoolman
@@ -17,7 +17,7 @@ TEST_DIR=$(mktemp -d)
 trap "rm -rf $TEST_DIR" EXIT
 
 echo "============================================================================"
-echo "TEST: Complete User Scenario - host-network + sqlserver + orcaslicer + spoolman"
+echo "TEST: Complete User Scenario - microservices + sqlserver + orcaslicer + spoolman"
 echo "============================================================================"
 echo ""
 
@@ -45,14 +45,14 @@ warn() {
 
 # Step 1: Generate compose file
 echo "Step 1: Generating Docker Compose with exact user configuration..."
-info "  Architecture: host-network"
+info "  Architecture: microservices"
 info "  Database: sqlserver"
 info "  Workers: orcaslicer (1 instance)"
 info "  Integrations: spoolman"
 echo ""
 
 if $COMPOSE_GENERATOR \
-    --architecture host-network \
+    --architecture microservices \
     --db-provider sqlserver \
     --addon-stacks orcaslicer,spoolman \
     --output-dir "$TEST_DIR" >/dev/null 2>&1; then
@@ -203,7 +203,7 @@ if [[ "$FAIL" -eq 0 ]]; then
     echo "✓ ALL TESTS PASSED - User scenario is valid!"
     echo ""
     echo "Your exact configuration generates a valid Docker Compose file:"
-    echo "  • Architecture: host-network"
+    echo "  • Architecture: microservices"
     echo "  • Database: SQL Server"
     echo "  • Workers: OrcaSlicer (1 instance)"
     echo "  • Integrations: Spoolman"

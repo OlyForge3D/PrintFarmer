@@ -62,7 +62,7 @@ Usage: $0 [OPTIONS]
 Generate deployment-specific Docker Compose configuration and copy required files.
 
 OPTIONS:
-    --architecture ARCH     Deployment architecture (monolithic|microservices|host-network)
+    --architecture ARCH     Deployment architecture (monolithic|microservices)
     --output-dir DIR        Output directory (default: repository root)
     --include-monitoring    Include monitoring stack
     --include-telemetry     Include telemetry/observability
@@ -82,9 +82,6 @@ EXAMPLES:
 
     # Generate with monitoring and telemetry
     $0 --architecture microservices --include-monitoring --include-telemetry
-
-    # Generate for host network mode without any slicer workers
-    $0 --architecture host-network --enable-orca-worker no
 EOF
 
 }
@@ -410,8 +407,10 @@ generate_compose() {
         "microservices")
             base_template="$TEMPLATES_DIR/docker-compose.microservices.yml"
             ;;
-        "host-network")
-            base_template="$TEMPLATES_DIR/docker-compose.host-network.yml"
+        *)
+            log_error "Unsupported architecture: $arch"
+            log_error "Valid options: monolithic, microservices"
+            return 1
             ;;
     esac
     
@@ -428,7 +427,7 @@ generate_compose() {
     
     # Replace the database service with provider-specific configuration
     # Check if architecture needs a database service (skip monolithic as it uses SQLite)
-    if [[ "$arch" == "microservices" || "$arch" == "host-network" ]]; then
+    if [[ "$arch" == "microservices" ]]; then
         # Generate provider-specific database config
         local db_config
         if ! db_config="$(generate_database_config)"; then
@@ -538,27 +537,6 @@ generate_compose() {
         log_info "Successfully merged addon services into compose file"
     fi
 
-    # If we're generating for host-network mode, ensure any connection strings
-    # that reference a Docker service name (e.g., 'database', 'postgres', 'mysql', 'sqlserver')
-    # are rewritten to use localhost so the API can connect to host network services.
-    if [[ "$arch" == "host-network" ]]; then
-        log_info "Host network mode detected — rewriting connection string hosts to 'localhost' where applicable"
-        # Use Python to perform safe, whole-file replacements for common provider host keys
-    python3 - "$compose_file" <<'PY' > "$compose_file".tmp && mv "$compose_file".tmp "$compose_file" || true
-import io,sys,re
-path = sys.argv[1]
-txt = open(path,'r').read()
-# Replace Host=database or Host=postgres etc. with Host=localhost
-txt = re.sub(r'Host=(?:database|postgres|postgresql)[;:]', 'Host=localhost;', txt, flags=re.I)
-# Replace Server=mysql/sqlserver with Server=localhost
-txt = re.sub(r'Server=(?:mysql|sqlserver)[,;:]', 'Server=localhost;', txt, flags=re.I)
-# Also handle patterns where the connection string uses host= or server= in mixed case
-txt = re.sub(r'host=(?:database|postgres|postgresql)[;:]', 'host=localhost;', txt, flags=re.I)
-txt = re.sub(r'server=(?:mysql|sqlserver)[,;:]', 'server=localhost;', txt, flags=re.I)
-sys.stdout.write(txt)
-PY
-    fi
-    
     # Validate the generated compose file when Docker Compose is available
     local compose_validate_cmd=""
     if docker compose version >/dev/null 2>&1; then
@@ -594,7 +572,7 @@ PY
     # while keeping other services on the bridge network. Use a small Python snippet
     # to perform the rewriting in a robust and portable way (avoids awk dialect issues).
     if [[ "$arch" == "microservices" ]]; then
-        log_info "Applying microservices host-mode adjustments: API -> host network, nginx -> extra_hosts host-gateway"
+        log_info "Applying microservices adjustments: API -> host network, frontend on bridge network"
 
     python3 - "$compose_file" <<'PY'
 import sys
@@ -805,7 +783,7 @@ show_dry_run() {
     fi
 
     case "$arch" in
-        "monolithic"|"microservices"|"host-network")
+        "monolithic"|"microservices")
             echo "  - Dockerfile.multistage (efficient multi-stage build for all services)"
             if [[ "$need_orca_worker" == "true" ]]; then
                 echo "    • Includes OrcaSlicer worker build target"
@@ -851,12 +829,12 @@ main() {
     
     # Validate architecture
     case "$ARCHITECTURE" in
-        monolithic|microservices|host-network)
+        monolithic|microservices)
             : # Valid architecture
             ;;
         *)
             log_error "Invalid architecture: $ARCHITECTURE"
-            log_error "Valid options: monolithic, microservices, host-network"
+            log_error "Valid options: monolithic, microservices"
             return 1
             ;;
     esac

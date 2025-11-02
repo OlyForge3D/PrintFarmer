@@ -45,8 +45,8 @@ run_deployment_test() {
         local arch_value="monolithic"
         if grep -q "ARCHITECTURE=microservices" "$original_dir/$config_name" 2>/dev/null; then
             arch_value="microservices"
-        elif grep -q "ARCHITECTURE=host-network" "$original_dir/$config_name" 2>/dev/null; then
-            arch_value="host-network"
+        elif grep -q "ARCHITECTURE=microservices" "$original_dir/$config_name" 2>/dev/null; then
+            arch_value="microservices"
         fi
         
         # Copy config to repo root for deployment script
@@ -174,15 +174,15 @@ EOF
     pass_test
 }
 
-# Test host-network deployment pipeline
+# Test microservices deployment pipeline
 test_host_network_deployment_pipeline() {
-    start_test "complete host-network deployment pipeline"
+    start_test "complete microservices deployment pipeline"
     
     cd "$TEST_TEMP_DIR"
     
-    # Create host-network config
+    # Create microservices config
     cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=host-network
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 NETWORK_MODE=host
 API_PORT=5245
@@ -201,7 +201,7 @@ EOF
     assert_contains "$output" "Setup completed successfully" "Host-network pipeline should complete"
     
     # Generate files separately for content validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture host-network --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Should generate docker-compose.yml via compose generator"
     local compose_content=$(cat "docker-compose.yml")
     assert_contains "$compose_content" "network_mode:" "Should use host networking"
@@ -389,7 +389,7 @@ test_network_mode_combinations() {
     
     cd "$TEST_TEMP_DIR"
     
-    local architectures=("monolithic" "microservices" "host-network")
+    local architectures=("monolithic" "microservices" "microservices")
     
     for arch in "${architectures[@]}"; do
         
@@ -405,7 +405,7 @@ test_network_mode_combinations() {
         assert_contains "$output" "Setup completed successfully" "Should deploy $arch successfully"
         
         # Validate network configuration in compose file
-        if [[ "$arch" == "host-network" ]]; then
+        if [[ "$arch" == "microservices" ]]; then
             local compose_content=$(cat "docker-compose.yml")
             assert_contains "$compose_content" "network_mode:" "Host network mode should be configured"
         fi

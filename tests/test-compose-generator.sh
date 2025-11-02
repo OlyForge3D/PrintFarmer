@@ -35,7 +35,7 @@ test_help_output() {
     
     assert_contains "$output" "Usage:" "Help should contain usage information"
     assert_contains "$output" "--architecture" "Help should mention architecture option"
-    assert_contains "$output" "monolithic|microservices|host-network" "Help should list architecture options"
+    assert_contains "$output" "monolithic|microservices" "Help should list architecture options"
     
     pass_test
 }
@@ -124,11 +124,11 @@ test_microservices_generation() {
     pass_test
 }
 
-# Test host-network architecture generation
+# Test microservices architecture generation
 test_host_network_generation() {
-    start_test "host-network architecture generation"
+    start_test "microservices architecture generation"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture host-network --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
     
     # Check required files were created
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml"
@@ -148,21 +148,20 @@ test_host_network_generation() {
     # Validate multistage build
     assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     
-    # Validate environment variables for host network
+    # Validate microservices configuration
     assert_contains "$compose_content" "DEPLOYMENT_MODE=microservices" "Should set microservices deployment mode"
-    assert_contains "$compose_content" "ASPNETCORE_URLS" "Should configure ASP.NET Core URLs"
-    assert_contains "$compose_content" "DOCKER_HOST_NETWORK=true" "Should set host network flag"
-    assert_contains "$compose_content" "NETWORK_MODE=host" "Should set network mode environment"
+    assert_contains "$compose_content" "network_mode:" "API should use host network mode"
     
-    # Validate networks still exist for non-host services
-    assert_contains "$compose_content" "networks:" "Should have networks for non-host services"
+    # Validate networks exist for bridge network services
+    assert_contains "$compose_content" "networks:" "Should have networks for bridge network services"
     assert_contains "$compose_content" "printfarmer-network" "Should define network for other services"
     
     # Validate no Redis references
     assert_not_contains "$compose_content" "redis:" "Should not contain Redis service"
     assert_not_contains "$compose_content" "REDIS_CONNECTION" "Should not contain Redis connection string"
     
-    # Validate mixed port configuration (some services use host networking, others use ports)
+    # Validate frontend has no host port mapping
+    assert_not_contains "$compose_content" 'ports:.*8080.*frontend' "Frontend should not map host port"
     assert_contains "$compose_content" "ports:" "Should have port mapping for non-host services"
     
     pass_test
@@ -617,7 +616,7 @@ test_no_prusaslicer_references() {
 test_architecture_database_combinations() {
     start_test "all architecture and database combinations"
     
-    local architectures=("monolithic" "microservices" "host-network")
+    local architectures=("monolithic" "microservices" "microservices")
     local databases=("postgres" "sqlserver" "mysql")
     
     for arch in "${architectures[@]}"; do
@@ -633,7 +632,7 @@ test_architecture_database_combinations() {
             assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $arch + $db"
             
             # Architecture-specific checks
-            if [ "$arch" = "host-network" ]; then
+            if [ "$arch" = "microservices" ]; then
                 assert_contains "$compose_content" "network_mode:" "Host-network should use host networking for $db"
             fi
         done
@@ -646,7 +645,7 @@ test_architecture_database_combinations() {
 test_architecture_addon_combinations() {
     start_test "architecture with all addons combinations"
     
-    local architectures=("monolithic" "microservices" "host-network")
+    local architectures=("monolithic" "microservices" "microservices")
     
     for arch in "${architectures[@]}"; do
         local temp_full_dir="$TEST_TEMP_DIR/test-$arch-full"
@@ -706,7 +705,7 @@ test_generated_compose_file_is_valid_yaml() {
     
     # Generate for all architectures AND all database providers
     # This ensures database service YAML is properly formatted for all combinations
-    local architectures=("monolithic" "microservices" "host-network")
+    local architectures=("monolithic" "microservices" "microservices")
     local providers=("postgres" "sqlserver" "mysql")
     
     for arch in "${architectures[@]}"; do
@@ -716,7 +715,7 @@ test_generated_compose_file_is_valid_yaml() {
             assert_file_exists "$TEST_TEMP_DIR/test-$arch/docker-compose.yml" "Should create compose file for $arch"
             assert_command_success "docker compose --file $TEST_TEMP_DIR/test-$arch/docker-compose.yml config --quiet" "Compose file for $arch should pass validation"
         else
-            # Microservices and host-network need database provider validation
+            # Microservices and microservices need database provider validation
             for provider in "${providers[@]}"; do
                 local test_subdir="$TEST_TEMP_DIR/test-${arch}-${provider}"
                 assert_command_success "$COMPOSE_GENERATOR --architecture $arch --db-provider $provider --output-dir $test_subdir" "Should generate $arch architecture with $provider database"
@@ -838,14 +837,14 @@ test_database_volume_mount_correctness() {
 }
 
 # Test: host_network_localhost_binding (PHASE 1 - HIGH PRIORITY)
-# Verifies that host-network architecture binds services to localhost
+# Verifies that microservices architecture binds services to localhost
 # Ensures API and other services can communicate via localhost, not service names
 test_host_network_localhost_binding() {
-    start_test "host-network localhost binding"
+    start_test "microservices localhost binding"
     
     cd "$TEST_TEMP_DIR"
     
-    local arch="host-network"
+    local arch="microservices"
     local test_dir="$TEST_TEMP_DIR/test-localhost-$arch"
     
     assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $test_dir" "Should generate $arch architecture"
@@ -853,7 +852,7 @@ test_host_network_localhost_binding() {
     local compose_file="$test_dir/docker-compose.yml"
     local yaml_content=$(cat "$compose_file")
     
-    # In host-network mode, services should be accessible via localhost
+    # In microservices mode, services should be accessible via localhost
     # Check that the compose file explicitly configures for host network access
     
     if echo "$yaml_content" | grep -q "network_mode.*host"; then
@@ -1427,16 +1426,16 @@ test_output_file_permissions() {
 
 # Test: host_network_sqlserver_configuration (PHASE 3 - REGRESSION TEST)
 # Regression test for bug: duplicate volumes keys in generated compose files
-# Configuration: host-network architecture + sqlserver database provider
+# Configuration: microservices architecture + sqlserver database provider
 # Bug Report: yaml: unmarshal errors: line 148: mapping key "volumes" already defined at line 25
 # Root Cause: ruamel.yaml detection was failing, causing fallback awk merge to create duplicate YAML keys
 test_host_network_sqlserver_configuration() {
-    start_test "host-network + sqlserver configuration (duplicate volumes regression)"
+    start_test "microservices + sqlserver configuration (duplicate volumes regression)"
     
     cd "$TEST_TEMP_DIR"
     
     # Generate configuration with the exact combination that triggered the bug
-    assert_command_success "$COMPOSE_GENERATOR --architecture host-network --db-provider sqlserver --output-dir $TEST_TEMP_DIR/test-host-net-ss"
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider sqlserver --output-dir $TEST_TEMP_DIR/test-host-net-ss"
     
     local compose_file="$TEST_TEMP_DIR/test-host-net-ss/docker-compose.yml"
     
@@ -1505,15 +1504,15 @@ test_host_network_sqlserver_configuration() {
     pass_test
 }
 
-# Test complete user scenario: host-network + sqlserver + orcaslicer + spoolman
+# Test complete user scenario: microservices + sqlserver + orcaslicer + spoolman
 test_complete_user_scenario() {
-    start_test "complete user scenario: host-network+sqlserver+orcaslicer+spoolman"
+    start_test "complete user scenario: microservices+sqlserver+orcaslicer+spoolman"
     
     local test_dir="$TEST_TEMP_DIR/user-scenario-test"
     mkdir -p "$test_dir"
     
     # Set exact user configuration
-    export ARCHITECTURE="host-network"
+    export ARCHITECTURE="microservices"
     export DB_PROVIDER="sqlserver"
     export ENABLE_ORCA_WORKER="yes"
     export ORCA_WORKER_COUNT="1"
@@ -1525,7 +1524,7 @@ test_complete_user_scenario() {
     # Generate compose file
     test_info "Generating compose file with exact user configuration..."
     assert_command_success "$COMPOSE_GENERATOR \
-        --architecture host-network \
+        --architecture microservices \
         --db-provider sqlserver \
         --addon-stacks orcaslicer,spoolman \
         --output-dir $test_dir"
@@ -1597,7 +1596,7 @@ test_complete_user_scenario() {
     fi
     
     # TEST 4: Architecture-specific validation
-    test_info "TEST 4: Validating host-network architecture configuration..."
+    test_info "TEST 4: Validating microservices architecture configuration..."
     local compose_content=$(cat "$compose_file")
     
     # Check for network_mode: host
@@ -1656,8 +1655,8 @@ test_complete_user_scenario() {
     local env_file="$test_dir/.env"
     if [[ -f "$env_file" ]]; then
         # Check required variables
-        if grep -q "ARCHITECTURE=host-network" "$env_file"; then
-            test_info "✓ ARCHITECTURE=host-network in .env"
+        if grep -q "ARCHITECTURE=microservices" "$env_file"; then
+            test_info "✓ ARCHITECTURE=microservices in .env"
         else
             test_info "⚠ ARCHITECTURE not found in .env (may be set via compose file)"
         fi
@@ -1724,7 +1723,7 @@ run_all_tests() {
     setup
     
     # CRITICAL: Check dependencies FIRST
-    # If ruamel.yaml is missing, all microservices/host-network tests will fail
+    # If ruamel.yaml is missing, all microservices/microservices tests will fail
     test_ruamel_yaml_dependency_check
     
     test_help_output

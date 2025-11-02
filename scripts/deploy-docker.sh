@@ -4136,14 +4136,8 @@ main() {
     
     # Determine output directory (CLI option or default to current directory)
     local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
-    
-    local generator_architecture="$ARCHITECTURE"
-    if [ "$ARCHITECTURE" = "microservices" ] && [ "${NETWORK_MODE:-bridge}" = "host" ]; then
-        generator_architecture="host-network"
-        print_info "Host network mode detected – generating host-network compose configuration"
-    fi
 
-    if generate_deployment_config "$generator_architecture" "$include_monitoring" "$include_telemetry" "$include_security" "$include_registry" "$output_dir"; then
+    if generate_deployment_config "$ARCHITECTURE" "$include_monitoring" "$include_telemetry" "$include_security" "$include_registry" "$output_dir"; then
         print_success "Using new compose generator"
     else
         print_warning "Falling back to legacy compose generation"
