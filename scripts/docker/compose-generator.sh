@@ -732,21 +732,34 @@ if start is not None:
     
     # When using network_mode: "host", networks: section must be removed
     # (Docker doesn't allow both - they're mutually exclusive)
-    new_block = [l for l in new_block if not l.lstrip().startswith('networks:')]
-    # Also remove the specific network entries after networks: (indented)
+    # Use a cleaner approach: remove the entire networks: section and its contents
     filtered = []
-    skip_networks_block = False
-    for i, l in enumerate(new_block):
-        if l.lstrip().startswith('networks:'):
-            skip_networks_block = True
+    i = 0
+    while i < len(new_block):
+        line = new_block[i]
+        # Check if this line defines "networks:" as a key (must be followed by : with optional value)
+        stripped = line.lstrip()
+        if stripped.startswith('networks:') and not stripped.startswith('#'):
+            # Skip this line and all following indented lines that belong to networks
+            i += 1
+            while i < len(new_block):
+                next_line = new_block[i]
+                next_stripped = next_line.lstrip()
+                # Stop skipping when we hit an empty line or a line at same/lower indentation that's a new key
+                if not next_stripped:
+                    i += 1
+                    continue
+                # If line starts with spaces (indented under networks:), skip it
+                if next_line.startswith('    ') and next_stripped and not next_stripped[0].isalpha():
+                    i += 1
+                    continue
+                # If it's a new key at the same level, stop skipping
+                if next_stripped[0].isalpha() and ':' in next_line:
+                    break
+                i += 1
             continue
-        elif skip_networks_block and (l.lstrip() == '' or (len(l) - len(l.lstrip()) > 4 and l[0].isspace())):
-            # Skip indented lines under networks:
-            if l.lstrip() != '' and l[0].isspace():
-                continue
-            else:
-                skip_networks_block = False
-        filtered.append(l)
+        filtered.append(line)
+        i += 1
     new_block = filtered
     
     # ensure network_mode: "host" exists under api
@@ -917,6 +930,30 @@ main() {
     log_info "Docker Compose Generator for PrintFarmer"
     log_info "Architecture: $ARCHITECTURE"
     log_info "Output directory: $OUTPUT_DIR"
+    
+    # Validate architecture
+    case "$ARCHITECTURE" in
+        monolithic|microservices|host-network)
+            : # Valid architecture
+            ;;
+        *)
+            log_error "Invalid architecture: $ARCHITECTURE"
+            log_error "Valid options: monolithic, microservices, host-network"
+            return 1
+            ;;
+    esac
+    
+    # Validate database provider
+    case "$DB_PROVIDER" in
+        postgres|sqlserver|mysql)
+            : # Valid provider
+            ;;
+        *)
+            log_error "Invalid database provider: $DB_PROVIDER"
+            log_error "Valid options: postgres, sqlserver, mysql"
+            return 1
+            ;;
+    esac
     
     if [[ "$DRY_RUN" == "true" ]]; then
         show_dry_run "$ARCHITECTURE"
