@@ -743,6 +743,46 @@ EOF
     pass_test
 }
 
+# Test: password_not_logged_to_stdout (PHASE 1 - HIGH PRIORITY)
+test_password_not_logged_to_stdout() {
+    start_test "password not logged to stdout"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Create config for postgres
+    cat > .deploy-config << EOF
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+EOF
+    
+    # Run deployment script and capture stdout
+    local output
+    output=$(timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true)
+    
+    # Check that env file was created
+    assert_file_exists ".env.microservices" "Should create .env.microservices"
+    
+    # Get the actual password from env file
+    local env_content
+    env_content=$(cat .env.microservices)
+    local actual_password
+    actual_password=$(echo "$env_content" | grep "POSTGRES_PASSWORD=" | cut -d= -f2 | head -1 || echo "")
+    
+    # Verify password is generated
+    assert_not_equals "" "$actual_password" "Password should be generated"
+    
+    # The plain password should NOT appear in stdout (security risk)
+    # It should only appear in the .env file
+    if [ -n "$actual_password" ]; then
+        assert_not_contains "$output" "$actual_password" "Plain password should NOT be logged to stdout"
+    fi
+    
+    # Verify masked version appears in output instead
+    assert_contains "$output" "***" "Output should show masked password indicator"
+    
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -753,6 +793,7 @@ run_all_tests() {
     test_batch_mode
     test_config_file_generation
     test_environment_variables
+    test_password_not_logged_to_stdout
     test_no_redis_configuration
     test_no_prusaslicer_configuration
     test_port_validation

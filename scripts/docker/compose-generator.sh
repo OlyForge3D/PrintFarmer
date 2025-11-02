@@ -729,6 +729,26 @@ if start is not None:
     block = txt[start:end]
     # remove ports entries under api
     new_block = remove_ports(block)
+    
+    # When using network_mode: "host", networks: section must be removed
+    # (Docker doesn't allow both - they're mutually exclusive)
+    new_block = [l for l in new_block if not l.lstrip().startswith('networks:')]
+    # Also remove the specific network entries after networks: (indented)
+    filtered = []
+    skip_networks_block = False
+    for i, l in enumerate(new_block):
+        if l.lstrip().startswith('networks:'):
+            skip_networks_block = True
+            continue
+        elif skip_networks_block and (l.lstrip() == '' or (len(l) - len(l.lstrip()) > 4 and l[0].isspace())):
+            # Skip indented lines under networks:
+            if l.lstrip() != '' and l[0].isspace():
+                continue
+            else:
+                skip_networks_block = False
+        filtered.append(l)
+    new_block = filtered
+    
     # ensure network_mode: "host" exists under api
     if not any(l.strip().startswith('network_mode:') for l in new_block[1:3]):
         # insert after header line
