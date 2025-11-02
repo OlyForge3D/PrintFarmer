@@ -13,7 +13,6 @@ All main compose files use `database` service with generic `printfarmer-database
 | Compose File | Service Name | Container Name | Purpose |
 |--------------|--------------|----------------|---------|
 | `docker-compose.microservices.yml` | `database` | `printfarmer-database` | Microservices (PostgreSQL or SQL Server) |
-| `docker-compose.host-network.yml` | `database` | `printfarmer-database` | Host network (PostgreSQL or SQL Server) |
 | `docker-compose.override.yml` | `database` | `printfarmer-database` | Development overrides |
 
 ### **Multi-Database Testing** (databases.yml only)
@@ -89,7 +88,7 @@ This approach gives you the flexibility to use SQL Server in production while ma
 
 **The confusion explained:**
 
-1. **Main Deployment Files** (`microservices.yml`, `host-network.yml`):
+1. **Main Deployment Files** (`microservices.yml`):
    - **Purpose**: Production/staging deployments with ONE database
    - **Container**: `printfarmer-database` (generic name)
    - **Benefit**: Same container name regardless of PostgreSQL vs SQL Server
