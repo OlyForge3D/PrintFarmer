@@ -213,6 +213,35 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Warn "Git still not present. Please install Git for Windows and re-run script." }
 } else { Write-Info "git present: $(git --version)" }
 
+# Verify/Install Python3 and ruamel.yaml (CRITICAL for Docker Compose YAML generation)
+# ruamel.yaml is required by compose-generator.sh for proper YAML handling
+if (-not (Get-Command python3 -ErrorAction SilentlyContinue)) {
+    Write-Info "Python3 not found — attempting winget install"
+    if ($haveWinget) {
+        try { winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements -h } catch { Write-Warn "winget python3 install failed" }
+    }
+    if (-not (Get-Command python3 -ErrorAction SilentlyContinue)) { Write-Warn "Python3 still not present. Please install Python 3 from https://www.python.org/downloads/ and re-run script." }
+} else { Write-Info "python3 present: $(python3 --version)" }
+
+# Install ruamel.yaml Python module (CRITICAL DEPENDENCY)
+if (Get-Command python3 -ErrorAction SilentlyContinue) {
+    try {
+        & python3 -c "from ruamel.yaml import YAML" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Info "ruamel.yaml already installed"
+        } else {
+            Write-Info "Installing Python module ruamel.yaml (CRITICAL for Docker deployment)..."
+            & python3 -m pip install --user ruamel.yaml
+        }
+    } catch {
+        Write-Info "Installing Python module ruamel.yaml (CRITICAL for Docker deployment)..."
+        & python3 -m pip install --user ruamel.yaml
+    }
+} else {
+    Write-Warn "Python3 not available; cannot install ruamel.yaml. Please install Python3 and re-run script."
+}
+
+
 Write-Success "Bootstrap complete. Run these commands as a normal user to verify:"
 Write-Host "    dotnet --info"
 Write-Host "    node --version"

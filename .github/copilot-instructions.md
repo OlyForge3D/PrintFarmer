@@ -280,6 +280,12 @@ npm run dev
 
 9. **Database initialization**: The app includes automatic database safety migrations on startup. No manual database setup required.
 
+10. **Missing ruamel.yaml Python module (CRITICAL)**: The deployment scripts require the `ruamel.yaml` Python module for proper Docker Compose YAML generation. Without it, database service configuration will be malformed and deployments will fail with "services must be a mapping" error.
+    - **Fix**: `pip install ruamel.yaml` or `apt-get install python3-ruamel.yaml`
+    - **Details**: See `docs/RUAMEL_YAML_DEPENDENCY.md`
+    - **Impact**: Microservices and host-network architectures with non-SQLite databases (PostgreSQL, SQL Server, MySQL) will fail
+    - **Prevention**: Tests check for this dependency and fail loudly if missing
+
 ## Project Architecture & Layout
 
 **IMPORTANT**: This is a separate API + React frontend architecture (migrated from Blazor WebAssembly).

@@ -665,6 +665,30 @@ test_architecture_addon_combinations() {
     pass_test
 }
 
+# Test: ruamel_yaml_dependency_check (PHASE 1 - CRITICAL)
+# Verifies that ruamel.yaml Python module is available
+# This is CRITICAL because without it, database service YAML will be malformed
+test_ruamel_yaml_dependency_check() {
+    start_test "ruamel.yaml Python module dependency check"
+    
+    # Check if Python3 is available
+    if ! command -v python3 >/dev/null 2>&1; then
+        fail_test "python3 is not available (required for compose generation)"
+        return 1
+    fi
+    
+    # Check if ruamel.yaml module is installed
+    if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+        fail_test "Python module 'ruamel.yaml' is not installed (CRITICAL - required for proper YAML generation)"
+        test_info "To fix: pip install ruamel.yaml"
+        test_info "Or: apt-get install python3-ruamel.yaml (Debian/Ubuntu)"
+        return 1
+    fi
+    
+    test_info "✓ Python3 and ruamel.yaml are available"
+    pass_test
+}
+
 # Test: generated_compose_file_is_valid_yaml (PHASE 1 - HIGH PRIORITY)
 test_generated_compose_file_is_valid_yaml() {
     start_test "generated compose file is valid YAML"
@@ -1698,6 +1722,10 @@ test_complete_user_scenario() {
 # Run all tests
 run_all_tests() {
     setup
+    
+    # CRITICAL: Check dependencies FIRST
+    # If ruamel.yaml is missing, all microservices/host-network tests will fail
+    test_ruamel_yaml_dependency_check
     
     test_help_output
     test_invalid_architecture

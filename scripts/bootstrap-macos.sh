@@ -86,6 +86,23 @@ else
   print "git present: $(git --version)"
 fi
 
+# Python3 and ruamel.yaml (CRITICAL for Docker Compose YAML generation)
+# ruamel.yaml is required by compose-generator.sh for proper YAML handling
+if ! command -v python3 >/dev/null 2>&1; then
+  print "Installing Python3 via Homebrew"
+  run_priv "brew install python3"
+else
+  print "Python3 present: $(python3 --version)"
+fi
+
+# Install ruamel.yaml Python module (CRITICAL DEPENDENCY)
+if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+  print "Installing Python module ruamel.yaml (CRITICAL for Docker deployment)..."
+  python3 -m pip install --user ruamel.yaml || run_priv "pip3 install ruamel.yaml"
+else
+  print "ruamel.yaml already installed"
+fi
+
 # Try Homebrew dotnet first (may not have exact pinned versions). If not available
 # or if you prefer a pinned version, use the repo-local dotnet-install script.
 if ! command -v dotnet >/dev/null 2>&1; then

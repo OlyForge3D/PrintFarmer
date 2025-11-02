@@ -430,74 +430,69 @@ generate_compose() {
     # Check if architecture needs a database service (skip monolithic as it uses SQLite)
     if [[ "$arch" == "microservices" || "$arch" == "host-network" ]]; then
         # Generate provider-specific database config
-        local db_config python_succeeded=false
+        local db_config
         if ! db_config="$(generate_database_config)"; then
             log_error "Failed to generate database configuration"
             return 1
         fi
         
-        # Use Python YAML-aware replacement to avoid awk escaping issues
-        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-replace-db.py" ]]; then
-            local temp_replaced py_error
-            temp_replaced="$(mktemp)"
-            py_error="$(mktemp)"
-            if python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
-                # Verify Python succeeded and produced output
-                if [[ -s "$temp_replaced" ]]; then
-                    mv "$temp_replaced" "$compose_file"
-                    log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration (Python merge)"
-                    python_succeeded=true
-                else
-                    log_warning "Python produced empty output, using AWK fallback"
-                    rm -f "$temp_replaced"
-                fi
-            else
-                log_warning "Python-based database replacement failed; attempting fallback"
-                if [[ -s "$py_error" ]]; then
-                    log_warning "Python error details: $(head -1 "$py_error")"
-                fi
-                rm -f "$temp_replaced" "$py_error"
-                # Fall through to awk-based approach below
-            fi
+        # CRITICAL: Check for required dependencies BEFORE attempting any replacements
+        # Python3 is required to properly handle YAML structure and indentation
+        if ! command -v python3 >/dev/null 2>&1; then
+            log_error "FATAL: python3 is required for database service configuration"
+            log_error "       Please install Python 3 to continue"
+            log_error "       Installation: apt-get install python3 (Debian/Ubuntu) or equivalent"
+            return 1
         fi
         
-        # Fallback: awk-based replacement (when Python unavailable or fails)
-        if [[ "$python_succeeded" == "false" ]]; then
-            log_info "Using AWK fallback for database service replacement"
-            local temp_before temp_after temp_new_compose
-            temp_before="$(mktemp)"
-            temp_after="$(mktemp)"
-            temp_new_compose="$(mktemp)"
-            
-            # Split the compose file: everything before database service, and everything after
-            awk '/^  database:/{exit} {print}' "$compose_file" > "$temp_before"
-            
-            # Find everything after the database service (skip until next service or volumes/networks)
-            awk '
-            BEGIN { found_db=0; skip=0 }
-            /^  database:/ { found_db=1; skip=1; next }
-            found_db && skip && /^  [a-zA-Z]/ { skip=0 }
-            found_db && skip && /^(volumes|networks|version):/ { skip=0 }
-            found_db && !skip { print }
-            ' "$compose_file" > "$temp_after"
-            
-            # Combine: before + new database config + after
-            cat "$temp_before" > "$temp_new_compose"
-            echo "$db_config" >> "$temp_new_compose"
-            cat "$temp_after" >> "$temp_new_compose"
-            
-            # Replace the original file
-            if ! mv "$temp_new_compose" "$compose_file"; then
-                log_error "Failed to update compose file with new database configuration"
-                rm -f "$temp_before" "$temp_after" "$temp_new_compose"
-                return 1
-            fi
-            
-            # Clean up temporary files
-            rm -f "$temp_before" "$temp_after"
-            
-            log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration (AWK fallback)"
+        # CRITICAL: ruamel.yaml is required for proper YAML handling
+        # Check if the Python module is available
+        if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+            log_error "FATAL: Python module 'ruamel.yaml' is not installed"
+            log_error "       This module is REQUIRED for proper Docker Compose YAML generation"
+            log_error "       Installation: pip install ruamel.yaml"
+            log_error "       Or for system-wide: apt-get install python3-ruamel.yaml (Debian/Ubuntu)"
+            return 1
         fi
+        
+        # CRITICAL: Verify the Python replacement script exists
+        if [[ ! -f "$SCRIPT_DIR/compose-replace-db.py" ]]; then
+            log_error "FATAL: Python script not found: $SCRIPT_DIR/compose-replace-db.py"
+            log_error "       This script is required for database service configuration"
+            return 1
+        fi
+        
+        # Now perform the Python-based YAML replacement
+        # There is NO FALLBACK - if this fails, we fail loudly so users know there's a problem
+        local temp_replaced py_error
+        temp_replaced="$(mktemp)"
+        py_error="$(mktemp)"
+        
+        if ! python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
+            log_error "FATAL: Failed to generate database configuration"
+            log_error "       Error details:"
+            cat "$py_error" | sed 's/^/         /' >&2
+            rm -f "$temp_replaced" "$py_error"
+            return 1
+        fi
+        
+        # Verify Python produced valid output
+        if [[ ! -s "$temp_replaced" ]]; then
+            log_error "FATAL: Python script produced empty output"
+            log_error "       This indicates a problem with the YAML generation"
+            rm -f "$temp_replaced" "$py_error"
+            return 1
+        fi
+        
+        # Replace the original compose file
+        if ! mv "$temp_replaced" "$compose_file"; then
+            log_error "FATAL: Failed to update compose file with generated configuration"
+            rm -f "$temp_replaced" "$py_error"
+            return 1
+        fi
+        
+        rm -f "$py_error"
+        log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
     fi
 
     # Merge addon services into the compose file

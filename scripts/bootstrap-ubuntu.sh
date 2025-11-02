@@ -105,6 +105,23 @@ else
   print "git already installed: $(git --version)"
 fi
 
+# Install Python3 and ruamel.yaml (CRITICAL for Docker Compose YAML generation)
+# ruamel.yaml is required by compose-generator.sh for proper YAML handling
+if ! command -v python3 >/dev/null 2>&1; then
+  print "Installing Python3..."
+  run_priv "apt-get install -y python3 python3-pip"
+else
+  print "Python3 already installed: $(python3 --version)"
+fi
+
+# Install ruamel.yaml Python module (CRITICAL DEPENDENCY)
+if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+  print "Installing Python module ruamel.yaml (CRITICAL for Docker deployment)..."
+  run_priv "apt-get install -y python3-ruamel.yaml || pip3 install ruamel.yaml"
+else
+  print "ruamel.yaml already installed"
+fi
+
 # Install dotnet 9 using the Microsoft package repo and preferred fixed version.
 # If the bundled `dotnet-install.sh` script is present in the repo, fall back to it as a last resort.
 if ! command -v dotnet >/dev/null 2>&1; then
