@@ -2395,17 +2395,17 @@ EOF
     # If DB_PROVIDER is empty, avoid writing provider-specific connection keys
     case "${DB_PROVIDER:-}" in
         postgres)
-            echo "ConnectionStrings__Postgres=$CONNECTION_STRING" >> "$ENV_FILE"
+            echo "ConnectionStrings__Postgres=\"$CONNECTION_STRING\"" >> "$ENV_FILE"
             ;;
         sqlserver)
-            echo "ConnectionStrings__SqlServer=$CONNECTION_STRING" >> "$ENV_FILE"
+            echo "ConnectionStrings__SqlServer=\"$CONNECTION_STRING\"" >> "$ENV_FILE"
             ;;
         mysql)
-            echo "ConnectionStrings__MySql=$CONNECTION_STRING" >> "$ENV_FILE"
+            echo "ConnectionStrings__MySql=\"$CONNECTION_STRING\"" >> "$ENV_FILE"
             ;;
         *) ;;
     esac
-    echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
+    echo "ConnectionStrings__Default=\"$CONNECTION_STRING_TO_WRITE\"" >> "$ENV_FILE"
     
     cat >> "$ENV_FILE" << EOF
 

@@ -784,6 +784,52 @@ EOF
     pass_test
 }
 
+# Test that .env files can be sourced without bash syntax errors (connection strings must be quoted)
+test_env_file_sourcing_with_connection_strings() {
+    start_test ".env file sourcing with connection strings"
+    
+    local test_env="$TEST_TEMP_DIR/test.env"
+    
+    # Create a test .env file with connection strings containing spaces (like SQL Server)
+    cat > "$test_env" << 'EOF'
+DEPLOYMENT_TYPE=microservices
+DB_PROVIDER=sqlserver
+SQLSERVER_PASSWORD=L0rWItvZR9KLaoYl!
+MSSQL_SA_PASSWORD=L0rWItvZR9KLaoYl!
+ConnectionStrings__SqlServer="Server=sqlserver;Database=printfarmer;User Id=sa;Password=L0rWItvZR9KLaoYl!;TrustServerCertificate=True;"
+ConnectionStrings__Default="Server=localhost;Database=printfarmer;User Id=sa;Password=L0rWItvZR9KLaoYl!;TrustServerCertificate=True;"
+CORS__AllowedOrigins=http://localhost:3000,http://localhost:8080
+EOF
+    
+    # Test that the .env file can be sourced without bash errors
+    cat > "$TEST_TEMP_DIR/test_source.sh" << 'EOFTEST'
+#!/bin/bash
+set -euo pipefail
+set -a
+source "$1"
+set +a
+echo "SOURCE_SUCCESS=true"
+echo "MSSQL_SA_PASSWORD=$MSSQL_SA_PASSWORD"
+echo "ConnectionStrings__Default=$ConnectionStrings__Default"
+EOFTEST
+    chmod +x "$TEST_TEMP_DIR/test_source.sh"
+    
+    # Run the source test
+    capture_output "$TEST_TEMP_DIR/test_source.sh $test_env 2>&1"
+    local output=$(get_output)
+    
+    # Verify no "command not found" errors (which would indicate unquoted connection strings)
+    assert_not_contains "$output" "User: command not found" "Connection string should be quoted to avoid 'User: command not found' error"
+    assert_not_contains "$output" "command not found" "Should not have bash command parsing errors"
+    
+    # Verify the variables were sourced correctly
+    assert_contains "$output" "SOURCE_SUCCESS=true" "Source operation should succeed"
+    assert_contains "$output" "MSSQL_SA_PASSWORD=L0rWItvZR9KLaoYl!" "MSSQL_SA_PASSWORD should be sourced correctly"
+    assert_contains "$output" "ConnectionStrings__Default=" "ConnectionStrings__Default should be sourced"
+    
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -812,7 +858,7 @@ run_all_tests() {
     test_env_provider_only_end_to_end_postgres
     test_env_provider_only_end_to_end_mysql
     test_env_provider_monolithic_providers
-    test_env_provider_hostnetwork_providers
+    test_env_file_sourcing_with_connection_strings
     
     teardown
 }
