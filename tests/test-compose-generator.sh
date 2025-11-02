@@ -334,19 +334,19 @@ test_all_database_providers() {
                 assert_contains "$compose_content" "database:" "Should include database service"
                 assert_contains "$compose_content" "image: postgres:" "Should use PostgreSQL image"
                 assert_contains "$compose_content" "POSTGRES_DB" "Should configure PostgreSQL database"
-                assert_contains "$compose_content" "database_data:" "Should have database volume"
+                assert_contains "$compose_content" "printfarmer-database:" "Should have database volume"
                 ;;
             "sqlserver")
                 assert_contains "$compose_content" "database:" "Should include database service"
                 assert_contains "$compose_content" "image: mcr.microsoft.com/mssql/server:" "Should use SQL Server image"
                 assert_contains "$compose_content" "MSSQL_SA_PASSWORD" "Should configure SQL Server password"
-                assert_contains "$compose_content" "database_data:" "Should have database volume"
+                assert_contains "$compose_content" "printfarmer-database:" "Should have database volume"
                 ;;
             "mysql")
                 assert_contains "$compose_content" "database:" "Should include database service"
                 assert_contains "$compose_content" "image: mysql:" "Should use MySQL image"
                 assert_contains "$compose_content" "MYSQL_DATABASE" "Should configure MySQL database"
-                assert_contains "$compose_content" "database_data:" "Should have database volume"
+                assert_contains "$compose_content" "printfarmer-database:" "Should have database volume"
                 ;;
         esac
         

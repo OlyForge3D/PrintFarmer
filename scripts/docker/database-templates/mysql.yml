@@ -8,7 +8,7 @@
       MYSQL_USER: ${MYSQL_USER:-farmuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-farmpass}
     volumes:
-      - database_data:/var/lib/mysql
+      - printfarmer-database:/var/lib/mysql
     ports:
       - "${DB_PORT:-3306}:3306"
     healthcheck:

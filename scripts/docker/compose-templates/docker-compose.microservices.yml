@@ -27,7 +27,7 @@ services:
         aliases:
           - postgres
     volumes:
-      - database_data:/var/lib/postgresql/data  # Default path, override in production
+      - printfarmer-database:/var/lib/postgresql/data  # Default path, override in production
     healthcheck:
       test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
       interval: 10s
@@ -66,10 +66,10 @@ services:
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
-      - app_data:/data
-      - model_uploads:/app/uploads
-      - gcode_storage:/app/gcode
-      - slicer_profiles:/app/profiles
+      - printfarmer-app-data:/data
+      - printfarmer-model-uploads:/app/uploads
+      - printfarmer-gcode-storage:/app/gcode
+      - printfarmer-slicer-profiles:/app/profiles
     depends_on:
       database:
         condition: service_healthy
@@ -123,8 +123,8 @@ services:
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
     volumes:
-      - orcaslicer_temp:/app/temp
-      - gcode_storage:/app/gcode
+      - printfarmer-orcaslicer-temp:/app/temp
+      - printfarmer-gcode-storage:/app/gcode
     depends_on:
       orcaslicer-binaries:
         condition: service_completed_successfully
@@ -210,9 +210,9 @@ networks:
     driver: bridge
 
 volumes:
-  database_data:  # Generic database volume (PostgreSQL, SQL Server, MySQL)
-  app_data:
-  model_uploads:
-  gcode_storage:
-  slicer_profiles:
-  orcaslicer_temp:
+  printfarmer-database:  # Generic database volume (PostgreSQL, SQL Server, MySQL)
+  printfarmer-app-data:
+  printfarmer-model-uploads:
+  printfarmer-gcode-storage:
+  printfarmer-slicer-profiles:
+  printfarmer-orcaslicer-temp:

@@ -2875,10 +2875,10 @@ DBEOF
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
-      - app_data:/data
-      - model_uploads:/app/uploads
-      - gcode_storage:/app/gcode
-      - slicer_profiles:/app/profiles
+      - printfarmer-app-data:/data
+      - printfarmer-model-uploads:/app/uploads
+      - printfarmer-gcode-storage:/app/gcode
+      - printfarmer-slicer-profiles:/app/profiles
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-5245}/healthz"]
       interval: 30s
@@ -2908,8 +2908,8 @@ DBEOF
       - Worker__QueueName=orcaslicer-jobs
       - Logging__LogLevel__Default=Information
     volumes:
-      - orcaslicer_temp:/app/temp
-      - gcode_storage:/app/gcode
+      - printfarmer-orcaslicer-temp:/app/temp
+      - printfarmer-gcode-storage:/app/gcode
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
@@ -2964,11 +2964,11 @@ volumes:
     postgres_data:
     sqlserver_data:
     mysql_data:
-    app_data:
-    model_uploads:
-    gcode_storage:
-    slicer_profiles:
-    orcaslicer_temp:
+    printfarmer-app-data:
+    printfarmer-model-uploads:
+    printfarmer-gcode-storage:
+    printfarmer-slicer-profiles:
+    printfarmer-orcaslicer-temp:
 RESTEOF
         
         print_success "Host network compose file created: docker-compose.host-network.yml"

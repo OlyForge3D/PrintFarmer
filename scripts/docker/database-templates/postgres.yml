@@ -7,7 +7,7 @@
       POSTGRES_USER: ${POSTGRES_USER:-farmuser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-farmpass}
     volumes:
-      - database_data:/var/lib/postgresql/data
+      - printfarmer-database:/var/lib/postgresql/data
     ports:
       - "${DB_PORT:-5432}:5432"
     healthcheck:

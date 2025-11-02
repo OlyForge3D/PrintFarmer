@@ -502,31 +502,77 @@ PY
             mv "$temp_merged_maps" "$compose_file"
             rm -f "$temp_minimal_addon"
         else
-            # Fallback: append volumes and networks contents conservatively
-            if [[ -s "$temp_vols" ]]; then
-                if grep -q '^volumes:' "$compose_file"; then
-                    awk -v addon="$temp_vols" '/^volumes:/ { print; while ((getline line < addon) > 0) print line; next } { print }' "$compose_file" > "$temp_merged_maps" && mv "$temp_merged_maps" "$compose_file"
-                else
-                    echo "" >> "$compose_file"
-                    echo "volumes:" >> "$compose_file"
-                    cat "$temp_vols" >> "$compose_file" || true
-                fi
-            fi
-            if [[ -s "$temp_nets" ]]; then
-                if grep -q '^networks:' "$compose_file"; then
-                    awk -v addon="$temp_nets" '/^networks:/ { print; while ((getline line < addon) > 0) print line; next } { print }' "$compose_file" > "$temp_merged_maps" && mv "$temp_merged_maps" "$compose_file"
-                else
-                    echo "" >> "$compose_file"
-                    echo "networks:" >> "$compose_file"
-                    cat "$temp_nets" >> "$compose_file" || true
-                fi
-            fi
+            # Fallback: use Python to safely merge volumes and networks into existing sections
+            python3 - "$compose_file" "$temp_vols" "$temp_nets" <<'PYMERGE'
+import sys
+compose_file = sys.argv[1]
+temp_vols = sys.argv[2]
+temp_nets = sys.argv[3]
+
+txt = open(compose_file, 'r').read()
+
+# Merge volumes: find the volumes: section and append new volumes
+if open(temp_vols, 'r').read().strip():
+    addon_vols = open(temp_vols, 'r').read().strip().split('\n')
+    lines = txt.split('\n')
+    out = []
+    i = 0
+    while i < len(lines):
+        out.append(lines[i])
+        if lines[i].startswith('volumes:'):
+            # Found volumes section, append addon volumes
+            i += 1
+            # Copy existing volume entries
+            while i < len(lines) and (lines[i].startswith('  ') or lines[i].strip() == ''):
+                if not lines[i].strip().startswith(('volumes:', 'networks:', 'services:', 'version:')):
+                    out.append(lines[i])
+                    i += 1
+                else:
+                    break
+            # Append addon volumes
+            for vol in addon_vols:
+                out.append(vol)
+            # Don't increment i; we'll add the current line normally
+            continue
+        i += 1
+    txt = '\n'.join(out)
+
+# Similar logic for networks
+if open(temp_nets, 'r').read().strip():
+    addon_nets = open(temp_nets, 'r').read().strip().split('\n')
+    lines = txt.split('\n')
+    out = []
+    i = 0
+    while i < len(lines):
+        out.append(lines[i])
+        if lines[i].startswith('networks:'):
+            # Found networks section, append addon networks
+            i += 1
+            # Copy existing network entries
+            while i < len(lines) and (lines[i].startswith('  ') or lines[i].strip() == ''):
+                if not lines[i].strip().startswith(('networks:', 'services:', 'version:')):
+                    out.append(lines[i])
+                    i += 1
+                else:
+                    break
+            # Append addon networks
+            for net in addon_nets:
+                out.append(net)
+            continue
+        i += 1
+    txt = '\n'.join(out)
+
+open(compose_file, 'w').write(txt)
+PYMERGE
         fi
 
     rm -f "$temp_db_maps" "$temp_merged_maps" "$temp_vols" "$temp_nets"
     }
 
-    merge_provider_maps
+    # DISABLED: merge_provider_maps is no longer needed.
+    # All templates now use a generic "printfarmer-database" volume instead of provider-specific volumes.
+    # This simplifies deployment and eliminates the risk of duplicate volume definitions.
+    # merge_provider_maps
     
     # Merge addon services into the compose file
     local addons_merged=false

@@ -54,10 +54,10 @@ services:
       # Required JWT signing key (32+ chars) for auth configuration
       - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
     volumes:
-      - app_data:/data
-      - model_uploads:/app/uploads
-      - gcode_storage:/app/gcode
-      - slicer_profiles:/app/profiles
+      - printfarmer-app-data:/data
+      - printfarmer-model-uploads:/app/uploads
+      - printfarmer-gcode-storage:/app/gcode
+      - printfarmer-slicer-profiles:/app/profiles
       - ./wwwroot/gcode-library:/app/wwwroot/gcode-library
       - ./models:/app/models
 
@@ -137,8 +137,8 @@ services:
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
     volumes:
-      - orcaslicer_temp:/app/temp
-      - gcode_storage:/app/gcode
+      - printfarmer-orcaslicer-temp:/app/temp
+      - printfarmer-gcode-storage:/app/gcode
     depends_on:
       orcaslicer-binaries:
         condition: service_completed_successfully
@@ -193,11 +193,11 @@ services:
       - printfarmer-network
 
 volumes:
-  app_data:
-  model_uploads:
-  gcode_storage:
-  slicer_profiles:
-  orcaslicer_temp:
+  printfarmer-app-data:
+  printfarmer-model-uploads:
+  printfarmer-gcode-storage:
+  printfarmer-slicer-profiles:
+  printfarmer-orcaslicer-temp:
 
 networks:
   printfarmer-network:

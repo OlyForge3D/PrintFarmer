@@ -136,9 +136,9 @@ validate_volume_configuration() {
     local content=$(cat "$compose_file")
     
     # Check for required volumes
-    assert_contains "$content" "app_data:" "Should have app_data volume"
-    assert_contains "$content" "model_uploads:" "Should have model_uploads volume"
-    assert_contains "$content" "gcode_storage:" "Should have gcode_storage volume"
+    assert_contains "$content" "printfarmer-app-data:" "Should have printfarmer-app-data volume"
+    assert_contains "$content" "printfarmer-model-uploads:" "Should have printfarmer-model-uploads volume"
+    assert_contains "$content" "printfarmer-gcode-storage:" "Should have printfarmer-gcode-storage volume"
     
     # Check that redis_data volume is NOT present
     assert_not_contains "$content" "redis_data:" "Should not contain redis_data volume"
