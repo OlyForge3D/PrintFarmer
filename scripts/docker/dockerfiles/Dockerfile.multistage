@@ -181,15 +181,23 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 FROM --platform=${TARGETPLATFORM} node:18-alpine AS frontend-build
 WORKDIR /app
 
+# Accept build arguments for frontend configuration
+ARG VITE_API_BASE_URL=/api
+ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+
 # Copy package files
 COPY src/Web/ReactApp/package*.json ./
 
 # Install dependencies (include dev deps so TypeScript compiler is available)
 RUN npm ci
 
-# Copy source code and build
+# Copy source code and build with environment variables
 COPY src/Web/ReactApp/ ./
-RUN npm run build
+RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL} \
+    VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL} \
+    npm run build
 
 ############################################################
 # React Frontend Runtime Container
