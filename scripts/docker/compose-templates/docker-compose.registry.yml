@@ -10,9 +10,6 @@
 #   docker compose --env-file .env.registry -f docker-compose.yml -f docker-compose.registry.yml up
 
 services:
-  # Override binary layer to use registry image
-  orcaslicer-binaries:
-    image: ${REGISTRY_HOST}/orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.1}
   # Override worker to use registry image  
   orcaslicer-worker:
     image: ${REGISTRY_HOST}/printfarmer-orcaslicer-worker:latest

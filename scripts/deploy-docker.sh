@@ -516,7 +516,7 @@ tear_down_deployment() {
 
     # First attempt: bring down compose-managed stacks so containers created by compose
     # are removed with the correct project name and associated volumes/networks.
-    print_info "Attempting to stop compose stacks (microservices / host-network / default)..."
+    print_info "Attempting to stop compose stacks (microservices / default)..."
     # Prefer microservices compose if present
     if [ -f docker-compose.microservices.yml ]; then
         # Improved tear-down: stop services in a safe order with retries and a kill fallback
@@ -578,7 +578,6 @@ tear_down_deployment() {
 
         # Run ordered tear-down for known compose files (microservices uses a separate env file)
         stop_compose_services ".env.microservices" "docker-compose.microservices.yml"
-        stop_compose_services "" "docker-compose.host-network.yml"
         stop_compose_services "" "docker-compose.yml"
     fi
 
@@ -661,12 +660,6 @@ tear_down_deployment() {
     # 7. Remove generated files
     print_info "Step 5/5: Removing generated configuration files..."
     local files_removed=0
-    
-    if [ -f docker-compose.host-network.yml ]; then
-        rm -f docker-compose.host-network.yml
-        echo "  • Removed docker-compose.host-network.yml"
-        ((files_removed++))
-    fi
     
     if [ -f docker-compose.override.yml ]; then
         rm -f docker-compose.override.yml
@@ -1209,17 +1202,9 @@ choose_architecture() {
                 print_success "Using CLI option: Microservices deployment"
                 return 0
                 ;;
-            host-network)
-                ARCHITECTURE="microservices"  # Host-network is a variant of microservices
-                NETWORK_MODE="host"
-                ENV_FILE=".env.microservices"
-                COMPOSE_FILE="docker-compose.yml"
-                print_success "Using CLI option: Host-network deployment"
-                return 0
-                ;;
             *)
                 print_error "Invalid architecture: $CLI_ARCHITECTURE"
-                print_info "Valid options: monolithic, microservices, host-network"
+                print_info "Valid options: monolithic, microservices"
                 exit 1
                 ;;
         esac
@@ -4213,7 +4198,6 @@ main() {
     else
         print_warning "Falling back to legacy compose generation"
         generate_compose_override
-        generate_host_network_override
     fi
 
     # Optional prepull for Apple Silicon or slow networks: pull common base images
