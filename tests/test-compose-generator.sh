@@ -179,8 +179,7 @@ test_orcaslicer_worker_config() {
     assert_contains "$compose_content" "target: orcaslicer-worker" "Should contain OrcaSlicer worker target"
     assert_contains "$compose_content" "orcaslicer-worker:" "Should have OrcaSlicer worker service"
     
-    # Validate multistage build targets
-    assert_contains "$compose_content" "target: orcaslicer-binaries" "Should contain orcaslicer-binaries target"
+    # Validate multistage build targets for actual services
     assert_contains "$compose_content" "target: api-runtime" "Should contain api-runtime target"
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend-runtime target"
     
@@ -568,10 +567,9 @@ test_multistage_targets() {
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
-    # Check for expected multistage targets used in compose file
+    # Check for expected multistage targets used as services in compose file
     assert_contains "$compose_content" "target: api-runtime" "Should contain api-runtime target"
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend-runtime target"
-    assert_contains "$compose_content" "target: orcaslicer-binaries" "Should contain orcaslicer-binaries target"
     assert_contains "$compose_content" "target: orcaslicer-worker" "Should contain orcaslicer-worker target"
     
     # Validate multistage dockerfile is used

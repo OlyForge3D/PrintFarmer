@@ -394,6 +394,8 @@ PY
 generate_compose() {
     local arch="$1"
     local output_dir="$2"
+    # Always output to docker-compose.yml regardless of architecture
+    # The generator customizes the template for the specific architecture
     local compose_file="$output_dir/docker-compose.yml"
     
     log_info "Generating docker-compose.yml for $arch architecture..."

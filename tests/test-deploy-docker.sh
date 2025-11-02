@@ -315,11 +315,11 @@ test_generated_db_password_propagation() {
     local output=$(get_output)
 
     # Determine expected env file
-    local env_file="$TEST_TEMP_DIR/.env.microservices"
+    local env_file="$TEST_TEMP_DIR/.env"
 
     # The deploy script copies .env to repo root; it also writes the output in working dir
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     assert_file_exists "$env_file" "Expected generated env file $env_file"
@@ -350,9 +350,9 @@ test_generated_sqlserver_password_propagation() {
     capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch --env DB_PROVIDER=sqlserver)"
     local output=$(get_output)
 
-    local env_file="$TEST_TEMP_DIR/.env.microservices"
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    local env_file="$TEST_TEMP_DIR/.env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     assert_file_exists "$env_file" "Expected generated env file $env_file"
@@ -387,9 +387,9 @@ test_generated_mysql_password_propagation() {
     capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch --env DB_PROVIDER=mysql)"
     local output=$(get_output)
 
-    local env_file="$TEST_TEMP_DIR/.env.microservices"
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    local env_file="$TEST_TEMP_DIR/.env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     assert_file_exists "$env_file" "Expected generated env file $env_file"
@@ -565,11 +565,11 @@ EOF
     assert_contains "$output" ".env" "Should mention .env creation"
 
     # Expect the generated env file for microservices
-    assert_file_exists ".env.microservices" "Should have created .env.microservices"
+    assert_file_exists ".env" "Should have created .env"
 
     # Inspect contents
     local env_content
-    env_content=$(cat .env.microservices)
+    env_content=$(cat .env)
 
     # Must include MSSQL canonical variable and SQLSERVER entries
     assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should include MSSQL_SA_PASSWORD"
@@ -588,7 +588,7 @@ EOF
     assert_contains "$output" "MSSQL_SA_PASSWORD" "Deploy output should print masked MSSQL_SA_PASSWORD"
 
     # Clean up
-    rm -f .deploy-config .env.microservices .env || true
+    rm -f .deploy-config .env .env || true
 
     pass_test
 }
@@ -607,9 +607,9 @@ EOF
     capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    assert_file_exists ".env.microservices" "Should have created .env.microservices for postgres"
+    assert_file_exists ".env" "Should have created .env for postgres"
     local env_content
-    env_content=$(cat .env.microservices)
+    env_content=$(cat .env)
 
     assert_contains "$env_content" "POSTGRES_PASSWORD" "Env file should include POSTGRES_PASSWORD"
     assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should not include MSSQL_SA_PASSWORD when postgres selected"
@@ -620,7 +620,7 @@ EOF
     assert_contains "$output" "PostgreSQL credentials included (masked):" "Deploy output should include masked Postgres credentials header"
     assert_contains "$output" "POSTGRES_PASSWORD" "Deploy output should print masked POSTGRES_PASSWORD"
 
-    rm -f .deploy-config .env.microservices .env || true
+    rm -f .deploy-config .env .env || true
 
     pass_test
 }
@@ -639,9 +639,9 @@ EOF
     capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    assert_file_exists ".env.microservices" "Should have created .env.microservices for mysql"
+    assert_file_exists ".env" "Should have created .env for mysql"
     local env_content
-    env_content=$(cat .env.microservices)
+    env_content=$(cat .env)
 
     assert_contains "$env_content" "MYSQL_PASSWORD" "Env file should include MYSQL_PASSWORD"
     assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should not include MSSQL_SA_PASSWORD when mysql selected"
@@ -652,7 +652,7 @@ EOF
     assert_contains "$output" "MySQL credentials included (masked):" "Deploy output should include masked MySQL credentials header"
     assert_contains "$output" "MYSQL_PASSWORD" "Deploy output should print masked MYSQL_PASSWORD"
 
-    rm -f .deploy-config .env.microservices .env || true
+    rm -f .deploy-config .env .env || true
 
     pass_test
 }
@@ -673,10 +673,10 @@ EOF
         capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic --config-file .deploy-config 2>&1 || true"
         local output=$(get_output)
 
-        # Expect .env.monolithic
-        assert_file_exists ".env.monolithic" "Should have created .env.monolithic for $provider"
+        # Expect .env
+        assert_file_exists ".env" "Should have created .env for $provider"
         local env_content
-        env_content=$(cat .env.monolithic)
+        env_content=$(cat .env)
 
         case "$provider" in
             postgres)
@@ -696,7 +696,7 @@ EOF
                 ;;
         esac
 
-        rm -f .deploy-config .env.monolithic .env || true
+        rm -f .deploy-config .env .env || true
     done
 
     pass_test
@@ -761,11 +761,11 @@ EOF
     output=$(timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true)
     
     # Check that env file was created
-    assert_file_exists ".env.microservices" "Should create .env.microservices"
+    assert_file_exists ".env" "Should create .env"
     
     # Get the actual password from env file
     local env_content
-    env_content=$(cat .env.microservices)
+    env_content=$(cat .env)
     local actual_password
     actual_password=$(echo "$env_content" | grep "POSTGRES_PASSWORD=" | cut -d= -f2 | head -1 || echo "")
     
@@ -853,12 +853,12 @@ EOF
         test_info "Deploy script output: $output"
     fi
 
-    # Determine expected env file - .env.microservices is used
+    # Determine expected env file - .env is used
     local env_file=""
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
-    elif [ -f ".env.microservices" ]; then
-        env_file=".env.microservices"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
+    elif [ -f ".env" ]; then
+        env_file=".env"
     elif [ -f ".env" ]; then
         env_file=".env"
     fi
@@ -905,9 +905,9 @@ EOF
     capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    local env_file=".env.microservices"
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    local env_file=".env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     assert_file_exists "$env_file" "Should create env file with discovery config"
@@ -941,9 +941,9 @@ EOF
     capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    local env_file=".env.microservices"
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    local env_file=".env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     assert_file_exists "$env_file" "Should create env file with discovery subnets"
@@ -979,9 +979,9 @@ EOF
     capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    local env_file=".env.microservices"
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    local env_file=".env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     assert_file_exists "$env_file" "Should create env file with full PFARM configuration"
@@ -1023,9 +1023,9 @@ EOF
     capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    local env_file=".env.microservices"
-    if [ -f "$REPO_ROOT/.env.microservices" ]; then
-        env_file="$REPO_ROOT/.env.microservices"
+    local env_file=".env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
     fi
 
     # Create a test script to source the .env file

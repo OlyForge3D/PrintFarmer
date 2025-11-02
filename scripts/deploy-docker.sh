@@ -516,75 +516,73 @@ tear_down_deployment() {
 
     # First attempt: bring down compose-managed stacks so containers created by compose
     # are removed with the correct project name and associated volumes/networks.
-    print_info "Attempting to stop compose stacks (microservices / default)..."
-    # Prefer microservices compose if present
-    if [ -f docker-compose.microservices.yml ]; then
-        # Improved tear-down: stop services in a safe order with retries and a kill fallback
-        stop_compose_services() {
-            local env_file="$1"; shift
-            local compose_file="$1"; shift
+    print_info "Attempting to stop compose stacks..."
+    
+    # Improved tear-down: stop services in a safe order with retries and a kill fallback
+    stop_compose_services() {
+        local env_file="$1"; shift
+        local compose_file="$1"; shift
 
-            print_info "Tearing down compose project: env_file='${env_file:-<none>}' compose_file='$compose_file'"
+        print_info "Tearing down compose project: env_file='${env_file:-<none>}' compose_file='$compose_file'"
 
-            # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
-            local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
+        # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
+        local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
 
-            # If an env file was provided, pass it to docker compose commands
-            local env_arg=( )
-            if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
-                env_arg=(--env-file "$env_file")
-            fi
+        # If an env file was provided, pass it to docker compose commands
+        local env_arg=( )
+        if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
+            env_arg=(--env-file "$env_file")
+        fi
 
-            for svc in "${ordered_services[@]}"; do
-                # Check if the service exists in this compose file
-                if docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -qx "$svc"; then
-                    print_info "Stopping service: $svc"
-                    # Attempt a graceful stop first
-                    docker compose "${env_arg[@]:-}" -f "$compose_file" stop -t 20 "$svc" || true
+        for svc in "${ordered_services[@]}"; do
+            # Check if the service exists in this compose file
+            if docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -qx "$svc"; then
+                print_info "Stopping service: $svc"
+                # Attempt a graceful stop first
+                docker compose "${env_arg[@]:-}" -f "$compose_file" stop -t 20 "$svc" || true
 
-                    # Wait up to 20s for container(s) to exit
-                    for i in $(seq 1 10); do
-                        running=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
-                        if [ -z "$running" ]; then
-                            print_success "Service $svc stopped"
-                            break
-                        fi
-                        sleep 2
-                    done
-
-                    # If still present, attempt docker kill then rm -f
-                    running_now=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
-                    if [ -n "$running_now" ]; then
-                        print_warning "Service $svc did not stop cleanly; killing container(s)"
-                        # Get container ids for the service (compose project-scoped names)
-                        docker compose "${env_arg[@]:-}" -f "$compose_file" ps --quiet "$svc" | xargs -r docker kill || true
-                        docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" || true
-                    else
-                        # Remove the stopped service to clean up networks/volumes when possible
-                        docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" 2>/dev/null || true
+                # Wait up to 20s for container(s) to exit
+                for i in $(seq 1 10); do
+                    running=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
+                    if [ -z "$running" ]; then
+                        print_success "Service $svc stopped"
+                        break
                     fi
+                    sleep 2
+                done
+
+                # If still present, attempt docker kill then rm -f
+                running_now=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
+                if [ -n "$running_now" ]; then
+                    print_warning "Service $svc did not stop cleanly; killing container(s)"
+                    # Get container ids for the service (compose project-scoped names)
+                    docker compose "${env_arg[@]:-}" -f "$compose_file" ps --quiet "$svc" | xargs -r docker kill || true
+                    docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" || true
+                else
+                    # Remove the stopped service to clean up networks/volumes when possible
+                    docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" 2>/dev/null || true
                 fi
-            done
-
-            # Finally, bring remaining services down and remove volumes/images as a cleanup step
-            print_info "Running: docker compose ${env_file:+--env-file $env_file} -f $compose_file down --volumes --rmi all"
-            # shellcheck disable=SC2086
-            if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
-                docker compose --env-file "$env_file" -f "$compose_file" down --volumes --rmi all || true
-            else
-                docker compose -f "$compose_file" down --volumes --rmi all || true
             fi
-        }
+        done
 
-        # Run ordered tear-down for known compose files (microservices uses a separate env file)
-        stop_compose_services ".env.microservices" "docker-compose.microservices.yml"
-        stop_compose_services "" "docker-compose.yml"
-    fi
+        # Finally, bring remaining services down and remove volumes/images as a cleanup step
+        print_info "Running: docker compose ${env_file:+--env-file $env_file} -f $compose_file down --volumes --rmi all"
+        # shellcheck disable=SC2086
+        if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
+            docker compose --env-file "$env_file" -f "$compose_file" down --volumes --rmi all || true
+        else
+            docker compose -f "$compose_file" down --volumes --rmi all || true
+        fi
+    }
 
-    # Try the default compose file as well
+    # Run tear-down with appropriate env file and compose file
     if [ -f docker-compose.yml ]; then
-        print_info "Running: docker compose -f docker-compose.yml down --volumes --rmi all"
-        docker compose -f docker-compose.yml down --volumes --rmi all || true
+        # Use .env if available, otherwise proceed without env file
+        if [ -f .env ]; then
+            stop_compose_services ".env" "docker-compose.yml"
+        else
+            stop_compose_services "" "docker-compose.yml"
+        fi
     fi
 
     # Ensure standalone host-mode nginx proxy (if created by script) is removed
@@ -1189,7 +1187,7 @@ choose_architecture() {
         case "$CLI_ARCHITECTURE" in
             monolithic|mono)
                 ARCHITECTURE="monolithic"
-                ENV_FILE=".env.monolithic"
+                ENV_FILE=".env"
                 COMPOSE_FILE="docker-compose.yml"
                 print_success "Using CLI option: Monolithic deployment"
                 check_dotnet_sdk
@@ -1197,7 +1195,7 @@ choose_architecture() {
                 ;;
             microservices|micro)
                 ARCHITECTURE="microservices"
-                ENV_FILE=".env.microservices"
+                ENV_FILE=".env"
                 COMPOSE_FILE="docker-compose.yml"
                 print_success "Using CLI option: Microservices deployment"
                 return 0
@@ -1238,7 +1236,7 @@ choose_architecture() {
     case "$ARCH_CHOICE" in
         1|monolithic|mono)
             ARCHITECTURE="monolithic"
-            ENV_FILE=".env.monolithic"
+            ENV_FILE=".env"
             COMPOSE_FILE="docker-compose.yml"
             print_success "Selected: Monolithic deployment (with multi-stage builds)"
             
@@ -1247,7 +1245,7 @@ choose_architecture() {
             ;;
         2|microservices|micro)
             ARCHITECTURE="microservices"
-            ENV_FILE=".env.microservices"
+            ENV_FILE=".env"
             COMPOSE_FILE="docker-compose.yml"
             print_success "Selected: Microservices deployment (with multi-stage builds)"
             ;;
