@@ -69,8 +69,11 @@ namespace Farm.Web.Api.Services.Printers
         Task<bool> FirmwareRestartAsync(Guid id, CancellationToken ct);
         Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct);
         Task<bool> StartPrintAsync(Guid id, string filename, CancellationToken ct);
-        Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct);
+        Task<bool> UploadGcodeAsync(Guid id, string filename, System.IO.Stream stream, CancellationToken ct);
         Task<string[]> GetFileListAsync(Guid id, CancellationToken ct);
+
+        // Get current print job status for a printer
+        Task<Farm.Web.Shared.PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct);
 
         // Bulk operations
         Task<object> BulkCreatePrintersAsync(Farm.Web.Shared.CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);

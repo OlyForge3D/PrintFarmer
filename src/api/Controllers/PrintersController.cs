@@ -227,63 +227,47 @@ public class PrintersController(
     /// <response code="404">If the printer with the specified ID was not found</response>
     /// <response code="500">If there was an error retrieving job status</response>
     [HttpGet("{id:guid}/printjob")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(typeof(Farm.Web.Shared.PrintJobStatusDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
     {
         try
         {
-            // Verify printer exists
+            // Verify printer exists first
             var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
             if (printer == null)
             {
+                _logger.LogWarning($"[PrintJob] Printer {id} not found");
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
-            _logger.LogInformation($"Getting print job status for printer {printer.Name}");
+            _logger.LogInformation($"[PrintJob] Getting print job status for printer {printer.Name}");
 
-            // TODO: Implementation Notes
-            // 1. Query backend client based on printer.Backend (Moonraker/PrusaLink/SDCP)
-            // 2. Call appropriate GetJobStatusAsync method on printer client
-            // 3. Map backend-specific job response to PrintJobStatusDto
-            // 4. Handle timeouts gracefully (2-3 second timeout recommended)
-            // 5. Return null if no active job or backend returns null
-            //
-            // Example:
-            // if (printer.Backend == 2) // PrusaLink
-            // {
-            //     var status = await _prusa.GetJobStatusAsync(printer.ServerUrl, printer.ApiKey, ct);
-            //     return Ok(status != null ? MapToDto(status) : null);
-            // }
-            // else if (printer.Backend == 3) // SDCP
-            // { 
-            //     var status = await _sdcp.GetJobStatusAsync(printer.ServerUrl, ct);
-            //     return Ok(status != null ? MapToDto(status) : null);
-            // }
-            // else // Moonraker (Backend == 1)
-            // {
-            //     var status = await _moon.GetJobStatusAsync(printer.ServerUrl, ct);
-            //     return Ok(status != null ? MapToDto(status) : null);
-            // }
+            // Delegate to service for actual retrieval logic
+            var jobStatus = await _printersService.GetPrintJobStatusAsync(id, ct);
 
-            // For now, return null (no active job)
-            _logger.LogWarning($"Print job status retrieval not yet implemented for backend {printer.Backend}");
-            return Ok((object?)null);
+            // Return the status (may be null if no active job)
+            return Ok(jobStatus);
         }
         catch (KeyNotFoundException)
         {
+            _logger.LogWarning($"[PrintJob] Printer {id} not found");
             return NotFound(new { message = $"Printer {id} not found" });
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning($"Timeout retrieving print job status for printer {id}");
+            _logger.LogWarning($"[PrintJob] Timeout retrieving print job status for printer {id}");
             return Ok((object?)null); // Return null on timeout
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Error getting print job status for printer {id}: {ex.Message}");
-            return Ok((object?)null); // Return null if unable to retrieve
+            _logger.LogError(ex, $"[PrintJob] Error getting print job status for printer {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to retrieve print job status",
+                error = ex.Message
+            });
         }
     }
 

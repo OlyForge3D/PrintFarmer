@@ -3375,10 +3375,6 @@ deploy_containers() {
                 # and runs on the docker network in bridge mode. Don't try to start a host-mode proxy.
                 # For monolithic with host mode, we may need a separate host-mode nginx proxy.
                 if [ "$ARCHITECTURE" = "microservices" ]; then
-                    # Give nginx-proxy and frontend time to start and connect
-                    print_info "Waiting for nginx-proxy and frontend services to be ready..."
-                    sleep 10
-                    
                     # For microservices, just verify the docker-compose nginx-proxy is working
                     if check_nginx_proxy; then
                         print_info "nginx proxy verification passed"

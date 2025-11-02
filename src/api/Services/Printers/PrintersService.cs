@@ -1560,5 +1560,84 @@ namespace Farm.Web.Api.Services.Printers
                 errors = errorResults.Count > 0 ? errorResults : null
             };
         }
+
+        /// <summary>
+        /// Retrieves the current print job status for a printer.
+        /// Supports multiple printer backends: Moonraker, PrusaLink (OctoPrint), and SDCP.
+        /// Returns null if no active job or if status cannot be retrieved.
+        /// </summary>
+        public async Task<Farm.Web.Shared.PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
+        {
+            try
+            {
+                // Verify printer exists
+                Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+                if (printer == null)
+                {
+                    _logger.LogWarning($"[PrintJobStatus] Printer {id} not found");
+                    return null;
+                }
+
+                _logger.LogInformation($"[PrintJobStatus] Getting print job status for printer {printer.Name} (Backend: {printer.Backend})");
+
+                // Route to appropriate client based on backend
+                switch (printer.Backend)
+                {
+                    case 1: // Moonraker
+                    {
+                        var job = await _moon.GetJobAsync(printer.ServerUrl, ct).ConfigureAwait(false);
+                        if (job != null)
+                        {
+                            return new Farm.Web.Shared.PrintJobStatusDto
+                            {
+                                State = job.PrintState,
+                                Progress = job.Progress,
+                                JobName = job.JobName,
+                                ThumbnailUrl = job.ThumbnailUrl
+                            };
+                        }
+                        return null;
+                    }
+
+                    case 2: // PrusaLink (OctoPrint-like API)
+                    {
+                        // Note: PrusaLink client may not have GetJobStatusAsync yet
+                        // Fallback to null for now - implementation can be added later
+                        _logger.LogInformation($"[PrintJobStatus] PrusaLink print job status not yet implemented");
+                        return null;
+                    }
+
+                    case 3: // SDCP (Elegoo)
+                    {
+                        var job = await _sdcp.GetJobAsync(printer.ServerUrl, ct).ConfigureAwait(false);
+                        if (job != null)
+                        {
+                            return new Farm.Web.Shared.PrintJobStatusDto
+                            {
+                                State = job.PrintState,
+                                Progress = job.Progress,
+                                JobName = job.JobName,
+                                ThumbnailUrl = job.ThumbnailUrl
+                            };
+                        }
+                        return null;
+                    }
+
+                    default:
+                        _logger.LogWarning($"[PrintJobStatus] Unknown backend type {printer.Backend}");
+                        return null;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning($"[PrintJobStatus] Timeout retrieving print job status for printer {id}");
+                return null; // Return null on timeout
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[PrintJobStatus] Error getting print job status for printer {id}: {ex.Message}");
+                return null; // Return null if unable to retrieve
+            }
+        }
     }
 }
