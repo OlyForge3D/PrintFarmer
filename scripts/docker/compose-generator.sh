@@ -440,11 +440,15 @@ generate_compose() {
             temp_replaced="$(mktemp)"
             py_error="$(mktemp)"
             if python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
-                mv "$temp_replaced" "$compose_file"
-                log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration (Python merge)"
-                # DEBUG: Show what's in the file after Python replacement
-                # sed -n '/^  database:/,/^  [a-z]/p' "$compose_file" | head -5 > /tmp/debug_after_python.txt
-                python_succeeded=true
+                # Verify Python succeeded and produced output
+                if [[ -s "$temp_replaced" ]]; then
+                    mv "$temp_replaced" "$compose_file"
+                    log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration (Python merge)"
+                    python_succeeded=true
+                else
+                    log_warning "Python produced empty output, using AWK fallback"
+                    rm -f "$temp_replaced"
+                fi
             else
                 log_warning "Python-based database replacement failed; attempting fallback"
                 if [[ -s "$py_error" ]]; then
