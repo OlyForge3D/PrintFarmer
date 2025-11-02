@@ -3927,6 +3927,10 @@ display_final_info() {
         echo -e "${BLUE}  • View logs:      docker compose --env-file $ENV_FILE logs -f${NC}"
         echo -e "${BLUE}  • Stop services:  docker compose --env-file $ENV_FILE down${NC}"
         echo -e "${BLUE}  • Update/restart: docker compose --env-file $ENV_FILE up -d --build${NC}"
+    else
+        echo -e "${BLUE}  • (Dry-run) To deploy: docker compose --env-file $ENV_FILE up -d --build${NC}"
+    fi
+    echo
 
     if [ "$ENABLE_DISCOVERY" = "yes" ]; then
         echo -e "${GREEN}Network Discovery:${NC}"
