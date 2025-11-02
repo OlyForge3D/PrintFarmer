@@ -1933,6 +1933,58 @@ EOF
         fi
     fi
 }
+
+# Helper function: Wait for the host API port to be ready before launching nginx
+# This prevents nginx startup failures and 502s when proxying to an unreachable upstream
+wait_for_host_api() {
+    local host_port=${API_PORT:-5245}
+    local timeout_seconds=${API_WAIT_TIMEOUT:-60}
+    local interval=2
+    local waited=0
+    print_info "Waiting up to ${timeout_seconds}s for API to accept connections on host port ${host_port}..."
+    while ! ss -ltn "sport = :${host_port}" >/dev/null 2>&1; do
+        if [ "$waited" -ge "$timeout_seconds" ]; then
+            print_warning "Timeout waiting for API on host port ${host_port} after ${timeout_seconds}s"
+            return 1
+        fi
+        sleep $interval
+        waited=$((waited + interval))
+    done
+    print_success "API is listening on host port ${host_port}"
+    return 0
+}
+
+# Helper function: Validate that the nginx proxy is correctly proxying to the API
+# Queries the health endpoint through the proxy. Returns 0 on success.
+validate_nginx_proxy() {
+    local port=${HTTP_PORT:-8080}
+    local timeout=${API_WAIT_TIMEOUT:-60}
+    local interval=2
+    local waited=0
+    print_info "Validating nginx proxy is responding at http://localhost:${port}/healthz ..."
+    while true; do
+        # Use --max-time to avoid long hangs; accept 200 OK
+        if curl -sS --max-time 5 -f "http://localhost:${port}/healthz" >/dev/null 2>&1; then
+            print_success "Nginx proxy validated: /healthz returned 200 via proxy"
+            return 0
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            print_error "Nginx proxy validation failed after ${timeout}s"
+            # Dump some useful debug info
+            print_info "--- nginx-proxy logs (last 200 lines) ---"
+            docker logs printfarmer-nginx-proxy --tail 200 || true
+            print_info "--- nginx config (if container running) ---"
+            if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
+                docker exec printfarmer-nginx-proxy nginx -T 2>/dev/null | sed -n '1,200p' || true
+            fi
+            print_info "--- docker ps snapshot ---"
+            docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
+            return 1
+        fi
+        sleep $interval
+        waited=$((waited + interval))
+    done
+}
     
     print_success "Created host-network Nginx config at deploy/nginx/conf.d.host/frontend-app.conf"
     
@@ -3876,63 +3928,6 @@ display_final_info() {
         echo -e "${BLUE}  • Stop services:  docker compose --env-file $ENV_FILE down${NC}"
         echo -e "${BLUE}  • Update/restart: docker compose --env-file $ENV_FILE up -d --build${NC}"
 
-    # If we're deploying microservices and API is configured to run in host mode,
-    # wait for the host API port to be ready before launching nginx to avoid
-    # nginx startup failures and 502s when proxying to an unreachable upstream.
-    wait_for_host_api() {
-        local host_port=${API_PORT:-5245}
-        local timeout_seconds=${API_WAIT_TIMEOUT:-60}
-        local interval=2
-        local waited=0
-        print_info "Waiting up to ${timeout_seconds}s for API to accept connections on host port ${host_port}..."
-        while ! ss -ltn "sport = :${host_port}" >/dev/null 2>&1; do
-            if [ "$waited" -ge "$timeout_seconds" ]; then
-                print_warning "Timeout waiting for API on host port ${host_port} after ${timeout_seconds}s"
-                return 1
-            fi
-            sleep $interval
-            waited=$((waited + interval))
-        done
-        print_success "API is listening on host port ${host_port}"
-        return 0
-    }
-
-    # Validate that the nginx proxy is correctly proxying to the API by
-    # querying the health endpoint through the proxy. Returns 0 on success.
-    validate_nginx_proxy() {
-        local port=${HTTP_PORT:-8080}
-        local timeout=${API_WAIT_TIMEOUT:-60}
-        local interval=2
-        local waited=0
-        print_info "Validating nginx proxy is responding at http://localhost:${port}/healthz ..."
-        while true; do
-            # Use --max-time to avoid long hangs; accept 200 OK
-            if curl -sS --max-time 5 -f "http://localhost:${port}/healthz" >/dev/null 2>&1; then
-                print_success "Nginx proxy validated: /healthz returned 200 via proxy"
-                return 0
-            fi
-            if [ "$waited" -ge "$timeout" ]; then
-                print_error "Nginx proxy validation failed after ${timeout}s"
-                # Dump some useful debug info
-                print_info "--- nginx-proxy logs (last 200 lines) ---"
-                docker logs printfarmer-nginx-proxy --tail 200 || true
-                print_info "--- nginx config (if container running) ---"
-                if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
-                    docker exec printfarmer-nginx-proxy nginx -T 2>/dev/null | sed -n '1,200p' || true
-                fi
-                print_info "--- docker ps snapshot ---"
-                docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
-                return 1
-            fi
-            sleep $interval
-            waited=$((waited + interval))
-        done
-    }
-    else
-        echo -e "${BLUE}  • (Dry-run) To deploy: docker compose --env-file $ENV_FILE up -d --build${NC}"
-    fi
-    echo
-    
     if [ "$ENABLE_DISCOVERY" = "yes" ]; then
         echo -e "${GREEN}Network Discovery:${NC}"
         echo -e "${BLUE}  • Configured ranges: $NETWORK_RANGES${NC}"
