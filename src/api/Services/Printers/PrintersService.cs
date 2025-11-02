@@ -1639,5 +1639,215 @@ namespace Farm.Web.Api.Services.Printers
                 return null; // Return null if unable to retrieve
             }
         }
+
+        /// <summary>
+        /// Imports printers from an uploaded CSV or JSON file.
+        /// Supports duplicate handling strategies: 'skip' (default), 'overwrite', or 'error'.
+        /// </summary>
+        /// <param name="file">The uploaded file (CSV or JSON)</param>
+        /// <param name="duplicateHandling">How to handle duplicates: 'skip', 'overwrite', or 'error'</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Import result with counts and error details</returns>
+        public async Task<object> ImportFromFileAsync(IFormFile file, string duplicateHandling = "skip", CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(file);
+
+            if (file.Length == 0)
+            {
+                throw new ArgumentException("File cannot be empty");
+            }
+
+            var fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (fileExtension != ".csv" && fileExtension != ".json")
+            {
+                throw new ArgumentException("File must be CSV or JSON format");
+            }
+
+            try
+            {
+                CreatePrinterDto[] printers;
+
+                if (fileExtension == ".csv")
+                {
+                    printers = await ParseCsvFileAsync(file, ct);
+                }
+                else // JSON
+                {
+                    printers = await ParseJsonFileAsync(file, ct);
+                }
+
+                if (printers == null || printers.Length == 0)
+                {
+                    throw new InvalidOperationException("No valid printer entries found in file");
+                }
+
+                _logger.LogInformation($"[Import] Parsed {printers.Length} printers from {fileExtension} file");
+
+                // Use existing BulkCreatePrintersAsync for actual creation
+                var result = await BulkCreatePrintersAsync(printers, duplicateHandling, ct);
+                _logger.LogInformation($"[Import] Successfully imported printers from file");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[Import] Failed to import printers from file: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Parses a CSV file into printer DTOs.
+        /// Expected CSV format: Name,ServerUrl,Backend,ModelId,ManufacturerId,CameraStreamUrl,CameraSnapshotUrl,ApiKey,Notes
+        /// </summary>
+        private async Task<CreatePrinterDto[]> ParseCsvFileAsync(IFormFile file, CancellationToken ct)
+        {
+            var printers = new List<CreatePrinterDto>();
+            var errors = new List<string>();
+
+            try
+            {
+                using (var reader = new System.IO.StreamReader(file.OpenReadStream()))
+                {
+                    string? headerLine = await reader.ReadLineAsync(ct);
+                    if (string.IsNullOrWhiteSpace(headerLine))
+                    {
+                        throw new InvalidOperationException("CSV file is empty or has no header");
+                    }
+
+                    // Parse header
+                    var headers = headerLine.Split(',').Select(h => h.Trim().ToLowerInvariant()).ToArray();
+                    var nameIdx = Array.IndexOf(headers, "name");
+                    var urlIdx = Array.IndexOf(headers, "serverurl");
+                    var backendIdx = Array.IndexOf(headers, "backend");
+                    var modelIdx = Array.IndexOf(headers, "modelid");
+                    var mfgIdx = Array.IndexOf(headers, "manufacturerid");
+                    var cameraStreamIdx = Array.IndexOf(headers, "camerastreamurl");
+                    var cameraSnapshotIdx = Array.IndexOf(headers, "camerasnapshoturl");
+                    var apiKeyIdx = Array.IndexOf(headers, "apikey");
+                    var notesIdx = Array.IndexOf(headers, "notes");
+                    var backendPortIdx = Array.IndexOf(headers, "backendport");
+                    var frontendPortIdx = Array.IndexOf(headers, "frontendport");
+
+                    if (nameIdx < 0 || urlIdx < 0)
+                    {
+                        throw new InvalidOperationException("CSV must have 'Name' and 'ServerUrl' columns");
+                    }
+
+                    int lineNumber = 1;
+                    string? line;
+                    while ((line = await reader.ReadLineAsync(ct)) != null)
+                    {
+                        lineNumber++;
+
+                        if (string.IsNullOrWhiteSpace(line))
+                        {
+                            continue; // Skip empty lines
+                        }
+
+                        try
+                        {
+                            var values = line.Split(',').Select(v => v.Trim()).ToArray();
+
+                            if (values.Length < 2)
+                            {
+                                errors.Add($"Line {lineNumber}: Insufficient columns");
+                                continue;
+                            }
+
+                            var printer = new CreatePrinterDto
+                            {
+                                Name = values[nameIdx],
+                                ServerUrl = values[urlIdx],
+                                Backend = backendIdx >= 0 && backendIdx < values.Length && Enum.TryParse<PrinterBackend>(values[backendIdx], true, out var b) ? b : PrinterBackend.Moonraker,
+                                ModelId = modelIdx >= 0 && modelIdx < values.Length && Guid.TryParse(values[modelIdx], out var mid) ? mid : null,
+                                ManufacturerId = mfgIdx >= 0 && mfgIdx < values.Length && Guid.TryParse(values[mfgIdx], out var mfid) ? mfid : null,
+                                CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
+                                CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
+                                ApiKey = apiKeyIdx >= 0 && apiKeyIdx < values.Length ? values[apiKeyIdx] : null,
+                                Notes = notesIdx >= 0 && notesIdx < values.Length ? values[notesIdx] : null,
+                                BackendPort = backendPortIdx >= 0 && backendPortIdx < values.Length && int.TryParse(values[backendPortIdx], out var bp) ? bp : null,
+                                FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out var fp) ? fp : null
+                            };
+
+                            if (string.IsNullOrWhiteSpace(printer.Name))
+                            {
+                                errors.Add($"Line {lineNumber}: Name is required");
+                                continue;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(printer.ServerUrl))
+                            {
+                                errors.Add($"Line {lineNumber}: ServerUrl is required");
+                                continue;
+                            }
+
+                            printers.Add(printer);
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"Line {lineNumber}: {ex.Message}");
+                        }
+                    }
+                }
+
+                if (errors.Count > 0)
+                {
+                    _logger.LogWarning($"[Import-CSV] Encountered {errors.Count} parsing errors while importing {printers.Count} valid printers");
+                }
+
+                return printers.ToArray();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Import-CSV] Failed to parse CSV file");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Parses a JSON file into printer DTOs.
+        /// Expected format: Array of printer objects with Name, ServerUrl, Backend, etc.
+        /// </summary>
+        private async Task<CreatePrinterDto[]> ParseJsonFileAsync(IFormFile file, CancellationToken ct)
+        {
+            try
+            {
+                using (var reader = new System.IO.StreamReader(file.OpenReadStream()))
+                {
+                    var content = await reader.ReadToEndAsync(ct);
+
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        throw new InvalidOperationException("JSON file is empty");
+                    }
+
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true,
+                        WriteIndented = false,
+                        TypeInfoResolver = new Farm.Web.Api.Serialization.ImportExportTypeInfoResolver()
+                    };
+
+                    var printers = JsonSerializer.Deserialize<CreatePrinterDto[]>(content, options);
+
+                    if (printers == null || printers.Length == 0)
+                    {
+                        throw new InvalidOperationException("JSON file contains no valid printer entries");
+                    }
+
+                    return printers;
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "[Import-JSON] JSON parsing error");
+                throw new InvalidOperationException($"Invalid JSON format: {ex.Message}", ex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Import-JSON] Failed to parse JSON file");
+                throw;
+            }
+        }
     }
 }

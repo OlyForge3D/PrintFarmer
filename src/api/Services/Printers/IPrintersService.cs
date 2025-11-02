@@ -77,5 +77,8 @@ namespace Farm.Web.Api.Services.Printers
 
         // Bulk operations
         Task<object> BulkCreatePrintersAsync(Farm.Web.Shared.CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
+
+        // File-based import
+        Task<object> ImportFromFileAsync(Microsoft.AspNetCore.Http.IFormFile file, string duplicateHandling = "skip", CancellationToken ct = default);
     }
 }

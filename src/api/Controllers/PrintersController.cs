@@ -170,45 +170,131 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Starts a printer discovery stream that provides real-time discovery updates via SignalR.
+    /// Imports printers from an uploaded CSV or JSON file with optional duplicate handling.
     /// </summary>
-    /// <param name="request">Discovery request parameters (optional) - filters discovery scope</param>
-    /// <returns>Discovery session information including session ID for SignalR group subscription</returns>
-    /// <response code="200">Returns discovery session ID and initial message</response>
+    /// <param name="file">The CSV or JSON file containing printer configurations</param>
+    /// <param name="duplicateHandling">How to handle duplicates: 'skip' (default), 'overwrite', or 'error'</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result of import operation including created printers and any errors</returns>
+    /// <response code="200">Returns import results with created printers and errors</response>
+    /// <response code="400">If the file is invalid or missing</response>
+    /// <response code="500">If there was an error importing printers</response>
+    [HttpPost("import")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    public async Task<IActionResult> ImportFromFileAsync(
+        [FromForm] IFormFile file,
+        [FromQuery] string? duplicateHandling = "skip",
+        CancellationToken ct = default)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No file provided or file is empty" });
+        }
+
+        var fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (fileExtension != ".csv" && fileExtension != ".json")
+        {
+            return BadRequest(new { message = "File must be CSV or JSON format" });
+        }
+
+        if (file.Length > 10 * 1024 * 1024) // 10MB limit
+        {
+            return BadRequest(new { message = "File is too large (max 10MB)" });
+        }
+
+        try
+        {
+            _logger.LogInformation($"[Import] Starting import from file: {file.FileName}");
+            var result = await _printersService.ImportFromFileAsync(file, duplicateHandling ?? "skip", ct);
+            _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning($"[Import] Validation error: {ex.Message}");
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning($"[Import] Invalid data error: {ex.Message}");
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Import] Import operation failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Import operation failed",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Starts a real-time printer discovery stream that broadcasts results via SignalR.
+    /// The frontend should connect to the PrinterHub and call JoinDiscoveryGroupAsync(sessionId) to receive updates.
+    /// </summary>
+    /// <param name="request">Discovery request parameters (optional) - can specify backends to probe</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Discovery session information including session ID for SignalR subscription</returns>
+    /// <response code="200">Returns discovery session ID and group name for SignalR subscription</response>
     /// <response code="400">If request parameters are invalid</response>
     /// <response code="500">If there was an error starting discovery</response>
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
-    public IActionResult StartDiscoveryStream(
-        [FromBody] Farm.Web.Shared.StartDiscoveryRequest? request)
+    public async Task<IActionResult> StartDiscoveryStreamAsync(
+        [FromBody] Farm.Web.Shared.StartDiscoveryRequest? request,
+        CancellationToken ct)
     {
         try
         {
             // Create unique session ID for this discovery operation
             var sessionId = Guid.NewGuid().ToString();
 
-            _logger.LogInformation($"Starting discovery stream with sessionId={sessionId}");
+            _logger.LogInformation($"[Discovery] Starting discovery stream with sessionId={sessionId}");
 
-            // TODO: Integration Points
-            // 1. Create discovery operation in database
-            // 2. Start background discovery service with sessionId
-            // 3. Service should broadcast discovery updates to SignalR group named: $"discovery-{sessionId}"
-            // 4. Frontend subscribes to PrinterHub with groupName: $"discovery-{sessionId}"
+            // Extract optional backend filter from request
+            IEnumerable<PrinterBackend>? backends = null;
+            if (request?.Backends != null && request.Backends.Count > 0)
+            {
+                backends = request.Backends;
+                _logger.LogInformation($"[Discovery] Filtering discovery to backends: {string.Join(", ", backends)}");
+            }
 
-            // For now, return session info that frontend can use
+            // Start background discovery task (fire and forget with proper error handling)
+            // This will broadcast updates via SignalR and populate the discovery progress cache
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, backends, ct);
+                    _logger.LogInformation($"[Discovery] Discovery stream completed for sessionId={sessionId}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[Discovery] Error during discovery stream (sessionId={sessionId}): {ex.Message}");
+                    // Note: Error is logged but not directly communicated to client
+                    // Client will see discovery complete with whatever results were found
+                }
+            }, ct);
+
+            // Return session info immediately so frontend can subscribe to SignalR group
             return Ok(new
             {
                 sessionId = sessionId,
-                message = "Discovery stream started. Subscribe to PrinterHub with discovery group to receive updates.",
                 groupName = $"discovery-{sessionId}",
+                message = "Discovery started. Connect to PrinterHub and call JoinDiscoveryGroupAsync to receive real-time updates.",
                 timestamp = DateTime.UtcNow
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to start discovery stream: {ex.Message}");
+            _logger.LogError(ex, $"[Discovery] Failed to start discovery stream: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to start discovery stream",
@@ -1391,6 +1477,267 @@ public class PrintersController(
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to discover printers");
         }
 
+    }
+
+    // ===== PHASE 4: PRINTER CONFIGURATION ENDPOINTS =====
+
+    /// <summary>
+    /// Gets the current configuration for a specific printer.
+    /// Returns all editable printer properties including API key, camera URLs, maintenance mode, etc.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Printer configuration details</returns>
+    /// <response code="200">Returns the printer configuration</response>
+    /// <response code="404">If the printer does not exist</response>
+    /// <response code="500">If there was an error retrieving the configuration</response>
+    [HttpGet("{id:guid}/config")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> GetPrinterConfigAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            _logger.LogInformation($"[Config] Getting printer configuration for {id}");
+            var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            
+            if (printer == null)
+            {
+                _logger.LogWarning($"[Config] Printer {id} not found");
+                return NotFound(new { message = $"Printer {id} not found" });
+            }
+
+            // Return printer configuration as JSON object
+            var config = new
+            {
+                id = printer.Id,
+                name = printer.Name,
+                serverUrl = printer.ServerUrl,
+                originalServerUrl = printer.OriginalServerUrl,
+                ipAddress = printer.IpAddress,
+                backend = printer.Backend,
+                apiKey = printer.ApiKey,
+                cameraStreamUrl = printer.CameraStreamUrl,
+                cameraSnapshotUrl = printer.CameraSnapshotUrl,
+                backendPort = printer.BackendPort,
+                frontendPort = printer.FrontendPort,
+                notes = printer.Notes,
+                manufacturerId = printer.ManufacturerId,
+                modelId = printer.ModelId,
+                dateAcquired = printer.DateAcquired,
+                inMaintenance = printer.InMaintenance
+            };
+
+            return Ok(config);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Config] Failed to get printer configuration for {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to retrieve printer configuration",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Updates the configuration for a specific printer.
+    /// Allows updating API key, camera URLs, maintenance mode, and other editable properties.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="config">The updated configuration properties</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Updated printer configuration</returns>
+    /// <response code="200">Returns the updated configuration</response>
+    /// <response code="400">If the configuration data is invalid</response>
+    /// <response code="404">If the printer does not exist</response>
+    /// <response code="500">If there was an error updating the configuration</response>
+    [HttpPut("{id:guid}/config")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    public async Task<IActionResult> UpdatePrinterConfigAsync(
+        Guid id,
+        [FromBody] object? config,
+        CancellationToken ct)
+    {
+        if (config == null)
+        {
+            return BadRequest(new { message = "Configuration data is required" });
+        }
+
+        try
+        {
+            _logger.LogInformation($"[Config] Updating printer configuration for {id}");
+            
+            var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            if (printer == null)
+            {
+                _logger.LogWarning($"[Config] Printer {id} not found for update");
+                return NotFound(new { message = $"Printer {id} not found" });
+            }
+
+            // Parse configuration updates from JSON
+            if (config is System.Text.Json.JsonElement jsonElement)
+            {
+                var configDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
+                if (configDict == null)
+                {
+                    return BadRequest(new { message = "Invalid configuration format" });
+                }
+
+                // Update fields if present in the request
+                if (configDict.TryGetValue("name", out var nameVal) && nameVal != null)
+                {
+                    printer.Name = nameVal.ToString() ?? printer.Name;
+                }
+
+                if (configDict.TryGetValue("apiKey", out var apiKeyVal))
+                {
+                    printer.ApiKey = apiKeyVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("cameraStreamUrl", out var streamVal))
+                {
+                    printer.CameraStreamUrl = streamVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("cameraSnapshotUrl", out var snapshotVal))
+                {
+                    printer.CameraSnapshotUrl = snapshotVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("notes", out var notesVal))
+                {
+                    printer.Notes = notesVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("inMaintenance", out var maintenanceVal) && bool.TryParse(maintenanceVal?.ToString(), out bool maintValue))
+                {
+                    printer.InMaintenance = maintValue;
+                }
+
+                if (configDict.TryGetValue("backendPort", out var bpVal) && int.TryParse(bpVal?.ToString(), out int bp))
+                {
+                    printer.BackendPort = bp;
+                }
+
+                if (configDict.TryGetValue("frontendPort", out var fpVal) && int.TryParse(fpVal?.ToString(), out int fp))
+                {
+                    printer.FrontendPort = fp;
+                }
+
+                _logger.LogInformation($"[Config] Updating printer: {printer.Name} with new configuration");
+                await _printersService.SaveChangesAsync(ct);
+                _logger.LogInformation($"[Config] Successfully updated printer configuration for {id}");
+
+                // Return updated configuration
+                var updatedConfig = new
+                {
+                    id = printer.Id,
+                    name = printer.Name,
+                    serverUrl = printer.ServerUrl,
+                    originalServerUrl = printer.OriginalServerUrl,
+                    ipAddress = printer.IpAddress,
+                    backend = printer.Backend,
+                    apiKey = printer.ApiKey,
+                    cameraStreamUrl = printer.CameraStreamUrl,
+                    cameraSnapshotUrl = printer.CameraSnapshotUrl,
+                    backendPort = printer.BackendPort,
+                    frontendPort = printer.FrontendPort,
+                    notes = printer.Notes,
+                    manufacturerId = printer.ManufacturerId,
+                    modelId = printer.ModelId,
+                    dateAcquired = printer.DateAcquired,
+                    inMaintenance = printer.InMaintenance,
+                    message = "Configuration updated successfully"
+                };
+
+                return Ok(updatedConfig);
+            }
+
+            return BadRequest(new { message = "Configuration must be a JSON object" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Config] Failed to update printer configuration for {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to update printer configuration",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Gets the capabilities and specifications for a specific printer.
+    /// Returns detailed hardware capabilities like build volume, temperature limits, materials support, etc.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Printer capabilities and specifications</returns>
+    /// <response code="200">Returns the printer capabilities</response>
+    /// <response code="404">If the printer does not exist or has no capabilities</response>
+    /// <response code="500">If there was an error retrieving capabilities</response>
+    [HttpGet("{id:guid}/capabilities")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> GetPrinterCapabilitiesAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            _logger.LogInformation($"[Capabilities] Getting printer capabilities for {id}");
+            
+            var capabilities = await _printersService.GetCapabilitiesByPrinterIdAsync(id, ct);
+            
+            if (capabilities == null)
+            {
+                _logger.LogWarning($"[Capabilities] No capabilities found for printer {id}");
+                return NotFound(new { message = $"Capabilities not found for printer {id}" });
+            }
+
+            // Return capabilities as JSON object
+            var capabilitiesObj = new
+            {
+                id = capabilities.Id,
+                printerId = capabilities.PrinterId,
+                nozzleDiameter = capabilities.NozzleDiameter,
+                supportedMaterials = capabilities.SupportedMaterials,
+                maxBuildVolumeX = capabilities.MaxBuildVolumeX,
+                maxBuildVolumeY = capabilities.MaxBuildVolumeY,
+                maxBuildVolumeZ = capabilities.MaxBuildVolumeZ,
+                hasHeatedBed = capabilities.HasHeatedBed,
+                hasEnclosure = capabilities.HasEnclosure,
+                multiMaterial = capabilities.MultiMaterial,
+                supportsAutoLeveling = capabilities.SupportsAutoLeveling,
+                numberOfExtruders = capabilities.NumberOfExtruders,
+                minHotendTemp = capabilities.MinHotendTemp,
+                maxHotendTemp = capabilities.MaxHotendTemp,
+                minBedTemp = capabilities.MinBedTemp,
+                maxBedTemp = capabilities.MaxBedTemp,
+                maxPrintSpeed = capabilities.MaxPrintSpeed,
+                currentMaterial = capabilities.CurrentMaterial,
+                currentSpoolId = capabilities.CurrentSpoolId,
+                isAvailable = capabilities.IsAvailable,
+                lastUpdated = capabilities.LastUpdated
+            };
+
+            return Ok(capabilitiesObj);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Capabilities] Failed to get printer capabilities for {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to retrieve printer capabilities",
+                error = ex.Message
+            });
+        }
     }
 
 }
