@@ -62,7 +62,7 @@ public partial class NetworkDiscoveryService(
                 return new List<DiscoveredPrinterDto>();
             }
         }
-        _logger.LogInformation($"Discovery settings: Networks={string.Join(",", settings.NetworkRanges)}, Timeout={settings.TimeoutMs}ms, MaxScans={settings.MaxConcurrentScans}, Ports={string.Join(",", settings.Ports)}", null, null);
+        _logger.LogInformation($"Discovery settings: Networks={string.Join(",", settings.NetworkRanges)}, Timeout={settings.TimeoutMs}ms, MaxScans={settings.MaxConcurrentScans}", null, null);
 
         List<DiscoveredPrinterDto> discovered = new();
 
@@ -90,6 +90,10 @@ public partial class NetworkDiscoveryService(
 
     public async Task DiscoverPrintersWithProgressAsync(string sessionId, IEnumerable<PrinterBackend>? backends, CancellationToken cancellationToken = default)
     {
+        // DEBUG: Force console output to verify this method is even being called
+        Console.WriteLine($"[DEBUG] DiscoverPrintersWithProgressAsync called for sessionId={sessionId}");
+        System.Diagnostics.Debug.WriteLine($"[DEBUG] DiscoverPrintersWithProgressAsync called for sessionId={sessionId}");
+        
         _logger.LogInformation($"Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)
@@ -124,7 +128,7 @@ public partial class NetworkDiscoveryService(
                 _logger.LogWarning("No network ranges configured and none could be auto-detected. Streaming discovery will send immediate completion.", null, null);
             }
         }
-        _logger.LogInformation($"Discovery settings: Networks={string.Join(",", settings.NetworkRanges)}, Timeout={settings.TimeoutMs}ms, MaxScans={settings.MaxConcurrentScans}, Ports={string.Join(",", settings.Ports)}", null, null);
+        _logger.LogInformation($"Discovery settings: Networks={string.Join(",", settings.NetworkRanges)}, Timeout={settings.TimeoutMs}ms, MaxScans={settings.MaxConcurrentScans}", null, null);
 
         int totalIps = 0;
         int scannedIps = 0;
@@ -646,11 +650,10 @@ public partial class NetworkDiscoveryService(
             // NetworkDiscoverySettings is registered as an AppSetting and should be available
             NetworkDiscoverySettings app = _settingsService.Get<NetworkDiscoverySettings>();
             IList<string> ranges = app.DiscoverySubnets ?? new List<string>();
-            IList<int> ports = app.Ports ?? new List<int> { 80 };
             // NetworkDiscoverySettingsDto expects concrete List<T> types; convert if necessary.
             List<string> rangesList = ranges is List<string> lr ? lr : ranges.ToList();
-            List<int> portsList = ports is List<int> lp ? lp : ports.ToList();
-            return new NetworkDiscoverySettingsDto(rangesList, app.ClientTimeoutMs, app.MaxConcurrentRequests, portsList, null);
+            // Note: Ports are NOT used - each discovery probe knows its own backend-specific ports
+            return new NetworkDiscoverySettingsDto(rangesList, app.ClientTimeoutMs, app.MaxConcurrentRequests, null);
         }
         catch (Exception ex)
         {

@@ -613,10 +613,9 @@ public record NetworkDiscoverySettingsDto(
     List<string> NetworkRanges,
     int TimeoutMs = 3000,
     int MaxConcurrentScans = 20,
-    List<int> Ports = null!,
     List<PrinterBackend>? Backends = null)
 {
-    public NetworkDiscoverySettingsDto() : this(new List<string>(), 3000, 20, new List<int> { 80 }, null)
+    public NetworkDiscoverySettingsDto() : this(new List<string>(), 3000, 20, null)
     {
     }
 }

@@ -69,21 +69,7 @@ public static class NetworkValidationService
             result._errors.Add("Max concurrent requests must be between 1 and 100");
         }
 
-        if (settings.Ports == null || (settings.Ports.Count == 0 && validNetworks.Count > 0))
-        {
-            result._errors.Add("At least one port is required when network ranges are configured");
-        }
-
-        if (settings.Ports != null)
-        {
-            foreach (int port in settings.Ports)
-            {
-                if (port < 1 || port > 65535)
-                {
-                    result._errors.Add($"Invalid port number: {port} (must be 1-65535)");
-                }
-            }
-        }
+        // NOTE: Ports validation removed - each discovery probe handles its own backend-specific ports
 
         return result;
     }

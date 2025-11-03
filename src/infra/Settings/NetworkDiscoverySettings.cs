@@ -25,11 +25,6 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
     public IList<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);
 
-    [SettingDisplay(Name = "Ports", Description = "List of ports to scan.", InputType = SettingInputType.Array, IsMulti = true)]
-    [JsonPropertyName("ports")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
-    public IList<int> Ports { get; set; } = new List<int> { 80 };
-
     [SettingDisplay(Name = "Client Timeout (ms)", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
     [JsonPropertyName("clientTimeoutMs")]
     public int ClientTimeoutMs { get; set; } = 200; // Valid range: 50-60000
@@ -49,7 +44,6 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     public void Validate()
     {
         EnsureUniqueSubnets();
-        EnsureUniquePorts();
         if (DiscoverySubnets == null || DiscoverySubnets.Count == 0 || DiscoverySubnets.Any(string.IsNullOrWhiteSpace))
         {
             throw new ValidationException("At least one valid subnet is required.");
@@ -76,23 +70,6 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
             foreach (var subnet in unique)
             {
                 DiscoverySubnets.Add(subnet);
-            }
-        }
-    }
-
-    private void EnsureUniquePorts()
-    {
-        if (Ports == null)
-        {
-            return;
-        }
-        var unique = Ports.Distinct().ToList();
-        if (unique.Count != Ports.Count)
-        {
-            Ports.Clear();
-            foreach (var port in unique)
-            {
-                Ports.Add(port);
             }
         }
     }

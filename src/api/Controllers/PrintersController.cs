@@ -32,6 +32,7 @@ public class PrintersController(
     Services.Catalog.ICatalogService catalogService,
     INetworkDiscoveryService networkDiscoveryService,
     IDefaultCatalogService defaultCatalogService,
+    IDiscoveryProgressCache discoveryProgressCache,
     IValidator<CreatePrinterDto> validator)
     : ControllerBase
 {
@@ -268,20 +269,39 @@ public class PrintersController(
 
             // Start background discovery task (fire and forget with proper error handling)
             // This will broadcast updates via SignalR and populate the discovery progress cache
+            // NOTE: We create a NEW CancellationTokenSource (not linked to request token) because:
+            // 1. Request token is disposed when response is sent
+            // 2. We want discovery to run in background independent of request lifecycle
+            // 3. Users should be able to cancel via separate API call (/discover/{sessionId}/cancel)
             _ = Task.Run(async () =>
             {
+                CancellationTokenSource discoveryCts = new();
                 try
                 {
-                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, backends, ct);
+                    // Store the CTS so clients can request cancellation via API endpoint
+                    discoveryProgressCache.SetCancellationSource(sessionId, discoveryCts);
+                    
+                    // Set a hard timeout of 15 minutes to prevent discovery from running forever
+                    discoveryCts.CancelAfter(TimeSpan.FromMinutes(15));
+                    
+                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, backends, discoveryCts.Token);
                     _logger.LogInformation($"[Discovery] Discovery stream completed for sessionId={sessionId}");
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning($"[Discovery] Discovery stream cancelled for sessionId={sessionId}");
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, $"[Discovery] Error during discovery stream (sessionId={sessionId}): {ex.Message}");
-                    // Note: Error is logged but not directly communicated to client
-                    // Client will see discovery complete with whatever results were found
                 }
-            }, ct);
+                finally
+                {
+                    // Clean up: remove from cache and dispose token
+                    discoveryProgressCache.Remove(sessionId);
+                    discoveryCts.Dispose();
+                }
+            });
 
             // Return session info immediately so frontend can subscribe to SignalR group
             return Ok(new
@@ -298,6 +318,52 @@ public class PrintersController(
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to start discovery stream",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Cancels an active network discovery session by sessionId.
+    /// Users can call this endpoint to stop an ongoing discovery operation.
+    /// </summary>
+    /// <param name="sessionId">The discovery session ID returned from /discover/stream endpoint</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Success or error response</returns>
+    /// <response code="200">Discovery cancellation requested successfully</response>
+    /// <response code="404">Discovery session not found or already completed</response>
+    [HttpPost("discover/{sessionId}/cancel")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> CancelDiscoveryAsync(string sessionId, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return BadRequest(new { error = "sessionId is required" });
+            }
+
+            // Attempt to cancel the discovery session
+            bool cancelled = discoveryProgressCache.TryCancel(sessionId);
+
+            if (cancelled)
+            {
+                _logger.LogInformation($"[Discovery] Cancellation requested for sessionId={sessionId}");
+                return Ok(new { message = "Discovery cancellation requested successfully" });
+            }
+            else
+            {
+                _logger.LogInformation($"[Discovery] Cannot cancel sessionId={sessionId} - session not found or already completed");
+                return NotFound(new { error = "Discovery session not found or already completed" });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Discovery] Error cancelling discovery session: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Error cancelling discovery",
                 error = ex.Message
             });
         }

@@ -40,7 +40,7 @@ public class IAppSettingTests
         Assert.True(settings.EnableDiscovery);
         Assert.Equal(60, settings.RequestDelayMs);
         Assert.Equal(5, settings.ClientTimeoutMs);
-        Assert.Equal(new[] { 80, 8080 }, settings.Ports);
+        // NOTE: Ports property removed - each discovery probe handles its own backend-specific ports
         Assert.Equal(new[] { "192.168.1.0/24", "10.0.0.0/24" }, settings.DiscoverySubnets);
 
         if (settings is IValidatableSetting validatable)

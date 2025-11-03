@@ -3,12 +3,12 @@ if (!window.PrintFarmerDebug) {
 }
 import React, { useState } from 'react';
 import './printerDiscovery.css';
-import { useStartDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
+import { useStartDiscoveryStream, useCancelDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-import { X, Search } from 'lucide-react';
+import { X, Search, XCircle } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterDiscoveryModalProps {
@@ -41,6 +41,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   const [selectedBackends, setSelectedBackends] = useState<Set<PrinterBackend>>(new Set([PrinterBackend.Moonraker, PrinterBackend.PrusaLink]));
 
   const startDiscoveryMutation = useStartDiscoveryStream();
+  const cancelDiscoveryMutation = useCancelDiscoveryStream();
   const createPrinterMutation = useCreatePrinter();
   const { isConnected: isSignalRConnected } = useSignalRConnection('printer');
   const [startError, setStartError] = useState<string | null>(null);
@@ -83,6 +84,17 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       setSelectedPrinters(new Set());
     } catch (error) {
       console.error('Failed to start discovery stream:', error);
+    }
+  };
+
+  const handleCancelDiscovery = async () => {
+    if (!sessionId) return;
+    try {
+      await cancelDiscoveryMutation.mutateAsync(sessionId);
+      setSessionId(null);
+      resetDiscovery();
+    } catch (error) {
+      console.error('Failed to cancel discovery stream:', error);
     }
   };
 
@@ -234,6 +246,19 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                     <Search className="h-4 w-4 mr-2" />
                     {isActive ? 'Scanning...' : 'Start Network Scan'}
                   </button>
+                  
+                  {isActive && (
+                    <button
+                      type="button"
+                      onClick={handleCancelDiscovery}
+                      disabled={cancelDiscoveryMutation.isPending}
+                      className="ml-2 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-error hover:bg-pf-error-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Stop the current network discovery scan"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Cancel Scan
+                    </button>
+                  )}
                   {selectedBackends.size === 0 && (
                     <p className="text-xs text-pf-error-text mt-2">Please select at least one backend to scan</p>
                   )}

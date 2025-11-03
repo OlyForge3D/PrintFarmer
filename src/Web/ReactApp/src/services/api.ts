@@ -343,6 +343,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async cancelDiscoveryStream(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post<{ message: string }>(`/printers/discover/${sessionId}/cancel`, {});
+    return response.data;
+  }
+
   // ============ Printer Control API methods ============
 
   async setTemperatures(printerId: string, targets: TempTargets): Promise<CommandResult> {

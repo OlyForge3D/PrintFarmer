@@ -297,6 +297,12 @@ export function useStartDiscoveryStream() {
   });
 }
 
+export function useCancelDiscoveryStream() {
+  return useMutation({
+    mutationFn: (sessionId: string) => apiClient.cancelDiscoveryStream(sessionId),
+  });
+}
+
 // ============ Catalog Hooks ============
 
 export function useManufacturers(options?: UseQueryOptions<ManufacturerDto[], ApiError>) {

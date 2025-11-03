@@ -20,7 +20,6 @@ public class BackendSelectionTests
             NetworkRanges: new List<string> { "192.168.1.0/24" },
             TimeoutMs: 3000,
             MaxConcurrentScans: 20,
-            Ports: new List<int> { 80, 7125 },
             Backends: backends
         );
 
@@ -39,7 +38,6 @@ public class BackendSelectionTests
             NetworkRanges: new List<string> { "192.168.1.0/24" },
             TimeoutMs: 3000,
             MaxConcurrentScans: 20,
-            Ports: new List<int> { 80 },
             Backends: null
         );
 
@@ -58,7 +56,7 @@ public class BackendSelectionTests
         settings.NetworkRanges.Should().BeEmpty();
         settings.TimeoutMs.Should().Be(3000);
         settings.MaxConcurrentScans.Should().Be(20);
-        settings.Ports.Should().Equal(80);
+        // NOTE: Ports parameter removed - each discovery probe handles its own backend-specific ports
     }
 
     [Fact]
