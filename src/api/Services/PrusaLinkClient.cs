@@ -97,12 +97,11 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
     public async Task<PrinterDto> CreatePrinterDtoAsync(
         Printer printer,
         PrusaCompositeStatus status,
-        int? frontendPort,
         CancellationToken ct = default)
     {
         // Get camera URLs from PrusaLink client methods
-        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
-        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
+        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, printer.FrontendPort, ct).ConfigureAwait(false);
+        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, printer.FrontendPort, ct).ConfigureAwait(false);
 
         // Construct backend-specific PrinterDto
         return new PrinterDto(
@@ -122,7 +121,9 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
             Backend: PrinterBackend.PrusaLink,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress
+            IpAddress: printer.IpAddress,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort
         );
     }
 

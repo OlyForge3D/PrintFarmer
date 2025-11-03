@@ -135,7 +135,7 @@ public interface ISdcpClient : IDisposable
     /// Creates a PrinterDto from a database Printer entity and its composite status.
     /// Encapsulates backend-specific DTO creation logic within the SDCP client.
     /// </summary>
-    /// <param name="printer">The printer entity from the database</param>
+    /// <param name="printer">The printer entity from the database (includes FrontendPort)</param>
     /// <param name="status">The composite status retrieved from the printer</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the fully constructed PrinterDto with all backend-specific details</returns>

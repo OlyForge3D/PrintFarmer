@@ -442,7 +442,9 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient
             Backend: PrinterBackend.SDCP,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress
+            IpAddress: printer.IpAddress,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort
         );
     }
 

@@ -615,7 +615,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
-                            {/* Camera button - always visible, enabled/disabled based on camera URLs */}
+              {/* Camera button - always visible, enabled/disabled based on camera URLs */}
               <button
                 type="button"
                 onClick={() => setShowCamera(!showCamera)}

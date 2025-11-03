@@ -460,12 +460,11 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
         Printer printer,
         PrinterCompositeStatus status,
         PrinterSpoolInfoDto? spoolInfo,
-        int? frontendPort,
         CancellationToken ct = default)
     {
         // Get camera URLs from Moonraker client methods
-        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
-        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
+        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, printer.FrontendPort, ct).ConfigureAwait(false);
+        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, printer.FrontendPort, ct).ConfigureAwait(false);
 
         // Construct backend-specific PrinterDto
         return new PrinterDto(
@@ -493,7 +492,9 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
             IpAddress: printer.IpAddress,
-            SpoolInfo: spoolInfo
+            SpoolInfo: spoolInfo,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort
         );
     }
 

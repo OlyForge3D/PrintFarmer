@@ -220,7 +220,7 @@ namespace Farm.Web.Api.Services.Printers
                         CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
                         PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct => await _prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), fastTimeoutCts.Token);
                         // Delegate to PrusaLink client for DTO creation
-                        return await _prusa.CreatePrinterDtoAsync(p, status, p.FrontendPort, fastTimeoutCts.Token);
+                        return await _prusa.CreatePrinterDtoAsync(p, status, fastTimeoutCts.Token);
                     }
                     else if (p.Backend == 2) // SDCP
                     {
@@ -244,7 +244,7 @@ namespace Farm.Web.Api.Services.Printers
                         PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _moon.GetCompositeStatusAsync(moonrakerUrl, ct), fastTimeoutCts.Token);
                         PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, fastTimeoutCts.Token);
                         // Delegate to Moonraker client for DTO creation
-                        return await _moon.CreatePrinterDtoAsync(p, status, spoolInfo, p.FrontendPort, fastTimeoutCts.Token);
+                        return await _moon.CreatePrinterDtoAsync(p, status, spoolInfo, fastTimeoutCts.Token);
                     }
                 }
                 catch (OperationCanceledException) when (fastTimeoutCts.Token.IsCancellationRequested)
@@ -320,7 +320,7 @@ namespace Farm.Web.Api.Services.Printers
             {
                 // Delegate to PrusaLink client for DTO creation
                 PrusaCompositeStatus status = await _prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
-                return await _prusa.CreatePrinterDtoAsync(p, status, p.FrontendPort, ct);
+                return await _prusa.CreatePrinterDtoAsync(p, status, ct);
             }
             else if (p.Backend == 2)
             {
@@ -334,7 +334,7 @@ namespace Farm.Web.Api.Services.Printers
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
                 PrinterCompositeStatus status = await _moon.GetCompositeStatusAsync(moonrakerUrl, ct);
                 PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, ct);
-                return await _moon.CreatePrinterDtoAsync(p, status, spoolInfo, p.FrontendPort, ct);
+                return await _moon.CreatePrinterDtoAsync(p, status, spoolInfo, ct);
             }
         }
 
@@ -785,12 +785,17 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch { }
 
+            // ServerUrl is already normalized without explicit port by NormalizeServerUrl()
+            // Port is managed separately via BackendPort field
+            string serverUrlForStorage = resolvedBase;
+            string originalUrlForStorage = normalizedInput;
+
             Printer p = new()
             {
                 Id = Guid.NewGuid(),
                 Name = dto.Name,
-                ServerUrl = resolvedBase,
-                OriginalServerUrl = normalizedInput,
+                ServerUrl = serverUrlForStorage,
+                OriginalServerUrl = originalUrlForStorage,
                 IpAddress = resolvedIp,
                 Notes = dto.Notes,
                 ManufacturerId = manufacturerId,
@@ -1185,12 +1190,9 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch { }
 
-            // Strip port before returning - ServerUrl should only contain scheme + host, no port
+            // ServerUrl is already normalized without explicit port by NormalizeServerUrl()
             // Port is managed separately via FrontendPort field
-            string normalizedForStorage = StripPortFromServerUrl(normalizedWithPort);
-            string resolvedBaseForStorage = StripPortFromServerUrl(resolvedBase);
-
-            return new Farm.Web.Shared.ResolveHostnameResponse(normalizedForStorage, resolvedIp, resolvedBaseForStorage);
+            return new Farm.Web.Shared.ResolveHostnameResponse(normalizedWithPort, resolvedIp, resolvedBase);
         }
 
         public string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
@@ -1292,78 +1294,18 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 Uri uri = new Uri(trimmed);
-                // If port is not specified, append default port for comparison purposes
-                int port = uri.IsDefaultPort ? defaultPort : uri.Port;
+                // Build URL without explicit port (use default ports)
                 UriBuilder ub = new UriBuilder(uri)
                 {
-                    Port = port
+                    Port = -1,  // -1 means use default port, not explicitly shown
+                    Path = string.Empty,  // Remove any paths
+                    Query = string.Empty
                 };
                 // Return without trailing slash for stable comparisons
                 return ub.Uri.ToString().TrimEnd('/');
             }
             catch
             {
-                return trimmed;
-            }
-        }
-
-        /// <summary>
-        /// Strips the port from a server URL, returning only scheme + host.
-        /// Used when persisting ServerUrl to the database (port is managed via FrontendPort field).
-        /// Example: "http://192.168.1.50:8080/api" -> "http://192.168.1.50"
-        /// </summary>
-        /// <param name="serverUrl">The full URL with optional port</param>
-        /// <returns>URL with only scheme and host, no port or path</returns>
-        public static string StripPortFromServerUrl(string? serverUrl)
-        {
-            if (string.IsNullOrWhiteSpace(serverUrl))
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                Uri uri = new Uri(serverUrl.Trim());
-                UriBuilder ub = new UriBuilder(uri)
-                {
-                    Port = -1,  // -1 means use default port (not explicitly shown in URI)
-                    Path = string.Empty,  // Remove any paths
-                    Query = string.Empty
-                };
-                return ub.Uri.ToString().TrimEnd('/');
-            }
-            catch
-            {
-                // Fallback: just remove port manually if URI parsing fails
-                string trimmed = serverUrl.Trim();
-                if (trimmed.Contains("://"))
-                {
-                    string[] parts = trimmed.Split(new[] { "://" }, StringSplitOptions.None);
-                    if (parts.Length == 2)
-                    {
-                        string hostPart = parts[1];
-                        // Remove port and path
-                        int colonIndex = hostPart.IndexOf(':');
-                        int slashIndex = hostPart.IndexOf('/');
-
-                        if (colonIndex > 0 || slashIndex > 0)
-                        {
-                            int endIndex = hostPart.Length;
-                            if (colonIndex > 0)
-                            {
-                                endIndex = Math.Min(endIndex, colonIndex);
-                            }
-
-                            if (slashIndex > 0)
-                            {
-                                endIndex = Math.Min(endIndex, slashIndex);
-                            }
-
-                            hostPart = hostPart.Substring(0, endIndex);
-                        }
-                        return parts[0] + "://" + hostPart;
-                    }
-                }
                 return trimmed;
             }
         }
