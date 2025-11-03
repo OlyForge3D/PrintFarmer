@@ -771,7 +771,17 @@ export class ApiClient {
   // ============ Authentication API methods ============
 
   async login(credentials: LoginRequest): Promise<AuthenticationResult> {
-    const response = await this.client.post<AuthenticationResult>('/auth/login', credentials);
+    // Backend expects the field name `UsernameOrEmail` (model uses UsernameOrEmail).
+    // Frontend `LoginRequest` type historically used `username` so map that to
+    // `usernameOrEmail` to remain backwards-compatible and avoid model binding
+    // validation errors (400 Bad Request).
+    const payload = {
+      // Support either `username` or `usernameOrEmail` in the credentials object
+      usernameOrEmail: (credentials as any).usernameOrEmail ?? (credentials as any).username,
+      password: credentials.password,
+    } as Record<string, string>;
+
+    const response = await this.client.post<AuthenticationResult>('/auth/login', payload);
     return response.data;
   }
 

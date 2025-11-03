@@ -735,7 +735,9 @@ export interface ApiError {
 
 // Authentication types
 export interface LoginRequest {
-  username: string;
+  // Accept either `username` (legacy) or `usernameOrEmail` (backend contract)
+  username?: string;
+  usernameOrEmail?: string;
   password: string;
 }
 
