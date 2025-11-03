@@ -169,12 +169,10 @@ public class MoonrakerClientTests
         var (client, _, _) = CreateClient(req =>
         {
             var url = req.RequestUri!.ToString();
-            if (url.EndsWith("/server/webcams/list"))
-            {
-                return Json(new { result = new { webcams = new[] { new { enabled = true, snapshot_url = "/snap.jpg", uid = "cam1" } } } });
-            }
 
-            if (url.EndsWith("/snap.jpg"))
+            // GetCameraSnapshotUrlAsync now constructs the URL directly instead of fetching from /server/webcams/list
+            // It creates: /webcam/?action=snapshot
+            if (url.Contains("/webcam/") && url.Contains("action=snapshot"))
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
             }

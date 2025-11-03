@@ -1,4 +1,7 @@
-﻿namespace Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Web.Shared;
+
+namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for PrusaLink client providing communication with Prusa printers via PrusaLink API.
@@ -38,6 +41,26 @@ public interface IPrusaLinkClient
     Task<PrusaJob?> GetJobAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets the URL for accessing the camera snapshot image.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink server (host only)</param>
+    /// <param name="frontendPort">Optional frontend port for camera access (defaults to 80 for HTTP, 443 for HTTPS)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the camera snapshot URL, or null if configuration fails</returns>
+    Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+    Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the URL for accessing the camera stream (typically MJPEG).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink server (host only)</param>
+    /// <param name="frontendPort">Optional frontend port for camera access (defaults to 80 for HTTP, 443 for HTTPS)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the camera stream URL, or null if configuration fails</returns>
+    Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+    Task<string?> GetCameraStreamUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Uploads a G-code file to the PrusaLink printer's storage.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
@@ -75,4 +98,19 @@ public interface IPrusaLinkClient
     /// </summary>
     Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
     Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a PrinterDto from a database Printer entity and its composite status.
+    /// Encapsulates backend-specific DTO creation logic within the PrusaLink client.
+    /// </summary>
+    /// <param name="printer">The printer entity from the database</param>
+    /// <param name="status">The composite status retrieved from the printer</param>
+    /// <param name="frontendPort">Optional frontend port for camera URL generation</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the fully constructed PrinterDto with all backend-specific details</returns>
+    Task<PrinterDto> CreatePrinterDtoAsync(
+        Printer printer,
+        PrusaCompositeStatus status,
+        int? frontendPort,
+        CancellationToken ct = default);
 }

@@ -8,12 +8,12 @@ public interface IDiscoveryProgressCache
     void Set(string sessionId, DiscoveryProgressDto progress);
     bool TryGet(string sessionId, out DiscoveryProgressDto? progress);
     void Remove(string sessionId);
-    
+
     /// <summary>
     /// Stores a CancellationTokenSource for a discovery session, allowing clients to request cancellation.
     /// </summary>
     void SetCancellationSource(string sessionId, CancellationTokenSource cts);
-    
+
     /// <summary>
     /// Attempts to cancel a discovery session by its sessionId.
     /// </summary>
@@ -46,12 +46,12 @@ public class DiscoveryProgressCache : IDiscoveryProgressCache
             cts.Dispose();
         }
     }
-    
+
     public void SetCancellationSource(string sessionId, CancellationTokenSource cts)
     {
         _cancellationSources[sessionId] = cts;
     }
-    
+
     public bool TryCancel(string sessionId)
     {
         if (_cancellationSources.TryGetValue(sessionId, out CancellationTokenSource? cts) && !cts.IsCancellationRequested)

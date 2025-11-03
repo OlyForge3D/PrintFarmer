@@ -1,7 +1,9 @@
 ﻿using System.Text;
 using System.Text.Json;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -259,112 +261,75 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
         }
     }
 
-    private async Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, CancellationToken ct = default)
+    public Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
     {
         try
         {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return Task.FromResult<string?>(null);
+            }
+
             Uri baseUri = new(NormalizeBaseUrl(baseUrl));
-            Uri listUri = new(baseUri, "server/webcams/list");
-            using HttpResponseMessage resp = await _http.GetAsync(listUri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+
+            UriBuilder builder = new(baseUri)
             {
-                return null;
-            }
+                Port = port,
+                Path = "/webcam/?action=stream",
+                Query = null
+            };
 
-            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
-            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
-            JsonElement root = doc.RootElement;
-            if ((root.TryGetProperty("webcams", out JsonElement cams) && cams.ValueKind == JsonValueKind.Array) ||
-                (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array))
-            {
-                foreach (JsonElement cam in cams.EnumerateArray())
-                {
-                    bool enabled = true;
-                    if (cam.TryGetProperty("enabled", out JsonElement en))
-                    {
-                        if (en.ValueKind == JsonValueKind.False)
-                        {
-                            enabled = false;
-                        }
-                        else if (en.ValueKind == JsonValueKind.True)
-                        {
-                            enabled = true;
-                        }
-                    }
-                    if (!enabled)
-                    {
-                        continue;
-                    }
-
-                    // Try direct snapshot_url from listing
-                    if (cam.TryGetProperty("snapshot_url", out JsonElement sn) && sn.ValueKind == JsonValueKind.String)
-                    {
-                        string? s = sn.GetString();
-                        if (!string.IsNullOrWhiteSpace(s))
-                        {
-                            string baseNormSnap = NormalizeBaseUrl(baseUrl);
-                            return NormalizeCameraUrl(s, baseNormSnap);
-                        }
-                    }
-
-                    // Prefer resolved URLs via /server/webcams/test using uid or name
-                    string? uid = null;
-                    if (cam.TryGetProperty("uid", out JsonElement uidEl) && uidEl.ValueKind == JsonValueKind.String)
-                    {
-                        uid = uidEl.GetString();
-                    }
-
-                    string? name = null;
-                    if (cam.TryGetProperty("name", out JsonElement nmEl) && nmEl.ValueKind == JsonValueKind.String)
-                    {
-                        name = nmEl.GetString();
-                    }
-
-                    Uri? testUri = uid is not null
-                        ? new Uri(new Uri(NormalizeBaseUrl(baseUrl)), $"server/webcams/test?uid={Uri.EscapeDataString(uid)}")
-                        : (name is not null ? new Uri(new Uri(NormalizeBaseUrl(baseUrl)), $"server/webcams/test?name={Uri.EscapeDataString(name)}") : null);
-                    if (testUri is not null)
-                    {
-                        try
-                        {
-                            using HttpResponseMessage tresp = await _http.PostAsync(testUri, content: null, cts.Token);
-                            if (tresp.IsSuccessStatusCode)
-                            {
-                                await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
-                                using JsonDocument tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
-                                JsonElement troot = tdoc.RootElement;
-                                if (troot.TryGetProperty("result", out JsonElement tresult))
-                                {
-                                    troot = tresult;
-                                }
-
-                                if (troot.TryGetProperty("snapshot_url", out JsonElement tsu) && tsu.ValueKind == JsonValueKind.String)
-                                {
-                                    string? s = tsu.GetString();
-                                    if (!string.IsNullOrWhiteSpace(s))
-                                    {
-                                        string baseNormLocal = NormalizeBaseUrl(baseUrl);
-                                        return NormalizeCameraUrl(s, baseNormLocal);
-                                    }
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-            }
+            return Task.FromResult<string?>(builder.Uri.ToString());
         }
-        catch { }
-        return null;
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<string?> GetCameraStreamUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        return GetCameraStreamUrlAsync(baseUrl.ToString(), frontendPort, ct);
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return Task.FromResult<string?>(null);
+            }
+
+            Uri baseUri = new(NormalizeBaseUrl(baseUrl));
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "/webcam/?action=snapshot",
+                Query = null
+            };
+
+            return Task.FromResult<string?>(builder.Uri.ToString());
+        }
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        return GetCameraSnapshotUrlAsync(baseUrl.ToString(), frontendPort, ct);
     }
 
     public async Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default)
     {
         try
         {
-            string? url = await GetCameraSnapshotUrlAsync(baseUrl, ct);
+            string? url = await GetCameraSnapshotUrlAsync(baseUrl, null, ct);
             if (string.IsNullOrWhiteSpace(url))
             {
                 return null;
@@ -467,6 +432,47 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             snap = snapshotUrl;
         }
         return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
+    }
+
+    public async Task<PrinterDto> CreatePrinterDtoAsync(
+        Printer printer,
+        PrinterCompositeStatus status,
+        PrinterSpoolInfoDto? spoolInfo,
+        int? frontendPort,
+        CancellationToken ct = default)
+    {
+        // Get camera URLs from Moonraker client methods
+        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
+        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
+
+        // Construct backend-specific PrinterDto
+        return new PrinterDto(
+            Id: printer.Id,
+            Name: printer.Name,
+            ServerUrl: printer.ServerUrl,
+            Notes: printer.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: printer.Manufacturer?.Name,
+            ModelName: printer.Model?.Name,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: cameraStreamUrl,
+            CameraSnapshotUrl: cameraSnapshotUrl,
+            X: status.X,
+            Y: status.Y,
+            Z: status.Z,
+            HotendTemp: status.HotendTemp,
+            BedTemp: status.BedTemp,
+            HotendTarget: status.HotendTarget,
+            BedTarget: status.BedTarget,
+            Backend: PrinterBackend.Moonraker,
+            ApiKey: printer.ApiKey,
+            OriginalServerUrl: printer.OriginalServerUrl,
+            IpAddress: printer.IpAddress,
+            SpoolInfo: spoolInfo
+        );
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)

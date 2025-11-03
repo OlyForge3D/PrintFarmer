@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -90,6 +92,104 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetJobAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+    }
+
+    public async Task<PrinterDto> CreatePrinterDtoAsync(
+        Printer printer,
+        PrusaCompositeStatus status,
+        int? frontendPort,
+        CancellationToken ct = default)
+    {
+        // Get camera URLs from PrusaLink client methods
+        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
+        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, frontendPort, ct).ConfigureAwait(false);
+
+        // Construct backend-specific PrinterDto
+        return new PrinterDto(
+            Id: printer.Id,
+            Name: printer.Name,
+            ServerUrl: printer.ServerUrl,
+            Notes: printer.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: printer.Manufacturer?.Name,
+            ModelName: printer.Model?.Name,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: cameraStreamUrl,
+            CameraSnapshotUrl: cameraSnapshotUrl,
+            Backend: PrinterBackend.PrusaLink,
+            ApiKey: printer.ApiKey,
+            OriginalServerUrl: printer.OriginalServerUrl,
+            IpAddress: printer.IpAddress
+        );
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return Task.FromResult<string?>(null);
+            }
+
+            Uri baseUri = new(baseUrl.TrimEnd('/'));
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "/webcam/?action=snapshot",
+                Query = null
+            };
+
+            return Task.FromResult<string?>(builder.Uri.ToString());
+        }
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCameraSnapshotUrlAsync(baseUrl.ToString(), frontendPort, ct);
+    }
+
+    public Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return Task.FromResult<string?>(null);
+            }
+
+            Uri baseUri = new(baseUrl.TrimEnd('/'));
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "/webcam/?action=stream",
+                Query = null
+            };
+
+            return Task.FromResult<string?>(builder.Uri.ToString());
+        }
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<string?> GetCameraStreamUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCameraStreamUrlAsync(baseUrl.ToString(), frontendPort, ct);
     }
 
     // File upload and management methods - Using comprehensive API client

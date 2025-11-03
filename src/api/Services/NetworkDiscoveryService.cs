@@ -93,7 +93,7 @@ public partial class NetworkDiscoveryService(
         // DEBUG: Force console output to verify this method is even being called
         Console.WriteLine($"[DEBUG] DiscoverPrintersWithProgressAsync called for sessionId={sessionId}");
         System.Diagnostics.Debug.WriteLine($"[DEBUG] DiscoverPrintersWithProgressAsync called for sessionId={sessionId}");
-        
+
         _logger.LogInformation($"Starting printer network discovery...", null, null);
 
         // Gather existing printers to exclude from streaming results (fresh scope - background task may outlive original request scope)

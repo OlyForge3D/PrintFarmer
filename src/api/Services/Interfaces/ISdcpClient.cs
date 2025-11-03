@@ -1,4 +1,7 @@
-﻿namespace Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Web.Shared;
+
+namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for SDCP (Smart Device Control Protocol) client providing communication with SDCP-compatible printers.
@@ -127,4 +130,17 @@ public interface ISdcpClient : IDisposable
     /// <returns>A task indicating whether the upload was successful</returns>
     Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
     Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a PrinterDto from a database Printer entity and its composite status.
+    /// Encapsulates backend-specific DTO creation logic within the SDCP client.
+    /// </summary>
+    /// <param name="printer">The printer entity from the database</param>
+    /// <param name="status">The composite status retrieved from the printer</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the fully constructed PrinterDto with all backend-specific details</returns>
+    Task<PrinterDto> CreatePrinterDtoAsync(
+        Printer printer,
+        PrinterCompositeStatus status,
+        CancellationToken ct = default);
 }

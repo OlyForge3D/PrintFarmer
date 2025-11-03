@@ -280,10 +280,10 @@ public class PrintersController(
                 {
                     // Store the CTS so clients can request cancellation via API endpoint
                     discoveryProgressCache.SetCancellationSource(sessionId, discoveryCts);
-                    
+
                     // Set a hard timeout of 15 minutes to prevent discovery from running forever
                     discoveryCts.CancelAfter(TimeSpan.FromMinutes(15));
-                    
+
                     await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, backends, discoveryCts.Token);
                     _logger.LogInformation($"[Discovery] Discovery stream completed for sessionId={sessionId}");
                 }
@@ -1567,7 +1567,7 @@ public class PrintersController(
         {
             _logger.LogInformation($"[Config] Getting printer configuration for {id}");
             var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
-            
+
             if (printer == null)
             {
                 _logger.LogWarning($"[Config] Printer {id} not found");
@@ -1639,7 +1639,7 @@ public class PrintersController(
         try
         {
             _logger.LogInformation($"[Config] Updating printer configuration for {id}");
-            
+
             var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
             if (printer == null)
             {
@@ -1758,9 +1758,9 @@ public class PrintersController(
         try
         {
             _logger.LogInformation($"[Capabilities] Getting printer capabilities for {id}");
-            
+
             var capabilities = await _printersService.GetCapabilitiesByPrinterIdAsync(id, ct);
-            
+
             if (capabilities == null)
             {
                 _logger.LogWarning($"[Capabilities] No capabilities found for printer {id}");

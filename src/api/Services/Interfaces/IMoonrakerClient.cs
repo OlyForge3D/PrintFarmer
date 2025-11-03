@@ -1,4 +1,7 @@
-﻿namespace Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Web.Shared;
+
+namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Interface for Moonraker client providing communication with Moonraker/Klipper 3D printer firmware.
@@ -50,13 +53,54 @@ public interface IMoonrakerClient
     #region Camera Operations
 
     /// <summary>
-    /// Captures a snapshot from the printer's camera.
+    /// Gets the URL for accessing the camera stream (typically MJPEG).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server (host only)</param>
+    /// <param name="frontendPort">Optional frontend port for camera access (defaults to 80 for HTTP, 443 for HTTPS)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the camera stream URL, or null if configuration fails</returns>
+    Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+    Task<string?> GetCameraStreamUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the URL for accessing a single camera snapshot image.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server (host only)</param>
+    /// <param name="frontendPort">Optional frontend port for camera access (defaults to 80 for HTTP, 443 for HTTPS)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the camera snapshot URL, or null if configuration fails</returns>
+    Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+    Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Captures a snapshot from the printer's camera as raw bytes.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the camera snapshot as byte array, or null if no camera is available</returns>
     Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default);
     Task<byte[]?> GetCameraSnapshotAsync(Uri baseUrl, CancellationToken ct = default);
+
+    #endregion
+
+    #region DTO Creation
+
+    /// <summary>
+    /// Creates a PrinterDto from a database Printer entity and its composite status.
+    /// Encapsulates backend-specific DTO creation logic within the Moonraker client.
+    /// </summary>
+    /// <param name="printer">The printer entity from the database</param>
+    /// <param name="status">The composite status retrieved from the printer</param>
+    /// <param name="spoolInfo">Optional spool information for Spoolman integration</param>
+    /// <param name="frontendPort">Optional frontend port for camera URL generation</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the fully constructed PrinterDto with all backend-specific details</returns>
+    Task<PrinterDto> CreatePrinterDtoAsync(
+        Farm.Infrastructure.Domain.Printer printer,
+        PrinterCompositeStatus status,
+        PrinterSpoolInfoDto? spoolInfo,
+        int? frontendPort,
+        CancellationToken ct = default);
 
     #endregion
 

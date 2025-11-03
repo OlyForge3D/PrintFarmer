@@ -2,8 +2,10 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -404,6 +406,44 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetCompositeStatusAsync(baseUrl.ToString(), ct);
+    }
+
+    public async Task<PrinterDto> CreatePrinterDtoAsync(
+        Printer printer,
+        PrinterCompositeStatus status,
+        CancellationToken ct = default)
+    {
+        // Get camera URLs from SDCP client methods
+        string? cameraStreamUrl = await GetCameraUrlAsync(printer.ServerUrl, ct).ConfigureAwait(false);
+        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, ct).ConfigureAwait(false);
+
+        // Construct backend-specific PrinterDto
+        return new PrinterDto(
+            Id: printer.Id,
+            Name: printer.Name,
+            ServerUrl: printer.ServerUrl,
+            Notes: printer.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: printer.Manufacturer?.Name,
+            ModelName: printer.Model?.Name,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: cameraStreamUrl,
+            CameraSnapshotUrl: cameraSnapshotUrl,
+            X: status.X,
+            Y: status.Y,
+            Z: status.Z,
+            HotendTemp: status.HotendTemp,
+            BedTemp: status.BedTemp,
+            HotendTarget: status.HotendTarget,
+            BedTarget: status.BedTarget,
+            Backend: PrinterBackend.SDCP,
+            ApiKey: printer.ApiKey,
+            OriginalServerUrl: printer.OriginalServerUrl,
+            IpAddress: printer.IpAddress
+        );
     }
 
     // Print control methods
