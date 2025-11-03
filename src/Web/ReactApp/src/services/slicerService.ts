@@ -116,7 +116,7 @@ class SlicerService {
     formData.append('modelFile', file);
 
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/validate`, {
+    const response = await fetch(`${baseUrl}/api/3d-models/validate`, {
       method: 'POST',
       body: formData
     });

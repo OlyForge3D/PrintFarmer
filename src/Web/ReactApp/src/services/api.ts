@@ -168,15 +168,15 @@ export class ApiClient {
     return resp.data;
   }
 
-  // Skip a discovered G-code file
-  async skipDiscoveredGcodeFile(fileId: string): Promise<DiscoveredGcodeFileDto> {
-    const resp = await this.client.post<DiscoveredGcodeFileDto>(`/harvest/discovered-files/${fileId}/skip`, {});
+  // Skip a discovered G-code file in a harvest operation
+  async skipDiscoveredGcodeFile(operationId: string, fileId: string): Promise<DiscoveredGcodeFileDto> {
+    const resp = await this.client.post<DiscoveredGcodeFileDto>(`/gcode-harvest/operations/${operationId}/files/${fileId}/skip`, {});
     return resp.data;
   }
 
-  // Retry a discovered G-code file
-  async retryDiscoveredGcodeFile(fileId: string): Promise<DiscoveredGcodeFileDto> {
-    const resp = await this.client.post<DiscoveredGcodeFileDto>(`/harvest/discovered-files/${fileId}/retry`, {});
+  // Retry a discovered G-code file in a harvest operation
+  async retryDiscoveredGcodeFile(operationId: string, fileId: string): Promise<DiscoveredGcodeFileDto> {
+    const resp = await this.client.post<DiscoveredGcodeFileDto>(`/gcode-harvest/operations/${operationId}/files/${fileId}/retry`, {});
     return resp.data;
   }
 
