@@ -35,7 +35,7 @@ public class WorkerHealthMonitorService : BackgroundService
         {
             try
             {
-                await CheckWorkerHealthAsync(stoppingToken);
+                await CheckWorkerHealthAsync();
             }
             catch (Exception ex)
             {
@@ -49,7 +49,7 @@ public class WorkerHealthMonitorService : BackgroundService
         _logger.LogInformation("Worker Health Monitor Service stopping");
     }
 
-    private async Task CheckWorkerHealthAsync(CancellationToken cancellationToken)
+    private async Task CheckWorkerHealthAsync()
     {
         using IServiceScope scope = _serviceProvider.CreateScope();
         IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();

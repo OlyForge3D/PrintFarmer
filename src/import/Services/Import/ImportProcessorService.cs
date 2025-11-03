@@ -84,6 +84,63 @@ public class ImportProcessorService : IImportProcessorService
         return results;
     }
 
+    /// <summary>
+    /// Strips the port from a server URL, returning only scheme + host.
+    /// Used when persisting ServerUrl to the database (port is managed via FrontendPort field).
+    /// Example: "http://192.168.1.50:8080/api" -> "http://192.168.1.50"
+    /// </summary>
+    private static string StripPortFromServerUrl(string? serverUrl)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            Uri uri = new Uri(serverUrl.Trim());
+            UriBuilder ub = new UriBuilder(uri)
+            {
+                Port = -1,  // -1 means use default port (not explicitly shown in URI)
+                Path = string.Empty,  // Remove any paths
+                Query = string.Empty
+            };
+            return ub.Uri.ToString().TrimEnd('/');
+        }
+        catch
+        {
+            // Fallback: just remove port manually if URI parsing fails
+            string trimmed = serverUrl.Trim();
+            if (trimmed.Contains("://"))
+            {
+                string[] parts = trimmed.Split(new[] { "://" }, StringSplitOptions.None);
+                if (parts.Length == 2)
+                {
+                    string hostPart = parts[1];
+                    // Remove port and path
+                    int colonIndex = hostPart.IndexOf(':');
+                    int slashIndex = hostPart.IndexOf('/');
+
+                    if (colonIndex > 0 || slashIndex > 0)
+                    {
+                        int endIndex = hostPart.Length;
+                        if (colonIndex > 0)
+                        {
+                            endIndex = Math.Min(endIndex, colonIndex);
+                        }
+                        if (slashIndex > 0)
+                        {
+                            endIndex = Math.Min(endIndex, slashIndex);
+                        }
+                        hostPart = hostPart.Substring(0, endIndex);
+                    }
+                    return parts[0] + "://" + hostPart;
+                }
+            }
+            return trimmed;
+        }
+    }
+
     private async Task<Farm.Web.Shared.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
     {
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
@@ -131,11 +188,14 @@ public class ImportProcessorService : IImportProcessorService
         int defaultPort = dto.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 7125;
         string normalizedInput = dto.ServerUrl ?? string.Empty;
 
+        // Strip port from ServerUrl - port is managed via FrontendPort field, not stored in ServerUrl
+        string serverUrlWithoutPort = StripPortFromServerUrl(normalizedInput);
+
         var p = new Farm.Infrastructure.Domain.Printer
         {
             Id = Guid.NewGuid(),
             Name = dto.Name,
-            ServerUrl = normalizedInput,
+            ServerUrl = serverUrlWithoutPort,
             OriginalServerUrl = dto.OriginalServerUrl,
             IpAddress = null,
             Notes = dto.Notes,

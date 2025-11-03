@@ -35,7 +35,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
         // Map printer presets
         foreach (var printer in preview.Printers)
         {
-            var match = MapPrinterPreset(printer, printerModels, manufacturers);
+            var match = MapPrinterPreset(printer, printerModels);
             result.PrinterMatches.Add(match);
         }
 
@@ -69,8 +69,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
     private PrinterPresetMatch MapPrinterPreset(
         OrcaPrinterPresetDto preset,
-        List<PrinterModel> catalogModels,
-        List<Manufacturer> catalogManufacturers)
+        List<PrinterModel> catalogModels)
     {
         var match = new PrinterPresetMatch
         {

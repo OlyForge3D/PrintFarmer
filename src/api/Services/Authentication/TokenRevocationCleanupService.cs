@@ -31,7 +31,7 @@ public class TokenRevocationCleanupService : BackgroundService
         {
             try
             {
-                await CleanupExpiredRevocationsAsync(stoppingToken);
+                await CleanupExpiredRevocationsAsync();
             }
             catch (Exception ex)
             {
@@ -53,7 +53,7 @@ public class TokenRevocationCleanupService : BackgroundService
         _logger.LogInformation("Token revocation cleanup service stopped");
     }
 
-    private async Task CleanupExpiredRevocationsAsync(CancellationToken cancellationToken)
+    private async Task CleanupExpiredRevocationsAsync()
     {
         using var scope = _scopeFactory.CreateScope();
         var tokenRevocationService = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();

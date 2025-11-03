@@ -161,7 +161,7 @@ public class EfSliceJobRepository : ISliceJobRepository
         // Aggregate bytes from artifacts table
         if (ids.Length > 0)
         {
-            long totalBytes = await _db.Artifacts.Where(a => ids.Contains(a.Id)).SumAsync(a => (long)a.SizeBytes, ct);
+            long totalBytes = await _db.Artifacts.Where(a => ids.Contains(a.Id)).SumAsync(a => a.SizeBytes, ct);
             job.ArtifactsTotalBytes = totalBytes;
             job.ArtifactsCount = ids.Length;
         }

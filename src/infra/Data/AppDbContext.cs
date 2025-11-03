@@ -15,8 +15,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
     public DbSet<PrinterModel> Models => Set<PrinterModel>();
     // Legacy alias for test compatibility (deprecated)
+#pragma warning disable S1133 // Legacy property kept for backward compatibility with existing tests
     [Obsolete("Use Models instead.")]
     public DbSet<PrinterModel> PrinterModels => Models;
+#pragma warning restore S1133 // Legacy property kept for backward compatibility with existing tests
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
     public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();

@@ -229,9 +229,7 @@ public abstract class HttpJobPollerService(
             {
                 if (localLinkedCts != null)
                 {
-#pragma warning disable S3358 // CancellationTokenSource.Cancel() is acceptable here
-                    localLinkedCts.Cancel();
-#pragma warning restore S3358
+                    await localLinkedCts.CancelAsync();
                     localLinkedCts.Dispose();
                 }
             }

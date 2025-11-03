@@ -89,7 +89,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
               {(printer.manufacturerName || printer.modelName) && <p className="text-sm text-gray-500 truncate">{[printer.manufacturerName, printer.modelName].filter(Boolean).join(' ')}</p>}
               <div className="flex items-center space-x-2 text-sm text-gray-500">
                 <span>{printer.serverUrl}</span>
-                <a href={printer.serverUrl?.replace(/:\d+/, ':80')} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
+                <a href={`${printer.serverUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
               </div>
               <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>{currentStatus.isOnline ? (currentStatus.state || 'Online') : 'Offline'}</span>
@@ -133,7 +133,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
               {(printer.manufacturerName || printer.modelName) && <p className="text-sm text-gray-500">{[printer.manufacturerName, printer.modelName].filter(Boolean).join(' ')}</p>}
               <div className="flex items-center space-x-2 text-sm text-gray-500">
                 <span>{printer.serverUrl}</span>
-                <a href={printer.serverUrl?.replace(/:\d+/, ':80')} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
+                <a href={`${printer.serverUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
                 {(currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl) && (
                   <button type="button" onClick={() => setIsCameraVisible(!isCameraVisible)} className="text-blue-500 hover:text-blue-700" title={isCameraVisible ? 'Hide camera' : 'Show camera'}>
                     {isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}

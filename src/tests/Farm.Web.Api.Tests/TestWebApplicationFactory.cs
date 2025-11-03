@@ -61,7 +61,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         try
         {
             var dir = TestArtifactsDirectory;
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
         }
         catch { }
     }
@@ -71,7 +74,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         try
         {
             var dir = TestArtifactsDirectory;
-            if (!Directory.Exists(dir)) return;
+            if (!Directory.Exists(dir))
+            {
+                return;
+            }
             // Remove common generated artifact types produced by tests
             foreach (var pat in new[] { "*.gcode", "*.png", "*.jpg", "*.jpeg" })
             {
@@ -93,7 +99,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 {
                     try
                     {
-                        if (!Directory.EnumerateFileSystemEntries(sd).Any()) Directory.Delete(sd);
+                        if (!Directory.EnumerateFileSystemEntries(sd).Any())
+                        {
+                            Directory.Delete(sd);
+                        }
                     }
                     catch { }
                 }

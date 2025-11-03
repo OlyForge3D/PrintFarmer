@@ -12,7 +12,7 @@ public class RegistrationBackgroundService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly ILogger<RegistrationBackgroundService> _logger;
     private readonly IHostApplicationLifetime _lifetime;
-    
+
     private Guid _serviceId;
     private string _apiKey = string.Empty;
     private bool _isRegistered;
@@ -72,10 +72,10 @@ public class RegistrationBackgroundService : BackgroundService
                 var status = state.IsShuttingDown ? "Draining" : "Online";
 
                 var success = await _registrationClient.HeartbeatAsync(
-                    _serviceId, 
-                    _apiKey, 
-                    freeSlots, 
-                    status, 
+                    _serviceId,
+                    _apiKey,
+                    freeSlots,
+                    status,
                     stoppingToken);
 
                 if (!success)
@@ -104,16 +104,16 @@ public class RegistrationBackgroundService : BackgroundService
         try
         {
             _logger.LogInformation("Attempting to register with slicer registry...");
-            
+
             var (serviceId, apiKey) = await _registrationClient.RegisterAsync(cancellationToken);
-            
+
             _serviceId = serviceId;
             _apiKey = apiKey;
             _isRegistered = true;
 
             _logger.LogInformation(
-                "Successfully registered with slicer registry. ServiceId: {ServiceId}, HeartbeatInterval: {Interval}s", 
-                _serviceId, 
+                "Successfully registered with slicer registry. ServiceId: {ServiceId}, HeartbeatInterval: {Interval}s",
+                _serviceId,
                 _heartbeatIntervalSeconds);
 
             return true;
@@ -136,12 +136,13 @@ public class RegistrationBackgroundService : BackgroundService
         try
         {
             _logger.LogInformation("Application shutting down, deregistering from slicer registry...");
-            
+
             // Use a short timeout for deregistration
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var deregisterTask = _registrationClient.DeregisterAsync(_serviceId, _apiKey, cts.Token);
-            
+
             // Block until deregistration completes or times out
+#pragma warning disable VSTHRD002 // Synchronous wait acceptable in shutdown scenario
             deregisterTask.Wait(cts.Token);
 
             if (deregisterTask.Result)
@@ -152,6 +153,7 @@ public class RegistrationBackgroundService : BackgroundService
             {
                 _logger.LogWarning("Deregistration returned false.");
             }
+#pragma warning restore VSTHRD002 // Synchronous wait acceptable in shutdown scenario
         }
         catch (Exception ex)
         {

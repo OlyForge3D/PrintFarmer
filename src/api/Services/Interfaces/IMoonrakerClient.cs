@@ -81,6 +81,17 @@ public interface IMoonrakerClient
     Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default);
     Task<byte[]?> GetCameraSnapshotAsync(Uri baseUrl, CancellationToken ct = default);
 
+    /// <summary>
+    /// Queries the Moonraker API for actual camera URLs configured on the printer.
+    /// This queries /server/webcams/list API and returns the first enabled camera's URLs.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="frontendPort">Optional frontend port for camera access (defaults to 80 for HTTP, 443 for HTTPS)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing (stream URL, snapshot URL) tuple, or (null, null) if no camera is configured</returns>
+    Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+    Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
     #endregion
 
     #region DTO Creation

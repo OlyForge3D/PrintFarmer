@@ -101,7 +101,7 @@ namespace Farm.Web.Api.Services.SlicerServices
         public Task<List<DistributedSlicingJob>> GetUserJobsAsync(Guid userId, int? limit = null, CancellationToken cancellationToken = default)
         {
             return _repo.GetByUserIdAsync(userId, limit, ct: cancellationToken)
-                .ContinueWith(t => t.Result.Select(ToDistributedJob).ToList(), cancellationToken);
+                .ContinueWith(t => t.Result.Select(ToDistributedJob).ToList(), cancellationToken, TaskContinuationOptions.None, TaskScheduler.Default);
         }
 
         public Task CleanupOldJobsAsync(TimeSpan maxAge, CancellationToken cancellationToken = default)

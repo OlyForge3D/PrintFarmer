@@ -797,7 +797,13 @@ namespace Farm.Web.Api.Services.Printers
                 ModelId = modelId,
                 DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc) : dto.DateAcquired,
                 Backend = (int)dto.Backend,
-                ApiKey = dto.ApiKey
+                ApiKey = dto.ApiKey,
+                // Use provided BackendPort and FrontendPort from discovery, or leave null for defaults
+                BackendPort = dto.BackendPort,
+                FrontendPort = dto.FrontendPort,
+                // Use provided camera URLs from discovery, or leave null
+                CameraStreamUrl = dto.CameraStreamUrl,
+                CameraSnapshotUrl = dto.CameraSnapshotUrl
             };
 
             await AddAsync(p, ct).ConfigureAwait(false);
@@ -1151,13 +1157,15 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<Farm.Web.Shared.ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, Farm.Web.Shared.PrinterBackend backend, CancellationToken ct)
         {
+            // First normalize with port for internal operations (URL comparison, parsing)
             int defaultPort = backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : backend == Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125;
-            string normalized = NormalizeServerUrl(serverUrl, defaultPort);
+            string normalizedWithPort = NormalizeServerUrl(serverUrl, defaultPort);
+
             string? resolvedIp = null;
-            string resolvedBase = normalized;
+            string resolvedBase = normalizedWithPort;
             try
             {
-                Uri uri = new(normalized);
+                Uri uri = new(normalizedWithPort);
                 if (!System.Net.IPAddress.TryParse(uri.Host, out _))
                 {
                     string hostToResolve = EnsureLocalSuffix(uri.Host);
@@ -1177,7 +1185,12 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch { }
 
-            return new Farm.Web.Shared.ResolveHostnameResponse(normalized, resolvedIp, resolvedBase);
+            // Strip port before returning - ServerUrl should only contain scheme + host, no port
+            // Port is managed separately via FrontendPort field
+            string normalizedForStorage = StripPortFromServerUrl(normalizedWithPort);
+            string resolvedBaseForStorage = StripPortFromServerUrl(resolvedBase);
+
+            return new Farm.Web.Shared.ResolveHostnameResponse(normalizedForStorage, resolvedIp, resolvedBaseForStorage);
         }
 
         public string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
@@ -1290,6 +1303,67 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch
             {
+                return trimmed;
+            }
+        }
+
+        /// <summary>
+        /// Strips the port from a server URL, returning only scheme + host.
+        /// Used when persisting ServerUrl to the database (port is managed via FrontendPort field).
+        /// Example: "http://192.168.1.50:8080/api" -> "http://192.168.1.50"
+        /// </summary>
+        /// <param name="serverUrl">The full URL with optional port</param>
+        /// <returns>URL with only scheme and host, no port or path</returns>
+        public static string StripPortFromServerUrl(string? serverUrl)
+        {
+            if (string.IsNullOrWhiteSpace(serverUrl))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                Uri uri = new Uri(serverUrl.Trim());
+                UriBuilder ub = new UriBuilder(uri)
+                {
+                    Port = -1,  // -1 means use default port (not explicitly shown in URI)
+                    Path = string.Empty,  // Remove any paths
+                    Query = string.Empty
+                };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                // Fallback: just remove port manually if URI parsing fails
+                string trimmed = serverUrl.Trim();
+                if (trimmed.Contains("://"))
+                {
+                    string[] parts = trimmed.Split(new[] { "://" }, StringSplitOptions.None);
+                    if (parts.Length == 2)
+                    {
+                        string hostPart = parts[1];
+                        // Remove port and path
+                        int colonIndex = hostPart.IndexOf(':');
+                        int slashIndex = hostPart.IndexOf('/');
+
+                        if (colonIndex > 0 || slashIndex > 0)
+                        {
+                            int endIndex = hostPart.Length;
+                            if (colonIndex > 0)
+                            {
+                                endIndex = Math.Min(endIndex, colonIndex);
+                            }
+
+                            if (slashIndex > 0)
+                            {
+                                endIndex = Math.Min(endIndex, slashIndex);
+                            }
+
+                            hostPart = hostPart.Substring(0, endIndex);
+                        }
+                        return parts[0] + "://" + hostPart;
+                    }
+                }
                 return trimmed;
             }
         }

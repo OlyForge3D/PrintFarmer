@@ -8,7 +8,7 @@ import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-import { X, Search, XCircle } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
 
 interface PrinterDiscoveryModalProps {
@@ -136,6 +136,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           modelId: config.modelId,
           newManufacturerName: config.newManufacturerName,
           newModelName: config.newModelName,
+          backendPort: printer.port,                           // Backend port detected during discovery
+          frontendPort: printer.frontendPort ?? undefined,     // Frontend port discovered, convert null to undefined
+          cameraStreamUrl: printer.cameraStreamUrl ?? undefined,   // Camera stream URL from discovery
+          cameraSnapshotUrl: printer.cameraSnapshotUrl ?? undefined, // Camera snapshot URL from discovery
         });
       }
       

@@ -248,9 +248,11 @@ public class PrintersController(
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
+#pragma warning disable CS1998 // Async method without await - intentional fire-and-forget pattern with background Task.Run
     public async Task<IActionResult> StartDiscoveryStreamAsync(
         [FromBody] Farm.Web.Shared.StartDiscoveryRequest? request,
         CancellationToken ct)
+#pragma warning restore CS1998 // Async method without await
     {
         try
         {
@@ -328,14 +330,13 @@ public class PrintersController(
     /// Users can call this endpoint to stop an ongoing discovery operation.
     /// </summary>
     /// <param name="sessionId">The discovery session ID returned from /discover/stream endpoint</param>
-    /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>Success or error response</returns>
     /// <response code="200">Discovery cancellation requested successfully</response>
     /// <response code="404">Discovery session not found or already completed</response>
     [HttpPost("discover/{sessionId}/cancel")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(404)]
-    public async Task<IActionResult> CancelDiscoveryAsync(string sessionId, CancellationToken ct)
+    public IActionResult CancelDiscovery(string sessionId)
     {
         try
         {

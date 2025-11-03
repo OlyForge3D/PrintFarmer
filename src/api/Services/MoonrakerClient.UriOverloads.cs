@@ -36,6 +36,12 @@ public partial class MoonrakerClient : IMoonrakerClient
         return GetCameraSnapshotAsync(baseUrl.ToString(), ct);
     }
 
+    public Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetConfiguredCameraUrlsAsync(baseUrl.ToString(), frontendPort, ct);
+    }
+
     // Printer Control Operations
     public Task<bool> SendHomeAsync(Uri baseUrl, CancellationToken ct = default)
     {

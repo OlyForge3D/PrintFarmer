@@ -19,7 +19,7 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
     protected virtual Task<bool> IsValidResponseAsync(HttpResponseMessage response, string content)
         => Task.FromResult(response.IsSuccessStatusCode);
 
-    public async Task<DiscoveredPrinterDto?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
+    public virtual async Task<DiscoveredPrinterDto?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
         using HttpClient client = new()
         { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };

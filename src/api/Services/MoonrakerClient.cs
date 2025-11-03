@@ -348,6 +348,28 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
         catch { return null; }
     }
 
+    /// <summary>
+    /// Queries the Moonraker API for actual configured camera URLs.
+    /// Returns the first enabled camera's stream and snapshot URLs from the /server/webcams/list API.
+    /// </summary>
+    public async Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            // Get the raw camera URLs from the API (which handles relative URL resolution)
+            (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
+
+            // If we got URLs from the API, they should already be normalized
+            // But we can optionally apply frontendPort if it differs from what the API returned
+            // For now, just return what the API provided
+            return (stream, snapshot);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
     public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
     {
         PrinterStatus status = await GetStatusAsync(baseUrl, ct);

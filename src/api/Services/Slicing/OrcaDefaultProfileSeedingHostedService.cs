@@ -26,6 +26,7 @@ namespace Farm.Web.Api.Services.Slicing
             _logger.LogInformation("[OrcaSeederHosted] StartAsync invoked - attempting Orca default profile seeding.");
             try
             {
+#pragma warning disable CA1303 // Do not pass literals as localized parameters
                 Console.WriteLine("[Console][OrcaSeederHosted] StartAsync invoked - seeding attempt begins.");
 
                 // Create a scope to resolve scoped services (IOrcaDefaultProfileSeeder is registered as scoped)
@@ -44,6 +45,7 @@ namespace Farm.Web.Api.Services.Slicing
                         Console.WriteLine("[Console][OrcaSeederHosted] Seeding routine completed.");
                     }
                 }
+#pragma warning restore CA1303 // Do not pass literals as localized parameters
             }
             catch (Exception ex)
             {

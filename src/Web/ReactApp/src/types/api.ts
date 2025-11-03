@@ -799,6 +799,8 @@ export interface ChangePasswordRequest {
 export interface DiscoveredPrinterDto {
   ipAddress: string;
   port: number;
+  backendPort?: number | null;
+  frontendPort?: number | null;
   serverUrl: string;
   backend: PrinterBackend;
   name: string;
@@ -806,6 +808,8 @@ export interface DiscoveredPrinterDto {
   model?: string;
   firmware?: string;
   version?: string;
+  cameraStreamUrl?: string | null;
+  cameraSnapshotUrl?: string | null;
 }
 
 // Network discovery settings

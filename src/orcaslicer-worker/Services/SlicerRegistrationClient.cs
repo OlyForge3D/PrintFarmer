@@ -181,7 +181,10 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 
     private class RegistrationResponse
     {
-        public Guid Id { get; set; }
-        public string ApiKey { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public Guid Id { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("apiKey")]
+        public string ApiKey { get; init; } = string.Empty;
     }
 }

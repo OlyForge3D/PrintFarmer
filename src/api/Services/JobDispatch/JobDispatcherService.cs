@@ -185,7 +185,9 @@ public class JobDispatcherService : IJobDispatcherService
         catch { }
         DateTime cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(staleSeconds);
         availableWorkers = availableWorkers.Where(w => w.LastHeartbeat == null || w.LastHeartbeat >= cutoff).ToList();
+#pragma warning disable S2696 // Static field updated from instance method (used for worker availability metrics)
         _lastAvailableWorkers = availableWorkers.Count;
+#pragma warning restore S2696 // Static field updated from instance method
 
         if (availableWorkers.Count == 0)
         {

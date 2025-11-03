@@ -531,6 +531,9 @@ public class DiscoveredPrinterDto
     public string? Version { get; set; }
     public bool IsReachable { get; set; }
     public DateTime DiscoveredAt { get; set; }
+    // Camera URLs discovered from printer API (if available)
+    public string? CameraStreamUrl { get; set; }
+    public string? CameraSnapshotUrl { get; set; }
 }
 
 // Discovery progress events for SignalR streaming

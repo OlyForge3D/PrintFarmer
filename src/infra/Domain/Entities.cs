@@ -385,7 +385,9 @@ public class PrintJob
 }
 
 // Printer Capabilities (extends Printer entity conceptually)
+#pragma warning disable CA1724 // Type name conflicts with namespace Farm.Infrastructure.Repositories.PrinterCapabilities
 public class PrinterCapabilities
+#pragma warning restore CA1724
 {
     public Guid Id { get; set; }
     public Guid PrinterId { get; set; }

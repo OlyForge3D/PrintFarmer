@@ -53,7 +53,7 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
             }
         }
 
-        public Task<IReadOnlyList<SystemLog>> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
+        public async Task<IReadOnlyList<SystemLog>> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
         {
             IQueryable<SystemLog> query = _db.SystemLogs.AsQueryable();
             if (!string.IsNullOrWhiteSpace(correlationId))
@@ -82,7 +82,8 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
                 query = query.Where(l => l.Metadata != null && EF.Functions.Like(l.Metadata.ToLower(), $"%{lower}%"));
             }
 
-            return query.OrderByDescending(l => l.Timestamp).ToListAsync(ct).ContinueWith<Task<IReadOnlyList<SystemLog>>>(t => Task.FromResult((IReadOnlyList<SystemLog>)t.Result)).Unwrap();
+            var result = await query.OrderByDescending(l => l.Timestamp).ToListAsync(ct);
+            return (IReadOnlyList<SystemLog>)result;
         }
 
         public Task AddAsync(SystemLog log, CancellationToken ct)
