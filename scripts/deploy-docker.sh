@@ -2,6 +2,26 @@
 
 # PrintFarmer Docker Deployment Script
 # Automated setup for Docker-based deployment with user-friendly prompts
+#
+# FEATURES:
+#   - Interactive or non-interactive deployment modes
+#   - Multi-architecture support (monolithic, microservices)
+#   - Optional monitoring and telemetry stacks
+#   - Automatic initial admin user setup (skips setup wizard)
+#   - Database provider selection
+#   - Dry-run validation
+#
+# AUTO-ADMIN SETUP:
+#   The --auto-admin flag enables automatic creation of the initial administrator account,
+#   which skips the setup wizard UI. This is useful for:
+#   - CI/CD pipelines that need fully automated deployments
+#   - Infrastructure-as-Code (IaC) scenarios
+#   - Containerized deployments that bypass manual setup
+#
+#   Usage: ./scripts/deploy-docker.sh --auto-admin
+#   With custom credentials: --auto-admin --auto-admin-username=admin --auto-admin-password=SecurePass123!
+#
+#   If no password is provided, one is automatically generated and displayed.
 
 set -euo pipefail
 
@@ -19,6 +39,10 @@ TEAR_DOWN=false
 SHOW_HELP=false
 REDEPLOY=false
 PREPULL=false
+AUTO_ADMIN=false
+AUTO_ADMIN_USERNAME=""
+AUTO_ADMIN_PASSWORD=""
+AUTO_ADMIN_EMAIL=""
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
@@ -738,6 +762,12 @@ VERIFY / UTILITY OPTIONS:
     --env-file FILE       Use a specific .env file for verification or compose commands
     --config-file FILE    Use a specific deployment config file instead of $REPO_ROOT/.deploy-config
 
+INITIAL ADMIN SETUP OPTIONS:
+    --auto-admin                Create initial admin user automatically after deployment
+    --auto-admin-username USER  Set admin username (default: admin)
+    --auto-admin-password PASS  Set admin password (default: auto-generated)
+    --auto-admin-email EMAIL    Set admin email (default: admin@printfarmer.local)
+
 EXAMPLES:
     # Interactive deployment (recommended for first-time setup)
     ./scripts/deploy-docker.sh
@@ -758,6 +788,15 @@ EXAMPLES:
 
     # Verify-only mode against an existing deployment (useful in CI)
     ./scripts/deploy-docker.sh --verify-deployment --env-file .env --config-file .deploy-config
+
+    # Deploy with automatic initial admin setup (skip setup wizard)
+    ./scripts/deploy-docker.sh --non-interactive --auto-admin
+    
+    # Deploy with auto-admin and custom credentials
+    ./scripts/deploy-docker.sh --auto-admin \
+        --auto-admin-username=myAdmin \
+        --auto-admin-password=SecurePass123! \
+        --auto-admin-email=admin@mycompany.com
 
     # Deploy specific architecture with additional services
     ./scripts/deploy-docker.sh --architecture microservices --include-monitoring
@@ -825,6 +864,9 @@ load_previous_config() {
         fi
         if [ -n "${NETWORK_MODE:-}" ]; then
             echo -e "  ${BLUE}Network Mode:${NC} $NETWORK_MODE"
+        fi
+        if [ "${AUTO_ADMIN:-false}" = "true" ]; then
+            echo -e "  ${BLUE}Auto-Admin Setup:${NC} Enabled (${AUTO_ADMIN_USERNAME:-admin})"
         fi
         
         print_info "Previous settings will be used as defaults (press Enter to accept)"
@@ -993,9 +1035,15 @@ EOF
         echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no" >> "$CONFIG_FILE"
     fi
 
-
-
     cat >> "$CONFIG_FILE" << EOF
+
+# Initial Admin Setup (Optional)
+# Set AUTO_ADMIN=true to automatically create admin user on deployment
+# This skips the setup wizard in the UI
+AUTO_ADMIN=${AUTO_ADMIN:-false}
+AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
+AUTO_ADMIN_PASSWORD=${AUTO_ADMIN_PASSWORD:-}
+AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
 
 # Operating System (detected)
 OS=$OS
@@ -3720,6 +3768,96 @@ check_nginx_proxy() {
     return 1
 }
 
+# Perform automatic initial admin setup
+setup_initial_admin() {
+    print_header "🔐 Setting Up Initial Admin User"
+
+    if [ "$AUTO_ADMIN" != "true" ]; then
+        print_info "Auto-admin setup disabled (use --auto-admin to enable)"
+        return 0
+    fi
+
+    # Determine API URL
+    local api_url
+    if [ -n "${DOCKER_PORT:-}" ]; then
+        api_url="http://localhost:${DOCKER_PORT}"
+    else
+        api_url="http://localhost:5245"
+    fi
+
+    # Wait for API to be ready
+    print_info "Waiting for API to be ready at $api_url/api/setup/status..."
+    local max_attempts=30
+    local attempt=0
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -s -f -m 2 "$api_url/api/setup/status" > /dev/null 2>&1; then
+            print_success "API is ready"
+            break
+        fi
+        attempt=$((attempt + 1))
+        if [ $attempt -lt $max_attempts ]; then
+            sleep 2
+        fi
+    done
+
+    if [ $attempt -ge $max_attempts ]; then
+        print_error "API did not become ready after $((max_attempts * 2)) seconds"
+        return 1
+    fi
+
+    # Check if setup is needed
+    local setup_status
+    setup_status=$(curl -s -m 5 "$api_url/api/setup/status" 2>/dev/null || echo '{"needsSetup":false}')
+    local needs_setup
+    needs_setup=$(echo "$setup_status" | grep -o '"needsSetup":\s*true' || echo "")
+
+    if [ -z "$needs_setup" ]; then
+        print_info "Setup has already been completed (admin user exists)"
+        return 0
+    fi
+
+    # Use provided credentials or generate defaults
+    local admin_username="${AUTO_ADMIN_USERNAME:-admin}"
+    local admin_password="${AUTO_ADMIN_PASSWORD:-}"
+    local admin_email="${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}"
+
+    # Generate a strong password if not provided
+    if [ -z "$admin_password" ]; then
+        admin_password=$(openssl rand -base64 16 2>/dev/null | tr -d '=+/' | cut -c1-16 || echo "PrintFarmer2025!")
+        print_info "Generated admin password: $admin_password"
+    fi
+
+    # Call the setup API to create initial admin
+    print_info "Creating initial admin user: $admin_username"
+    local response
+    response=$(curl -s -X POST "$api_url/api/setup/initial-admin" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"username\": \"$admin_username\",
+            \"password\": \"$admin_password\",
+            \"email\": \"$admin_email\",
+            \"firstName\": \"Administrator\",
+            \"lastName\": \"User\"
+        }" 2>/dev/null || echo '{"success":false,"error":"Connection failed"}')
+
+    local success
+    success=$(echo "$response" | grep -o '"success":\s*true' || echo "")
+
+    if [ -n "$success" ]; then
+        print_success "Initial admin user created successfully"
+        print_info "Username: $admin_username"
+        print_info "Email: $admin_email"
+        if [ "${AUTO_ADMIN_PASSWORD:-}" = "" ]; then
+            print_warning "Save the generated password: $admin_password"
+        fi
+        return 0
+    else
+        print_error "Failed to create initial admin user"
+        print_error "Response: $response"
+        return 1
+    fi
+}
+
 # Verify deployment
 verify_deployment() {
     print_header "🔍 Verifying Deployment"
@@ -4226,6 +4364,9 @@ main() {
     
     deploy_containers
     
+    # Run auto-admin setup if requested
+    setup_initial_admin || true
+    
     # Run verification and capture result
     local verification_passed=true
     verify_deployment || verification_passed=false
@@ -4341,6 +4482,46 @@ while [ $# -gt 0 ]; do
             ;;
         --prepull)
             PREPULL=true
+            shift
+            ;;
+        --auto-admin)
+            AUTO_ADMIN=true
+            shift
+            ;;
+        --auto-admin-username)
+            if [ -n "${2:-}" ]; then
+                AUTO_ADMIN_USERNAME="$2"
+                shift 2
+            else
+                echo "Missing value for --auto-admin-username" >&2; exit 2
+            fi
+            ;;
+        --auto-admin-username=*)
+            AUTO_ADMIN_USERNAME="${1#--auto-admin-username=}"
+            shift
+            ;;
+        --auto-admin-password)
+            if [ -n "${2:-}" ]; then
+                AUTO_ADMIN_PASSWORD="$2"
+                shift 2
+            else
+                echo "Missing value for --auto-admin-password" >&2; exit 2
+            fi
+            ;;
+        --auto-admin-password=*)
+            AUTO_ADMIN_PASSWORD="${1#--auto-admin-password=}"
+            shift
+            ;;
+        --auto-admin-email)
+            if [ -n "${2:-}" ]; then
+                AUTO_ADMIN_EMAIL="$2"
+                shift 2
+            else
+                echo "Missing value for --auto-admin-email" >&2; exit 2
+            fi
+            ;;
+        --auto-admin-email=*)
+            AUTO_ADMIN_EMAIL="${1#--auto-admin-email=}"
             shift
             ;;
         --config-file=*)
