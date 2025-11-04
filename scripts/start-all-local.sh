@@ -6,6 +6,7 @@
 #
 # Options:
 #   --foreground/-f    Run services in foreground (blocks until Ctrl+C)
+#   --config FILE      Load config from FILE (supports AUTO_ADMIN settings)
 #   --no-tests         Skip running initial tests
 #   --clean            Clean build artifacts before starting
 #   --fresh            Terminate existing containers/apps and clean up database files before starting fresh
@@ -14,10 +15,15 @@
 #   1. API Backend (ASP.NET Core) - localhost:5245
 #   2. React Frontend (Vite) - localhost:3000
 #
+# Config File Example (~/.start-local.conf):
+#   AUTO_ADMIN=true
+#   AUTO_ADMIN_USERNAME=admin
+#   AUTO_ADMIN_PASSWORD=MySecurePassword123!
+#   AUTO_ADMIN_EMAIL=admin@printfarmer.local
+#
 # Requirements:
 #   - .NET SDK 9.0.302+
 #   - Node.js >=20.19
-#   - Docker (only if --with-redis flag used)
 
 set -euo pipefail
 
@@ -29,6 +35,12 @@ REACT_DIR="$SRC_DIR/Web/ReactApp"
 
 API_URL=${API_URL:-http://localhost:5245}
 REACT_URL=${REACT_URL:-http://localhost:3000}
+
+# Auto-admin defaults
+AUTO_ADMIN=${AUTO_ADMIN:-false}
+AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
+AUTO_ADMIN_PASSWORD=${AUTO_ADMIN_PASSWORD:-}
+AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
 
 # Logging and PID management
 LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
@@ -49,12 +61,17 @@ FOREGROUND=0
 NO_TESTS=0
 CLEAN=0
 FRESH=0
+CONFIG_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --foreground|-f)
       FOREGROUND=1
       shift
+      ;;
+    --config)
+      CONFIG_FILE="$2"
+      shift 2
       ;;
     --no-tests)
       NO_TESTS=1
@@ -74,6 +91,24 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Auto-detect config file if not provided
+if [[ -z "$CONFIG_FILE" ]]; then
+  # Check for config in common locations (in order of priority)
+  for default_location in ~/.start-local.conf ~/.config/printfarmer/start-local-config ./.start-local.conf; do
+    if [[ -f "$default_location" ]]; then
+      CONFIG_FILE="$default_location"
+      break
+    fi
+  done
+fi
+
+# Load config file if found
+if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
+  info "Loading config from $CONFIG_FILE..."
+  source "$CONFIG_FILE"
+  success "Config loaded"
+fi
 
 # Utility functions
 info() { echo -e "${BLUE}ℹ️  $*${NC}"; }
@@ -263,6 +298,21 @@ export DEPLOYMENT_MODE=monolithic
 export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"
 
+# Auto-admin setup (if enabled)
+if [[ "$AUTO_ADMIN" == "true" ]]; then
+  if [[ -z "$AUTO_ADMIN_PASSWORD" ]]; then
+    error "AUTO_ADMIN_PASSWORD must be set when AUTO_ADMIN=true"
+  fi
+  export AUTO_ADMIN=true
+  export AUTO_ADMIN_USERNAME="$AUTO_ADMIN_USERNAME"
+  export AUTO_ADMIN_PASSWORD="$AUTO_ADMIN_PASSWORD"
+  export AUTO_ADMIN_EMAIL="$AUTO_ADMIN_EMAIL"
+  info "Auto-admin setup enabled for user: $AUTO_ADMIN_USERNAME"
+else
+  # Ensure variables are exported but empty
+  export AUTO_ADMIN=false
+fi
+
 # No Redis connection string exported in simplified local script
 
 # Start API server
@@ -378,6 +428,16 @@ echo "🛠️  Development URLs:"
 echo "  • Main Application: $REACT_URL"
 echo "  • API Documentation: $API_URL/swagger (if enabled)"
 echo
+
+# Show auto-admin info if enabled
+if [[ "$AUTO_ADMIN" == "true" ]]; then
+  echo "👤 Auto-Admin Credentials:"
+  echo "  • Username: $AUTO_ADMIN_USERNAME"
+  echo "  • Email: $AUTO_ADMIN_EMAIL"
+  echo "  • Password: (set in config)"
+  echo "  • Setup Wizard: SKIPPED"
+  echo
+fi
 
 if [[ $FOREGROUND -eq 1 ]]; then
   info "Running in foreground mode. Press Ctrl+C to stop all services."
