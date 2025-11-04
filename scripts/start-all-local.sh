@@ -10,6 +10,7 @@
 #   --no-tests         Skip running initial tests
 #   --clean            Clean build artifacts before starting
 #   --fresh            Terminate existing containers/apps and clean up database files before starting fresh
+#   --tear-down        Stop all running services and exit (no startup)
 #
 # Services started:
 #   1. API Backend (ASP.NET Core) - localhost:5245
@@ -27,40 +28,20 @@
 
 set -euo pipefail
 
-# Configuration
-ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-SRC_DIR="$ROOT_DIR/src"
-API_DIR="$SRC_DIR/api"
-REACT_DIR="$SRC_DIR/Web/ReactApp"
-
-API_URL=${API_URL:-http://localhost:5245}
-REACT_URL=${REACT_URL:-http://localhost:3000}
-
-# Auto-admin defaults
-AUTO_ADMIN=${AUTO_ADMIN:-false}
-AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
-AUTO_ADMIN_PASSWORD=${AUTO_ADMIN_PASSWORD:-}
-AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
-
-# Logging and PID management
-LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
-PID_DIR=${PID_DIR:-"$ROOT_DIR/.pids"}
-API_LOG="$LOG_DIR/api.log"
-REACT_LOG="$LOG_DIR/react.log"
-META_FILE="$PID_DIR/services.meta"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Load common utilities
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ ! -f "$SCRIPT_DIR/common-utils.sh" ]]; then
+  echo "❌ Error: common-utils.sh not found in $SCRIPT_DIR"
+  exit 1
+fi
+source "$SCRIPT_DIR/common-utils.sh"
 
 # Parse command line options
 FOREGROUND=0
 NO_TESTS=0
 CLEAN=0
 FRESH=0
+TEAR_DOWN=0
 CONFIG_FILE=""
 
 while [[ $# -gt 0 ]]; do
@@ -85,17 +66,42 @@ while [[ $# -gt 0 ]]; do
       FRESH=1
       shift
       ;;
+    --tear-down)
+      TEAR_DOWN=1
+      shift
+      ;;
     *)
-      echo "Unknown option: $1"
-      exit 1
+      log_error "Unknown option: $1"
       ;;
   esac
 done
 
+# Configuration
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SRC_DIR="$ROOT_DIR/src"
+API_DIR="$SRC_DIR/api"
+REACT_DIR="$SRC_DIR/Web/ReactApp"
+
+API_URL=${API_URL:-http://localhost:5245}
+REACT_URL=${REACT_URL:-http://localhost:3000}
+
+# Auto-admin defaults
+AUTO_ADMIN=${AUTO_ADMIN:-false}
+AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
+AUTO_ADMIN_PASSWORD=${AUTO_ADMIN_PASSWORD:-}
+AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
+
+# Logging and PID management
+LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
+PID_DIR=${PID_DIR:-"$ROOT_DIR/.pids"}
+API_LOG="$LOG_DIR/api.log"
+REACT_LOG="$LOG_DIR/react.log"
+META_FILE="$PID_DIR/services.meta"
+
 # Auto-detect config file if not provided
 if [[ -z "$CONFIG_FILE" ]]; then
   # Check for config in common locations (in order of priority)
-  for default_location in ~/.start-local.conf ~/.config/printfarmer/start-local-config ./.start-local.conf; do
+  for default_location in ~/.start-local-config ~/.config/printfarmer/start-local-config ./.start-local-config; do
     if [[ -f "$default_location" ]]; then
       CONFIG_FILE="$default_location"
       break
@@ -105,47 +111,21 @@ fi
 
 # Load config file if found
 if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-  info "Loading config from $CONFIG_FILE..."
+  log_info "Loading config from $CONFIG_FILE..."
   source "$CONFIG_FILE"
-  success "Config loaded"
+  log_success "Config loaded"
 fi
-
-# Utility functions
-info() { echo -e "${BLUE}ℹ️  $*${NC}"; }
-success() { echo -e "${GREEN}✅ $*${NC}"; }
-warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
-error() { echo -e "${RED}❌ $*${NC}"; exit 1; }
-
-require_cmd() {
-  if ! command -v "$1" &> /dev/null; then
-    error "Required command '$1' not found. Please install it first."
-  fi
-}
-
-check_port() {
-  local port=$1
-  if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-    warn "Port $port is already in use. Attempting to free it..."
-    lsof -ti:$port | xargs kill -9 2>/dev/null || true
-    sleep 2
-    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-      error "Could not free port $port. Please stop the conflicting process manually."
-    fi
-  fi
-}
 
 # Fresh cleanup function - terminates all existing containers and processes
 fresh_cleanup() {
-  info "Starting fresh cleanup - terminating all existing containers and processes..."
-  
-  # (Redis containers are not managed by this simplified local script)
+  log_info "Starting fresh cleanup - terminating all existing containers and processes..."
   
   # Kill any processes on PrintFarmer ports
   local ports=(5000 5245 7281 3000)  # API and React ports
   for port in "${ports[@]}"; do
-    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-      warn "Terminating processes on port $port"
-      lsof -ti:$port | xargs kill -9 2>/dev/null || true
+    if is_port_in_use "$port"; then
+      log_warn "Terminating processes on port $port"
+      free_port "$port" || true
       sleep 1
     fi
   done
@@ -154,49 +134,49 @@ fresh_cleanup() {
   rm -f "$META_FILE" 2>/dev/null || true
   
   # Clean up database files and persistent resources
-  info "Cleaning up database files and persistent resources..."
+  log_info "Cleaning up database files and persistent resources..."
   
   # Clean up database files
   if [[ -f "$SRC_DIR/api/farm.db" ]]; then
     rm -f "$SRC_DIR/api/farm.db"
-    warn "Removed main database file: farm.db"
+    log_warn "Removed main database file: farm.db"
   fi
   
   if [[ -f "$SRC_DIR/api/bin/Debug/net9.0/farm.db" ]]; then
     rm -f "$SRC_DIR/api/bin/Debug/net9.0/farm.db"
-    warn "Removed build output database file"
+    log_warn "Removed build output database file"
   fi
   
   # Clean up test database files
   if [[ -d "$SRC_DIR/tests/_temp" ]]; then
     rm -rf "$SRC_DIR/tests/_temp"
-    warn "Removed test temporary database files"
+    log_warn "Removed test temporary database files"
   fi
   
   # Clean up log files
   if [[ -d "$LOG_DIR" ]] && [[ "$(ls -A $LOG_DIR 2>/dev/null)" ]]; then
     rm -f "$LOG_DIR"/*.log 2>/dev/null || true
-    warn "Cleared log files"
+    log_warn "Cleared log files"
   fi
   
   # Clean up PID directory
   if [[ -d "$PID_DIR" ]] && [[ "$(ls -A $PID_DIR 2>/dev/null)" ]]; then
     rm -f "$PID_DIR"/* 2>/dev/null || true
-    warn "Cleared PID files"
+    log_warn "Cleared PID files"
   fi
   
   # Clean up Vite cache
   if [[ -d "$REACT_DIR/node_modules/.vite" ]]; then
     rm -rf "$REACT_DIR/node_modules/.vite"
-    warn "Cleared Vite cache"
+    log_warn "Cleared Vite cache"
   fi
   
-  success "Fresh cleanup completed - ready for clean startup"
+  log_success "Fresh cleanup completed - ready for clean startup"
 }
 
 # Cleanup function for graceful shutdown
 cleanup() {
-  info "Shutting down services..."
+  log_info "Shutting down services..."
   
   if [[ -f "$META_FILE" ]]; then
     source "$META_FILE" 2>/dev/null || true
@@ -204,31 +184,75 @@ cleanup() {
     # Stop services
     if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" 2>/dev/null; then
       kill "$API_PID" 2>/dev/null || true
-      warn "Stopped API server (PID: $API_PID)"
+      log_warn "Stopped API server (PID: $API_PID)"
     fi
     
     if [[ -n "${REACT_PID:-}" ]] && kill -0 "$REACT_PID" 2>/dev/null; then
       kill "$REACT_PID" 2>/dev/null || true
-      warn "Stopped React dev server (PID: $REACT_PID)"
+      log_warn "Stopped React dev server (PID: $REACT_PID)"
     fi
-    
-    # No Redis container to stop in the simplified local workflow
   fi
   
   # Clean up files
   rm -f "$META_FILE" 2>/dev/null || true
   
-  success "All services stopped"
+  log_success "All services stopped"
 }
 
 # Set up signal handlers
 trap cleanup EXIT INT TERM
 
+# Handle tear-down mode (stop services without starting)
+if [[ $TEAR_DOWN -eq 1 ]]; then
+  log_info "Tear-down mode: stopping all PrintFarmer services..."
+  
+  if [[ -f "$META_FILE" ]]; then
+    source "$META_FILE" 2>/dev/null || true
+    
+    # Kill services
+    if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" 2>/dev/null; then
+      log_info "Stopping API server (PID: $API_PID)..."
+      kill "$API_PID" 2>/dev/null || true
+      sleep 1
+      log_success "API server stopped"
+    fi
+    
+    if [[ -n "${REACT_PID:-}" ]] && kill -0 "$REACT_PID" 2>/dev/null; then
+      log_info "Stopping React dev server (PID: $REACT_PID)..."
+      kill "$REACT_PID" 2>/dev/null || true
+      sleep 1
+      log_success "React dev server stopped"
+    fi
+    
+    rm -f "$META_FILE"
+  else
+    log_warn "No running services found (no PID metadata file)"
+  fi
+  
+  # Also try to kill by port in case PIDs don't match
+  log_info "Clearing ports..."
+  for port in 5245 7281 3000; do
+    if is_port_in_use "$port"; then
+      log_info "Force-killing process on port $port..."
+      free_port "$port" || true
+      sleep 1
+    fi
+  done
+  
+  log_success "🛑 All services have been stopped"
+  exit 0
+fi
+
+# Handle fresh mode (cleanup before starting)
+if [[ $FRESH -eq 1 ]]; then
+  fresh_cleanup
+fi
+
 # Check prerequisites
-info "Checking prerequisites..."
-require_cmd dotnet
-require_cmd npm
-require_cmd node
+log_info "Checking prerequisites..."
+require_command dotnet
+require_command npm
+require_command node
 
 # Docker checks and Redis startup are intentionally omitted from this simplified local script.
 
@@ -268,23 +292,23 @@ if [[ $FRESH -eq 1 ]]; then
 fi
 
 # Check and free ports
-info "Checking ports..."
-check_port ${API_URL##*:}
-check_port ${REACT_URL##*:}
+log_info "Checking ports..."
+free_port ${API_URL##*:}
+free_port ${REACT_URL##*:}
 
 # Bootstrap dependencies if needed
-info "Bootstrapping dependencies..."
+log_info "Bootstrapping dependencies..."
 cd "$SRC_DIR"
 
 if [[ ! -f "$API_DIR/bin/Debug/net9.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]]; then
-  info "Restoring and building .NET solution..."
+  log_info "Restoring and building .NET solution..."
   dotnet restore ./farm-web.sln
   dotnet build ./farm-web.sln -c Debug
 fi
 
 cd "$REACT_DIR"
 if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
-  info "Installing React dependencies..."
+  log_info "Installing React dependencies..."
   npm install --legacy-peer-deps
 fi
 cd "$SRC_DIR"
@@ -301,25 +325,17 @@ export ALLOWED_ORIGINS="$REACT_URL"
 # Auto-admin setup (if enabled)
 if [[ "$AUTO_ADMIN" == "true" ]]; then
   if [[ -z "$AUTO_ADMIN_PASSWORD" ]]; then
-    error "AUTO_ADMIN_PASSWORD must be set when AUTO_ADMIN=true"
+    log_error "AUTO_ADMIN_PASSWORD must be set when AUTO_ADMIN=true"
   fi
-  export AUTO_ADMIN=true
-  export AUTO_ADMIN_USERNAME="$AUTO_ADMIN_USERNAME"
-  export AUTO_ADMIN_PASSWORD="$AUTO_ADMIN_PASSWORD"
-  export AUTO_ADMIN_EMAIL="$AUTO_ADMIN_EMAIL"
-  info "Auto-admin setup enabled for user: $AUTO_ADMIN_USERNAME"
-else
-  # Ensure variables are exported but empty
-  export AUTO_ADMIN=false
+  log_info "Auto-admin setup enabled for user: $AUTO_ADMIN_USERNAME"
 fi
 
 # No Redis connection string exported in simplified local script
 
 # Start API server
-info "Starting API server..."
+log_info "Starting API server..."
 cd "$SRC_DIR"
 if [[ $FOREGROUND -eq 1 ]]; then
-  # In foreground mode, we'll start in background initially for testing, then switch to foreground
   dotnet run --project api/Farm.Web.Api.csproj > "$API_LOG" 2>&1 &
   API_PID=$!
 else
@@ -328,7 +344,7 @@ else
 fi
 
 # Start React dev server
-info "Starting React dev server..."
+log_info "Starting React dev server..."
 cd "$REACT_DIR"
 if [[ $FOREGROUND -eq 1 ]]; then
   npm run dev > "$REACT_LOG" 2>&1 &
@@ -347,72 +363,41 @@ REACT_URL=$REACT_URL
 STARTED_AT=$(date)
 EOF
 
-success "Services starting..."
+log_success "Services starting..."
 
 # Wait for services to be ready
-info "Waiting for services to be ready..."
+log_info "Waiting for services to be ready..."
 
-# Wait for API
-for i in {1..60}; do
-  if curl -s "$API_URL/healthz" > /dev/null 2>&1; then
-    success "API server ready at $API_URL"
-    break
-  fi
-  if [[ $i -eq 60 ]]; then
-    error "API server failed to start within 60 seconds. Check logs: $API_LOG"
-  fi
-  sleep 1
-done
+# Use common utilities for waiting
+if ! wait_for_api "$API_URL" 60 1; then
+  log_error "API server failed to start. Check logs: $API_LOG"
+fi
 
-# Wait for React dev server
-for i in {1..60}; do
-  if curl -s "$REACT_URL" > /dev/null 2>&1; then
-    success "React dev server ready at $REACT_URL"
-    break
-  fi
-  if [[ $i -eq 60 ]]; then
-    error "React dev server failed to start within 60 seconds. Check logs: $REACT_LOG"
-  fi
-  sleep 1
-done
-
-# Redis checks removed from the simplified local script
+if ! wait_for_react "$REACT_URL" 60 1; then
+  log_error "React dev server failed to start. Check logs: $REACT_LOG"
+fi
 
 # Run initial tests unless disabled
 if [[ $NO_TESTS -eq 0 ]]; then
-  info "Running initial health checks..."
-  
-  # Test API endpoints
-  if curl -s "$API_URL/healthz" | grep -q '"status":"ok"'; then
-    success "API health check passed"
-  else
-    warn "API health check failed"
-  fi
-  
-  if curl -s "$API_URL/api/printers" | grep -q '\[\]'; then
-    success "API printers endpoint working"
-  else
-    warn "API printers endpoint returned unexpected response"
-  fi
-  
-  # Test React
-  if curl -s "$REACT_URL" | grep -q -i "printfarmer\|vite"; then
-    success "React dev server serving content"
-  else
-    warn "React dev server not serving expected content"
-  fi
+  log_info "Running initial health checks..."
+  run_health_check_suite "$API_URL" "$REACT_URL"
 else
-  info "Skipping initial tests (--no-tests specified)"
+  log_info "Skipping initial tests (--no-tests specified)"
+fi
+
+# Setup initial admin user if AUTO_ADMIN is enabled
+if [[ "$AUTO_ADMIN" == "true" ]]; then
+  log_info "Setting up initial admin user..."
+  create_initial_admin "$API_URL" "$AUTO_ADMIN_USERNAME" "$AUTO_ADMIN_PASSWORD" "$AUTO_ADMIN_EMAIL"
 fi
 
 # Display summary
 echo
-success "🚀 All services are ready!"
+log_success "🚀 All services are ready!"
 echo
 echo "📊 Service URLs:"
 echo "  • API Backend:     $API_URL"
 echo "  • React Frontend:  $REACT_URL"
-# Redis is not started by this script
 echo
 echo "🔍 Health Checks:"
 echo "  • API Health:      $API_URL/healthz"
@@ -422,7 +407,6 @@ echo
 echo "📝 Log Files:"
 echo "  • API Logs:        $API_LOG"
 echo "  • React Logs:      $REACT_LOG"
-# No Redis logs to show
 echo
 echo "🛠️  Development URLs:"
 echo "  • Main Application: $REACT_URL"
@@ -440,20 +424,18 @@ if [[ "$AUTO_ADMIN" == "true" ]]; then
 fi
 
 if [[ $FOREGROUND -eq 1 ]]; then
-  info "Running in foreground mode. Press Ctrl+C to stop all services."
+  log_info "Running in foreground mode. Press Ctrl+C to stop all services."
   echo
   
   # Switch to foreground mode
   wait $API_PID $REACT_PID
 else
-  info "Running in background mode."
+  log_info "Running in background mode."
   echo "To stop all services, run:"
   echo "  kill $API_PID $REACT_PID"
-  if [[ $WITH_REDIS -eq 1 ]]; then
-    echo "  # No Redis container to stop"
-  fi
   echo
-  echo "Or simply run this script again with Ctrl+C to use the cleanup handler."
+  echo "Or stop all services cleanly with:"
+  echo "  ./scripts/start-all-local.sh --tear-down"
   echo
   echo "To monitor logs:"
   echo "  tail -f $API_LOG"
