@@ -1,0 +1,8 @@
+.importProgressBar {
+  width: calc(var(--progress-percent, 0) * 1%);
+  transition: width 300ms ease-in-out;
+  height: 0.5rem;
+}
+
+
+

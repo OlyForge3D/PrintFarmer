@@ -15,6 +15,7 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Annotations;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Printers
@@ -33,8 +34,9 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
+        private readonly IHubContext<Farm.Web.Api.Hubs.PrinterHub> _hubContext;
 
-        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Farm.Web.Api.Services.Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper)
+        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Farm.Web.Api.Services.Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Farm.Web.Api.Hubs.PrinterHub> hubContext)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _moon = moon ?? throw new ArgumentNullException(nameof(moon));
@@ -48,6 +50,7 @@ namespace Farm.Web.Api.Services.Printers
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
+            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
         }
 
         // History helpers moved from controller: call Moonraker client and map to shared DTOs
@@ -1349,12 +1352,16 @@ namespace Farm.Web.Api.Services.Printers
             var createdPrinters = new List<PrinterDto>();
             var errorResults = new Dictionary<int, string>();
             var skippedCount = 0;
+            var results = new List<dynamic>();
 
             for (int i = 0; i < printers.Length; i++)
             {
                 try
                 {
                     var printerDto = printers[i];
+                    string status = "Imported";
+                    string? reason = null;
+                    PrinterDto? createdDto = null;
 
                     // Check for duplicates
                     bool exists = await ExistsByNameOrServerUrlAsync(printerDto.Name, printerDto.ServerUrl, ct);
@@ -1364,7 +1371,8 @@ namespace Farm.Web.Api.Services.Printers
                         {
                             _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name}");
                             skippedCount++;
-                            continue;
+                            status = "Skipped";
+                            reason = $"Duplicate printer already exists";
                         }
                         else if ((duplicateHandling ?? "skip") == "overwrite")
                         {
@@ -1379,24 +1387,59 @@ namespace Farm.Web.Api.Services.Printers
                                 await RemoveAsync(existing, ct);
                                 await SaveChangesAsync(ct);
                             }
+                            createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
+                            await SaveChangesAsync(ct);
+                            createdPrinters.Add(createdDto);
+                            _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
                         }
                         else if ((duplicateHandling ?? "skip") == "error")
                         {
-                            errorResults[i] = $"Duplicate printer: {printerDto.Name} already exists";
-                            continue;
+                            status = "Failed";
+                            reason = $"Duplicate printer: {printerDto.Name} already exists";
+                            errorResults[i] = reason;
                         }
                     }
+                    else
+                    {
+                        // Create the printer
+                        createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
+                        await SaveChangesAsync(ct);
+                        createdPrinters.Add(createdDto);
+                        _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
+                    }
 
-                    // Create the printer
-                    var createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
-                    await SaveChangesAsync(ct);
-                    createdPrinters.Add(createdDto);
-                    _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
+                    // Build result with status info
+                    var result = new
+                    {
+                        index = i,
+                        name = printerDto.Name,
+                        status = status,
+                        id = createdDto?.Id,
+                        reason = reason
+                    };
+                    results.Add(result);
+
+                    // Send SignalR update to all connected clients
+                    await _hubContext.Clients.All.SendAsync("printerImportProgress", result, ct);
                 }
                 catch (Exception ex)
                 {
-                    errorResults[i] = $"Failed to create printer: {ex.Message}";
-                    _logger.LogWarning($"[BulkCreate] Error creating printer at index {i}: {ex.Message}");
+                    var errorMessage = $"Failed to create printer: {ex.Message}";
+                    errorResults[i] = errorMessage;
+                    _logger.LogWarning($"[BulkCreate] Error creating printer at index {i}: {errorMessage}");
+
+                    var result = new
+                    {
+                        index = i,
+                        name = printers[i].Name,
+                        status = "Failed",
+                        id = (string?)null,
+                        reason = errorMessage
+                    };
+                    results.Add(result);
+
+                    // Send SignalR update for failure
+                    await _hubContext.Clients.All.SendAsync("printerImportProgress", result, ct);
                 }
             }
 
@@ -1405,7 +1448,7 @@ namespace Farm.Web.Api.Services.Printers
                 importedCount = createdPrinters.Count,
                 skippedCount = skippedCount,
                 failureCount = errorResults.Count,
-                results = createdPrinters,
+                results = results,
                 errors = errorResults.Count > 0 ? errorResults : null
             };
         }

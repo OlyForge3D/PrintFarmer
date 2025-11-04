@@ -1,6 +1,7 @@
 import React from 'react';
 import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
+import { printerHubService } from '@/services/printerHubService';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { toast } from 'sonner';
@@ -43,6 +44,44 @@ export function PrintersAdminPage() {
   const [showExportOptions, setShowExportOptions] = React.useState(false);
   const [exportProgress, setExportProgress] = React.useState<number | null>(null);
   const [exporting, setExporting] = React.useState<boolean>(false);
+
+  // Set up SignalR connection for real-time import progress updates
+  React.useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+
+    const setupSignalR = async () => {
+      try {
+        if (!printerHubService.isConnected()) {
+          await printerHubService.start();
+        }
+
+        // Subscribe to import progress updates
+        unsubscribe = printerHubService.onPrinterImportProgress((progress) => {
+          setImportResults(prev => {
+            if (!prev) return [progress];
+            // Update existing result or add new one
+            const existing = prev.findIndex(r => r.index === progress.index);
+            if (existing >= 0) {
+              const updated = [...prev];
+              updated[existing] = progress;
+              return updated;
+            }
+            return [...prev, progress];
+          });
+        });
+      } catch (error) {
+        console.error('Failed to set up PrinterHub:', error);
+      }
+    };
+
+    setupSignalR();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, []);
 
   const handleExport = () => {
     if (!printers || !printers.length) {
@@ -241,7 +280,16 @@ export function PrintersAdminPage() {
       toast.error('No valid printers to import');
       return;
     }
+    
+    // Initialize all items with "Pending" status
+    const pendingResults = toImport.map((item) => ({
+      index: item.__index,
+      name: item.name,
+      status: 'Pending' as const
+    }));
+    setImportResults(pendingResults);
     setImporting(true);
+    
     try {
       // Prefer server-side bulk endpoint for better validation and per-item errors
       const dtos = toImport.map(i => ({
@@ -256,10 +304,10 @@ export function PrintersAdminPage() {
         newModelName: i.modelName
       }));
 
-  const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
+      const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
       // Map results back to preview item indices
       const mappedResults = resp.results?.map((r, idx) => ({ ...r, index: toImport[idx].__index })) || [];
-  setImportResults(mappedResults);
+      setImportResults(mappedResults);
       // Keep previewItems so admin can review results
     } catch (err) {
       console.error('Batch import failed', err);
@@ -461,7 +509,23 @@ export function PrintersAdminPage() {
 
           {previewItems && (
             <div className="p-4 bg-pf-bg-2 border border-pf-border rounded">
-              <h3 className="text-lg font-semibold">Import preview ({previewItems.length})</h3>
+              {(() => {
+                const totalItems = previewItems.length;
+                const completedItems = importResults?.length ?? 0;
+                const progressPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+                return (
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">Import preview ({previewItems.length})</h3>
+                    {importing && (
+                      <div className="flex items-center gap-3">
+                        <div className="text-sm text-pf-text-secondary">
+                          <span className="font-semibold">{completedItems}/{totalItems}</span> processed • <span className="font-semibold">{progressPercent}%</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="mt-2 overflow-x-auto">
                 <table className="w-full text-sm border-collapse">
                   <thead className="bg-pf-bg-2 border-b border-pf-border">
@@ -486,6 +550,15 @@ export function PrintersAdminPage() {
                           <td className="px-3 py-2 text-center text-xs">
                             {importResult ? (
                               <>
+                                {importResult.status === 'Pending' && (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <svg className="animate-spin h-3 w-3 text-pf-text-secondary" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    <span className="text-pf-text-secondary">Pending</span>
+                                  </div>
+                                )}
                                 {importResult.status === 'Imported' && <span className="text-pf-success-text font-semibold">Imported</span>}
                                 {importResult.status === 'Skipped' && <span className="text-pf-warning-text font-semibold">Skipped</span>}
                                 {importResult.status === 'Failed' && (
@@ -499,7 +572,7 @@ export function PrintersAdminPage() {
                               <span className="text-pf-text-tertiary">-</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-center space-x-2">
+                          <td className="px-3 py-2 text-center">
                             <button
                               disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
                               onClick={() => handleRetryRow(item)}
@@ -509,9 +582,6 @@ export function PrintersAdminPage() {
                             >
                               {retryingIndex === item.__index ? '↻' : '↻'}
                             </button>
-                            {importResult?.id && (
-                              <a href={`/printers/${importResult.id}`} className="text-xs text-pf-accent underline hover:opacity-80" target="_blank" rel="noreferrer" aria-label={`Open printer ${importResult.name}`}>Open</a>
-                            )}
                           </td>
                         </tr>
                       );
@@ -530,7 +600,7 @@ export function PrintersAdminPage() {
                   </select>
                 </label>
                 <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{importing ? 'Importing...' : 'Confirm Import'}</button>
-                <button type="button" disabled={importing} aria-label="Cancel import preview" onClick={() => setPreviewItems(null)} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">Cancel</button>
+                <button type="button" disabled={importing} aria-label="Close import preview and review results" onClick={() => setPreviewItems(null)} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{importing ? 'Importing...' : 'Finish'}</button>
                 <button type="button" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" title={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'} onClick={handleRetryAllFailed} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">Retry All</button>
               </div>
             </div>

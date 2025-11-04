@@ -259,7 +259,7 @@ export interface CreatePrinterDto {
 export interface BulkImportResultItem {
   index: number;
   name: string;
-  status: 'Imported' | 'Skipped' | 'Failed';
+  status: 'Pending' | 'Imported' | 'Skipped' | 'Failed';
   id?: string;
   reason?: string;
 }
