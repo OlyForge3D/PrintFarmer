@@ -27,6 +27,10 @@ export function PrintersAdminPage() {
     backend: number;
     apiKey?: string | undefined;
     notes?: string | undefined;
+    manufacturerId?: string | undefined;
+    modelId?: string | undefined;
+    manufacturerName?: string | undefined;
+    modelName?: string | undefined;
     valid: boolean;
   };
 
@@ -189,6 +193,10 @@ export function PrintersAdminPage() {
         const backend = typeof rec.backend === 'number' ? rec.backend : 0;
         const apiKey = typeof rec.apiKey === 'string' ? rec.apiKey : undefined;
         const notes = typeof rec.notes === 'string' ? rec.notes : undefined;
+        const manufacturerId = typeof rec.manufacturerId === 'string' ? rec.manufacturerId : undefined;
+        const modelId = typeof rec.modelId === 'string' ? rec.modelId : undefined;
+        const manufacturerName = typeof rec.manufacturerName === 'string' ? rec.manufacturerName : undefined;
+        const modelName = typeof rec.modelName === 'string' ? rec.modelName : undefined;
 
         return {
           __index: idx,
@@ -198,6 +206,10 @@ export function PrintersAdminPage() {
           backend,
           apiKey,
           notes,
+          manufacturerId,
+          modelId,
+          manufacturerName,
+          modelName,
           valid: Boolean(name && serverUrl)
         } as PreviewItem;
       });
@@ -225,7 +237,11 @@ export function PrintersAdminPage() {
         serverUrl: i.serverUrl,
         backend: i.backend,
         apiKey: i.apiKey,
-        notes: i.notes
+        notes: i.notes,
+        manufacturerId: i.manufacturerId,
+        modelId: i.modelId,
+        newManufacturerName: i.manufacturerName,
+        newModelName: i.modelName
       }));
 
   const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
@@ -252,6 +268,10 @@ export function PrintersAdminPage() {
         backend: item.backend,
         apiKey: item.apiKey,
         notes: item.notes,
+        manufacturerId: item.manufacturerId,
+        modelId: item.modelId,
+        newManufacturerName: item.manufacturerName,
+        newModelName: item.modelName
       };
   const resp = await apiClient.bulkCreatePrinters([dto], { duplicateHandling });
       // resp.results is array; server returns index relative to input (0). Map it back to the preview item's original index
@@ -301,6 +321,10 @@ export function PrintersAdminPage() {
         backend: i.backend,
         apiKey: i.apiKey,
         notes: i.notes,
+        manufacturerId: i.manufacturerId,
+        modelId: i.modelId,
+        newManufacturerName: i.manufacturerName,
+        newModelName: i.modelName
       }));
   const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
       // Merge results: map resp.results (0..n) back to original indices
@@ -331,7 +355,7 @@ export function PrintersAdminPage() {
                 </span>
               ) : 'Export printers'}
             </button>
-            <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="px-4 py-2 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3">Import printers</button>
+            <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="px-4 py-2 bg-pf-accent text-white rounded hover:opacity-90">Import printers</button>
             <input aria-label="Import printers JSON file" ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
 
@@ -432,9 +456,11 @@ export function PrintersAdminPage() {
                           <button
                             disabled={retryingIndex !== null}
                             onClick={() => handleRetryRow(item)}
-                            className="px-2 py-1 text-xs border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3"
+                            className="px-1.5 py-1 text-sm bg-pf-accent text-white rounded hover:opacity-90"
+                            aria-label={retryingIndex === item.__index ? 'Retrying...' : 'Retry import'}
+                            title={retryingIndex === item.__index ? 'Retrying...' : 'Retry import'}
                           >
-                            {retryingIndex === item.__index ? 'Retrying...' : 'Retry'}
+                            {retryingIndex === item.__index ? '↻' : '↻'}
                           </button>
                         </div>
                       </div>
@@ -453,8 +479,8 @@ export function PrintersAdminPage() {
                   </select>
                 </label>
                 <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90">{importing ? 'Importing...' : 'Confirm Import'}</button>
-                <button type="button" disabled={importing} aria-label="Cancel import preview" onClick={() => setPreviewItems(null)} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3">Cancel</button>
-                <button type="button" disabled={importing} aria-label="Retry all failed imports" onClick={handleRetryAllFailed} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3">Retry all failed</button>
+                <button type="button" disabled={importing} aria-label="Cancel import preview" onClick={() => setPreviewItems(null)} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90">Cancel</button>
+                <button type="button" disabled={importing} aria-label="Retry all failed imports" title="Retry all failed imports" onClick={handleRetryAllFailed} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90">Retry All</button>
               </div>
             </div>
           )}

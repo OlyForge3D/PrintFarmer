@@ -152,6 +152,12 @@ export function usePrinterDetails(id: string, options?: UseQueryOptions<PrinterD
     queryFn: () => apiClient.getPrinterDetails(id),
     enabled: !!id,
     staleTime: 30000,
+    retry: (failureCount, error) => {
+      // Don't retry on 404 (printer not found, likely deleted)
+      if (error?.statusCode === 404) return false;
+      // Retry other errors up to 2 times
+      return failureCount < 2;
+    },
     ...options,
   });
 }

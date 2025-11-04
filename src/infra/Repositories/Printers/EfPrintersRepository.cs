@@ -31,7 +31,7 @@ public class EfPrintersRepository : IPrintersRepository
     public async Task RemoveAsync(Printer p, CancellationToken ct)
     {
         // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
-        
+
         // Remove GcodeFile records that reference this printer as source or target
         var gcodeFilesReferencing = await _db.GcodeFiles
             .Where(gf => gf.SourcePrinterId == p.Id || gf.TargetPrinterId == p.Id)

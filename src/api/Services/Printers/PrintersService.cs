@@ -727,8 +727,19 @@ namespace Farm.Web.Api.Services.Printers
             if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
             {
                 string name = dto.NewManufacturerName!.Trim();
-                ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct).ConfigureAwait(false);
-                manufacturerId = created.Id;
+                try
+                {
+                    ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct).ConfigureAwait(false);
+                    manufacturerId = created.Id;
+                }
+                catch (Farm.Web.Api.Infrastructure.Exceptions.DuplicateEntityException ex)
+                {
+                    // Manufacturer already exists, use its ID
+                    if (ex.ExistingDto is ManufacturerDto existingMfg)
+                    {
+                        manufacturerId = existingMfg.Id;
+                    }
+                }
             }
 
             Guid modelId = dto.ModelId ?? Guid.Empty;
@@ -744,8 +755,19 @@ namespace Farm.Web.Api.Services.Printers
                     MaxZ: null,
                     DefaultBackend: null,
                     SupportedFilamentTypeIds: null);
-                PrinterModelDto createdModel = await _catalogService.CreateModelAsync(createReq, ct).ConfigureAwait(false);
-                modelId = createdModel.Id;
+                try
+                {
+                    PrinterModelDto createdModel = await _catalogService.CreateModelAsync(createReq, ct).ConfigureAwait(false);
+                    modelId = createdModel.Id;
+                }
+                catch (Farm.Web.Api.Infrastructure.Exceptions.DuplicateEntityException ex)
+                {
+                    // Model already exists, use its ID
+                    if (ex.ExistingDto is PrinterModelDto existingModel)
+                    {
+                        modelId = existingModel.Id;
+                    }
+                }
             }
 
             if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
