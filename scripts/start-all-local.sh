@@ -258,23 +258,23 @@ require_command node
 
 # Verify .NET version
 if ! dotnet --version | grep -q "^9\.0\."; then
-  error ".NET SDK 9.0+ required. Current version: $(dotnet --version)"
+  log_error ".NET SDK 9.0+ required. Current version: $(dotnet --version)"
 fi
 
 # Verify Node.js version
 node_version=$(node --version | sed 's/v//')
 if ! printf '%s\n18.0.0\n' "$node_version" | sort -V | head -1 | grep -q "^18"; then
-  error "Node.js >=20.19 required. Current version: $node_version"
+  log_error "Node.js >=20.19 required. Current version: $node_version"
 fi
 
-success "Prerequisites check passed"
+log_success "Prerequisites check passed"
 
 # Create directories
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # Clean build artifacts if requested
 if [[ $CLEAN -eq 1 ]]; then
-  info "Cleaning build artifacts..."
+  log_info "Cleaning build artifacts..."
   cd "$SRC_DIR"
   find . -name "bin" -o -name "obj" | xargs rm -rf 2>/dev/null || true
   if [[ -d "$REACT_DIR/dist" ]]; then
@@ -283,7 +283,7 @@ if [[ $CLEAN -eq 1 ]]; then
   if [[ -d "$REACT_DIR/node_modules/.vite" ]]; then
     rm -rf "$REACT_DIR/node_modules/.vite"
   fi
-  success "Build artifacts cleaned"
+  log_success "Build artifacts cleaned"
 fi
 
 # Fresh cleanup - terminate all existing containers and processes
