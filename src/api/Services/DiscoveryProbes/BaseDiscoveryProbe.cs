@@ -15,6 +15,9 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
     protected abstract PrinterBackend Backend { get; }
     protected abstract string PrinterName { get; }
 
+    // Expose the backend via the public interface
+    PrinterBackend INetworkDiscoveryProbe.Backend => Backend;
+
     // Optionally override for custom validation/parse
     protected virtual Task<bool> IsValidResponseAsync(HttpResponseMessage response, string content)
         => Task.FromResult(response.IsSuccessStatusCode);

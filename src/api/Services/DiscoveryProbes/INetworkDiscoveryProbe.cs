@@ -9,6 +9,11 @@ public interface INetworkDiscoveryProbe
     string DisplayName { get; }
 
     /// <summary>
+    /// The backend this probe detects (Moonraker/PrusaLink/SDCP/OctoPrint)
+    /// </summary>
+    PrinterBackend Backend { get; }
+
+    /// <summary>
     /// Attempt to discover a printer backend at the given IP/port.
     /// </summary>
     /// <returns>A DiscoveredPrinterDto if found, otherwise null.</returns>

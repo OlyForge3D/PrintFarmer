@@ -3190,6 +3190,31 @@ deploy_containers() {
             print_info "Prepared temporary build_context at ./build_context"
         fi
 
+        # If the user provided an extracted Orca assets directory under build_context/orca,
+        # prefer building an assets image from those extracted files. This creates
+        # an image tag `orcaslicer-assets:ci` that will be used as the asset source
+        # for subsequent orcaslicer-binaries / worker builds.
+        if [ -d "./build_context/orca" ]; then
+            # Detect common extracted layouts (orca7z/ or orcaslicer_binary/)
+            if [ -d "./build_context/orca/orca7z" ] || [ -d "./build_context/orca/orcaslicer_dist" ] || [ -f "./build_context/orca/orcaslicer_binary/orca-slicer" ] ; then
+                print_info "Detected local extracted Orca assets in ./build_context/orca — building orcaslicer-assets:ci from extracted files"
+                platform_arg=()
+                if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+                    platform_arg+=(--platform "${DOCKER_BUILD_PLATFORM}")
+                fi
+                # Build using the extracted-assets Dockerfile (canonical copy under dockerfiles/)
+                if docker build "${platform_arg[@]}" -f dockerfiles/Dockerfile.orca-assets-extracted -t orcaslicer-assets:ci ./build_context/orca; then
+                    docker tag orcaslicer-assets:ci orcaslicer-assets:local || true
+                    # Make subsequent logic treat this as the prebuilt asset image
+                    ORCA_ASSET_IMAGE="orcaslicer-assets:ci"
+                    export ORCA_ASSET_IMAGE
+                    print_success "Built orcaslicer-assets:ci from local extracted files"
+                else
+                    print_warning "Failed to build orcaslicer-assets:ci from ./build_context/orca — will fall back to download/build later"
+                fi
+            fi
+        fi
+
         # Build orcaslicer-binaries layer first if orca worker is enabled (optimized caching)
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
@@ -3281,11 +3306,21 @@ deploy_containers() {
         # Now build all services
         # Support passing --platform to docker compose build when requested
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+            print_info "Attempting docker compose build with platform ${DOCKER_BUILD_PLATFORM}"
+            # Try using the --platform flag first (supported on modern compose). If it fails
+            # (for example older compose binary that reports unknown flag), fall back to
+            # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
             if "${compose_cmd[@]}" build --no-cache --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
-                print_error "Failed to build Docker images"
-                exit 1
+                print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
+                export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
+                if "${compose_cmd[@]}" build --no-cache; then
+                    print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
+                else
+                    print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
+                    exit 1
+                fi
             fi
         else
             if "${compose_cmd[@]}" build --no-cache; then

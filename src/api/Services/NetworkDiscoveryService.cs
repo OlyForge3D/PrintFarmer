@@ -537,7 +537,7 @@ public partial class NetworkDiscoveryService(
         try
         {
             // Use discovery probes to attempt printer detection (each probe knows its own ports)
-            DiscoveredPrinterDto? discovered = await TryDiscoverPrinterAsync(ipAddress, settings.TimeoutMs, cancellationToken);
+            DiscoveredPrinterDto? discovered = await TryDiscoverPrinterAsync(ipAddress, settings.TimeoutMs, settings.Backends, cancellationToken);
             if (discovered != null)
             {
                 // Filter out printers already in the system
@@ -565,10 +565,18 @@ public partial class NetworkDiscoveryService(
         return null;
     }
 
-    private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
+    private async Task<DiscoveredPrinterDto?> TryDiscoverPrinterAsync(string ipAddress, int timeoutMs, List<PrinterBackend>? backends, CancellationToken cancellationToken)
     {
+        // Determine which probes to run. If the caller provided a backend filter, only run probes for those backends.
+        IEnumerable<DiscoveryProbes.INetworkDiscoveryProbe> probesToRun = _discoveryProbes;
+        if (backends != null && backends.Count > 0)
+        {
+            var backendSet = new HashSet<PrinterBackend>(backends);
+            probesToRun = probesToRun.Where(p => backendSet.Contains(p.Backend));
+        }
+
         // Use discovery probes to attempt printer detection
-        foreach (DiscoveryProbes.INetworkDiscoveryProbe probe in _discoveryProbes)
+        foreach (DiscoveryProbes.INetworkDiscoveryProbe probe in probesToRun)
         {
             if (cancellationToken.IsCancellationRequested)
             {
