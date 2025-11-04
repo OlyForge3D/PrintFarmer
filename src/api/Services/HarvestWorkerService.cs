@@ -281,6 +281,18 @@ public partial class HarvestWorkerService(
                 extractedMaterial = discoveredFile.ExtractedMaterial
             }, ct);
 
+            // Emit operation progress update for real-time UI updates
+            int totalProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
+            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestOperationProgress", new
+            {
+                operationId = job.OperationId,
+                filesFound = operation.FilesFound,
+                filesProcessed = totalProcessed,
+                filesAdded = operation.FilesAdded,
+                filesSkipped = operation.FilesSkipped,
+                filesErrored = operation.FilesErrored
+            }, ct);
+
             _logger.LogInformation($"Successfully processed file {job.FileName} for operation {job.OperationId}", null, null);
 
             // Verify the file was actually saved
@@ -558,16 +570,17 @@ public partial class HarvestWorkerService(
             return; // Operation doesn't exist or is not running
         }
 
-        // Count total discovered files for this operation
-        int discoveredCount = await harvestRepo.GetDiscoveredFilesCountAsync(operationId, ct);
-
         // Check if we've processed all expected files
-        // FilesAdded + FilesSkipped + FilesErrored should equal the total discovered files
+        // FilesFound is set during discovery phase and represents all files after filtering
+        // FilesAdded + FilesSkipped + FilesErrored tracks how many we've processed
         int totalProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
 
-        _logger.LogDebug($"Operation {operationId}: Discovered={discoveredCount}, Processed={totalProcessed} (Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored})", null, null);
+        _logger.LogDebug($"Operation {operationId}: Expected={operation.FilesFound}, Processed={totalProcessed} (Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored})", null, null);
 
-        if (discoveredCount > 0 && discoveredCount == totalProcessed)
+        // Operation is complete when we've processed all files that were discovered
+        // If FilesFound > 0, we should have found files and processed them all
+        // If FilesFound == 0, operation already completed during discovery phase
+        if (operation.FilesFound > 0 && totalProcessed >= operation.FilesFound)
         {
             // All files have been processed, mark operation as complete
             operation.Status = GcodeHarvestStatus.Completed;

@@ -124,6 +124,12 @@ export const HarvestPage: React.FC = () => {
       });
     });
 
+    // Subscribe to operation progress events (for real-time progress bar updates)
+    const unsubscribeOperationProgress = signalRService.onHarvestOperationProgress(() => {
+      // Force a refetch to update the UI with latest progress
+      refetchOperations();
+    });
+
     // Also subscribe to harvest update for total progress (existing logic)
     const unsubscribe = signalRService.onHarvestUpdate(() => {
       refetchOperations();
@@ -133,6 +139,7 @@ export const HarvestPage: React.FC = () => {
     return () => {
       unsubscribe();
       unsubscribeFileProgress();
+      unsubscribeOperationProgress();
       // Leave SignalR group for each joined operation
       joinedOps.forEach(opId => signalRService.leaveHarvestGroup(opId));
     };

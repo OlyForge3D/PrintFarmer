@@ -16,7 +16,16 @@ export type HarvestFileProgress = {
   totalBytes: number;
   percent: number;
 };
+export type HarvestOperationProgress = {
+  operationId: string;
+  filesFound: number;
+  filesProcessed: number;
+  filesAdded: number;
+  filesSkipped: number;
+  filesErrored: number;
+};
 type HarvestFileProgressCallback = (progress: HarvestFileProgress) => void;
+type HarvestOperationProgressCallback = (progress: HarvestOperationProgress) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
 type ConnectionStateCallback = (connected: boolean) => void;
 // HarvestFileDiscovered event type
@@ -37,6 +46,7 @@ type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 export class SignalRService {
   private connection: HubConnection | null = null;
   private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
+  private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
@@ -129,6 +139,17 @@ export class SignalRService {
     };
   }
 
+  // ============ Harvest Operation Progress Event Subscription ============
+  onHarvestOperationProgress(callback: HarvestOperationProgressCallback): () => void {
+    this.harvestOperationProgressCallbacks.push(callback);
+    return () => {
+      const index = this.harvestOperationProgressCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestOperationProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   // Connection lifecycle events
   private setupEventHandlers(): void {
     if (!this.connection) return;
@@ -183,6 +204,17 @@ export class SignalRService {
           callback(progress);
         } catch (error) {
           console.error('Error in harvest file progress callback:', error);
+        }
+      });
+    });
+
+    // NEW: Operation progress event (overall harvest progress)
+  this.connection.on('harvestoperationprogress', (progress: HarvestOperationProgress) => {
+      this.harvestOperationProgressCallbacks.forEach(callback => {
+        try {
+          callback(progress);
+        } catch (error) {
+          console.error('Error in harvest operation progress callback:', error);
         }
       });
     });
