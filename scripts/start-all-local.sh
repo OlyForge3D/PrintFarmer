@@ -121,7 +121,7 @@ fresh_cleanup() {
   log_info "Starting fresh cleanup - terminating all existing containers and processes..."
   
   # Kill any processes on PrintFarmer ports
-  local ports=(5000 5245 7281 3000)  # API and React ports
+  local ports=(5245 7281 3000)  # API HTTP/HTTPS and React ports
   for port in "${ports[@]}"; do
     if is_port_in_use "$port"; then
       log_warn "Terminating processes on port $port"

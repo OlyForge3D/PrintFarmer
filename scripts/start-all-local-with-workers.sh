@@ -244,7 +244,7 @@ fresh_cleanup() {
   cleanup_slicer_images
   
   # Kill any processes on PrintFarmer ports
-  local ports=(5000 5245 7281 3000)  # API, React ports
+  local ports=(5245 7281 3000)  # API HTTP/HTTPS and React ports
   for port in "${ports[@]}"; do
     if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
       warn "Terminating processes on port $port"
