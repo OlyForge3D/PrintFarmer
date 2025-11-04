@@ -195,8 +195,20 @@ export function PrintersAdminPage() {
         const notes = typeof rec.notes === 'string' ? rec.notes : undefined;
         const manufacturerId = typeof rec.manufacturerId === 'string' ? rec.manufacturerId : undefined;
         const modelId = typeof rec.modelId === 'string' ? rec.modelId : undefined;
-        const manufacturerName = typeof rec.manufacturerName === 'string' ? rec.manufacturerName : undefined;
-        const modelName = typeof rec.modelName === 'string' ? rec.modelName : undefined;
+        // Support multiple field name formats from different export/import sources:
+        // - camelCase: manufacturerName, modelName (old format)
+        // - PascalCase: Manufacturer, Model (intermediate format)
+        // - API export: ManufacturerName, PrinterModel (current format)
+        const manufacturerName = typeof rec.manufacturerName === 'string' 
+          ? rec.manufacturerName 
+          : (typeof rec.ManufacturerName === 'string' 
+            ? rec.ManufacturerName 
+            : (typeof rec.Manufacturer === 'string' ? rec.Manufacturer : undefined));
+        const modelName = typeof rec.modelName === 'string' 
+          ? rec.modelName 
+          : (typeof rec.PrinterModel === 'string' 
+            ? rec.PrinterModel 
+            : (typeof rec.Model === 'string' ? rec.Model : undefined));
 
         return {
           __index: idx,
@@ -245,11 +257,10 @@ export function PrintersAdminPage() {
       }));
 
   const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
-  setImportResults(resp.results ?? null);
-  toast.success(`Imported ${resp.importedCount} printers${resp.skippedCount ? `, ${resp.skippedCount} skipped` : ''}`);
-      // Keep previewItems so admin can review results; clear preview only when all imported
-      const allImported = (resp.results || []).every(r => r.status === 'Imported' || r.status === 'Skipped');
-      if (allImported) setPreviewItems(null);
+      // Map results back to preview item indices
+      const mappedResults = resp.results?.map((r, idx) => ({ ...r, index: toImport[idx].__index })) || [];
+  setImportResults(mappedResults);
+      // Keep previewItems so admin can review results
     } catch (err) {
       console.error('Batch import failed', err);
       toast.error('Import encountered errors');
@@ -400,23 +411,50 @@ export function PrintersAdminPage() {
                   </div>
                 )}
 
-                <ul className="mt-2 divide-y divide-pf-border">
-                  {printers.map(p => (
-                    <li key={p.id} className="flex items-center justify-between py-2">
-                      <div className="flex items-center gap-3">
-                        <input aria-label={`Select printer ${p.name}`} type="checkbox" checked={selectedIds.includes(p.id)} onChange={(e) => {
-                          if (e.target.checked) setSelectedIds(prev => Array.from(new Set([...prev, p.id])));
-                          else setSelectedIds(prev => prev.filter(id => id !== p.id));
-                        }} />
-                        <div>
-                          <div className="font-medium text-pf-text-primary">{p.name}</div>
-                          <div className="text-xs">{p.manufacturerName ?? ''} {p.modelName ?? ''}</div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-pf-text-tertiary">{p.ipAddress ?? p.serverUrl ?? ''} <span className="ml-3">{p.backend}</span></div>
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-sm border-collapse">
+                    <thead className="bg-pf-bg-2 border-b border-pf-border">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">
+                          <input
+                            aria-label="Select all printers"
+                            type="checkbox"
+                            checked={selectedIds.length === printers.length && printers.length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedIds(printers.map(p => p.id));
+                              else setSelectedIds([]);
+                            }}
+                          />
+                        </th>
+                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Printer Name</th>
+                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Manufacturer</th>
+                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Model</th>
+                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Server URL</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-pf-border">
+                      {printers.map(p => (
+                        <tr key={p.id} className="hover:bg-pf-bg-2 transition-colors">
+                          <td className="px-3 py-2">
+                            <input
+                              aria-label={`Select printer ${p.name}`}
+                              type="checkbox"
+                              checked={selectedIds.includes(p.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedIds(prev => Array.from(new Set([...prev, p.id])));
+                                else setSelectedIds(prev => prev.filter(id => id !== p.id));
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-pf-text-primary font-medium">{p.name}</td>
+                          <td className="px-3 py-2 text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
+                          <td className="px-3 py-2 text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
+                          <td className="px-3 py-2 text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
@@ -424,49 +462,62 @@ export function PrintersAdminPage() {
           {previewItems && (
             <div className="p-4 bg-pf-bg-2 border border-pf-border rounded">
               <h3 className="text-lg font-semibold">Import preview ({previewItems.length})</h3>
-              <div className="mt-2 text-sm text-pf-text-secondary">
-                <ul className="space-y-2">
-                  {previewItems.map(item => (
-                    <li key={item.__index} className="flex justify-between items-center">
-                      <div>
-                        <div className="font-medium text-pf-text-primary">{item.name || <i className="text-xs text-pf-text-tertiary">(missing name)</i>}</div>
-                        <div className="text-xs">{item.notes ?? ''}</div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-xs text-pf-text-tertiary">{item.serverUrl || <span className="text-pf-error-text">(missing URL)</span>}</div>
-                        {importResults && importResults.length > 0 && (
-                          <div className="ml-2 text-xs flex items-center gap-2">
-                            {(() => {
-                              const r = importResults.find(rr => rr.index === item.__index);
-                              if (!r) return null;
-                              if (r.status === 'Imported') return <span className="text-pf-success-text">Imported</span>;
-                              if (r.status === 'Skipped') return <span className="text-pf-warning-text">Skipped</span>;
-                              return <span className="text-pf-error-text">Failed: {r.reason}</span>;
-                            })()}
-                            {(() => {
-                              const r = importResults.find(rr => rr.index === item.__index && rr.id);
-                              if (!r) return null;
-                              return (
-                                <a href={`/printers/${r.id}`} className="text-xs text-pf-accent underline" target="_blank" rel="noreferrer" aria-label={`Open printer ${r.name}`}>Open</a>
-                              );
-                            })()}
-                          </div>
-                        )}
-                        <div>
-                          <button
-                            disabled={retryingIndex !== null}
-                            onClick={() => handleRetryRow(item)}
-                            className="px-1.5 py-1 text-sm bg-pf-accent text-white rounded hover:opacity-90"
-                            aria-label={retryingIndex === item.__index ? 'Retrying...' : 'Retry import'}
-                            title={retryingIndex === item.__index ? 'Retrying...' : 'Retry import'}
-                          >
-                            {retryingIndex === item.__index ? '↻' : '↻'}
-                          </button>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead className="bg-pf-bg-2 border-b border-pf-border">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Printer Name</th>
+                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Manufacturer</th>
+                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Model</th>
+                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Server URL</th>
+                      <th className="text-center px-3 py-2 font-semibold text-pf-text-primary">Status</th>
+                      <th className="text-center px-3 py-2 font-semibold text-pf-text-primary">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-pf-border">
+                    {previewItems.map(item => {
+                      const importResult = importResults?.find(r => r.index === item.__index);
+                      return (
+                        <tr key={item.__index} className="hover:bg-pf-bg-2 transition-colors">
+                          <td className="px-3 py-2 text-pf-text-primary font-medium">{item.name || <i className="text-pf-text-tertiary">(missing)</i>}</td>
+                          <td className="px-3 py-2 text-pf-text-secondary">{item.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
+                          <td className="px-3 py-2 text-pf-text-secondary">{item.modelName || <span className="text-pf-warning-text">-</span>}</td>
+                          <td className="px-3 py-2 text-pf-text-secondary">{item.serverUrl || <span className="text-pf-error-text">(missing)</span>}</td>
+                          <td className="px-3 py-2 text-center text-xs">
+                            {importResult ? (
+                              <>
+                                {importResult.status === 'Imported' && <span className="text-pf-success-text font-semibold">Imported</span>}
+                                {importResult.status === 'Skipped' && <span className="text-pf-warning-text font-semibold">Skipped</span>}
+                                {importResult.status === 'Failed' && (
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-pf-error-text font-semibold">Failed</span>
+                                    {importResult.reason && <span className="text-pf-error-text text-xs">{importResult.reason}</span>}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-pf-text-tertiary">-</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-center space-x-2">
+                            <button
+                              disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
+                              onClick={() => handleRetryRow(item)}
+                              className="px-1.5 py-1 text-sm bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                              aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
+                              title={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Only failed imports can be retried'}
+                            >
+                              {retryingIndex === item.__index ? '↻' : '↻'}
+                            </button>
+                            {importResult?.id && (
+                              <a href={`/printers/${importResult.id}`} className="text-xs text-pf-accent underline hover:opacity-80" target="_blank" rel="noreferrer" aria-label={`Open printer ${importResult.name}`}>Open</a>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
 
               <div className="mt-3 flex gap-2">
@@ -478,9 +529,9 @@ export function PrintersAdminPage() {
                     <option value="rename">Rename</option>
                   </select>
                 </label>
-                <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90">{importing ? 'Importing...' : 'Confirm Import'}</button>
-                <button type="button" disabled={importing} aria-label="Cancel import preview" onClick={() => setPreviewItems(null)} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90">Cancel</button>
-                <button type="button" disabled={importing} aria-label="Retry all failed imports" title="Retry all failed imports" onClick={handleRetryAllFailed} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90">Retry All</button>
+                <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{importing ? 'Importing...' : 'Confirm Import'}</button>
+                <button type="button" disabled={importing} aria-label="Cancel import preview" onClick={() => setPreviewItems(null)} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">Cancel</button>
+                <button type="button" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" title={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'} onClick={handleRetryAllFailed} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">Retry All</button>
               </div>
             </div>
           )}
