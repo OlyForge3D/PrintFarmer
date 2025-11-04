@@ -27,7 +27,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       const result = await apiClient.importSelectedGcodeFiles({
         harvestOperationId: operationId,
         fileIds,
-      });
+      }, { timeout: 300000 }); // 5-minute timeout for import operations
+      
       // Use the correct API response field names with fallback to 0
       const importedCount = result.importedFiles ?? 0;
       const skippedCount = (result.skippedFileIds?.length ?? 0);

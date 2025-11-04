@@ -72,8 +72,8 @@
   .disabled\:bg-gray-300:disabled { background-color: rgb(209 213 219); }
   .disabled\:bg-gray-50:disabled { background-color: rgb(249 250 251); }
 
-  /* Import progress bar */
-  .pf-import-progress-bar {
-    width: calc(var(--progress-percent, 0) * 1%);
+  /* Progress bars - applies CSS variable --progress to width */
+  [style*="--progress"] {
+    width: var(--progress);
   }
 }

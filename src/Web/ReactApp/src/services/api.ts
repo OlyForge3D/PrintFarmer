@@ -162,9 +162,13 @@ export class ApiClient {
   }
 
   // Import selected discovered G-code files
-  async importSelectedGcodeFiles(dto: { harvestOperationId: string; fileIds: string[] }): Promise<GcodeHarvestResultDto> {
+  async importSelectedGcodeFiles(
+    dto: { harvestOperationId: string; fileIds: string[] },
+    options?: { timeout?: number }
+  ): Promise<GcodeHarvestResultDto> {
     // Backend exposes this endpoint under /api/gcode-harvest/import
-    const resp = await this.client.post<GcodeHarvestResultDto>(`/gcode-harvest/import`, dto);
+    const config: AxiosRequestConfig = options?.timeout ? { timeout: options.timeout } : {};
+    const resp = await this.client.post<GcodeHarvestResultDto>(`/gcode-harvest/import`, dto, config);
     return resp.data;
   }
 
@@ -775,9 +779,11 @@ export class ApiClient {
     // Frontend `LoginRequest` type historically used `username` so map that to
     // `usernameOrEmail` to remain backwards-compatible and avoid model binding
     // validation errors (400 Bad Request).
+    const usernameOrEmail = (credentials as LoginRequest & { username?: string }).usernameOrEmail 
+      ?? (credentials as LoginRequest & { username?: string }).username;
+    
     const payload = {
-      // Support either `username` or `usernameOrEmail` in the credentials object
-      usernameOrEmail: (credentials as any).usernameOrEmail ?? (credentials as any).username,
+      usernameOrEmail,
       password: credentials.password,
     } as Record<string, string>;
 
