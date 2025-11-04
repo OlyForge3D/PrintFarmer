@@ -157,6 +157,17 @@ export const HarvestPage: React.FC = () => {
     }
   }, [harvestOperations, optimisticOps]);
 
+  // Update selectedOperation when harvestOperations changes to show latest data
+  useEffect(() => {
+    if (selectedOperation && harvestOperations) {
+      const updatedOp = harvestOperations.find(op => op.id === selectedOperation.id);
+      if (updatedOp && JSON.stringify(updatedOp) !== JSON.stringify(selectedOperation)) {
+        setSelectedOperation(updatedOp);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [harvestOperations]);
+
   // Early return for permission check (must be after all hooks and effects)
   if (!hasPermission('gcode_harvest', 'execute')) {
     return <AccessDenied />;

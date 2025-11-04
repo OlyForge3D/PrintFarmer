@@ -1134,7 +1134,7 @@ public class StartGcodeHarvestDto
 public class ImportSelectedGcodeFilesDto
 {
     public Guid HarvestOperationId { get; set; }
-    public Guid[] SelectedFileIds { get; set; } = [];
+    public Guid[] FileIds { get; set; } = [];
     public bool AddToLibraryOnly { get; set; } = true; // If false, also create print jobs
     public bool AutoDetectCapabilities { get; set; } = true;
     public string[]? DefaultTags { get; set; }
@@ -1143,13 +1143,32 @@ public class ImportSelectedGcodeFilesDto
 /// <summary>
 /// Result summary returned after importing selected harvested files.
 /// </summary>
-public record GcodeHarvestResultDto(
-    Guid OperationId,
-    bool Success,
-    string Message,
-    int DiscoveredFiles = 0,
-    int ImportedFiles = 0,
-    string[]? Errors = null);
+public class GcodeHarvestResultDto
+{
+    public Guid OperationId { get; set; }
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int DiscoveredFiles { get; set; }
+    public int ImportedFiles { get; set; }
+    public string[]? Errors { get; set; }
+    public string[] ImportedFileIds { get; set; } = Array.Empty<string>();
+    public string[] SkippedFileIds { get; set; } = Array.Empty<string>();
+    public string[] FailedFileIds { get; set; } = Array.Empty<string>();
+    public Dictionary<string, string>? ErrorDetails { get; set; }
+
+    // Constructor for backward compatibility
+    public GcodeHarvestResultDto() { }
+
+    public GcodeHarvestResultDto(Guid operationId, bool success, string message, int discoveredFiles = 0, int importedFiles = 0, string[]? errors = null)
+    {
+        OperationId = operationId;
+        Success = success;
+        Message = message;
+        DiscoveredFiles = discoveredFiles;
+        ImportedFiles = importedFiles;
+        Errors = errors;
+    }
+}
 
 // G-code Metadata Extraction
 /// <summary>

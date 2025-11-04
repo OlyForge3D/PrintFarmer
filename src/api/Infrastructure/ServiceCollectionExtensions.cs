@@ -162,6 +162,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
         _ = services.AddScoped<Farm.Infrastructure.Normalization.INormalizationEventLogger, Farm.Infrastructure.Normalization.NormalizationEventLogger>();
 
+        // Storage path service for multi-deployment support (Docker and Kubernetes)
+        // Provides centralized configuration for file storage paths
+        _ = services.AddSingleton<Farm.Web.Api.Services.StorageManagement.IStoragePathService, Farm.Web.Api.Services.StorageManagement.StoragePathService>();
+
         // HTTP Clients with typed clients
         _ = services.AddHttpClient<IMoonrakerClient, MoonrakerClient>(client =>
         {
@@ -240,6 +244,7 @@ public static class ServiceCollectionExtensions
         // IHarvestQueue must be Singleton because it's used by background tasks that outlive HTTP request scopes
         _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
+        _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService, Farm.Web.Api.Services.Gcode.GcodeMetadataExtractorService>();
 
         // Background worker to process harvest file jobs from the queue
         if (!disableBg)

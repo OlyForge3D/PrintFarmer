@@ -8,13 +8,15 @@ export interface ImportSelectedGcodeFilesDto {
 // Result DTO for G-code harvest import
 export interface GcodeHarvestResultDto {
   operationId: string;
-  importedCount: number;
-  skippedCount: number;
-  failedCount: number;
+  success: boolean;
+  message: string;
+  discoveredFiles: number;
+  importedFiles: number;
+  errors?: string[];
   importedFileIds: string[];
   skippedFileIds: string[];
   failedFileIds: string[];
-  errors?: Record<string, string>;
+  errorDetails?: Record<string, string>;
 }
 export interface DiscoveredGcodeFileDto {
   id: string;

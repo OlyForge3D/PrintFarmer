@@ -28,14 +28,18 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         harvestOperationId: operationId,
         fileIds,
       });
-      toast.success(`Imported: ${result.importedCount}, Skipped: ${result.skippedCount}, Failed: ${result.failedCount}`);
+      // Use the correct API response field names with fallback to 0
+      const importedCount = result.importedFiles ?? 0;
+      const skippedCount = (result.skippedFileIds?.length ?? 0);
+      const failedCount = (result.failedFileIds?.length ?? 0);
+      toast.success(`Imported: ${importedCount}, Skipped: ${skippedCount}, Failed: ${failedCount}`);
       setFiles(prev => prev.map(f => {
         const imported = Array.isArray(result.importedFileIds) && result.importedFileIds.includes(f.id);
         const skipped = Array.isArray(result.skippedFileIds) && result.skippedFileIds.includes(f.id);
         const failed = Array.isArray(result.failedFileIds) && result.failedFileIds.includes(f.id);
         if (imported) return { ...f, status: HarvestFileStatus.Complete, error: '' };
         if (skipped) return { ...f, status: HarvestFileStatus.Skipped, error: '' };
-        if (failed) return { ...f, status: HarvestFileStatus.Failed, error: result.errors?.[f.id] || f.error };
+        if (failed) return { ...f, status: HarvestFileStatus.Failed, error: result.errorDetails?.[f.id] || f.error };
         return f;
       }));
       setSelected(new Set());
@@ -188,7 +192,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-surface z-20">Indexed Files</h4>
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-10">
+          <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
             <tr>
               <th className="p-2 border-b border-pf-border"><input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" /></th>
               <th className="p-2 border-b border-pf-border text-left">File</th>
