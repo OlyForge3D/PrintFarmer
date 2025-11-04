@@ -1,8 +1,8 @@
-import { 
-  HubConnection, 
-  HubConnectionBuilder, 
+import {
+  HubConnection,
+  HubConnectionBuilder,
   HubConnectionState,
-  LogLevel 
+  LogLevel
 } from '@microsoft/signalr';
 import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
 import { apiClient } from '@/services/api';
@@ -154,7 +154,7 @@ export class SignalRService {
   private setupEventHandlers(): void {
     if (!this.connection) return;
     // Harvest events (harvest hub)
-  this.connection.on('harvestfilediscovered', (evt: HarvestFileDiscoveredEvent) => {
+    this.connection.on('harvestfilediscovered', (evt: HarvestFileDiscoveredEvent) => {
       this.harvestFileDiscoveredCallbacks.forEach(callback => {
         try {
           callback(evt);
@@ -187,7 +187,7 @@ export class SignalRService {
     });
 
     // Business event handlers (harvest hub)
-  this.connection.on('harvestupdate', (operationId: string, status: HarvestUpdateDto) => {
+    this.connection.on('harvestupdate', (operationId: string, status: HarvestUpdateDto) => {
       this.harvestUpdateCallbacks.forEach(callback => {
         try {
           callback(operationId, status);
@@ -198,7 +198,7 @@ export class SignalRService {
     });
 
     // NEW: Per-file progress event
-  this.connection.on('harvestfileprogress', (progress: HarvestFileProgress) => {
+    this.connection.on('harvestfileprogress', (progress: HarvestFileProgress) => {
       this.harvestFileProgressCallbacks.forEach(callback => {
         try {
           callback(progress);
@@ -209,7 +209,7 @@ export class SignalRService {
     });
 
     // NEW: Operation progress event (overall harvest progress)
-  this.connection.on('harvestoperationprogress', (progress: HarvestOperationProgress) => {
+    this.connection.on('harvestoperationprogress', (progress: HarvestOperationProgress) => {
       this.harvestOperationProgressCallbacks.forEach(callback => {
         try {
           callback(progress);
@@ -219,7 +219,7 @@ export class SignalRService {
       });
     });
 
-  this.connection.on('jobqueueupdate', (update: JobQueueUpdateDto) => {
+    this.connection.on('jobqueueupdate', (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach(callback => {
         try {
           callback(update);
@@ -350,7 +350,7 @@ export class SignalRService {
 
   onPrinterStatusUpdate(callback: PrinterStatusCallback): () => void {
     this.printerStatusCallbacks.push(callback);
-    
+
     // Return unsubscribe function
     return () => {
       const index = this.printerStatusCallbacks.indexOf(callback);
@@ -362,7 +362,7 @@ export class SignalRService {
 
   onHarvestUpdate(callback: HarvestUpdateCallback): () => void {
     this.harvestUpdateCallbacks.push(callback);
-    
+
     return () => {
       const index = this.harvestUpdateCallbacks.indexOf(callback);
       if (index > -1) {
@@ -373,7 +373,7 @@ export class SignalRService {
 
   onJobQueueUpdate(callback: JobQueueUpdateCallback): () => void {
     this.jobQueueUpdateCallbacks.push(callback);
-    
+
     return () => {
       const index = this.jobQueueUpdateCallbacks.indexOf(callback);
       if (index > -1) {
@@ -384,7 +384,7 @@ export class SignalRService {
 
   onConnectionStateChange(callback: ConnectionStateCallback): () => void {
     this.connectionStateCallbacks.push(callback);
-    
+
     return () => {
       const index = this.connectionStateCallbacks.indexOf(callback);
       if (index > -1) {
@@ -430,7 +430,7 @@ export class SignalRService {
   // Refresh SignalR settings and reconnect with new log level
   async refreshSettings(): Promise<void> {
     await this.loadSettings();
-    
+
     // If connection exists and is connected, recreate it with new settings
     if (this.connection && this.connection.state === HubConnectionState.Connected) {
       await this.connection.stop();
@@ -450,7 +450,7 @@ export class SignalRService {
     this.harvestFileDiscoveredCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
-    
+
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

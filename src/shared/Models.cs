@@ -1488,6 +1488,58 @@ public class CreateOrUpdatePrinterCapabilitiesDto
 }
 
 /// <summary>
+/// Lean capabilities export DTO (excludes redundant PrinterId/PrinterName already in parent PrinterWithCapabilitiesDto).
+/// Used for export to keep JSON compact and avoid duplication.
+/// Null properties are excluded from JSON export to keep payload minimal.
+/// </summary>
+public class PrinterCapabilitiesExportDto
+{
+    public Guid Id { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? NozzleDiameter { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? SupportedMaterials { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MaxBuildVolumeX { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MaxBuildVolumeY { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MaxBuildVolumeZ { get; set; }
+
+    public bool HasHeatedBed { get; set; } = true;
+    public bool HasEnclosure { get; set; } = false;
+    public bool MultiMaterial { get; set; } = false;
+    public bool SupportsAutoLeveling { get; set; } = false;
+    public int NumberOfExtruders { get; set; } = 1;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinHotendTemp { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxHotendTemp { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinBedTemp { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxBedTemp { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CurrentMaterial { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CurrentSpoolId { get; set; }
+
+    public bool IsAvailable { get; set; } = true;
+    public DateTime LastUpdated { get; set; }
+}
+
+/// <summary>
 /// Combined printer identity with capabilities snapshot.
 /// </summary>
 public class PrinterWithCapabilitiesDto
@@ -1495,11 +1547,35 @@ public class PrinterWithCapabilitiesDto
     public Guid PrinterId { get; set; }
     public string PrinterName { get; set; } = string.Empty;
     public string PrinterModel { get; set; } = string.Empty;
-    public PrinterCapabilitiesDto? Capabilities { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PrinterCapabilitiesExportDto? Capabilities { get; set; }
+
     // Additional export-friendly fields
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ManufacturerName { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PrinterBackend? Backend { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? IpAddress { get; set; }
+
+    // Import-friendly fields (for re-importing exported printers)
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServerUrl { get; set; } // Base URL without port (e.g., "http://192.168.1.100")
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? BackendPort { get; set; } // Backend API port (e.g., 7125 for Moonraker)
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FrontendPort { get; set; } // Frontend port if applicable (e.g., 5000 for PrusaLink)
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApiKey { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Notes { get; set; }
 }
 
 /// <summary>

@@ -28,10 +28,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     // The ArtifactsMetrics instance id resolved from the host's root service provider
     // (useful for tests to correlate which server-side metrics instance is the "host" one).
     public Guid? HostArtifactsInstanceId { get; private set; }
-        // Optional: token associated with the host-level ArtifactsMetrics instance
-        // used to perform host-scoped resets safely when multiple test hosts run
-        // in the same process.
-        public string? HostArtifactsInstanceToken { get; private set; }
+    // Optional: token associated with the host-level ArtifactsMetrics instance
+    // used to perform host-scoped resets safely when multiple test hosts run
+    // in the same process.
+    public string? HostArtifactsInstanceToken { get; private set; }
 
     private readonly string _dbPath;
     private SqliteConnection? _inMemorySqliteConnection;
@@ -86,7 +86,9 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     var files = Directory.GetFiles(dir, pat, SearchOption.AllDirectories);
                     foreach (var f in files)
                     {
-                        try { File.Delete(f); } catch { }
+                        try
+                        { File.Delete(f); }
+                        catch { }
                     }
                 }
                 catch { }
@@ -118,7 +120,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         var tempDir = Farm.Web.Api.Tests.TestInfrastructure.TestPaths.GetUniqueTempDirectory();
         _dbPath = Path.Combine(tempDir, dbFile);
         TryDelete();
-        
+
         // Ensure Program.cs picks up the test-specific database path early
         // Minimal hosting reads configuration very early; environment variables are safest for overrides
         Environment.SetEnvironmentVariable("ConnectionStrings__Default", $"Data Source={_dbPath}");
@@ -369,27 +371,29 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 // a scoped lifetime so parallel test hosts in the same process do not share
                 // the same metrics instance across test-hosts. Remove any existing descriptor
                 // and register a scoped instance here.
+                try
+                {
+                    var metricsDescriptors = services.Where(d => d.ServiceType == typeof(Farm.Web.Api.Services.Artifacts.ArtifactsMetrics)).ToList();
+                    foreach (var md in metricsDescriptors)
+                    {
+                        try
+                        { services.Remove(md); }
+                        catch { }
+                    }
+                    // Register a per-host singleton for tests so all services in the same TestServer
+                    // share one ArtifactsMetrics instance, while different test hosts (in the same
+                    // process) get isolated instances. Tag the instance with a host-specific token
+                    // so resets can be targeted safely.
+                    var hostToken = Guid.NewGuid().ToString("N");
                     try
                     {
-                        var metricsDescriptors = services.Where(d => d.ServiceType == typeof(Farm.Web.Api.Services.Artifacts.ArtifactsMetrics)).ToList();
-                        foreach (var md in metricsDescriptors)
-                        {
-                            try { services.Remove(md); } catch { }
-                        }
-                        // Register a per-host singleton for tests so all services in the same TestServer
-                        // share one ArtifactsMetrics instance, while different test hosts (in the same
-                        // process) get isolated instances. Tag the instance with a host-specific token
-                        // so resets can be targeted safely.
-                        var hostToken = Guid.NewGuid().ToString("N");
-                        try
-                        {
-                            // store token on the factory instance so tests can correlate if needed
-                            // (we cannot assign HostArtifactsInstanceToken here because CreateHost may run
-                            // multiple times per factory; it's set later when probing the host's service provider)
-                        }
-                        catch { }
-                        services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>(sp => new Farm.Web.Api.Services.Artifacts.ArtifactsMetrics(hostToken));
+                        // store token on the factory instance so tests can correlate if needed
+                        // (we cannot assign HostArtifactsInstanceToken here because CreateHost may run
+                        // multiple times per factory; it's set later when probing the host's service provider)
                     }
+                    catch { }
+                    services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>(sp => new Farm.Web.Api.Services.Artifacts.ArtifactsMetrics(hostToken));
+                }
                 catch { }
             }
             catch { }
@@ -446,22 +450,22 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         }
                     }
 
-                        // Only mark startup to skip DB init when the shared fixture actually
-                        // provided the connection (i.e. an external fixture seeded the DB).
-                        // If we created the connection ourselves we will decide to skip
-                        // startup seeding only after a successful pre-seed below.
-                        if (Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection != null)
-                        {
-                            Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
-                        }
+                    // Only mark startup to skip DB init when the shared fixture actually
+                    // provided the connection (i.e. an external fixture seeded the DB).
+                    // If we created the connection ourselves we will decide to skip
+                    // startup seeding only after a successful pre-seed below.
+                    if (Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection != null)
+                    {
+                        Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
+                    }
 
-                        // Register into DI if not already present
-                        try
-                        {
-                            services.AddSingleton<Microsoft.Data.Sqlite.SqliteConnection>(earlyConn);
-                            services.AddSingleton<System.Data.Common.DbConnection>(earlyConn);
-                        }
-                        catch { }
+                    // Register into DI if not already present
+                    try
+                    {
+                        services.AddSingleton<Microsoft.Data.Sqlite.SqliteConnection>(earlyConn);
+                        services.AddSingleton<System.Data.Common.DbConnection>(earlyConn);
+                    }
+                    catch { }
                 }
             }
             catch { }

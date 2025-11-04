@@ -480,29 +480,32 @@ namespace Farm.Web.Api.Services.Printers
                     ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
                     Backend = p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP : Farm.Web.Shared.PrinterBackend.Moonraker,
                     IpAddress = p.IpAddress,
-                    Capabilities = cap == null ? null : new Farm.Web.Shared.PrinterCapabilitiesDto(
-                        cap.Id,
-                        cap.PrinterId,
-                        p.Name,
-                        cap.NozzleDiameter,
-                        cap.SupportedMaterials,
-                        cap.MaxBuildVolumeX,
-                        cap.MaxBuildVolumeY,
-                        cap.MaxBuildVolumeZ,
-                        cap.HasHeatedBed,
-                        cap.HasEnclosure,
-                        cap.MultiMaterial,
-                        cap.SupportsAutoLeveling,
-                        cap.NumberOfExtruders,
-                        cap.MinHotendTemp,
-                        cap.MaxHotendTemp,
-                        cap.MinBedTemp,
-                        cap.MaxBedTemp,
-                        cap.CurrentMaterial,
-                        cap.CurrentSpoolId,
-                        cap.IsAvailable,
-                        cap.LastUpdated
-                    )
+                    // Add import-friendly fields for re-importing
+                    ServerUrl = p.ServerUrl,
+                    ApiKey = p.ApiKey,
+                    Notes = p.Notes,
+                    Capabilities = cap == null ? null : new Farm.Web.Shared.PrinterCapabilitiesExportDto
+                    {
+                        Id = cap.Id,
+                        NozzleDiameter = cap.NozzleDiameter,
+                        SupportedMaterials = cap.SupportedMaterials,
+                        MaxBuildVolumeX = cap.MaxBuildVolumeX,
+                        MaxBuildVolumeY = cap.MaxBuildVolumeY,
+                        MaxBuildVolumeZ = cap.MaxBuildVolumeZ,
+                        HasHeatedBed = cap.HasHeatedBed,
+                        HasEnclosure = cap.HasEnclosure,
+                        MultiMaterial = cap.MultiMaterial,
+                        SupportsAutoLeveling = cap.SupportsAutoLeveling,
+                        NumberOfExtruders = cap.NumberOfExtruders,
+                        MinHotendTemp = cap.MinHotendTemp,
+                        MaxHotendTemp = cap.MaxHotendTemp,
+                        MinBedTemp = cap.MinBedTemp,
+                        MaxBedTemp = cap.MaxBedTemp,
+                        CurrentMaterial = cap.CurrentMaterial,
+                        CurrentSpoolId = cap.CurrentSpoolId,
+                        IsAvailable = cap.IsAvailable,
+                        LastUpdated = cap.LastUpdated
+                    }
                 };
             }).ToArray();
 

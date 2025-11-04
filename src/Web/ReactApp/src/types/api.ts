@@ -151,10 +151,16 @@ export interface PrinterWithCapabilitiesDto {
   printerId: string;
   printerName: string;
   printerModel: string;
-  capabilities?: PrinterCapabilitiesDto | null;
+  capabilities?: PrinterCapabilitiesExportDto | null; // Lean export format (no duplicate printerId/printerName)
   manufacturerName?: string | null;
   backend?: PrinterBackend | null;
   ipAddress?: string | null;
+  // Import-friendly fields (for re-importing exported printers)
+  serverUrl?: string | null; // Base URL without port (e.g., "http://192.168.1.100")
+  backendPort?: number | null; // Backend API port (e.g., 7125 for Moonraker)
+  frontendPort?: number | null; // Frontend port if applicable (e.g., 5000 for PrusaLink)
+  apiKey?: string | null;
+  notes?: string | null;
 }
 
 export interface FilamentInfo {
@@ -329,6 +335,28 @@ export interface PrinterModelDto {
 }
 
 // Printer capabilities interface
+export interface PrinterCapabilitiesExportDto {
+  id: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+  maxBuildVolumeX?: number;
+  maxBuildVolumeY?: number;
+  maxBuildVolumeZ?: number;
+  hasHeatedBed: boolean;
+  hasEnclosure: boolean;
+  multiMaterial: boolean;
+  supportsAutoLeveling: boolean;
+  numberOfExtruders: number;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  currentMaterial?: string;
+  currentSpoolId?: number;
+  isAvailable: boolean;
+  lastUpdated: Date;
+}
+
 export interface PrinterCapabilitiesDto {
   id: string;
   printerId: string;
