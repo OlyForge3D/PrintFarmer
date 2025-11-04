@@ -11,6 +11,7 @@ public interface IHarvestRepository
 {
     // GcodeHarvestOperation operations
     Task<GcodeHarvestOperation?> GetOperationByIdAsync(Guid operationId, CancellationToken ct = default);
+    Task<GcodeHarvestOperation?> GetOperationByIdTrackedAsync(Guid operationId, CancellationToken ct = default);
     Task<GcodeHarvestOperation?> GetOperationWithPrinterAsync(Guid operationId, CancellationToken ct = default);
     Task<GcodeHarvestOperation?> GetActiveOperationForPrinterAsync(Guid printerId, CancellationToken ct = default);
     Task<List<GcodeHarvestOperation>> GetOperationsAsync(Guid? printerId, GcodeHarvestStatus? status, int limit, int offset, CancellationToken ct = default);
@@ -31,6 +32,8 @@ public interface IHarvestRepository
     Task<HarvestDiscoveredFile?> GetDiscoveredFileByOperationAndFileNameAsync(Guid operationId, string fileName, CancellationToken ct = default);
     Task AddDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default);
     Task UpdateDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default);
+    Task DeleteDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default);
+    Task DeleteDiscoveredFilesByOperationAsync(Guid operationId, CancellationToken ct = default);
 
     // Combined operations
     Task SaveChangesAsync(CancellationToken ct = default);

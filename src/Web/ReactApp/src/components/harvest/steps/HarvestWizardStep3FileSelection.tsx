@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { CheckCircle, AlertCircle, Loader } from 'lucide-react';
 import type { HarvestOptions, HarvestDiscoveredFile } from '../HarvestWizard';
 
@@ -8,35 +8,19 @@ interface HarvestWizardStep3FileSelectionProps {
   files: HarvestDiscoveredFile[];
   isDiscovering: boolean;
   onComplete: (selectedFileIds: string[]) => void;
-  onStartDiscovery: () => void;
 }
 
 export function HarvestWizardStep3FileSelection({
   files,
   isDiscovering,
   onComplete,
-  onStartDiscovery,
 }: HarvestWizardStep3FileSelectionProps) {
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [allSelected, setAllSelected] = useState(false);
-  const [discoveryStarted, setDiscoveryStarted] = useState(false);
 
-  // Auto-start discovery when component mounts
-  useEffect(() => {
-    if (!discoveryStarted) {
-      onStartDiscovery();
-      setDiscoveryStarted(true);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    // Auto-select all files when they appear
-    if (files.length > 0 && selectedFileIds.size === 0) {
-      const ids = new Set(files.map(f => f.id));
-      setSelectedFileIds(ids);
-      setAllSelected(true);
-    }
-  }, [files.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Don't auto-select files - let users manually choose what to import
+  // Previously this was auto-selecting all files, which could explain why
+  // all files were being imported even when user deselected most of them
 
   const handleToggleFile = (fileId: string) => {
     const newSelected = new Set(selectedFileIds);
@@ -62,8 +46,12 @@ export function HarvestWizardStep3FileSelection({
 
   const handleContinue = () => {
     if (selectedFileIds.size > 0) {
+      const selectedArray = Array.from(selectedFileIds);
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info(`[Step3] User selected ${selectedArray.length} files:`, selectedArray);
+      }
       // Complete step 3 and pass selected file IDs
-      onComplete(Array.from(selectedFileIds));
+      onComplete(selectedArray);
     }
   };
 
@@ -86,6 +74,20 @@ export function HarvestWizardStep3FileSelection({
           <div className="flex items-center gap-3 p-3 bg-pf-info-bg border border-pf-info rounded-lg">
             <Loader className="w-5 h-5 text-pf-info animate-spin" />
             <span className="text-sm text-pf-info">Scanning printer for G-code files...</span>
+          </div>
+        )}
+
+        {!isDiscovering && files.length > 0 && (
+          <div className="flex items-center gap-3 p-3 bg-pf-success-bg border border-pf-success rounded-lg">
+            <CheckCircle className="w-5 h-5 text-pf-success" />
+            <span className="text-sm text-pf-success font-medium">Scan complete. {files.length} file{files.length !== 1 ? 's' : ''} discovered.</span>
+          </div>
+        )}
+
+        {!isDiscovering && files.length === 0 && (
+          <div className="flex items-center gap-3 p-3 bg-pf-warning-bg border border-pf-warning rounded-lg">
+            <AlertCircle className="w-5 h-5 text-pf-warning" />
+            <span className="text-sm text-pf-warning">No G-code files found on the printer.</span>
           </div>
         )}
       </div>

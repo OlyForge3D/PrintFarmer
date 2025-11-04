@@ -268,7 +268,7 @@ public partial class HarvestWorkerService(
             await harvestRepo.SaveChangesAsync(ct);
 
             // Emit per-file progress event with discovered file info
-            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestFileDiscovered", new
+            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("harvestfilediscovered", new
             {
                 operationId = job.OperationId,
                 fileId = discoveredFile.Id,
@@ -283,7 +283,7 @@ public partial class HarvestWorkerService(
 
             // Emit operation progress update for real-time UI updates
             int totalProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
-            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestOperationProgress", new
+            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("harvestoperationprogress", new
             {
                 operationId = job.OperationId,
                 filesFound = operation.FilesFound,
@@ -315,7 +315,7 @@ public partial class HarvestWorkerService(
             _logger.LogError(ex, $"Failed to process file job {job.FileName} for operation {job.OperationId}", null, null);
             await RecordFileErrorAsync(harvestRepo, job.OperationId, job.FileName, ex.Message, ct);
             // Emit error event for this file
-            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("HarvestFileDiscovered", new
+            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("harvestfilediscovered", new
             {
                 operationId = job.OperationId,
                 fileId = Guid.NewGuid(),

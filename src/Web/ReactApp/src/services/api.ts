@@ -626,6 +626,20 @@ export class ApiClient {
     return response.data;
   }
 
+  async getActiveHarvestForPrinter(printerId: string): Promise<GcodeHarvestOperation | null> {
+    const response = await this.client.get<GcodeHarvestOperation | null>(`/gcode-harvest/printers/${printerId}/active`);
+    return response.data;
+  }
+
+  async getAllActiveHarvests(): Promise<GcodeHarvestOperation[]> {
+    const response = await this.client.get<GcodeHarvestOperation[]>('/gcode-harvest/active');
+    return response.data;
+  }
+
+  async restartHarvestDiscovery(operationId: string): Promise<boolean> {
+    const response = await this.client.post<boolean>(`/gcode-harvest/operations/${operationId}/restart-discovery`);
+    return response.data === true;
+  }
 
   async cancelHarvestOperation(operationId: string): Promise<boolean> {
     const response = await this.client.post<boolean>(`/gcode-harvest/operations/${operationId}/cancel`);

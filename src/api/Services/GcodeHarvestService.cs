@@ -338,59 +338,54 @@ public partial class GcodeHarvestService(
                 scopedLogger.LogWarning($"Could not find operation {operation.Id} in database to update files found count");
             }
 
-            // Queue each G-code file for processing
-            int queuedCount = 0;
-            foreach (PrinterFileInfo? fileInfo in filteredFiles)
+            // Send discovered files to frontend immediately during discovery phase (not wait for processing)
+            scopedLogger.LogInformation($"Sending {gcodeFileCount} discovered files to frontend for operation {operation.Id}");
+            foreach (PrinterFileInfo fileInfo in filteredFiles)
             {
-                HarvestFileJob job = new()
+                // Save discovered file to database so user can select it
+                HarvestDiscoveredFile discoveredFile = new()
                 {
-                    OperationId = operation.Id,
-                    PrinterId = printer.Id,
-                    ServerUrl = printer.ServerUrl,
-                    FilePath = fileInfo.Path,
+                    Id = Guid.NewGuid(),
+                    HarvestOperationId = operation.Id,
                     FileName = fileInfo.Name,
-                    FileSize = fileInfo.Size,
+                    FilePath = fileInfo.Path,
+                    Size = fileInfo.Size,
+                    ExtractedSlicerName = fileInfo.SlicerName,
+                    ExtractedMaterial = fileInfo.FilamentWeightGrams.HasValue ? $"~{Math.Round(fileInfo.FilamentWeightGrams.Value)}g" : "",
+                    Status = HarvestFileStatus.Pending,
+                    DiscoveredAt = DateTime.UtcNow,
                     ModifiedAt = fileInfo.ModifiedAt,
-
-                    // Pass metadata from API (avoids downloading files during processing)
-                    SlicerName = fileInfo.SlicerName,
-                    SlicerVersion = fileInfo.SlicerVersion,
-                    EstimatedTimeSeconds = fileInfo.EstimatedTimeSeconds,
-                    FilamentLengthMm = fileInfo.FilamentLengthMm,
-                    FilamentWeightGrams = fileInfo.FilamentWeightGrams,
-                    LayerHeight = fileInfo.LayerHeight,
-                    FirstLayerHeight = fileInfo.FirstLayerHeight,
-                    ObjectHeight = fileInfo.ObjectHeight,
-                    FirstLayerBedTemp = fileInfo.FirstLayerBedTemp,
-                    FirstLayerExtrTemp = fileInfo.FirstLayerExtrTemp,
-                    ThumbnailRelativePath = fileInfo.ThumbnailRelativePath
+                    AlreadyInLibrary = false
                 };
 
-                scopedLogger.LogDebug($"Queueing file {fileInfo.Name} with path {fileInfo.Path}");
-                await _harvestQueue.EnqueueAsync(job);
-                queuedCount++;
+                await scopedHarvestRepo.AddDiscoveredFileAsync(discoveredFile, ct: default);
 
-                if (queuedCount % 10 == 0)
+                // Send file discovery event immediately so UI can show files 
+                await scopedHub.Clients.Group($"harvest-{operation.Id}").SendAsync("harvestfilediscovered", new
                 {
-                    scopedLogger.LogInformation($"Queued {queuedCount} files so far for operation {operation.Id}");
-                }
+                    operationId = operation.Id.ToString(),
+                    fileId = discoveredFile.Id.ToString(),
+                    fileName = fileInfo.Name,
+                    filePath = fileInfo.Path,
+                    fileSize = fileInfo.Size,
+                    extractedSlicer = fileInfo.SlicerName ?? "",
+                    extractedMaterial = fileInfo.FilamentWeightGrams.HasValue ? $"~{Math.Round(fileInfo.FilamentWeightGrams.Value)}g" : "",
+                });
             }
 
-            scopedLogger.LogInformation($"Queued {queuedCount} files for processing in operation {operation.Id}");
+            await scopedHarvestRepo.SaveChangesAsync(ct: default);
 
-            // Check how many discovered files already exist
-            int existingFiles = await scopedHarvestRepo.GetDiscoveredFilesCountAsync(operation.Id);
+            // Discovery is complete - files are now shown to user for selection
+            // Queueing only happens after user selects files via ImportSelectedFilesAsync
+            scopedLogger.LogInformation($"Discovery complete for operation {operation.Id}. Waiting for user to select files to import.");
 
-            scopedLogger.LogInformation($"Found {existingFiles} existing discovered files for operation {operation.Id}");
-
-            // If no files were queued, mark operation as completed
-            if (queuedCount == 0 && dbOperation != null)
+            // Signal to UI that discovery is complete and stop the spinner
+            await scopedHub.Clients.Group($"harvest-{operation.Id}").SendAsync("harvestdiscoverycomplete", new
             {
-                dbOperation.Status = GcodeHarvestStatus.Completed;
-                dbOperation.CompletedAt = DateTime.UtcNow;
-                await scopedHarvestRepo.SaveChangesAsync();
-                scopedLogger.LogInformation($"Operation {operation.Id} completed with no files to process");
-            }
+                operationId = operation.Id.ToString(),
+                totalFilesDiscovered = gcodeFileCount,
+                completedAt = DateTime.UtcNow.ToString("O")
+            });
         }
         catch (Exception ex)
         {
@@ -615,7 +610,11 @@ public partial class GcodeHarvestService(
             return new GcodeHarvestResultDto(request.HarvestOperationId, false, "Harvest operation not found");
         }
 
+        _logger.LogInformation($"ImportSelectedFilesAsync: Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
+
         HarvestDiscoveredFile[] selectedFiles = await _harvestRepo.GetDiscoveredFilesByIdsAsync(request.FileIds.ToList(), ct);
+        
+        _logger.LogInformation($"ImportSelectedFilesAsync: Retrieved {selectedFiles.Length} files from database");
 
         List<string> importedFileIds = new();
         List<string> skippedFileIds = new();
@@ -829,7 +828,8 @@ public partial class GcodeHarvestService(
 
     public async Task<bool> CancelHarvestAsync(Guid operationId, CancellationToken ct = default)
     {
-        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationByIdAsync(operationId, ct);
+        // Use tracked version so changes will be persisted
+        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationByIdTrackedAsync(operationId, ct);
 
         if (operation == null || operation.Status != GcodeHarvestStatus.Running)
         {
@@ -843,9 +843,106 @@ public partial class GcodeHarvestService(
         // Log the cancellation for tracking purposes
         _logger.LogInformation($"Harvest operation {operationId} was cancelled");
 
+        // Broadcast cancellation event via SignalR so UI updates immediately
+        await _harvestHub.Clients.Group($"harvest-{operationId}").SendAsync("harvestoperationcancelled", new
+        {
+            operationId,
+            status = "cancelled",
+            completedAt = operation.CompletedAt
+        }, ct);
+
         // Note: We don't actually cancel the task because Task.Run doesn't support 
         // cancellation after it's started. The background task will check the 
         // operation status and exit gracefully when it sees the Cancelled status.
+
+        return true;
+    }
+
+    public async Task<bool> RestartDiscoveryAsync(Guid operationId, CancellationToken ct = default)
+    {
+        // Get the operation with tracking enabled
+        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationByIdTrackedAsync(operationId, ct);
+
+        if (operation == null || operation.Status != GcodeHarvestStatus.Running)
+        {
+            return false;
+        }
+
+        // Get the printer to verify it exists and get its details
+        Printer? printer = await _printersRepo.FindByIdAsync(operation.PrinterId, ct);
+        if (printer == null)
+        {
+            _logger.LogError($"Printer {operation.PrinterId} for harvest operation {operationId} not found");
+            return false;
+        }
+
+        _logger.LogInformation($"Restarting file discovery for operation {operationId} on printer {printer.Name}");
+
+        // Clear discovered files to restart fresh
+        await _harvestRepo.DeleteDiscoveredFilesByOperationAsync(operationId, ct);
+
+        // Reset operation statistics
+        operation.FilesFound = 0;
+        operation.FilesAdded = 0;
+        operation.FilesSkipped = 0;
+        operation.FilesErrored = 0;
+        operation.TotalBytesProcessed = 0;
+
+        // Save changes
+        await _harvestRepo.SaveChangesAsync(ct);
+
+        _logger.LogInformation($"Cleared discovered files for operation {operationId}, restarting discovery");
+
+        // Broadcast restart event via SignalR to notify clients
+        await _harvestHub.Clients.Group($"harvest-{operationId}").SendAsync("harvestdiscoveryrestarted", new
+        {
+            operationId,
+            status = "restarting",
+            restartedAt = DateTime.UtcNow
+        }, ct);
+
+        // Start fresh discovery in background (using same pattern as StartHarvestAsync)
+        Task backgroundTask = Task.Run(async () =>
+        {
+            try
+            {
+                _logger.LogInformation($"🔄 Background harvest restart task STARTED for operation {operationId} on printer {printer.Name}");
+                await DiscoverAndQueueFilesAsync(operation, printer);
+                _logger.LogInformation($"✅ Background harvest restart task COMPLETED successfully for operation {operationId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"❌ Background harvest restart task FAILED for operation {operationId}: {ex.Message}");
+
+                // Update the operation status to failed with detailed error info
+                await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
+                IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
+                GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operationId);
+                if (dbOperation != null)
+                {
+                    HarvestErrorHelper.SetOperationError(
+                        dbOperation,
+                        ex,
+                        nameof(HarvestErrorPhase.Discovery),
+                        failedResource: printer.ServerUrl);
+                    await scopedHarvestRepo.SaveChangesAsync();
+                    _logger.LogError($"💾 Updated operation {operationId} status to Failed in database");
+                }
+                else
+                {
+                    _logger.LogError($"⚠️ Could not find operation {operationId} in database to mark as failed");
+                }
+            }
+            finally
+            {
+                // Remove from active tasks when done
+                _ = _activeTasks.TryRemove(operationId, out _);
+                _logger.LogDebug($"Removed operation {operationId} from active tasks tracking");
+            }
+        });
+
+        // Track the task
+        _activeTasks.TryAdd(operationId, backgroundTask);
 
         return true;
     }

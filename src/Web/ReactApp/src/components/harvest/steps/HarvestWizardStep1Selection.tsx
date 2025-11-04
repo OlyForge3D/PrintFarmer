@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { Printer, PrinterBackend } from '@/types/api';
+import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
 import { CheckCircle, X } from 'lucide-react';
 
 interface HarvestWizardStep1SelectionProps {
   printers: Printer[];
   selectedPrinterId: string | null;
   onSelect: (printerId: string) => void;
+  activeHarvests?: GcodeHarvestOperation[];
 }
 
 // Helper to convert PrinterBackend enum to string
@@ -24,11 +25,17 @@ export function HarvestWizardStep1Selection({
   printers,
   selectedPrinterId,
   onSelect,
+  activeHarvests = [],
 }: HarvestWizardStep1SelectionProps) {
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBackend, setSelectedBackend] = useState<PrinterBackend | undefined>(undefined);
   const [selectedModel, setSelectedModel] = useState<string>('');
+
+  // Build a set of printer IDs that have active harvests
+  const printersWithActiveHarvests = useMemo(() => {
+    return new Set(activeHarvests.map(h => h.printerId));
+  }, [activeHarvests]);
 
   // Get unique values for filter options - only online printers
   const onlinePrinters = useMemo(() => printers.filter(p => p.isOnline), [printers]);
@@ -282,21 +289,33 @@ export function HarvestWizardStep1Selection({
 
       {/* Printer Selection Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {filteredPrinters.map(printer => (
+        {filteredPrinters.map(printer => {
+          const hasActiveHarvest = printersWithActiveHarvests.has(printer.id);
+          
+          return (
           <button
             key={printer.id}
-            onClick={() => onSelect(printer.id)}
+            onClick={() => !hasActiveHarvest && onSelect(printer.id)}
+            disabled={hasActiveHarvest}
             className={`p-4 rounded-lg border-2 text-left transition-all ${
-              selectedPrinterId === printer.id
+              hasActiveHarvest
+                ? 'border-pf-warning bg-pf-warning-bg cursor-not-allowed opacity-60'
+                : selectedPrinterId === printer.id
                 ? 'border-pf-accent bg-pf-accent-bg'
                 : 'border-pf-border hover:border-pf-accent hover:bg-pf-hover'
             }`}
+            title={hasActiveHarvest ? 'This printer has an active harvest in progress' : undefined}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="font-semibold text-pf-text-primary flex items-center gap-2">
                   {printer.name}
                   <span className="inline-block w-2 h-2 rounded-full bg-pf-success" />
+                  {hasActiveHarvest && (
+                    <span className="ml-auto text-xs bg-pf-warning text-white px-2 py-1 rounded whitespace-nowrap">
+                      Harvest in progress
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm text-pf-text-secondary mt-1">
                   {printer.manufacturerName} {printer.modelName}
@@ -305,12 +324,13 @@ export function HarvestWizardStep1Selection({
                   {backendToString(printer.backend)} • {printer.serverUrl}
                 </div>
               </div>
-              {selectedPrinterId === printer.id && (
+              {selectedPrinterId === printer.id && !hasActiveHarvest && (
                 <CheckCircle className="w-5 h-5 text-pf-accent flex-shrink-0" />
               )}
             </div>
           </button>
-        ))}
+        );
+        })}
       </div>
     </div>
   );

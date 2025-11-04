@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Printer } from '@/types/api';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Printer, GcodeHarvestOperation } from '@/types/api';
 import { HarvestWizardStep1Selection } from './steps/HarvestWizardStep1Selection';
 import { HarvestWizardStep2Options } from './steps/HarvestWizardStep2Options';
 import { HarvestWizardStep3FileSelection } from './steps/HarvestWizardStep3FileSelection';
@@ -31,6 +31,7 @@ export interface HarvestWizardState {
   discoveredFiles: HarvestDiscoveredFile[];
   isDiscovering: boolean;
   selectedFileIds: Set<string>;
+  selectedFiles: HarvestDiscoveredFile[]; // Store selected file details for Step 4
 }
 
 interface HarvestWizardProps {
@@ -48,6 +49,7 @@ interface HarvestWizardProps {
  */
 export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardProps) {
   const [step, setStep] = useState(1);
+  const [activeHarvests, setActiveHarvests] = useState<GcodeHarvestOperation[]>([]);
   const [state, setState] = useState<HarvestWizardState>({
     selectedPrinterId: null,
     options: {
@@ -61,15 +63,17 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
     discoveredFiles: [],
     isDiscovering: false,
     selectedFileIds: new Set(),
+    selectedFiles: [],
   });
 
   // Refs for managing file discovery batching and subscriptions
   const subscriptionRef = useRef<(() => void) | null>(null);
   const pendingFilesRef = useRef<HarvestDiscoveredFile[]>([]);
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const discoveryStartedRef = useRef(false);
 
   // Batch file updates for better performance (batches updates every 100ms)
-  const flushPendingFiles = () => {
+  const flushPendingFiles = useCallback(() => {
     if (pendingFilesRef.current.length > 0) {
       const filesToAdd = pendingFilesRef.current;
       pendingFilesRef.current = [];
@@ -80,9 +84,9 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
         selectedFileIds: new Set([...prev.selectedFileIds, ...filesToAdd.map(f => f.id)]),
       }));
     }
-  };
+  }, []);
 
-  const queueFileForBatch = (file: HarvestDiscoveredFile) => {
+  const queueFileForBatch = useCallback((file: HarvestDiscoveredFile) => {
     pendingFilesRef.current.push(file);
     
     // Clear existing timeout
@@ -92,7 +96,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
     
     // Set a new timeout to flush after 100ms of no new files
     batchTimeoutRef.current = setTimeout(flushPendingFiles, 100);
-  };
+  }, [flushPendingFiles]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -108,8 +112,25 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       // Flush any remaining pending files
       flushPendingFiles();
     };
-  }, []);
+  }, [flushPendingFiles]);
 
+  // Fetch active harvests to prevent selecting printers with active operations
+  useEffect(() => {
+    const fetchActiveHarvests = async () => {
+      try {
+        const active = await apiClient.getAllActiveHarvests();
+        setActiveHarvests(active);
+      } catch (error) {
+        console.error('Failed to fetch active harvests:', error);
+      }
+    };
+    
+    fetchActiveHarvests();
+    
+    // Poll every 5 seconds to keep track of active harvests
+    const interval = setInterval(fetchActiveHarvests, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleStep1Complete = (printerId: string) => {
     setState(prev => ({ ...prev, selectedPrinterId: printerId }));
@@ -121,8 +142,10 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
     setStep(3);
   };
 
-  const handleStartDiscovery = async () => {
-    if (!state.selectedPrinterId) return;
+  const handleStartDiscovery = useCallback(async () => {
+    // Prevent multiple calls to start discovery
+    if (discoveryStartedRef.current || !state.selectedPrinterId) return;
+    discoveryStartedRef.current = true;
 
     setState(prev => ({ ...prev, isDiscovering: true, discoveredFiles: [] }));
 
@@ -165,13 +188,31 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
           queueFileForBatch(discoveredFile);
         }
       });
+
+      // Subscribe to discovery completion event
+      signalRService.onHarvestDiscoveryComplete((evt) => {
+        if (evt.operationId === operationId) {
+          // Flush any remaining pending files before marking discovery as complete
+          flushPendingFiles();
+          // Mark discovery as complete
+          setState(prev => ({ ...prev, isDiscovering: false }));
+          if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+            console.info(`[HarvestWizard] Discovery complete for operation ${operationId}: ${evt.totalFilesDiscovered} files found`);
+          }
+        }
+      });
     } catch (error) {
       console.error('Failed to start discovery:', error);
       setState(prev => ({ ...prev, isDiscovering: false }));
+      discoveryStartedRef.current = false;
     }
-  };
+  }, [state.selectedPrinterId, state.options, queueFileForBatch, flushPendingFiles]);
 
   const handleStep3Complete = (selectedFileIds: string[]) => {
+    // Store selected file details for Step 4 display
+    const selectedFiles = state.discoveredFiles.filter(f => selectedFileIds.includes(f.id));
+    setState(prev => ({ ...prev, selectedFiles }));
+    
     // Move to Step 4 with selected files
     setStep(4);
     // Begin import with selected files
@@ -182,6 +223,10 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
     if (!state.operationId) {
       console.error('No operation ID available for import');
       return;
+    }
+
+    if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+      console.info(`[HarvestWizard] Starting import with ${selectedFileIds.length} selected files:`, selectedFileIds);
     }
 
     try {
@@ -205,6 +250,10 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
 
   const handleBack = () => {
     if (step > 1) {
+      // Reset discovery flag when going back from step 3
+      if (step === 3) {
+        discoveryStartedRef.current = false;
+      }
       setStep(step - 1);
     }
   };
@@ -271,12 +320,14 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
             printers={printers}
             selectedPrinterId={state.selectedPrinterId}
             onSelect={handleStep1Complete}
+            activeHarvests={activeHarvests}
           />
         )}
         {step === 2 && (
           <HarvestWizardStep2Options
             options={state.options}
             onComplete={handleStep2Complete}
+            onStartDiscovery={handleStartDiscovery}
           />
         )}
         {step === 3 && (
@@ -284,12 +335,13 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
             files={state.discoveredFiles}
             isDiscovering={state.isDiscovering}
             onComplete={handleStep3Complete}
-            onStartDiscovery={handleStartDiscovery}
           />
         )}
         {step === 4 && (
           <HarvestWizardStep4Progress
             totalFiles={state.selectedFileIds.size}
+            selectedFiles={state.selectedFiles}
+            operationId={state.operationId || undefined}
             onCompleted={handleCompleted}
             onCancel={() => setStep(3)}
           />

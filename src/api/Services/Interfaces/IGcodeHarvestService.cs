@@ -47,6 +47,12 @@ public interface IGcodeHarvestService
     Task<bool> CancelHarvestAsync(Guid operationId, CancellationToken ct = default);
 
     /// <summary>
+    /// Restart/resume file discovery for a stalled or paused harvest operation
+    /// Clears discovered files and restarts the discovery process from scratch
+    /// </summary>
+    Task<bool> RestartDiscoveryAsync(Guid operationId, CancellationToken ct = default);
+
+    /// <summary>
     /// Get the active harvest operation for a printer, if any
     /// </summary>
     Task<GcodeHarvestOperationDto?> GetActiveHarvestAsync(Guid printerId, CancellationToken ct = default);

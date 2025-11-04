@@ -9,7 +9,7 @@ import {
   GcodeHarvestOperation,
 } from '@/types/api';
 import { useAuth } from '@/contexts/AuthHooks';
-import { usePrinters, useCancelHarvestOperation } from '@/hooks/useApi';
+import { usePrinters, useCancelHarvestOperation, useRestartHarvestDiscovery } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/harvest-signalr';
 import { apiClient } from '@/services/api';
@@ -25,6 +25,7 @@ export const HarvestPage: React.FC = () => {
     Record<string, Record<string, import('@/services/harvest-signalr').HarvestFileProgress>>
   >({});
   const cancelHarvestMutation = useCancelHarvestOperation();
+  const restartHarvestDiscoveryMutation = useRestartHarvestDiscovery();
   const { hasPermission } = useAuth();
   const { data: printers, isLoading: printersLoading } = usePrinters();
   const { getPrinterStatus } = usePrinterStatusUpdates();
@@ -109,6 +110,16 @@ export const HarvestPage: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [harvestOperations]);
+
+  // Redirect to wizard when all active operations are cancelled/completed
+  useEffect(() => {
+    if (harvestOperations) {
+      const activeOps = harvestOperations.filter(op => op.status === GcodeHarvestStatus.Running);
+      if (activeOps.length === 0 && wizardStep === 'operations') {
+        setWizardStep('wizard');
+      }
+    }
+  }, [harvestOperations, wizardStep]);
 
   // Early return for permission check (must be after all hooks)
   if (!hasPermission('gcode_harvest', 'execute')) {
@@ -257,23 +268,43 @@ export const HarvestPage: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        await cancelHarvestMutation.mutateAsync(op.id);
-                        toast.success(`Cancelled: ${op.printerName}`);
-                        refetchOperations();
-                      } catch (error) {
-                        console.error('Failed to cancel operation:', error);
-                        toast.error(`Failed to cancel: ${op.printerName}`);
-                      }
-                    }}
-                    className="pf-btn pf-btn-danger text-xs flex-shrink-0"
-                    disabled={cancelHarvestMutation.isPending}
-                  >
-                    {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel'}
-                  </button>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await restartHarvestDiscoveryMutation.mutateAsync(op.id);
+                          toast.success(`Restarting discovery for: ${op.printerName}`);
+                          refetchOperations();
+                        } catch (error) {
+                          console.error('Failed to restart discovery:', error);
+                          toast.error(`Failed to restart discovery: ${op.printerName}`);
+                        }
+                      }}
+                      className="pf-btn pf-btn-secondary text-xs flex-shrink-0"
+                      disabled={restartHarvestDiscoveryMutation.isPending}
+                      title="Restart file discovery for this harvest"
+                    >
+                      {restartHarvestDiscoveryMutation.isPending ? 'Restarting...' : 'Restart Discovery'}
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await cancelHarvestMutation.mutateAsync(op.id);
+                          toast.success(`Cancelled: ${op.printerName}`);
+                          refetchOperations();
+                        } catch (error) {
+                          console.error('Failed to cancel operation:', error);
+                          toast.error(`Failed to cancel: ${op.printerName}`);
+                        }
+                      }}
+                      className="pf-btn pf-btn-danger text-xs flex-shrink-0"
+                      disabled={cancelHarvestMutation.isPending}
+                    >
+                      {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel'}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

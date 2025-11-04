@@ -214,6 +214,34 @@ public class GcodeHarvestController(
     }
 
     /// <summary>
+    /// Restart/refresh file discovery for a stalled or paused harvest operation
+    /// Clears previously discovered files and restarts the discovery process from scratch
+    /// </summary>
+    /// <param name="operationId">The harvest operation ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">Discovery restart initiated successfully</response>
+    /// <response code="400">Operation cannot be restarted</response>
+    /// <response code="404">Operation not found</response>
+    [HttpPost("operations/{operationId:guid}/restart-discovery")]
+    [ProducesResponseType(typeof(bool), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<bool>> RestartDiscoveryAsync(Guid operationId, CancellationToken ct)
+    {
+        try
+        {
+            bool result = await _harvestService.RestartDiscoveryAsync(operationId, ct);
+            return result ? Ok(true) : BadRequest("Operation discovery cannot be restarted");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to restart discovery for harvest operation {operationId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to restart discovery");
+        }
+    }
+
+    /// <summary>
     /// Get active harvest operation for a specific printer
     /// </summary>
     /// <param name="printerId">The printer ID</param>

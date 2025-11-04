@@ -27,6 +27,13 @@ public class EfHarvestRepository : IHarvestRepository
             .FirstOrDefaultAsync(o => o.Id == operationId, ct);
     }
 
+    // Gets operation with tracking enabled for modifications (e.g., cancellation)
+    public async Task<GcodeHarvestOperation?> GetOperationByIdTrackedAsync(Guid operationId, CancellationToken ct = default)
+    {
+        return await _db.GcodeHarvestOperations
+            .FirstOrDefaultAsync(o => o.Id == operationId, ct);
+    }
+
     public async Task<GcodeHarvestOperation?> GetOperationWithPrinterAsync(Guid operationId, CancellationToken ct = default)
     {
         return await _db.GcodeHarvestOperations
@@ -184,6 +191,23 @@ public class EfHarvestRepository : IHarvestRepository
     {
         _db.HarvestDiscoveredFiles.Update(file);
         return Task.CompletedTask;
+    }
+
+    public Task DeleteDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default)
+    {
+        _db.HarvestDiscoveredFiles.Remove(file);
+        return Task.CompletedTask;
+    }
+
+    public async Task DeleteDiscoveredFilesByOperationAsync(Guid operationId, CancellationToken ct = default)
+    {
+        // Get all files for this operation
+        List<HarvestDiscoveredFile> files = await _db.HarvestDiscoveredFiles
+            .Where(d => d.HarvestOperationId == operationId)
+            .ToListAsync(ct);
+
+        // Remove all of them
+        _db.HarvestDiscoveredFiles.RemoveRange(files);
     }
 
     // Combined operations

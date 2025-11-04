@@ -4,11 +4,13 @@ import type { HarvestOptions } from '../HarvestWizard';
 interface HarvestWizardStep2OptionsProps {
   options: HarvestOptions;
   onComplete: (options: HarvestOptions) => void;
+  onStartDiscovery?: () => void;
 }
 
 export function HarvestWizardStep2Options({
   options,
   onComplete,
+  onStartDiscovery,
 }: HarvestWizardStep2OptionsProps) {
   const [localOptions, setLocalOptions] = useState<HarvestOptions>(options);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -90,6 +92,8 @@ export function HarvestWizardStep2Options({
     setErrors(newErrors);
 
     if (Object.keys(newErrors).length === 0) {
+      // Start discovery before moving to next step
+      onStartDiscovery?.();
       onComplete(localOptions);
     }
   };

@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle, AlertCircle, Loader, X } from 'lucide-react';
+import { signalRService } from '@/services/harvest-signalr';
+
+interface HarvestDiscoveredFile {
+  id: string;
+  name: string;
+  size: number;
+  path: string;
+  slicerName?: string;
+  material?: string;
+}
 
 interface FileImportStatus {
   fileId: string;
@@ -11,12 +21,16 @@ interface FileImportStatus {
 
 interface HarvestWizardStep4ProgressProps {
   totalFiles: number;
+  selectedFiles: HarvestDiscoveredFile[];
+  operationId?: string;
   onCompleted: () => void;
   onCancel?: () => void;
 }
 
 export function HarvestWizardStep4Progress({
   totalFiles,
+  selectedFiles,
+  operationId,
   onCompleted,
   onCancel,
 }: HarvestWizardStep4ProgressProps) {
@@ -36,67 +50,74 @@ export function HarvestWizardStep4Progress({
     return () => clearInterval(interval);
   }, [isImporting, startTime]);
 
-  // TODO: Subscribe to SignalR progress events for operationId to update file statuses in real-time
-  // signalRService.onHarvestFileProgress((evt) => { ... })
-  
-  // Simulate file import progress (in real implementation, this would come from SignalR)
+  // Subscribe to real SignalR progress events
   useEffect(() => {
-    if (!isImporting || totalFiles === 0) return;
+    if (!operationId) return;
 
-    // Simulate gradual file imports
-    const interval = setInterval(() => {
-      setFileStatuses(prev => {
-        const updated = [...prev];
-
-        // Find files still pending
-        const pendingCount = updated.filter(f => f.status === 'pending').length;
-
-        if (pendingCount === 0 && updated.length === totalFiles) {
-          // All done
-          setIsImporting(false);
-          return updated;
-        }
-
-        // Move one pending to importing
-        const pendingIdx = updated.findIndex(f => f.status === 'pending');
-        if (pendingIdx !== -1) {
-          updated[pendingIdx] = {
-            ...updated[pendingIdx],
-            status: 'importing',
-            progress: Math.random() * 100,
-          };
-        }
-
-        // Advance random importing files to completion
-        updated.forEach((file, idx) => {
-          if (file.status === 'importing' && Math.random() > 0.7) {
-            updated[idx] = {
-              ...file,
-              status: 'completed',
-              progress: 100,
+    const unsubscribe = signalRService.onHarvestFileProgress((evt) => {
+      if (evt.operationId === operationId) {
+        setFileStatuses(prev => {
+          // Find or create file status using fileName as key
+          let fileStatus = prev.find(f => f.fileName === evt.fileName);
+          
+          if (!fileStatus) {
+            // New file - create entry
+            fileStatus = {
+              fileId: evt.fileName, // Use fileName as fileId for tracking
+              fileName: evt.fileName,
+              status: 'importing',
+              progress: evt.percent,
             };
+            return [...prev, fileStatus];
           }
+
+          // Update existing file
+          return prev.map(f =>
+            f.fileName === evt.fileName
+              ? {
+                  ...f,
+                  progress: evt.percent,
+                  status: evt.percent >= 100 ? 'completed' : 'importing',
+                }
+              : f
+          );
         });
 
-        return updated;
-      });
-    }, 1000);
+        if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+          console.info(`[Step4] File progress: ${evt.fileName} - ${evt.percent}% (${evt.bytesCopied}/${evt.totalBytes} bytes)`);
+        }
+      }
+    });
 
-    return () => clearInterval(interval);
-  }, [isImporting, totalFiles]);
+    return () => {
+      unsubscribe();
+    };
+  }, [operationId]);
 
-  // Initialize file statuses on mount
+  // Check if all files are complete
   useEffect(() => {
-    if (fileStatuses.length === 0 && totalFiles > 0) {
-      const statuses: FileImportStatus[] = Array.from({ length: totalFiles }, (_, i) => ({
-        fileId: `file-${i}`,
-        fileName: `File ${i + 1}`,
-        status: 'pending',
-        progress: 0,
-      }));
-      setFileStatuses(statuses);
+    // Only mark as done if we have received progress events for files
+    if (fileStatuses.length === 0 || totalFiles === 0) return;
+    
+    const completedCount = fileStatuses.filter(f => f.status === 'completed').length;
+    const failedCount = fileStatuses.filter(f => f.status === 'failed').length;
+    const totalProcessed = completedCount + failedCount;
+    
+    if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+      console.info(`[Step4] Progress check: ${completedCount} completed, ${failedCount} failed out of ${totalFiles} total (files received: ${fileStatuses.length})`);
     }
-  }, [totalFiles, fileStatuses.length]);
+    
+    // If all files are either completed or failed, we're done importing
+    if (totalProcessed === totalFiles) {
+      setIsImporting(false);
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info(`[Step4] Import complete: ${completedCount} completed, ${failedCount} failed`);
+      }
+    }
+  }, [fileStatuses, totalFiles]);
+
+  // Don't initialize with placeholder data - let SignalR events populate the list
+  // Previously this was creating phantom files which prevented detecting completion
 
   const completedCount = fileStatuses.filter(f => f.status === 'completed').length;
   const failedCount = fileStatuses.filter(f => f.status === 'failed').length;
@@ -177,46 +198,120 @@ export function HarvestWizardStep4Progress({
       {/* File list */}
       <div className="space-y-2">
         <h3 className="text-sm font-medium text-pf-text-primary">Import Details</h3>
-        <div className="max-h-64 overflow-y-auto space-y-1 border border-pf-border rounded-lg p-3 bg-pf-bg">
-          {fileStatuses.map(file => (
-            <div
-              key={file.fileId}
-              className="flex items-center gap-3 p-2 rounded text-sm"
-            >
-              <div className="flex-shrink-0 w-4 h-4">
-                {file.status === 'pending' && (
-                  <div className="w-4 h-4 border-2 border-pf-border rounded-full" />
+        <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-lg p-3 bg-pf-bg">
+          {fileStatuses.map(file => {
+            // Find the selected file info to get additional details
+            const selectedFile = selectedFiles.find(f => f.name === file.fileName);
+            
+            return (
+              <div
+                key={file.fileId}
+                className="flex flex-col gap-2 p-3 rounded border border-pf-border bg-pf-surface"
+              >
+                {/* File name and status */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-5 h-5">
+                    {file.status === 'pending' && (
+                      <div className="w-5 h-5 border-2 border-pf-border rounded-full" />
+                    )}
+                    {file.status === 'importing' && (
+                      <Loader className="w-5 h-5 text-pf-accent animate-spin" />
+                    )}
+                    {file.status === 'completed' && (
+                      <CheckCircle className="w-5 h-5 text-pf-success" />
+                    )}
+                    {file.status === 'failed' && (
+                      <AlertCircle className="w-5 h-5 text-pf-error" />
+                    )}
+                    {file.status === 'skipped' && (
+                      <div className="w-5 h-5 border-2 border-pf-warning rounded-full flex items-center justify-center">
+                        <div className="w-2 h-2 bg-pf-warning rounded-full" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-pf-text-primary truncate">{file.fileName}</div>
+                    {selectedFile && (
+                      <div className="text-xs text-pf-text-secondary truncate">
+                        {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                      </div>
+                    )}
+                    {file.error && (
+                      <div className="text-xs text-pf-error truncate">{file.error}</div>
+                    )}
+                  </div>
+                  <div className="text-xs font-mono text-pf-text-secondary flex-shrink-0">
+                    {file.status === 'importing' && `${Math.round(file.progress)}%`}
+                    {file.status === 'completed' && 'Done'}
+                    {file.status === 'pending' && 'Waiting'}
+                    {file.status === 'failed' && 'Failed'}
+                    {file.status === 'skipped' && 'Skipped'}
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                {(file.status === 'importing' || file.status === 'completed') && (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-2 bg-pf-border rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          file.status === 'completed'
+                            ? 'bg-pf-success'
+                            : 'bg-pf-accent'
+                        }`}
+                        style={{ width: `${Math.max(0, Math.min(100, file.progress))}%` } as React.CSSProperties}
+                      />
+                    </div>
+                    <div className="text-xs text-pf-text-secondary w-8 text-right">
+                      {Math.round(file.progress)}%
+                    </div>
+                  </div>
                 )}
-                {file.status === 'importing' && (
-                  <Loader className="w-4 h-4 text-pf-accent animate-spin" />
-                )}
-                {file.status === 'completed' && (
-                  <CheckCircle className="w-4 h-4 text-pf-success" />
-                )}
-                {file.status === 'failed' && (
-                  <AlertCircle className="w-4 h-4 text-pf-error" />
-                )}
-                {file.status === 'skipped' && (
-                  <div className="w-4 h-4 border-2 border-pf-warning rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-pf-warning rounded-full" />
+
+                {/* Action buttons */}
+                {(file.status === 'importing' || file.status === 'failed') && (
+                  <div className="flex gap-2 pt-1">
+                    {file.status === 'failed' && (
+                      <>
+                        <button
+                          onClick={() => {
+                            // Retry - mark as pending so it can be reimported
+                            setFileStatuses(prev =>
+                              prev.map(f =>
+                                f.fileId === file.fileId
+                                  ? { ...f, status: 'pending', progress: 0, error: undefined }
+                                  : f
+                              )
+                            );
+                          }}
+                          className="text-xs px-2 py-1 bg-pf-accent text-white rounded hover:bg-pf-accent-hover transition-colors"
+                        >
+                          Retry
+                        </button>
+                      </>
+                    )}
+                    {file.status === 'importing' && (
+                      <button
+                        onClick={() => {
+                          // Cancel - mark as skipped
+                          setFileStatuses(prev =>
+                            prev.map(f =>
+                              f.fileId === file.fileId
+                                ? { ...f, status: 'skipped', error: 'Cancelled by user' }
+                                : f
+                            )
+                          );
+                        }}
+                        className="text-xs px-2 py-1 bg-pf-error text-white rounded hover:bg-pf-error-hover transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-pf-text-primary truncate">{file.fileName}</div>
-                {file.error && (
-                  <div className="text-xs text-pf-error truncate">{file.error}</div>
-                )}
-              </div>
-              <div className="text-xs text-pf-text-secondary">
-                {file.status === 'importing' && `${Math.round(file.progress)}%`}
-                {file.status === 'completed' && 'Done'}
-                {file.status === 'pending' && 'Waiting'}
-                {file.status === 'failed' && 'Failed'}
-                {file.status === 'skipped' && 'Skipped'}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

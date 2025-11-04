@@ -547,7 +547,20 @@ export function useCancelHarvestOperation() {
       queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations() });
     },
   });
-}// ============ Job Queue Hooks ============
+}
+
+export function useRestartHarvestDiscovery() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (operationId: string) => apiClient.restartHarvestDiscovery(operationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations() });
+    },
+  });
+}
+
+// ============ Job Queue Hooks ============
 
 export function useJobQueue(printerId?: string, options?: UseQueryOptions<JobQueuePrintJob[], ApiError>) {
   return useQuery({

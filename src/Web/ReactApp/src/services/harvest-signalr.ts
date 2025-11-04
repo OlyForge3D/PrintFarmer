@@ -43,10 +43,28 @@ export type HarvestFileDiscoveredEvent = {
 };
 type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
+// Harvest discovery restart event type
+export type HarvestDiscoveryRestartedEvent = {
+  operationId: string;
+  status: string;
+  restartedAt: string;
+};
+type HarvestDiscoveryRestartedCallback = (evt: HarvestDiscoveryRestartedEvent) => void;
+
+// Harvest discovery complete event type
+export type HarvestDiscoveryCompleteEvent = {
+  operationId: string;
+  totalFilesDiscovered: number;
+  completedAt: string;
+};
+type HarvestDiscoveryCompleteCallback = (evt: HarvestDiscoveryCompleteEvent) => void;
+
 export class SignalRService {
   private connection: HubConnection | null = null;
   private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
   private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
+  private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
+  private harvestDiscoveryCompleteCallbacks: HarvestDiscoveryCompleteCallback[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
@@ -150,6 +168,28 @@ export class SignalRService {
     };
   }
 
+  // ============ Harvest Discovery Restarted Event Subscription ============
+  onHarvestDiscoveryRestarted(callback: HarvestDiscoveryRestartedCallback): () => void {
+    this.harvestDiscoveryRestartedCallbacks.push(callback);
+    return () => {
+      const index = this.harvestDiscoveryRestartedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestDiscoveryRestartedCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Discovery Complete Event Subscription ============
+  onHarvestDiscoveryComplete(callback: HarvestDiscoveryCompleteCallback): () => void {
+    this.harvestDiscoveryCompleteCallbacks.push(callback);
+    return () => {
+      const index = this.harvestDiscoveryCompleteCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestDiscoveryCompleteCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   // Connection lifecycle events
   private setupEventHandlers(): void {
     if (!this.connection) return;
@@ -215,6 +255,58 @@ export class SignalRService {
           callback(progress);
         } catch (error) {
           console.error('Error in harvest operation progress callback:', error);
+        }
+      });
+    });
+
+    // NEW: Operation cancelled event
+    this.connection.on('harvestoperationcancelled', (data: { operationId: string; status: string; completedAt: string }) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest operation cancelled:', data.operationId);
+      }
+      // Trigger operation progress callback to update UI
+      this.harvestOperationProgressCallbacks.forEach(callback => {
+        try {
+          callback({
+            operationId: data.operationId,
+            filesFound: 0,
+            filesProcessed: 0,
+            filesAdded: 0,
+            filesSkipped: 0,
+            filesErrored: 0
+          });
+        } catch (error) {
+          console.error('Error in harvest operation cancelled callback:', error);
+        }
+      });
+    });
+
+    // NEW: Discovery restarted event
+    this.connection.on('harvestdiscoveryrestarted', (data: HarvestDiscoveryRestartedEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest discovery restarted:', data.operationId);
+      }
+      // Notify all restart callbacks
+      this.harvestDiscoveryRestartedCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in harvest discovery restarted callback:', error);
+        }
+      });
+    });
+
+    // NEW: Discovery complete event
+    this.connection.on('harvestdiscoverycomplete', (data: HarvestDiscoveryCompleteEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest discovery completed:', data.operationId, 'Total files:', data.totalFilesDiscovered);
+      }
+      // Notify all complete callbacks
+      this.harvestDiscoveryCompleteCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in harvest discovery complete callback:', error);
         }
       });
     });

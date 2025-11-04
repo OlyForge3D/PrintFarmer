@@ -1,0 +1,159 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Web.Shared;
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Services;
+
+/// <summary>
+/// Tests for GcodeHarvestOperation entity change tracking and persistence
+/// Specifically tests that the cancel operation properly persists to the database
+/// </summary>
+public class HarvestOperationChangeTrackingTests : IAsyncLifetime
+{
+    private readonly DbContextOptions<AppDbContext> _dbOptions;
+    private AppDbContext _dbContext = null!;
+    private EfHarvestRepository _harvestRepository = null!;
+
+    public HarvestOperationChangeTrackingTests()
+    {
+        // Use in-memory database for testing
+        _dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options;
+    }
+
+    public async Task InitializeAsync()
+    {
+        _dbContext = new AppDbContext(_dbOptions);
+        await _dbContext.Database.EnsureCreatedAsync();
+
+        _harvestRepository = new EfHarvestRepository(_dbContext);
+    }
+
+    public async Task DisposeAsync()
+    {
+        await _dbContext.Database.EnsureDeletedAsync();
+        _dbContext.Dispose();
+    }
+
+    [Fact]
+    public async Task GetOperationByIdAsync_WithAsNoTracking_ReturnsDetachedEntity()
+    {
+        // Arrange
+        var printerId = Guid.NewGuid();
+        var operationId = Guid.NewGuid();
+
+        var operation = new GcodeHarvestOperation
+        {
+            Id = operationId,
+            PrinterId = printerId,
+            Status = GcodeHarvestStatus.Running,
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = null,
+            FilesFound = 0
+        };
+
+        await _harvestRepository.AddOperationAsync(operation);
+        await _harvestRepository.SaveChangesAsync();
+
+        // Act - Get with AsNoTracking (returns detached entity)
+        var detachedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
+
+        // Assert - Entity is detached, so modifying and saving won't work
+        detachedOp.Should().NotBeNull();
+        detachedOp!.Status.Should().Be(GcodeHarvestStatus.Running);
+
+        // Modifying and saving should NOT persist changes
+        detachedOp.Status = GcodeHarvestStatus.Cancelled;
+        detachedOp.CompletedAt = DateTime.UtcNow;
+        await _harvestRepository.SaveChangesAsync();
+
+        // Verify status was NOT saved (entity was detached)
+        var fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
+        fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Running); // Still running!
+    }
+
+    [Fact]
+    public async Task GetOperationByIdTrackedAsync_ReturnsTrackedEntity()
+    {
+        // Arrange
+        var printerId = Guid.NewGuid();
+        var operationId = Guid.NewGuid();
+
+        var operation = new GcodeHarvestOperation
+        {
+            Id = operationId,
+            PrinterId = printerId,
+            Status = GcodeHarvestStatus.Running,
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = null,
+            FilesFound = 0
+        };
+
+        await _harvestRepository.AddOperationAsync(operation);
+        await _harvestRepository.SaveChangesAsync();
+
+        // Act - Get with tracking enabled
+        var trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
+
+        // Assert - Entity is tracked, so modifying and saving WILL work
+        trackedOp.Should().NotBeNull();
+        trackedOp!.Status.Should().Be(GcodeHarvestStatus.Running);
+
+        // Modifying and saving SHOULD persist changes
+        trackedOp.Status = GcodeHarvestStatus.Cancelled;
+        trackedOp.CompletedAt = DateTime.UtcNow;
+        await _harvestRepository.SaveChangesAsync();
+
+        // Verify status WAS saved (entity was tracked)
+        var fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
+        fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled); // Now cancelled!
+        fetchedOp.CompletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CancelOperation_WithTrackedEntity_PersistsToDatabase()
+    {
+        // Arrange - Create an operation
+        var printerId = Guid.NewGuid();
+        var operationId = Guid.NewGuid();
+
+        var operation = new GcodeHarvestOperation
+        {
+            Id = operationId,
+            PrinterId = printerId,
+            Status = GcodeHarvestStatus.Running,
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = null,
+            FilesFound = 0
+        };
+
+        await _harvestRepository.AddOperationAsync(operation);
+        await _harvestRepository.SaveChangesAsync();
+
+        // Act - Simulate cancel: fetch with tracking, modify, save
+        var trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
+        trackedOp!.Status = GcodeHarvestStatus.Cancelled;
+        trackedOp.CompletedAt = DateTime.UtcNow;
+        await _harvestRepository.SaveChangesAsync();
+
+        // Assert - Verify persistence in new context to ensure actual DB save
+        var newContext = new AppDbContext(_dbOptions);
+        var newRepo = new EfHarvestRepository(newContext);
+        
+        var persistedOp = await newRepo.GetOperationByIdAsync(operationId);
+        persistedOp.Should().NotBeNull();
+        persistedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled);
+        persistedOp.CompletedAt.Should().NotBeNull();
+
+        newContext.Dispose();
+    }
+}
