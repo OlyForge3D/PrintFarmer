@@ -31,56 +31,49 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
   const isCancelled = operation.status === GcodeHarvestStatus.Cancelled;
 
   const summaryTable = (
-    <table className="w-full text-sm mb-4 border border-pf-border rounded bg-pf-bg-0">
-      <tbody>
-        {/* Printer name only, no label */}
-        <tr>
-          <td className="px-4 py-2 font-bold text-lg text-pf-primary" colSpan={2}>{operation.printerName}</td>
-        </tr>
-        {/* Status row */}
-        <tr>
-          <th className="text-left font-medium px-4 py-2 w-48">Status</th>
-          <td className="px-4 py-2">{operation.status}</td>
-        </tr>
-        {/* Started, Completed, Duration on one line */}
-        <tr>
-          <th className="text-left font-medium px-4 py-2">Started / Completed / Duration</th>
-          <td className="px-4 py-2">
-            <span>{started.toLocaleString()}</span>
-            {completed && <span> &rarr; {completed.toLocaleString()}</span>}
+    <div className="mb-3">
+      {/* Row 1: Printer name, Status, Started/Completed on same line */}
+      <div className="flex items-center gap-6 mb-3">
+        <div className="flex-shrink-0">
+          <div className="text-lg font-bold text-pf-primary">{operation.printerName}</div>
+        </div>
+        <div className="flex-shrink-0">
+          <span className="text-sm font-medium text-pf-text-1">Status:</span>
+          <span className="ml-1 text-sm font-semibold text-pf-text-0">{operation.status}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-medium text-pf-text-1">
+            {started.toLocaleString()}
+            {completed && <span> → {completed.toLocaleString()}</span>}
             {completed && <span className="ml-2 text-xs text-pf-muted">({duration})</span>}
-          </td>
-        </tr>
-        {/* Chicklets row */}
-        <tr>
-          <th className="text-left font-medium px-4 py-2 align-top">File Stats</th>
-          <td className="px-4 py-2">
-            <div className="flex flex-wrap gap-2">
-              <div className="w-20 h-8 rounded bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center">
-                Found&nbsp;<span className="font-bold">{operation.filesFound}</span>
-              </div>
-              <div className="w-20 h-8 rounded bg-green-100 border border-green-300 text-green-900 text-xs font-semibold flex items-center justify-center">
-                Added&nbsp;<span className="font-bold">{operation.filesAdded}</span>
-              </div>
-              <div className="w-20 h-8 rounded bg-gray-100 border border-gray-300 text-gray-800 text-xs font-semibold flex items-center justify-center">
-                Skipped&nbsp;<span className="font-bold">{operation.filesSkipped}</span>
-              </div>
-              <div className="w-20 h-8 rounded bg-red-100 border border-red-300 text-red-900 text-xs font-semibold flex items-center justify-center">
-                Errored&nbsp;<span className="font-bold">{operation.filesErrored}</span>
-              </div>
-              <div className="w-28 h-8 rounded bg-blue-100 border border-blue-300 text-blue-900 text-xs font-semibold flex items-center justify-center">
-                Total&nbsp;<span className="font-bold">{operation.totalSizeBytes} bytes</span>
-              </div>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+          </span>
+        </div>
+      </div>
+      
+      {/* Row 2: File Stats Chicklets */}
+      <div className="flex flex-wrap gap-2">
+        <div className="h-7 rounded bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
+          Found <span className="font-bold ml-1">{operation.filesFound}</span>
+        </div>
+        <div className="h-7 rounded bg-green-100 border border-green-300 text-green-900 text-xs font-semibold flex items-center justify-center px-2">
+          Added <span className="font-bold ml-1">{operation.filesAdded}</span>
+        </div>
+        <div className="h-7 rounded bg-gray-100 border border-gray-300 text-gray-800 text-xs font-semibold flex items-center justify-center px-2">
+          Skipped <span className="font-bold ml-1">{operation.filesSkipped}</span>
+        </div>
+        <div className="h-7 rounded bg-red-100 border border-red-300 text-red-900 text-xs font-semibold flex items-center justify-center px-2">
+          Errored <span className="font-bold ml-1">{operation.filesErrored}</span>
+        </div>
+        <div className="h-7 rounded bg-blue-100 border border-blue-300 text-blue-900 text-xs font-semibold flex items-center justify-center px-2">
+          Total <span className="font-bold ml-1">{operation.totalSizeBytes}</span>
+        </div>
+      </div>
+    </div>
   );
 
   const content = (
     <div
-      className={`bg-pf-bg-0 rounded-lg w-full p-6 relative ${inline ? 'border border-pf-border' : 'shadow-lg'} ${className}`}
+      className={`bg-pf-bg-0 rounded-lg w-full h-full flex flex-col p-6 relative ${inline ? 'border border-pf-border' : 'shadow-lg'} ${className}`}
     >
       {!hideCloseButton && onClose && (
         <button
@@ -91,8 +84,8 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
           ×
         </button>
       )}
-      <h2 className="text-xl font-bold mb-4 text-pf-text-0">Harvest Operation Details</h2>
-      <div className="mb-4">
+      <h2 className="text-xl font-bold mb-3 text-pf-text-0 flex-shrink-0">Harvest Operation Details</h2>
+      <div className="mb-3 flex-shrink-0">
         {summaryTable}
       </div>
 
@@ -102,7 +95,7 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
         if (!errorInfo) return null;
 
         return (
-          <div className="bg-red-50 border border-red-300 rounded-lg p-3 mb-4">
+          <div className="bg-red-50 border border-red-300 rounded-lg p-3 mb-3 flex-shrink-0">
             <div className="flex items-start gap-3">
               <ErrorIcon type={errorInfo.iconType} />
               <div className="flex-1 min-w-0">
@@ -141,7 +134,7 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
 
       {/* Cancelled Banner */}
       {isCancelled && (
-        <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-4">
+        <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-3 flex-shrink-0">
           <div className="flex items-start gap-3">
             <svg className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -158,7 +151,7 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
 
       {/* Success Banner */}
       {isCompleted && !operation.error && (
-        <div className="bg-green-50 border border-green-300 rounded-lg p-3 mb-4">
+        <div className="bg-green-50 border border-green-300 rounded-lg p-3 mb-3 flex-shrink-0">
           <div className="flex items-start gap-3">
             <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -174,7 +167,7 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
       )}
 
       {Object.keys(perFileProgress).length > 0 && (
-        <div className="mb-4">
+        <div className="mb-3 flex-shrink-0">
           <div className="text-md font-semibold text-pf-primary mb-1">Per-File Progress</div>
           <div className="max-h-48 overflow-y-auto border border-pf-border rounded bg-pf-surface">
             <table className="w-full text-xs">
@@ -198,24 +191,26 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
           </div>
         </div>
       )}
-      <div className="mb-2">
+      <div className="mb-2 flex-shrink-0">
         <div className="text-md font-semibold text-pf-primary mb-1">Discovered Files</div>
         <div className="text-xs text-pf-muted mb-2">
           You can retry or skip errored files, or import selected files to the library. This list is available for review even after completion or cancellation.
         </div>
       </div>
-      <div className="max-h-80 overflow-y-auto rounded border border-pf-border bg-pf-surface">
+      <div className="rounded border border-pf-border bg-pf-surface overflow-hidden flex-1 min-h-0">
         <IndexedFilesList operationId={operation.id} />
       </div>
     </div>
   );
 
   if (inline) {
-    return <div className="w-full">{content}</div>;
+    return <div className="w-full h-full">{content}</div>;
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      {content}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-4">
+      <div className="w-full max-w-6xl h-5/6 flex flex-col">
+        {content}
+      </div>
     </div>
   );
 }

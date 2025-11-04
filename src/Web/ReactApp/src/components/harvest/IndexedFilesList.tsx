@@ -184,11 +184,11 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
   }
 
   return (
-    <div className="mt-4">
-      <h4 className="font-semibold mb-2 text-pf-primary">Indexed Files</h4>
-      <div className="overflow-x-auto rounded shadow border border-pf-border bg-pf-surface">
+    <div className="flex flex-col h-full">
+      <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-surface z-20">Indexed Files</h4>
+      <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-pf-table-header text-pf-table-header-text">
+          <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-10">
             <tr>
               <th className="p-2 border-b border-pf-border"><input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" /></th>
               <th className="p-2 border-b border-pf-border text-left">File</th>
@@ -316,7 +316,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
           </tbody>
         </table>
       </div>
-      <div className="mt-3 flex items-center gap-3">
+      <div className="px-4 py-3 border-t border-pf-border flex items-center gap-3 bg-pf-surface">
         <button
           className={`btn btn-primary bg-pf-accent text-white hover:bg-pf-accent-dark focus:ring-2 focus:ring-pf-accent focus:outline-none px-4 py-2 rounded shadow disabled:opacity-50 disabled:cursor-not-allowed`}
           disabled={selected.size === 0}
