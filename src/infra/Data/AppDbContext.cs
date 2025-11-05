@@ -40,6 +40,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
     public DbSet<Artifact> Artifacts => Set<Artifact>();
 
+    // File Health & Consistency Auditing
+    public DbSet<FileHealthAudit> FileHealthAudits => Set<FileHealthAudit>();
+
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
@@ -218,6 +221,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(g => g.SlicerVersion).HasMaxLength(64);
             b.Property(g => g.RequiredMaterial).HasMaxLength(64);
             b.Property(g => g.SlicerSettings).HasColumnType("TEXT");
+            b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(0); // Unknown
+            b.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
 
             // JSON array properties
             b.Property(g => g.CompatibleMaterials)
@@ -254,6 +259,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(g => g.RequiredMaterial);
             b.HasIndex(g => g.TargetPrinterId);
             b.HasIndex(g => g.SourcePrinterId);
+            b.HasIndex(g => g.HealthStatus); // Index for dashboard queries
+            b.HasIndex(g => g.LastHealthCheckDate); // Index for recent health checks
         });
 
         // Print Job Entity Configuration
@@ -563,6 +570,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(m => m.FileSizeBytes).IsRequired();
             b.Property(m => m.Tags).HasColumnType("TEXT");
             b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
+            b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(0); // Unknown
+            b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
 
             // Foreign Key
             b.HasOne(m => m.UploadedByUser)
@@ -576,6 +585,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(m => m.FileFormat);
             b.HasIndex(m => m.IsValid);
             b.HasIndex(m => m.UploadedByUserId);
+            b.HasIndex(m => m.HealthStatus); // Index for dashboard queries
+            b.HasIndex(m => m.LastHealthCheckDate); // Index for recent health checks
         });
 
         // SlicerProfile Entity Configuration
@@ -755,6 +766,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(f => f.StartedAt);
             b.Property(f => f.CompletedAt);
             b.HasIndex(f => f.HarvestOperationId);
+        });
+
+        // File Health Audit Entity Configuration
+        modelBuilder.Entity<FileHealthAudit>(b =>
+        {
+            b.HasKey(a => a.Id);
+            b.Property(a => a.AuditDate).IsRequired();
+            b.Property(a => a.AuditType).HasConversion<int>();
+            b.Property(a => a.FilesChecked).IsRequired();
+            b.Property(a => a.HealthyFiles).IsRequired();
+            b.Property(a => a.MissingFiles).IsRequired();
+            b.Property(a => a.CorruptedFiles).IsRequired();
+            b.Property(a => a.OrphanedFiles).IsRequired();
+            b.Property(a => a.MissingFileIds).HasColumnType("TEXT"); // JSON array
+            b.Property(a => a.CorruptedFileIds).HasColumnType("TEXT"); // JSON array
+            b.Property(a => a.OrphanedFilePaths).HasColumnType("TEXT"); // JSON array
+            b.Property(a => a.SummaryMessage).HasColumnType("TEXT");
+            b.Property(a => a.HasIssues).IsRequired();
+            b.Property(a => a.CreatedAt).IsRequired();
+
+            // Indexes for efficient querying and dashboard
+            b.HasIndex(a => a.AuditDate).IsDescending(); // Most recent audits first
+            b.HasIndex(a => a.AuditType);
+            b.HasIndex(a => a.HasIssues);
+            b.HasIndex(a => new { a.AuditType, a.AuditDate }).IsDescending(false, true); // Composite for type+recent queries
         });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)

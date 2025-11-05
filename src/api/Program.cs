@@ -374,6 +374,22 @@ builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>
 builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
 
+// Register file consistency audit background service
+// Runs hourly to detect orphaned/missing/corrupted files
+builder.Services.AddHostedService(sp =>
+{
+    var scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
+    var logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+    var config = sp.GetRequiredService<IConfiguration>();
+    var modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
+    var gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
+    return new Farm.Web.Api.Services.FileManagement.FileConsistencyAuditService(
+        scopeFactory,
+        logger,
+        modelStoragePath,
+        gcodeStoragePath);
+});
+
 // Add JWT Authentication
 builder.Services.AddAuthentication("Bearer")
     .AddJwtBearer("Bearer", options =>

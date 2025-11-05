@@ -177,26 +177,48 @@ namespace Farm.Web.Api.Services.Model
 
             Guid modelId = Guid.NewGuid();
             string fileName = $"{modelId}{fileExtension}";
-            string filePath = Path.Combine(_modelsPath, fileName);
-            if (!_fileManagementService.IsSafePath(filePath, _modelsPath))
+            string finalFilePath = Path.Combine(_modelsPath, fileName);
+            if (!_fileManagementService.IsSafePath(finalFilePath, _modelsPath))
             {
                 throw new InvalidOperationException("Unsafe file path generated");
             }
 
+            // Use temp file pattern for safety: write to temp, then move to final location
+            string tempFileName = $"{modelId}.tmp{fileExtension}";
+            string tempFilePath = Path.Combine(_modelsPath, tempFileName);
+
             try
             {
+                // Step 1: Write to temp file and compute hash
                 string fileHash;
-                using (var stream = _fileSystem.OpenWrite(filePath))
+                try
                 {
-                    using MemoryStream memoryStream = new();
-                    await modelFile.CopyToAsync(memoryStream, ct);
-                    memoryStream.Position = 0;
+                    using (var stream = _fileSystem.OpenWrite(tempFilePath))
+                    {
+                        using MemoryStream memoryStream = new();
+                        await modelFile.CopyToAsync(memoryStream, ct);
+                        memoryStream.Position = 0;
 
-                    byte[] hashBytes = await System.Security.Cryptography.SHA256.HashDataAsync(memoryStream, ct);
-                    fileHash = _fileManagementService.ToHex(hashBytes);
+                        byte[] hashBytes = await System.Security.Cryptography.SHA256.HashDataAsync(memoryStream, ct);
+                        fileHash = _fileManagementService.ToHex(hashBytes);
 
-                    memoryStream.Position = 0;
-                    await memoryStream.CopyToAsync(stream, ct);
+                        memoryStream.Position = 0;
+                        await memoryStream.CopyToAsync(stream, ct);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Failed to write model file to temp location: {ex.Message}");
+                    // Cleanup temp file if write failed
+                    try
+                    {
+                        if (_fileManagementService.IsSafePath(tempFilePath, _modelsPath) && _fileSystem.FileExists(tempFilePath))
+                        {
+                            _fileSystem.DeleteFile(tempFilePath);
+                        }
+                    }
+                    catch { /* ignore cleanup errors */ }
+                    throw;
                 }
 
                 // Virus scan best-effort: if scanner not available skip
@@ -206,18 +228,19 @@ namespace Farm.Web.Api.Services.Model
                 }
                 catch { }
 
-                // Analyze model metadata (best-effort)
+                // Step 2: Analyze model metadata (best-effort)
                 ModelAnalysisResult? analysis = null;
                 try
                 {
                     // analysis is optional; resolve from DI if available via _analysisService
                     if (_analysisService != null)
                     {
-                        analysis = await _analysisService.AnalyzeModelAsync(filePath, fileExtension, ct);
+                        analysis = await _analysisService.AnalyzeModelAsync(tempFilePath, fileExtension, ct);
                     }
                 }
                 catch { }
 
+                // Step 3: Check for duplicates
                 Model3D? existingModel = await _repository.GetByHashAsync(fileHash, ct);
                 string baseName = Path.GetFileNameWithoutExtension(originalName);
                 if (existingModel != null)
@@ -232,9 +255,10 @@ namespace Farm.Web.Api.Services.Model
 
                     if (treatAsDuplicate)
                     {
-                        if (_fileManagementService.IsSafePath(filePath, _modelsPath) && _fileSystem.FileExists(filePath))
+                        // Cleanup temp file before returning existing
+                        if (_fileManagementService.IsSafePath(tempFilePath, _modelsPath) && _fileSystem.FileExists(tempFilePath))
                         {
-                            _fileSystem.DeleteFile(filePath);
+                            _fileSystem.DeleteFile(tempFilePath);
                         }
 
                         return new Shared.Model3DUploadResultDto
@@ -254,12 +278,13 @@ namespace Farm.Web.Api.Services.Model
                     fileHash = _fileManagementService.ToHex(newHashBytes);
                 }
 
+                // Step 4: Create DB record (still pointing to temp file for now)
                 Model3D model = new()
                 {
                     Id = modelId,
                     OriginalFileName = originalName,
                     DisplayName = Path.GetFileNameWithoutExtension(originalName),
-                    FilePath = filePath,
+                    FilePath = finalFilePath,  // Store final path in DB
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
@@ -277,6 +302,30 @@ namespace Farm.Web.Api.Services.Model
                 await _repository.AddAsync(model, ct);
                 await _repository.SaveChangesAsync(ct);
 
+                // Step 5: Move temp file to final location (only after DB commit succeeds)
+                try
+                {
+                    if (_fileSystem.FileExists(tempFilePath))
+                    {
+                        // Delete any existing file at final location first (shouldn't happen but be safe)
+                        if (_fileSystem.FileExists(finalFilePath))
+                        {
+                            _fileSystem.DeleteFile(finalFilePath);
+                        }
+
+                        // Move temp to final location
+                        _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
+                        _logger.LogDebug($"Model file moved from temp to final location: {modelId}");
+                    }
+                }
+                catch (Exception moveEx)
+                {
+                    _logger.LogError($"Failed to move model file from temp to final location: {moveEx.Message}. File remains in temp location.");
+                    // Note: DB record points to finalFilePath but file is still at tempFilePath
+                    // This will be detected by consistency audit and can be manually recovered
+                    throw new InvalidOperationException("Failed to finalize model file", moveEx);
+                }
+
                 // Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
                 try
                 {
@@ -287,7 +336,8 @@ namespace Farm.Web.Api.Services.Model
 
                         if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
                         {
-                            await _thumbnailService.GenerateAndSaveThumbnailAsync(filePath, thumbnailPath, ct);
+                            // Use final file path (not temp) for thumbnail generation
+                            await _thumbnailService.GenerateAndSaveThumbnailAsync(finalFilePath, thumbnailPath, ct);
 
                             // Update model with thumbnail path
                             model.ThumbnailPath = thumbnailPath;
@@ -316,15 +366,22 @@ namespace Farm.Web.Api.Services.Model
             }
             catch
             {
-                // cleanup partial file if exists
+                // Cleanup both temp and final files if something fails
                 try
                 {
-                    if (_fileManagementService.IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
+                    // Try to clean up temp file
+                    if (_fileManagementService.IsSafePath(tempFilePath, _modelsPath) && _fileSystem.FileExists(tempFilePath))
                     {
-                        System.IO.File.Delete(filePath);
+                        _fileSystem.DeleteFile(tempFilePath);
+                    }
+
+                    // Try to clean up final file if it was already moved
+                    if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
+                    {
+                        _fileSystem.DeleteFile(finalFilePath);
                     }
                 }
-                catch { }
+                catch { /* ignore cleanup errors */ }
 
                 throw;
             }
