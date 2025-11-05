@@ -45,6 +45,12 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Use StoragePathService to get the correct gcode storage directory
             string storageRoot = _storagePathService.GetGcodeStorageDirectory();
+            // Ensure storage root exists
+            if (!Directory.Exists(storageRoot))
+            {
+                Directory.CreateDirectory(storageRoot);
+            }
+
             string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
             if (!vPath.StartsWith('/'))
             {
@@ -65,9 +71,10 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
+            // Create the requested directory if it doesn't exist (for root or nested paths)
             if (!Directory.Exists(requestedDirFullPath))
             {
-                throw new DirectoryNotFoundException($"Directory '{virtualPathNormalized}' not found");
+                Directory.CreateDirectory(requestedDirFullPath);
             }
 
             System.IO.DirectoryInfo dirInfo = new(requestedDirFullPath);
@@ -281,9 +288,10 @@ namespace Farm.Web.Api.Services.Gcode
             // Resolve path using IStoragePathService
             (_, string parentDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
 
+            // Create parent directory if needed
             if (!Directory.Exists(parentDirFullPath))
             {
-                throw new DirectoryNotFoundException("Parent directory does not exist");
+                Directory.CreateDirectory(parentDirFullPath);
             }
 
             string newDirFullPath = Path.GetFullPath(Path.Combine(parentDirFullPath, name));
