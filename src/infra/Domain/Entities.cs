@@ -164,6 +164,11 @@ public class GcodeFile
     public string[]? TargetPrinterModels { get; set; } // JSON field
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    
+    // File health status (populated by FileConsistencyAuditService)
+    public DateTime? LastHealthCheckDate { get; set; }
+    public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
+    public string? LastVerificationResult { get; set; } // JSON object with verification details
 }
 
 public enum GcodeSource
@@ -284,6 +289,11 @@ public class Model3D
     public User? UploadedByUser { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    
+    // File health status (populated by FileConsistencyAuditService)
+    public DateTime? LastHealthCheckDate { get; set; }
+    public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
+    public string? LastVerificationResult { get; set; } // JSON object with verification details
 }
 
 public enum ModelFileFormat
@@ -293,6 +303,15 @@ public enum ModelFileFormat
     OBJ = 2,
     PLY = 3,
     STEP = 4
+}
+
+public enum FileHealthStatus
+{
+    Unknown = 0,      // Never checked or status unknown
+    Healthy = 1,      // File exists, hash and size match
+    Missing = 2,      // File not found on disk
+    Corrupted = 3,    // File exists but hash/size mismatch
+    Inaccessible = 4  // File exists but cannot be read (permission denied)
 }
 
 // Slicer Profile Management System
@@ -636,6 +655,39 @@ public class SlicerSettings
     public string? PerEngineJson { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public double JitterPercent { get; set; } = 15.0;
+}
+
+// File Consistency Audit System
+public class FileHealthAudit
+{
+    public Guid Id { get; set; }
+    public DateTime AuditDate { get; set; }
+    public FileAuditType AuditType { get; set; } // Model3D, GcodeFile, or Orphaned
+    
+    // Statistics
+    public int FilesChecked { get; set; }
+    public int HealthyFiles { get; set; }
+    public int MissingFiles { get; set; }
+    public int CorruptedFiles { get; set; }
+    public int OrphanedFiles { get; set; }
+    
+    // Details - JSON arrays of file IDs/paths with issues
+    public string? MissingFileIds { get; set; } // JSON array of Guids
+    public string? CorruptedFileIds { get; set; } // JSON array of Guids
+    public string? OrphanedFilePaths { get; set; } // JSON array of file paths
+    
+    // Summary & status
+    public string? SummaryMessage { get; set; } // Human-readable audit summary
+    public bool HasIssues { get; set; } // True if any files missing/corrupted/orphaned
+    public DateTime CreatedAt { get; set; }
+}
+
+public enum FileAuditType
+{
+    Model3D = 0,
+    GcodeFile = 1,
+    OrphanedFiles = 2,
+    FullAudit = 3
 }
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1724:Type names should not match namespace", Justification = "Renamed infra domain type to PasswordPolicyEntity to avoid CA1724 conflicts with API domain type.")]

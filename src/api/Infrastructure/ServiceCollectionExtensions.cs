@@ -169,6 +169,8 @@ public static class ServiceCollectionExtensions
         // File Management Services
         // Unified file operations (path resolution, sanitization, hashing, utilities)
         _ = services.AddSingleton<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
+        // File integrity verification (existence, hash, size checks)
+        _ = services.AddSingleton<Farm.Web.Api.Services.FileManagement.IFileIntegrityService, Farm.Web.Api.Services.FileManagement.FileIntegrityService>();
         // Chunked upload state management (scoped to request lifetime)
         _ = services.AddScoped<Farm.Web.Api.Services.FileManagement.IChunkedUploadService, Farm.Web.Api.Services.FileManagement.ChunkedUploadService>();
 

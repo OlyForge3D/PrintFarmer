@@ -8,6 +8,7 @@ namespace Farm.Web.Api.Services.IO
         public void CreateDirectory(string path) => Directory.CreateDirectory(path);
         public bool FileExists(string path) => File.Exists(path);
         public void DeleteFile(string path) => File.Delete(path);
+        public void MoveFile(string sourceFileName, string destFileName, bool overwrite = false) => File.Move(sourceFileName, destFileName, overwrite);
         public Stream OpenWrite(string path) => new FileStream(path, FileMode.Create, FileAccess.Write);
         public Stream OpenRead(string path) => new FileStream(path, FileMode.Open, FileAccess.Read);
         public async System.Threading.Tasks.Task<byte[]> ReadAllBytesAsync(string path, System.Threading.CancellationToken ct = default)
