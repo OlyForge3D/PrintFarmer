@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -25,8 +26,7 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     /// Returns statistics on file health across Model3D and GcodeFile libraries.
     /// </summary>
     [HttpGet("health/summary")]
-    [ProduceResponseType(200)]
-    public async Task<ActionResult<FileHealthSummaryDto>> GetHealthSummary(CancellationToken ct)
+    public async Task<ActionResult<FileHealthSummaryDto>> GetHealthSummaryAsync(CancellationToken ct)
     {
         var model3DStats = await GetModel3DHealthStatsAsync(ct);
         var gcodeStats = await GetGcodeHealthStatsAsync(ct);
@@ -56,8 +56,7 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     /// Get detailed audit history with recent findings.
     /// </summary>
     [HttpGet("audits/history")]
-    [ProduceResponseType(200)]
-    public async Task<ActionResult<List<FileHealthAuditDto>>> GetAuditHistory(
+    public async Task<ActionResult<List<FileHealthAuditDto>>> GetAuditHistoryAsync(
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
@@ -86,8 +85,7 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     /// Get files with health issues (missing, corrupted, inaccessible).
     /// </summary>
     [HttpGet("files/issues")]
-    [ProduceResponseType(200)]
-    public async Task<ActionResult<FileIssuesSummaryDto>> GetFilesWithIssues(CancellationToken ct)
+    public async Task<ActionResult<FileIssuesSummaryDto>> GetFilesWithIssuesAsync(CancellationToken ct)
     {
         var missingModel3DFiles = await dbContext.Models3D
             .Where(m => m.HealthStatus == FileHealthStatus.Missing)
@@ -191,9 +189,7 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     /// Get details for a specific Model3D file's health status.
     /// </summary>
     [HttpGet("model3d/{modelId}/health")]
-    [ProduceResponseType(200)]
-    [ProduceResponseType(404)]
-    public async Task<ActionResult<FileHealthDetailDto>> GetModel3DHealth(Guid modelId, CancellationToken ct)
+    public async Task<ActionResult<FileHealthDetailDto>> GetModel3DHealthAsync(Guid modelId, CancellationToken ct)
     {
         var model = await dbContext.Models3D
             .Where(m => m.Id == modelId)
@@ -224,9 +220,7 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     /// Get details for a specific GcodeFile's health status.
     /// </summary>
     [HttpGet("gcode/{gcodeId}/health")]
-    [ProduceResponseType(200)]
-    [ProduceResponseType(404)]
-    public async Task<ActionResult<FileHealthDetailDto>> GetGcodeFileHealth(Guid gcodeId, CancellationToken ct)
+    public async Task<ActionResult<FileHealthDetailDto>> GetGcodeFileHealthAsync(Guid gcodeId, CancellationToken ct)
     {
         var gcode = await dbContext.GcodeFiles
             .Where(g => g.Id == gcodeId)
@@ -251,69 +245,6 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
         }
 
         return Ok(gcode);
-    }
-
-    // Helper DTOs
-
-    private record FileHealthSummaryDto
-    {
-        public int TotalModel3DFiles { get; init; }
-        public int Model3DHealthy { get; init; }
-        public int Model3DMissing { get; init; }
-        public int Model3DCorrupted { get; init; }
-        public int TotalGcodeFiles { get; init; }
-        public int GcodeHealthy { get; init; }
-        public int GcodeMissing { get; init; }
-        public int GcodeCorrupted { get; init; }
-        public DateTime? LastHealthyAuditDate { get; init; }
-        public double OverallHealthPercentage { get; init; }
-    }
-
-    private record FileHealthAuditDto
-    {
-        public Guid Id { get; init; }
-        public DateTime AuditDate { get; init; }
-        public string AuditType { get; init; } = string.Empty;
-        public int FilesChecked { get; init; }
-        public int HealthyFiles { get; init; }
-        public int MissingFiles { get; init; }
-        public int CorruptedFiles { get; init; }
-        public int OrphanedFiles { get; init; }
-        public string? SummaryMessage { get; init; }
-        public bool HasIssues { get; init; }
-    }
-
-    private record FileIssueDto
-    {
-        public Guid FileId { get; init; }
-        public string FileName { get; init; } = string.Empty;
-        public string FilePath { get; init; } = string.Empty;
-        public string FileType { get; init; } = string.Empty;
-        public string IssueType { get; init; } = string.Empty;
-        public DateTime? LastCheckDate { get; init; }
-    }
-
-    private record FileIssuesSummaryDto
-    {
-        public int TotalIssues { get; init; }
-        public int MissingFiles { get; init; }
-        public int CorruptedFiles { get; init; }
-        public int InaccessibleFiles { get; init; }
-        public List<FileIssueDto> Issues { get; init; } = new();
-    }
-
-    private record FileHealthDetailDto
-    {
-        public Guid FileId { get; init; }
-        public string FileName { get; init; } = string.Empty;
-        public string FilePath { get; init; } = string.Empty;
-        public string FileType { get; init; } = string.Empty;
-        public long FileSize { get; init; }
-        public string FileHash { get; init; } = string.Empty;
-        public string HealthStatus { get; init; } = string.Empty;
-        public DateTime? LastHealthCheckDate { get; init; }
-        public string? VerificationDetails { get; init; }
-        public DateTime UploadedDate { get; init; }
     }
 
     // Private helper methods
