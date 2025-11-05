@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, AlertCircle, Check } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes } from '@/hooks/useApi';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
@@ -24,9 +25,9 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateModelRequest }) => {
-      const response = await fetch(`/api/catalog/printer-models/${id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(data),
       });
       if (!response.ok) {

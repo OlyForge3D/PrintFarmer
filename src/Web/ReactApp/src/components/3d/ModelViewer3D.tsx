@@ -14,6 +14,7 @@ import {
 import { STLLoader } from 'three-stdlib';
 import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 export interface ModelViewerProps {
   modelUrl: string;
@@ -90,7 +91,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         return <PLYModel url={modelUrl} />;
       case '3mf':
         // 3MF requires server-side conversion to STL
-        return <STLModel url={`/api/convert/3mf-to-stl?url=${encodeURIComponent(modelUrl)}`} />;
+        return <STLModel url={`${getApiBaseUrl()}/convert/3mf-to-stl?url=${encodeURIComponent(modelUrl)}`} />;
       default:
         return <STLModel url={modelUrl} />;
     }

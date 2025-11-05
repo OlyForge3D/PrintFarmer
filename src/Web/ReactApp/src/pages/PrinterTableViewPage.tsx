@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePrinters } from '@/hooks/useApi';
 import { useAuth } from '@/contexts/AuthHooks';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
@@ -34,7 +35,7 @@ export function PrinterTableViewPage() {
     try {
       // Delete all selected printers
       await Promise.all(printersToDelete.map(printer => 
-        fetch(`/api/printers/${printer.id}`, { method: 'DELETE' })
+        fetch(`${getApiBaseUrl()}/printers/${printer.id}`, { method: 'DELETE', headers: getAuthHeaders() })
       ));
       
       // Refresh the printer list
@@ -53,9 +54,9 @@ export function PrinterTableViewPage() {
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
       await Promise.all(printers.map(printer => 
-        fetch(`/api/printers/${printer.id}/maintenance`, {
+        fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify(inMaintenance)
         })
       ));

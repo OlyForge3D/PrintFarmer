@@ -2,6 +2,7 @@ import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
 import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
@@ -83,7 +84,7 @@ export const ModelsPage: React.FC = () => {
   const { data: availablePrinters = [] } = useQuery({
     queryKey: ['printers-fast'],
     queryFn: async () => {
-      const response = await fetch('/api/printers/fast');
+      const response = await fetch(`${getApiBaseUrl()}/printers/fast`, { headers: getAuthHeaders() });
       return response.json();
     },
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes

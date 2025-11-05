@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { PageTemplate } from '@/components/PageTemplate';
 import { TestTube } from 'lucide-react';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface DryRunResult {
   rendered: string;
@@ -22,9 +23,9 @@ export const SlicerDryRunPage: React.FC = () => {
         setLoading(true);
         setResult(null);
         try {
-            const res = await fetch('/api/admin/slicer/dryrun', {
+            const res = await fetch(`${getApiBaseUrl()}/admin/slicer/dryrun`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                 body: JSON.stringify({ template, engine })
             });
             if (!res.ok) {

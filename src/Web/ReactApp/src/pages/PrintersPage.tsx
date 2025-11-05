@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { useAuth } from '@/contexts/AuthHooks';
 import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
 import { PrinterTableView } from '@/components/PrinterTableView';
@@ -113,9 +114,9 @@ export function PrintersPage() {
     try {
       // TODO: Implement maintenance status API calls
       await Promise.all(printers.map(printer => 
-        fetch(`/api/printers/${printer.id}/maintenance`, {
+        fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ inMaintenance })
         })
       ));

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { ClipboardList } from 'lucide-react';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface JobStatus {
   id: string;
@@ -30,7 +31,7 @@ export const SlicerJobStatusPage: React.FC = () => {
         setLoading(true);
         setStatus(null);
         try {
-            const res = await fetch(`/api/slicer/jobs/${encodeURIComponent(jobId)}/status`);
+            const res = await fetch(`${getApiBaseUrl()}/slicer/jobs/${encodeURIComponent(jobId)}/status`, { headers: getAuthHeaders() });
             if (!res.ok) {
                 if (res.status === 404) throw new Error('Job not found');
                 throw new Error('Failed to fetch job status');

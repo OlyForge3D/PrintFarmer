@@ -94,7 +94,7 @@ export function UserManagementPage() {
         const params = new URLSearchParams();
         if (username) params.append('username', username);
         if (email) params.append('email', email);
-        const res = await fetch(`/api/users/availability?${params.toString()}`, { signal: ctrl.signal });
+        const res = await fetch(`${getApiBaseUrl()}/users/availability?${params.toString()}`, { signal: ctrl.signal, headers: getAuthHeaders() });
         if (!res.ok) throw new Error('availability failed');
         const data: { usernameExists?: boolean; emailExists?: boolean } = await res.json();
 
@@ -651,12 +651,11 @@ export function UserManagementPage() {
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
-                  const token = localStorage.getItem('auth-token');
-                  const response = await fetch(`/api/users/${selectedUser.id}`, {
+                  const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
                     method: 'PUT',
                     headers: {
-                      'Authorization': `Bearer ${token}`,
-                      'Content-Type': 'application/json'
+                      'Content-Type': 'application/json',
+                      ...getAuthHeaders()
                     },
                     body: JSON.stringify({
                       firstName: selectedUser.firstName,

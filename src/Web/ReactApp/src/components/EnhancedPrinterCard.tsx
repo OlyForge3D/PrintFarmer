@@ -6,6 +6,7 @@ import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { 
   ChevronDown, ChevronUp, Cog, Play, Pause, Square as StopIcon, Home, Upload, RefreshCw,
   Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, Move, FileText
@@ -61,10 +62,12 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
   const apiCall = (path: string, body?: unknown) => {
     const init: RequestInit = { method: 'POST' };
     if (body && typeof body === 'object') {
-      init.headers = { 'Content-Type': 'application/json' };
+      init.headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
       init.body = JSON.stringify(body);
+    } else {
+      init.headers = getAuthHeaders();
     }
-    return fetch(path, init).catch(e => console.error(e));
+    return fetch(`${getApiBaseUrl()}${path}`, init).catch(e => console.error(e));
   };
   const handlePause = useCallback(() => apiCall(`/api/printers/${printer.id}/pause`), [printer.id]);
   const handleResume = useCallback(() => apiCall(`/api/printers/${printer.id}/resume`), [printer.id]);
@@ -76,7 +79,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
   const handleApplyPreset = useCallback((m: keyof TempPresets) => { const p = DEFAULT_PRESETS[m]; setTempInputs(p); apiCall(`/api/printers/${printer.id}/temps`, p); }, [printer.id]);
   const handleMove = useCallback((x?: number | null, y?: number | null, z?: number | null) => apiCall(`/api/printers/${printer.id}/move`, { x: x || undefined, y: y || undefined, z: z || undefined }), [printer.id]);
   const handleMoveTo = useCallback(() => apiCall(`/api/printers/${printer.id}/move-to`, moveInputs), [printer.id, moveInputs]);
-  const handleFileUpload = useCallback(async () => { if (!selectedFile) return; const formData = new FormData(); formData.append('file', selectedFile); setIsUploading(true); try { const r = await fetch(`/api/printers/${printer.id}/files`, { method: 'POST', body: formData }); if (r.ok) setSelectedFile(null); } finally { setIsUploading(false); } }, [printer.id, selectedFile]);
+  const handleFileUpload = useCallback(async () => { if (!selectedFile) return; const formData = new FormData(); formData.append('file', selectedFile); setIsUploading(true); try { const r = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/files`, { method: 'POST', body: formData, headers: getAuthHeaders() }); if (r.ok) setSelectedFile(null); } finally { setIsUploading(false); } }, [printer.id, selectedFile]);
 
   if (!isExpanded) {
     return (
