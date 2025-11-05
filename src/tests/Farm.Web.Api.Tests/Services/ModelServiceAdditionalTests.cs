@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Repositories.Model;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -41,11 +42,16 @@ namespace Farm.Web.Api.Tests.Services
             };
 
             var mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
-            mockRepo.Setup(r => r.GetByHashAsync(It.Is<string>(s => s == contentHash), It.IsAny<CancellationToken>())).ReturnsAsync(existing);
+            mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(existing);
             mockRepo.Setup(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()));
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+                .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
@@ -63,8 +69,21 @@ namespace Farm.Web.Api.Tests.Services
             var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
             var mockRepo = new Mock<IModelRepository>();
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            // Setup ValidateModelExtension to throw for invalid extensions
+            mockFileManagement.Setup(s => s.ValidateModelExtension(It.IsAny<string>()))
+                .Callback<string>(ext =>
+                {
+                    var allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
+                    string extension = ext.StartsWith('.') ? ext : "." + ext;
+                    if (!allowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+                    {
+                        throw new ArgumentException($"Invalid file type '{extension}'");
+                    }
+                });
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()));
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile badFile = CreateFormFile("file", "x", "model.exe");
 
@@ -80,8 +99,10 @@ namespace Farm.Web.Api.Tests.Services
             var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
             var mockRepo = new Mock<IModelRepository>();
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()));
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
 
@@ -102,7 +123,12 @@ namespace Farm.Web.Api.Tests.Services
             var mockAnalysis = new Mock<Farm.Web.Api.Services.Interfaces.IModelAnalysisService>(MockBehavior.Strict);
             mockAnalysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("analysis failed"));
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockAnalysis.Object);
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+                .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object, mockAnalysis.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
@@ -123,7 +149,12 @@ namespace Farm.Web.Api.Tests.Services
             mockRepo.Setup(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db failure"));
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()));
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+                .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 

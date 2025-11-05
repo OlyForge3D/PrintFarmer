@@ -4,6 +4,7 @@ using System.Text; // Needed for Encoding when deriving secondary hash
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Shared;
@@ -27,12 +28,22 @@ public class ModelController : ControllerBase
     private readonly IThumbnailGenerationService _thumbnailService;
     private readonly string _modelsPath;
     private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
+    private readonly IFileManagementService _fileManagementService;
 
-    public ModelController(IUnifiedLoggingService logger, IModelService modelService, IConfiguration configuration, IModelAnalysisService analysisService, IVirusScanner virusScanner, IThumbnailGenerationService thumbnailService, Farm.Web.Api.Services.IO.IFileSystem fileSystem)
+    public ModelController(
+        IUnifiedLoggingService logger,
+        IModelService modelService,
+        IConfiguration configuration,
+        IModelAnalysisService analysisService,
+        IVirusScanner virusScanner,
+        IThumbnailGenerationService thumbnailService,
+        Farm.Web.Api.Services.IO.IFileSystem fileSystem,
+        IFileManagementService fileManagementService)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
@@ -61,27 +72,17 @@ public class ModelController : ControllerBase
             return BadRequest("Model file is required");
         }
 
-        // Validate file extension
-        string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
-        string originalName = modelFile.FileName ?? string.Empty;
-        string fileExtension = Path.GetExtension(originalName);
-
-        // Use an OrdinalIgnoreCase comparison for extension membership checks
-        if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
+        // Validate file extension using service
+        string fileExtension = Path.GetExtension(modelFile.FileName ?? string.Empty);
+        try
         {
-            return BadRequest($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
+            _fileManagementService.ValidateModelExtension(fileExtension);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
-        // Generate unique filename and calculate hash
-        Guid modelId = Guid.NewGuid();
-        string fileName = $"{modelId}{fileExtension}";
-        string filePath = Path.Combine(_modelsPath, fileName);
-        if (!IsSafePath(filePath, _modelsPath))
-        {
-            return BadRequest("Unsafe file path generated");
-        }
-
-        // Upload remains controller-owned for now (complex file handling). Delegate read/delete flows to service.
         try
         {
             var result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
@@ -143,7 +144,7 @@ public class ModelController : ControllerBase
     public async Task<IActionResult> GetModelFileAsync(Guid id)
     {
         var path = await _modelService.GetModelFilePathAsync(id, CancellationToken.None);
-        if (string.IsNullOrEmpty(path) || !_fileSystem.FileExists(path) || !IsSafePath(path, _modelsPath))
+        if (string.IsNullOrEmpty(path) || !_fileSystem.FileExists(path) || !_fileManagementService.IsSafePath(path, _modelsPath))
         {
             return NotFound();
         }
@@ -176,7 +177,7 @@ public class ModelController : ControllerBase
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
     {
         var thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
-        if (string.IsNullOrEmpty(thumbPath) || !_fileSystem.FileExists(thumbPath) || !IsSafePath(thumbPath, Path.GetDirectoryName(thumbPath) ?? string.Empty))
+        if (string.IsNullOrEmpty(thumbPath) || !_fileSystem.FileExists(thumbPath) || !_fileManagementService.IsSafePath(thumbPath, Path.GetDirectoryName(thumbPath) ?? string.Empty))
         {
             return NotFound("Thumbnail not available");
         }
@@ -231,23 +232,4 @@ public class ModelController : ControllerBase
             return BadRequest(ae.Message);
         }
     }
-
-    private static bool IsSafePath(string candidatePath, string root)
-    {
-        try
-        {
-            string fullRoot = Path.GetFullPath(root);
-            string fullCandidate = Path.GetFullPath(candidatePath);
-            return fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    // File format resolution is centralized in the ModelService. Controller-local duplicate removed.
-
-    // Helper methods for file format and type resolution are implemented in ModelService and other
-    // shared places. These controller-local duplicates were unused and removed to satisfy analyzers.
 }

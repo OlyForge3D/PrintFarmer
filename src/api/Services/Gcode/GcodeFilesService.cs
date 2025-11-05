@@ -6,9 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Repositories.Gcode;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode
@@ -17,11 +17,13 @@ namespace Farm.Web.Api.Services.Gcode
     {
         private readonly IGcodeRepository _gcodeRepo;
         private readonly IUnifiedLoggingService _logger;
+        private readonly Farm.Web.Api.Services.StorageManagement.IStoragePathService _storagePathService;
 
-        public GcodeFilesService(IGcodeRepository gcodeRepo, IUnifiedLoggingService logger)
+        public GcodeFilesService(IGcodeRepository gcodeRepo, IUnifiedLoggingService logger, Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
         }
 
         public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
@@ -41,7 +43,28 @@ namespace Farm.Web.Api.Services.Gcode
                 pageSize = 500;
             }
 
-            (string _, string? requestedDirFullPath, string? virtualPathNormalized) = ResolveAndValidatePath(path, null, false, null);
+            // Use StoragePathService to get the correct gcode storage directory
+            string storageRoot = _storagePathService.GetGcodeStorageDirectory();
+            string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
+            if (!vPath.StartsWith('/'))
+            {
+                vPath = "/" + vPath;
+            }
+
+            // Parse virtual path to relative path
+            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Where(s => s != "." && s != "..")
+                .ToArray();
+            string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
+            string requestedDirFullPath = Path.GetFullPath(Path.Combine(storageRoot, safeRel));
+
+            // Security check: ensure path doesn't escape the storage root
+            if (!requestedDirFullPath.StartsWith(storageRoot, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Path escapes storage root");
+            }
+
+            string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
             if (!Directory.Exists(requestedDirFullPath))
             {
                 throw new DirectoryNotFoundException($"Directory '{virtualPathNormalized}' not found");
@@ -149,7 +172,7 @@ namespace Farm.Web.Api.Services.Gcode
             return new GcodeFileListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
         }
 
-        public async Task<GcodeFileEntryDto> UploadAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, string webRootPath, CancellationToken ct)
+        public async Task<GcodeFileEntryDto> UploadAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
             if (!uploadSettings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
@@ -157,7 +180,9 @@ namespace Farm.Web.Api.Services.Gcode
                 throw new InvalidOperationException($"Invalid file type '{ext}'");
             }
 
-            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path, webRootPath, false, null);
+            // Resolve path using IStoragePathService
+            (string storageRoot, string targetDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
+
             if (!Directory.Exists(targetDirFullPath))
             {
                 Directory.CreateDirectory(targetDirFullPath);
@@ -198,12 +223,14 @@ namespace Farm.Web.Api.Services.Gcode
             return new GcodeFileEntryDto(virtualFilePath, safeName, info.Length, info.LastWriteTimeUtc, false);
         }
 
-        public async Task<MultiUploadResponse> UploadMultipleAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, string webRootPath, CancellationToken ct)
+        public async Task<MultiUploadResponse> UploadMultipleAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             List<GcodeFileEntryDto> created = new();
             List<MultiUploadFailure> failed = new();
 
-            (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(path, webRootPath, false, null);
+            // Resolve path using IStoragePathService
+            (_, string targetDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
+
             if (!Directory.Exists(targetDirFullPath))
             {
                 Directory.CreateDirectory(targetDirFullPath);
@@ -240,7 +267,7 @@ namespace Farm.Web.Api.Services.Gcode
             return new MultiUploadResponse(created, failed, created.Count, failed.Count);
         }
 
-        public Task<GcodeFileEntryDto> MakeDirectoryAsync(string? path, string? name, string webRootPath, CancellationToken ct)
+        public Task<GcodeFileEntryDto> MakeDirectoryAsync(string? path, string? name, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -251,7 +278,9 @@ namespace Farm.Web.Api.Services.Gcode
                 throw new ArgumentException("Invalid directory name");
             }
 
-            (_, string? parentDirFullPath, string? virtualParent) = ResolveAndValidatePath(path, webRootPath, false, null);
+            // Resolve path using IStoragePathService
+            (_, string parentDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
+
             if (!Directory.Exists(parentDirFullPath))
             {
                 throw new DirectoryNotFoundException("Parent directory does not exist");
@@ -268,8 +297,9 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             Directory.CreateDirectory(newDirFullPath);
+
             GcodeFileEntryDto dto = new(
-                Path: CombineVirtual(virtualParent, name),
+                Path: CombineVirtual(virtualDir, name),
                 Name: name,
                 Size: 0,
                 ModifiedAt: Directory.GetLastWriteTimeUtc(newDirFullPath),
@@ -278,16 +308,18 @@ namespace Farm.Web.Api.Services.Gcode
             return Task.FromResult(dto);
         }
 
-        public Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, string webRootPath, CancellationToken ct)
+        public Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct)
         {
-            (string? rootFullPath, string _, string _) = ResolveAndValidatePath("/", webRootPath, false, null);
+            string storageRoot = _storagePathService.GetGcodeStorageDirectory();
             int deleted = 0;
 
             foreach (string virtualPath in virtualPaths)
             {
                 try
                 {
-                    (string _, string? fullFilePath, string _) = ResolveAndValidatePath(virtualPath, webRootPath, true, rootFullPath);
+                    // Resolve path using IStoragePathService
+                    (_, string fullFilePath, _) = ResolveVirtualPath(virtualPath, storageRoot);
+
                     if (Directory.Exists(fullFilePath))
                     {
                         if (recursive)
@@ -311,28 +343,35 @@ namespace Farm.Web.Api.Services.Gcode
             return Task.FromResult(deleted > 0);
         }
 
-        public async Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, string webRootPath, CancellationToken ct)
+        public async Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, CancellationToken ct)
         {
-            (string _, string? fullFilePath, string? virtualNorm) = ResolveAndValidatePath(path, webRootPath, true, null);
+            // Resolve path using IStoragePathService
+            (string storageRoot, string fullFilePath, _) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
+
             if (!File.Exists(fullFilePath))
             {
                 return null;
             }
 
             byte[] bytes = await File.ReadAllBytesAsync(fullFilePath, ct);
-            string fileName = Path.GetFileName(virtualNorm);
+            string fileName = Path.GetFileName(fullFilePath);
             return (bytes, fileName);
         }
 
-        public Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, string webRootPath, CancellationToken ct)
+        public Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct)
         {
-            (string? root, string? sourceFull, _) = ResolveAndValidatePath(sourcePath, webRootPath, true, null);
-            (_, string? destFull, string? destVirtual) = ResolveAndValidatePath(destinationPath, webRootPath, true, root);
+            string storageRoot = _storagePathService.GetGcodeStorageDirectory();
+
+            // Resolve source path using IStoragePathService
+            (_, string sourceFull, _) = ResolveVirtualPath(sourcePath, storageRoot);
 
             if (!File.Exists(sourceFull) && !Directory.Exists(sourceFull))
             {
                 return Task.FromResult((false, string.Empty, false));
             }
+
+            // Resolve destination path using IStoragePathService
+            (_, string destFull, string destVirtual) = ResolveVirtualPath(destinationPath, storageRoot);
 
             bool isDirectory = Directory.Exists(sourceFull);
             bool destExistsFile = File.Exists(destFull);
@@ -381,51 +420,6 @@ namespace Farm.Web.Api.Services.Gcode
         // Helper methods
         private static bool IsMatch(string name, string? search)
             => string.IsNullOrWhiteSpace(search) || name.Contains(search, StringComparison.OrdinalIgnoreCase);
-
-        private static (string rootFullPath, string resolvedFullPath, string virtualNormalized) ResolveAndValidatePath(
-            string? virtualPath,
-            string? webRootPath,
-            bool treatAsFile,
-            string? rootFullPathOverride)
-        {
-            string? envOverride = Environment.GetEnvironmentVariable("GCODE_LIBRARY_ROOT");
-            string baseRoot = !string.IsNullOrWhiteSpace(envOverride) ? Path.GetFullPath(envOverride) : webRootPath ?? string.Empty;
-
-            if (string.IsNullOrWhiteSpace(baseRoot))
-            {
-                baseRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-            }
-
-            Directory.CreateDirectory(baseRoot);
-            string root = rootFullPathOverride ?? Path.GetFullPath(Path.Combine(baseRoot, "gcode-library"));
-            Directory.CreateDirectory(root);
-
-            string vPath = string.IsNullOrWhiteSpace(virtualPath) ? "/" : virtualPath.Trim();
-            if (!vPath.StartsWith('/'))
-            {
-                vPath = "/" + vPath;
-            }
-
-            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Where(s => s != "." && s != "..")
-                .ToArray();
-            string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
-            string candidate = Path.GetFullPath(Path.Combine(root, safeRel));
-
-            if (!candidate.StartsWith(root, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Path escapes library root");
-            }
-
-            if (!treatAsFile)
-            {
-                return (root, candidate, segments.Length == 0 ? "/" : "/" + string.Join('/', segments));
-            }
-            else
-            {
-                return (root, candidate, "/" + string.Join('/', segments));
-            }
-        }
 
         private static string CombineVirtual(string? baseVirtual, string childName)
         {
@@ -487,6 +481,40 @@ namespace Farm.Web.Api.Services.Gcode
             await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await file.CopyToAsync(fs, ct);
             return (fullTarget, safeName);
+        }
+
+        /// <summary>
+        /// Helper method to resolve and validate virtual paths consistently throughout the service.
+        /// Centralizes path security logic to prevent directory traversal attacks.
+        /// </summary>
+        private static (string storageRoot, string resolvedFullPath, string virtualNormalized) ResolveVirtualPath(
+            string? virtualPath,
+            string storageRoot)
+        {
+            // Normalize incoming virtual path
+            string vPath = string.IsNullOrWhiteSpace(virtualPath) ? "/" : virtualPath.Trim();
+            if (!vPath.StartsWith('/'))
+            {
+                vPath = "/" + vPath;
+            }
+
+            // Collapse .. segments and remove . segments
+            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Where(s => s != "." && s != "..")
+                .ToArray();
+
+            string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
+            string candidate = Path.GetFullPath(Path.Combine(storageRoot, safeRel));
+
+            // Security check: ensure path doesn't escape the storage root
+            if (!candidate.StartsWith(storageRoot, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Path escapes storage root");
+            }
+
+            string virtualNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
+
+            return (storageRoot, candidate, virtualNormalized);
         }
     }
 }

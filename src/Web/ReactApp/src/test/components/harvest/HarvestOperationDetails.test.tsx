@@ -1,5 +1,5 @@
 
-import { render, act } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { screen, waitFor, fireEvent } from '@testing-library/dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
@@ -114,12 +114,10 @@ describe('HarvestOperationDetails', () => {
     });
   });
 
-  it('calls onClose when close button is clicked', async () => {
+  it('calls onClose when close button is clicked', () => {
     const onClose = vi.fn();
     render(<HarvestOperationDetails operation={mockOperation} onClose={onClose} />);
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('Close details'));
-    });
+    fireEvent.click(screen.getByLabelText('Close details'));
     expect(onClose).toHaveBeenCalled();
   });
 });

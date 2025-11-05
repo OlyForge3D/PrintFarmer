@@ -166,6 +166,18 @@ public static class ServiceCollectionExtensions
         // Provides centralized configuration for file storage paths
         _ = services.AddSingleton<Farm.Web.Api.Services.StorageManagement.IStoragePathService, Farm.Web.Api.Services.StorageManagement.StoragePathService>();
 
+        // File Management Services
+        // Unified file operations (path resolution, sanitization, hashing, utilities)
+        _ = services.AddSingleton<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
+        // Chunked upload state management (scoped to request lifetime)
+        _ = services.AddScoped<Farm.Web.Api.Services.FileManagement.IChunkedUploadService, Farm.Web.Api.Services.FileManagement.ChunkedUploadService>();
+
+        // Artifact Services
+        // Metrics instrumentation for artifact storage lifecycle (singleton for process-wide meter management)
+        _ = services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
+        _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
+        _ = services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
+
         // HTTP Clients with typed clients
         _ = services.AddHttpClient<IMoonrakerClient, MoonrakerClient>(client =>
         {
@@ -248,6 +260,8 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService, Farm.Web.Api.Services.Gcode.GcodeMetadataExtractorService>();
+        _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeFilesService, Farm.Web.Api.Services.Gcode.GcodeFilesService>();
+        _ = services.AddScoped<Farm.Web.Api.Repositories.Gcode.IGcodeRepository, Farm.Web.Api.Repositories.Gcode.EfGcodeRepository>();
 
         // Background worker to process harvest file jobs from the queue
         if (!disableBg)

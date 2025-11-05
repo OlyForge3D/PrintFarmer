@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Repositories.Model;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Interfaces; // for ModelAnalysisResult
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -22,12 +23,21 @@ namespace Farm.Web.Api.Services.Model
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
         private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
-        public ModelService(IModelRepository repository, IUnifiedLoggingService logger, IConfiguration configuration, Farm.Web.Api.Services.IO.IFileSystem fileSystem, IModelAnalysisService? analysisService = null)
+        private readonly IFileManagementService _fileManagementService;
+
+        public ModelService(
+            IModelRepository repository,
+            IUnifiedLoggingService logger,
+            IConfiguration configuration,
+            Farm.Web.Api.Services.IO.IFileSystem fileSystem,
+            IFileManagementService fileManagementService,
+            IModelAnalysisService? analysisService = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _analysisService = analysisService;
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+            _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
             ArgumentNullException.ThrowIfNull(configuration);
             _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
             if (!_fileSystem.DirectoryExists(_modelsPath))
@@ -46,7 +56,7 @@ namespace Farm.Web.Api.Services.Model
                 Name = m.DisplayName,
                 FileName = m.OriginalFileName,
                 FileSize = m.FileSizeBytes,
-                FileType = GetFileTypeString(m.FileFormat),
+                FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
                 UploadedAt = m.UploadedAt,
                 Url = $"/api/3d-models/{m.Id}/file",
                 ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null
@@ -67,7 +77,7 @@ namespace Farm.Web.Api.Services.Model
                 Name = model.DisplayName,
                 FileName = model.OriginalFileName,
                 FileSize = model.FileSizeBytes,
-                FileType = GetFileTypeString(model.FileFormat),
+                FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
                 Url = $"/api/3d-models/{model.Id}/file",
                 ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null
@@ -96,7 +106,7 @@ namespace Farm.Web.Api.Services.Model
 
             try
             {
-                if (IsSafePath(model.FilePath, _modelsPath) && System.IO.File.Exists(model.FilePath))
+                if (_fileManagementService.IsSafePath(model.FilePath, _modelsPath) && System.IO.File.Exists(model.FilePath))
                 {
                     System.IO.File.Delete(model.FilePath);
                 }
@@ -126,10 +136,15 @@ namespace Farm.Web.Api.Services.Model
 
             List<string> issues = new();
             string fileExtension = Path.GetExtension(modelFile.FileName);
-            string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply" };
-            if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
+
+            // Validate extension
+            try
             {
-                issues.Add($"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}");
+                _fileManagementService.ValidateModelExtension(fileExtension);
+            }
+            catch (ArgumentException ex)
+            {
+                issues.Add(ex.Message);
             }
 
             if (modelFile.Length > 100_000_000)
@@ -151,18 +166,16 @@ namespace Farm.Web.Api.Services.Model
                 throw new ArgumentException("Model file is required", nameof(modelFile));
             }
 
-            string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
             string originalName = modelFile.FileName ?? string.Empty;
             string fileExtension = Path.GetExtension(originalName);
-            if (!allowedExtensions.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException("Invalid file type", nameof(modelFile));
-            }
+
+            // Validate extension using service
+            _fileManagementService.ValidateModelExtension(fileExtension);
 
             Guid modelId = Guid.NewGuid();
             string fileName = $"{modelId}{fileExtension}";
             string filePath = Path.Combine(_modelsPath, fileName);
-            if (!IsSafePath(filePath, _modelsPath))
+            if (!_fileManagementService.IsSafePath(filePath, _modelsPath))
             {
                 throw new InvalidOperationException("Unsafe file path generated");
             }
@@ -177,7 +190,7 @@ namespace Farm.Web.Api.Services.Model
                     memoryStream.Position = 0;
 
                     byte[] hashBytes = await System.Security.Cryptography.SHA256.HashDataAsync(memoryStream, ct);
-                    fileHash = ToHexLower(hashBytes);
+                    fileHash = _fileManagementService.ToHex(hashBytes);
 
                     memoryStream.Position = 0;
                     await memoryStream.CopyToAsync(stream, ct);
@@ -216,7 +229,7 @@ namespace Farm.Web.Api.Services.Model
 
                     if (treatAsDuplicate)
                     {
-                        if (IsSafePath(filePath, _modelsPath) && _fileSystem.FileExists(filePath))
+                        if (_fileManagementService.IsSafePath(filePath, _modelsPath) && _fileSystem.FileExists(filePath))
                         {
                             _fileSystem.DeleteFile(filePath);
                         }
@@ -227,7 +240,7 @@ namespace Farm.Web.Api.Services.Model
                             Name = existingModel.DisplayName,
                             FileName = existingModel.OriginalFileName,
                             FileSize = existingModel.FileSizeBytes,
-                            FileType = GetFileTypeString(existingModel.FileFormat),
+                            FileType = _fileManagementService.GetModelFileFormatString(existingModel.FileFormat),
                             UploadedAt = existingModel.UploadedAt,
                             Url = $"/api/3d-models/{existingModel.Id}/file"
                         };
@@ -235,7 +248,7 @@ namespace Farm.Web.Api.Services.Model
 
                     byte[] composite = System.Text.Encoding.UTF8.GetBytes(fileHash + "|" + originalName);
                     byte[] newHashBytes = System.Security.Cryptography.SHA256.HashData(composite);
-                    fileHash = ToHexLower(newHashBytes);
+                    fileHash = _fileManagementService.ToHex(newHashBytes);
                 }
 
                 Model3D model = new()
@@ -246,7 +259,7 @@ namespace Farm.Web.Api.Services.Model
                     FilePath = filePath,
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
-                    FileFormat = GetFileFormat(fileExtension),
+                    FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
                     UploadedAt = DateTime.UtcNow,
                     IsValid = true,
                     CreatedAt = DateTime.UtcNow,
@@ -279,7 +292,7 @@ namespace Farm.Web.Api.Services.Model
                 // cleanup partial file if exists
                 try
                 {
-                    if (IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
+                    if (_fileManagementService.IsSafePath(filePath, _modelsPath) && System.IO.File.Exists(filePath))
                     {
                         System.IO.File.Delete(filePath);
                     }
@@ -288,64 +301,6 @@ namespace Farm.Web.Api.Services.Model
 
                 throw;
             }
-        }
-
-        private static string ToHexLower(byte[] bytes)
-        {
-            return Convert.ToHexString(bytes).ToLowerInvariant();
-        }
-
-        private static ModelFileFormat GetFileFormat(string extension)
-        {
-            if (string.Equals(extension, ".stl", StringComparison.OrdinalIgnoreCase))
-            {
-                return ModelFileFormat.STL;
-            }
-            if (string.Equals(extension, ".3mf", StringComparison.OrdinalIgnoreCase))
-            {
-                return ModelFileFormat.TMF;
-            }
-            if (string.Equals(extension, ".obj", StringComparison.OrdinalIgnoreCase))
-            {
-                return ModelFileFormat.OBJ;
-            }
-            if (string.Equals(extension, ".ply", StringComparison.OrdinalIgnoreCase))
-            {
-                return ModelFileFormat.PLY;
-            }
-            if (string.Equals(extension, ".step", StringComparison.OrdinalIgnoreCase))
-            {
-                return ModelFileFormat.STEP;
-            }
-
-            return ModelFileFormat.STL;
-        }
-
-        private static bool IsSafePath(string candidatePath, string root)
-        {
-            try
-            {
-                string fullRoot = Path.GetFullPath(root);
-                string fullCandidate = Path.GetFullPath(candidatePath);
-                return fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static string GetFileTypeString(ModelFileFormat format)
-        {
-            return format switch
-            {
-                ModelFileFormat.STL => "stl",
-                ModelFileFormat.TMF => "3mf",
-                ModelFileFormat.OBJ => "obj",
-                ModelFileFormat.PLY => "ply",
-                ModelFileFormat.STEP => "step",
-                _ => "stl"
-            };
         }
     }
 }

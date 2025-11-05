@@ -25,14 +25,6 @@ namespace Farm.Web.Api.Tests;
 
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
-    // The ArtifactsMetrics instance id resolved from the host's root service provider
-    // (useful for tests to correlate which server-side metrics instance is the "host" one).
-    public Guid? HostArtifactsInstanceId { get; private set; }
-    // Optional: token associated with the host-level ArtifactsMetrics instance
-    // used to perform host-scoped resets safely when multiple test hosts run
-    // in the same process.
-    public string? HostArtifactsInstanceToken { get; private set; }
-
     private readonly string _dbPath;
     private SqliteConnection? _inMemorySqliteConnection;
     // Optional shared connection used as a lightweight fixture across factory instances
@@ -50,69 +42,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     public Mock<IModelAnalysisService> MockModelAnalysisService { get; private set; } = null!;
 
     private readonly ConcurrentDictionary<Guid, DistributedSlicingJob> _slicerJobs = new();
-
-    // Directory under the repo where tests may write generated artifacts (gcode, png thumbnails, etc.).
-    // Default: <repo-root>/src/test-artifacts when tests are executed with CWD set to src.
-    private static string TestArtifactsDirectory =>
-        Environment.GetEnvironmentVariable("TEST_ARTIFACTS_DIR") ?? Path.Combine(Directory.GetCurrentDirectory(), "test-artifacts");
-
-    private static void EnsureTestArtifactsDirectoryExists()
-    {
-        try
-        {
-            var dir = TestArtifactsDirectory;
-            if (!Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-        }
-        catch { }
-    }
-
-    private static void CleanTestArtifactsDirectory()
-    {
-        try
-        {
-            var dir = TestArtifactsDirectory;
-            if (!Directory.Exists(dir))
-            {
-                return;
-            }
-            // Remove common generated artifact types produced by tests
-            foreach (var pat in new[] { "*.gcode", "*.png", "*.jpg", "*.jpeg" })
-            {
-                try
-                {
-                    var files = Directory.GetFiles(dir, pat, SearchOption.AllDirectories);
-                    foreach (var f in files)
-                    {
-                        try
-                        { File.Delete(f); }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-            // Also remove empty directories under the artifacts dir
-            try
-            {
-                var subdirs = Directory.GetDirectories(dir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length);
-                foreach (var sd in subdirs)
-                {
-                    try
-                    {
-                        if (!Directory.EnumerateFileSystemEntries(sd).Any())
-                        {
-                            Directory.Delete(sd);
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-        }
-        catch { }
-    }
 
     public CustomWebApplicationFactory()
     {
@@ -148,16 +77,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         // Set up default mock behaviors
         SetupDefaultMockBehaviors();
-
-        // Ensure a repo-local test artifacts directory exists and perform a quick cleanup
-        // of any leftover files from previous test runs. Tests that generate .gcode/.png
-        // should write into this directory (or the env var TEST_ARTIFACTS_DIR) when possible.
-        try
-        {
-            EnsureTestArtifactsDirectoryExists();
-            CleanTestArtifactsDirectory();
-        }
-        catch { }
 
         SetupSlicerServiceMocks();
         // As an extra guard, ensure OpenTelemetry exporters and sampling are disabled when tests instantiate the factory
@@ -330,18 +249,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         }
         builder.ConfigureAppConfiguration((context, config) =>
         {
-            // Ensure artifact storage during tests is redirected to the repo-local test-artifacts
-            // directory so generated .gcode/.png files are written into a path that is gitignored.
-            var artifactRoot = Path.GetFullPath(TestArtifactsDirectory);
-
             var dict = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = $"Data Source={_dbPath}",
                 ["ConnectionStrings:Sqlite"] = $"Data Source={_dbPath}",
                 // Avoid running EF Core Migrate() in tests when using ad-hoc SQLite files; rely on startup safety + EnsureCreated
-                ["DISABLE_EF_MIGRATIONS"] = "true",
-                // Force artifact root path to the test artifacts directory (absolute) during tests
-                ["ArtifactStorage:RootPath"] = artifactRoot
+                ["DISABLE_EF_MIGRATIONS"] = "true"
             };
             config.AddInMemoryCollection(dict!);
         });
@@ -357,44 +270,16 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     (d.ImplementationFactory != null && d.ImplementationFactory.Method?.DeclaringType != null && (d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("OpenTelemetry") || d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("TracerProvider") || d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("MeterProvider") || d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("Otlp")))
                 ).ToList();
 
-                foreach (var desc in otelCandidates)
+                foreach (var d in otelCandidates)
                 {
                     try
                     {
-                        services.Remove(desc);
+                        services.Remove(d);
                     }
-                    catch { }
-                }
-
-                // TEST-ONLY: Ensure ArtifactsMetrics is registered with test-friendly lifetime.
-                // In production the application registers it as a singleton. For tests we prefer
-                // a scoped lifetime so parallel test hosts in the same process do not share
-                // the same metrics instance across test-hosts. Remove any existing descriptor
-                // and register a scoped instance here.
-                try
-                {
-                    var metricsDescriptors = services.Where(d => d.ServiceType == typeof(Farm.Web.Api.Services.Artifacts.ArtifactsMetrics)).ToList();
-                    foreach (var md in metricsDescriptors)
+                    catch
                     {
-                        try
-                        { services.Remove(md); }
-                        catch { }
                     }
-                    // Register a per-host singleton for tests so all services in the same TestServer
-                    // share one ArtifactsMetrics instance, while different test hosts (in the same
-                    // process) get isolated instances. Tag the instance with a host-specific token
-                    // so resets can be targeted safely.
-                    var hostToken = Guid.NewGuid().ToString("N");
-                    try
-                    {
-                        // store token on the factory instance so tests can correlate if needed
-                        // (we cannot assign HostArtifactsInstanceToken here because CreateHost may run
-                        // multiple times per factory; it's set later when probing the host's service provider)
-                    }
-                    catch { }
-                    services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>(sp => new Farm.Web.Api.Services.Artifacts.ArtifactsMetrics(hostToken));
                 }
-                catch { }
             }
             catch { }
             // Best-effort: ensure an IDbContextFactory is resolvable early so singleton
@@ -450,14 +335,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         }
                     }
 
-                    // Only mark startup to skip DB init when the shared fixture actually
-                    // provided the connection (i.e. an external fixture seeded the DB).
-                    // If we created the connection ourselves we will decide to skip
-                    // startup seeding only after a successful pre-seed below.
-                    if (Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection != null)
-                    {
-                        Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
-                    }
+                    // Ensure the env flag so startup doesn't double-seed
+                    Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
 
                     // Register into DI if not already present
                     try
@@ -1076,13 +955,9 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             }
 
             // Dump DB table counts and sample rows to test output for debugging missing FK issues
-            // This is noisy in normal test runs; enable only when TEST_ENABLE_DB_DUMP=true
             try
             {
-                if (IsDbDumpEnabled())
-                {
-                    DumpDatabaseState(db);
-                }
+                DumpDatabaseState(db);
             }
             catch (Exception ex)
             {
@@ -1124,50 +999,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             throw new InvalidOperationException("TestWebApplicationFactory: Host pre-seed or verification failed.", ex);
         }
 
-        // Previously we reset global metric state here which cleared all in-process
-        // ArtifactsMetrics instances. That interferes with parallel test-hosts
-        // running in the same process. Instead, after we capture the host's
-        // own ArtifactsMetrics instance id below, we'll reset only that instance
-        // (ResetInstances) to ensure deterministic starting state for this host.
-
-        // Capture the host-level ArtifactsMetrics instance id for test diagnostics and correlation.
+        // Reset global metric state to ensure tests start with deterministic counters/gauges
         try
         {
-            using var probeScope = host.Services.CreateScope();
-            var hostMetrics = probeScope.ServiceProvider.GetService<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
-            if (hostMetrics != null)
-            {
-                try
-                {
-                    HostArtifactsInstanceId = hostMetrics.InstanceId;
-                    HostArtifactsInstanceToken = hostMetrics.HostToken;
-                    Console.WriteLine($"TestFactory: Host ArtifactsMetrics.InstanceId={HostArtifactsInstanceId:N}");
-                    if (!string.IsNullOrEmpty(HostArtifactsInstanceToken))
-                    {
-                        Console.WriteLine($"TestFactory: Host ArtifactsMetrics.Token={HostArtifactsInstanceToken}");
-                    }
-                }
-                catch { }
-            }
+            Farm.Web.Api.Services.Artifacts.ArtifactsMetrics.ResetForTests();
         }
-        catch { }
-
-        // Reset only the host's own ArtifactsMetrics instance state so this test host
-        // starts from deterministic counters/gauges without touching other test-host
-        // instances that may be running in the same process.
-        try
+        catch
         {
-            if (!string.IsNullOrEmpty(HostArtifactsInstanceToken))
-            {
-                Farm.Web.Api.Services.Artifacts.ArtifactsMetrics.ResetInstancesForHost(HostArtifactsInstanceToken);
-            }
-            else if (HostArtifactsInstanceId.HasValue)
-            {
-                // Fallback: reset by instance id if token was not available
-                Farm.Web.Api.Services.Artifacts.ArtifactsMetrics.ResetInstances(new[] { HostArtifactsInstanceId.Value });
-            }
+            // best-effort; don't fail host creation if metrics reset is not available
         }
-        catch { }
 
         // Diagnostic self-check: ensure the IAuthAuditService can write an audit entry
         // and that the entry is visible when queried from a new scope. This helps
@@ -1201,12 +1041,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                             catch { }
                             // Also dump a small DB state to help triage
                             try
-                            {
-                                if (IsDbDumpEnabled())
-                                {
-                                    DumpDatabaseState(verifyDb);
-                                }
-                            }
+                            { DumpDatabaseState(verifyDb); }
                             catch { }
                             throw new InvalidOperationException("AuthAudit diagnostic self-check failed: audit writes are not visible across scopes. This typically indicates AppDbContext/connection mismatch in test DI registration.");
                         }
@@ -1472,19 +1307,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         }
     }
 
-    private static bool IsDbDumpEnabled()
-    {
-        try
-        {
-            var v = Environment.GetEnvironmentVariable("TEST_ENABLE_DB_DUMP");
-            return string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(v, "1", StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     public new void Dispose()
     {
         base.Dispose();
@@ -1501,13 +1323,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         catch { }
 
         TryDelete();
-
-        // Clean any test-generated artifacts produced during the test run.
-        try
-        {
-            CleanTestArtifactsDirectory();
-        }
-        catch { }
     }
 
     // Message handler used by test HttpClients to simulate Spoolman probe behaviors.

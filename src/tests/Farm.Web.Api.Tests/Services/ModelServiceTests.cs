@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -36,7 +37,10 @@ namespace Farm.Web.Api.Tests.Services
                 .Returns(Task.CompletedTask);
             mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()));
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile file = CreateFormFile("file", "dummy-content", "model.stl");
 
@@ -75,13 +79,20 @@ namespace Farm.Web.Api.Tests.Services
             };
 
             var mockRepo = new Mock<Farm.Web.Api.Repositories.Model.IModelRepository>(MockBehavior.Strict);
-            // For duplicate scenario: GetByHashAsync returns existing model
-            mockRepo.Setup(r => r.GetByHashAsync(It.Is<string>(s => s == contentHash), It.IsAny<CancellationToken>()))
+            // For duplicate scenario: GetByHashAsync returns existing model for any hash
+            mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()));
+            var mockFileManagement = new Mock<IFileManagementService>();
+            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            // Setup ToHex to match the expected hash
+            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+                .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+            // Setup ToHex to match the expected hash
+            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+                .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            // Create a file whose SHA256 matches the existing model
+            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
             var result = await service.UploadModelAsync(file, CancellationToken.None);

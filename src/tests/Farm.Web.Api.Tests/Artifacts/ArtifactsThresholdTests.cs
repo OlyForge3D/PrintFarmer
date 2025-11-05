@@ -85,18 +85,46 @@ public class ArtifactsThresholdTests
         // Arrange
         using var metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
-        // Act & Assert using instance-local state (avoids global MeterListener interference)
-        var initialState = metrics.CurrentState;
+
+        var meterListener = new MeterListener();
+        var stateValues = new System.Collections.Generic.List<int>();
+
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == "PrintFarmer.Artifacts" &&
+                instrument.Name == "printfarmer.artifacts.storage_threshold_state")
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+
+        meterListener.SetMeasurementEventCallback<int>((instrument, measurement, tags, state) =>
+        {
+            if (instrument.Name == "printfarmer.artifacts.storage_threshold_state")
+            {
+                stateValues.Add(measurement);
+            }
+        });
+
+        meterListener.Start();
+
+        // Act - Record initial state (normal)
+        meterListener.RecordObservableInstruments();
+        var initialState = stateValues.LastOrDefault();
 
         // Upload to warning level
         metrics.RecordUpload(1500);
         Thread.Sleep(50);
-        var warningState = metrics.CurrentState;
+        meterListener.RecordObservableInstruments();
+        var warningState = stateValues.LastOrDefault();
 
         // Upload to critical level
         metrics.RecordUpload(4000);
         Thread.Sleep(50);
-        var criticalState = metrics.CurrentState;
+        meterListener.RecordObservableInstruments();
+        var criticalState = stateValues.LastOrDefault();
+
+        meterListener.Dispose();
 
         // Assert
         initialState.Should().Be(0); // Normal

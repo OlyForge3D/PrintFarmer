@@ -30,33 +30,13 @@ public class GcodeFilesController(
     IUnifiedLoggingService logger,
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService,
-    Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService
+    Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
+    Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
+    Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
     private IReadOnlyCollection<string> AllowedExtensions => uploadSettings.AllowedExtensions;
-
-    // ---------------- Chunked upload (in-memory state) ----------------
-    private static readonly ConcurrentDictionary<string, ChunkUploadState> _chunkStates = new();
-    private const int DefaultChunkSize = 1 * 1024 * 1024; // 1 MB recommended chunk size
-
-    private sealed class ChunkUploadState
-    {
-        public required string Id { get; init; }
-        public required string UserId { get; init; }
-        public required string TempFilePath { get; init; }
-        public required string MetaFilePath { get; init; }
-        public required string TargetDirectoryFullPath { get; init; }
-        public required string FinalSafeName { get; set; }
-        public required long TotalSize { get; init; }
-        public long UploadedBytes; // atomic via Interlocked only if multithreaded
-        public DateTime CreatedUtc { get; init; } = DateTime.UtcNow;
-        public string? HashAlgorithm { get; init; }
-        public string? ExpectedHash { get; init; }
-        public string? FinalHash { get; set; }
-        public IncrementalHash? Hasher { get; init; }
-        public bool Paused { get; set; }
-    }
 
     /// <summary>
     /// Computes a hash for an existing G-code file for deduplication/comparison (sha256 default; supports sha1).
@@ -65,7 +45,7 @@ public class GcodeFilesController(
     [ProducesResponseType(typeof(GcodeFileHashResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
-    [SuppressMessage("Security", "CA3003", Justification = "Path validated via ResolveAndValidatePath and enforced root prefix check.")]
+    [SuppressMessage("Security", "CA3003", Justification = "Path validated in service via IStoragePathService with root prefix check.")]
     public ActionResult<GcodeFileHashResponse> GetFileHash([FromQuery] string? path, [FromQuery] string? algorithm = "sha256")
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -107,7 +87,7 @@ public class GcodeFilesController(
                 hasher.AppendData(buffer, 0, read);
                 total += read;
             }
-            string hex = ToHex(hasher.GetHashAndReset());
+            string hex = fileManagementService.ToHex(hasher.GetHashAndReset());
             return Ok(new GcodeFileHashResponse(fileName, total, algorithm, hex));
         }
         catch (Exception ex)
@@ -161,98 +141,44 @@ public class GcodeFilesController(
         {
             return BadRequest("fileName and positive size required");
         }
+
         string ext = Path.GetExtension(req.FileName) ?? string.Empty;
         if (!AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest($"Invalid file type '{ext}'. Allowed: {string.Join(", ", AllowedExtensions)}");
         }
+
         try
         {
+            // Resolve and validate target directory
             (_, string? targetDirFullPath, string? virtualDir) = ResolveAndValidatePath(req.Path ?? "/");
             if (!Directory.Exists(targetDirFullPath))
             {
                 _ = Directory.CreateDirectory(targetDirFullPath);
             }
-            // Sanitize filename & collision resolution (reserve final name now so user sees stable name)
-            string originalName = Path.GetFileName(req.FileName);
-            if (string.IsNullOrWhiteSpace(originalName))
-            {
-                originalName = "upload" + ext;
-            }
-            string safeName = originalName;
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                safeName = safeName.Replace(c, '_');
-            }
-            if (!safeName.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-            {
-                safeName += ext;
-            }
 
-            string destinationPath = Path.Combine(targetDirFullPath, safeName);
-            string fullTarget = Path.GetFullPath(destinationPath);
-            if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
-            {
-                return BadRequest("Unsafe target path");
-            }
-            if (System.IO.File.Exists(fullTarget))
-            {
-                string baseName = Path.GetFileNameWithoutExtension(safeName);
-                int counter = 1;
-                string candidate;
-                do
-                {
-                    candidate = baseName + " (" + counter++ + ")" + ext;
-                    fullTarget = Path.GetFullPath(Path.Combine(targetDirFullPath, candidate));
-                } while (System.IO.File.Exists(fullTarget));
-                safeName = Path.GetFileName(fullTarget);
-            }
-            // Create temp part file path (unique by GUID) to avoid partial naming collisions
-            string uploadId = Guid.NewGuid().ToString("N");
-            string tempFilePath = Path.Combine(targetDirFullPath, safeName + "." + uploadId + ".part");
-            string metaFilePath = tempFilePath + ".meta.json";
-            using (System.IO.File.Create(tempFilePath))
-            {
-                // create empty temp file
-            }
+            // Get user ID for quota tracking
             string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-            // Optional hashing (sha256 default if provided "sha256" or "sha1")
-            IncrementalHash? hasher = null;
-            string? hashAlgo = null;
-            string? expectedHash = null;
-            if (!string.IsNullOrWhiteSpace(req.HashAlgorithm))
-            {
-                string algo = req.HashAlgorithm.Trim();
-                if (!algo.Equals("sha256", StringComparison.OrdinalIgnoreCase) && !algo.Equals("sha1", StringComparison.OrdinalIgnoreCase))
-                {
-                    return BadRequest("Unsupported hashAlgorithm. Allowed: sha256, sha1");
-                }
-                hashAlgo = algo;
-                expectedHash = string.IsNullOrWhiteSpace(req.ExpectedHash) ? null : req.ExpectedHash.Trim();
-                hasher = algo.Equals("sha1", StringComparison.OrdinalIgnoreCase) ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            }
-            ChunkUploadState state = new()
-            {
-                Id = uploadId,
-                UserId = userId,
-                TempFilePath = tempFilePath,
-                MetaFilePath = metaFilePath,
-                TargetDirectoryFullPath = targetDirFullPath,
-                FinalSafeName = safeName,
-                TotalSize = req.Size,
-                UploadedBytes = 0,
-                HashAlgorithm = hashAlgo,
-                ExpectedHash = expectedHash,
-                Hasher = hasher,
-                Paused = false
-            };
-            if (!_chunkStates.TryAdd(uploadId, state))
-            {
-                return Problem("Failed to initialize upload", statusCode: 500);
-            }
-            PersistChunkState(state, logger);
-            string virtualFilePath = virtualDir == "/" ? "/" + safeName : virtualDir.TrimEnd('/') + "/" + safeName;
-            return Ok(new ChunkInitResponse(uploadId, safeName, virtualFilePath, 0, req.Size, DefaultChunkSize, hashAlgo));
+
+            // Delegate to service - it handles all business logic (sanitization, collision resolution, temp file creation, etc.)
+            var result = chunkedUploadService.InitializeUpload(
+                userId,
+                req.FileName,
+                req.Size,
+                targetDirFullPath,
+                AllowedExtensions,
+                req.HashAlgorithm,
+                req.ExpectedHash);
+
+            string virtualFilePath = virtualDir == "/" ? "/" + result.SafeFileName : virtualDir?.TrimEnd('/') + "/" + result.SafeFileName;
+            return Ok(new ChunkInitResponse(
+                result.UploadId,
+                result.SafeFileName,
+                virtualFilePath,
+                0,
+                req.Size,
+                result.RecommendedChunkSize,
+                req.HashAlgorithm));
         }
         catch (Exception ex)
         {
@@ -273,105 +199,63 @@ public class GcodeFilesController(
         {
             return NotFound();
         }
-        if (!_chunkStates.TryGetValue(uploadId, out ChunkUploadState? state))
-        {
-            return NotFound();
-        }
-        // If server-side paused, block further chunk data until resumed to avoid inconsistent state.
-        if (state.Paused)
-        {
-            return StatusCode(StatusCodes.Status423Locked, new
-            {
-                error = "upload_paused",
-                status = new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, state.UploadedBytes == state.TotalSize, state.FinalHash, true)
-            });
-        }
-        if (offset != state.UploadedBytes)
-        {
-            return Conflict(new { expectedOffset = state.UploadedBytes, providedOffset = offset });
-        }
+
         try
         {
-            // Read body stream fully into buffer (could stream append but we need size for quota)
+            // Read chunk data from request body
             await using MemoryStream ms = new();
             await Request.Body.CopyToAsync(ms);
             byte[] chunkBytes = ms.ToArray();
+
             if (chunkBytes.Length == 0)
             {
                 return BadRequest("Empty chunk");
             }
-            long remaining = state.TotalSize - state.UploadedBytes;
-            if (chunkBytes.Length > remaining)
+
+            // Get user ID for service
+            string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+
+            // Delegate to service - it handles all the validation, quota checking, hashing, and finalization
+            var result = await chunkedUploadService.AppendChunkAsync(uploadId, offset, chunkBytes, userId, quotaService);
+
+            return Ok(new ChunkStatusResponse(
+                result.UploadId,
+                result.SafeFileName,
+                result.UploadedBytes,
+                result.TotalSize,
+                result.IsCompleted,
+                result.FinalHash,
+                result.IsPaused));
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("offset"))
+        {
+            return Conflict(new { error = "offset_mismatch", message = ex.Message });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("paused"))
+        {
+            var status = chunkedUploadService.GetOrResumeUpload(uploadId);
+            if (status != null)
             {
-                return BadRequest("Chunk exceeds remaining size");
-            }
-            string userId = state.UserId;
-            if (!quotaService.TryAddUsage(userId, chunkBytes.Length, out long used, out long limit))
-            {
-                Response.Headers["X-Upload-Quota-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
-                Response.Headers["X-Upload-Quota-Used"] = used.ToString(CultureInfo.InvariantCulture);
-                return StatusCode(StatusCodes.Status429TooManyRequests, "Daily upload quota exceeded");
-            }
-            await System.IO.File.AppendAllTextAsync(state.TempFilePath, string.Empty); // ensure exists
-            await using (FileStream fs = new(state.TempFilePath, FileMode.Append, FileAccess.Write, FileShare.None))
-            {
-                await fs.WriteAsync(new ReadOnlyMemory<byte>(chunkBytes), CancellationToken.None);
-            }
-            state.UploadedBytes += chunkBytes.Length;
-            state.Hasher?.AppendData(chunkBytes);
-            bool completed = state.UploadedBytes == state.TotalSize;
-            if (completed)
-            {
-                // Finalize: move temp file to final destination name
-                string finalFull = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
-                if (System.IO.File.Exists(finalFull))
+                return StatusCode(StatusCodes.Status423Locked, new
                 {
-                    // Extremely rare: file created after init; collision resolve again
-                    string ext = Path.GetExtension(state.FinalSafeName);
-                    string baseName = Path.GetFileNameWithoutExtension(state.FinalSafeName);
-                    int counter = 1;
-                    string candidate;
-                    string newFull;
-                    do
-                    {
-                        candidate = baseName + " (" + counter++ + ")" + ext;
-                        newFull = Path.GetFullPath(Path.Combine(state.TargetDirectoryFullPath, candidate));
-                    } while (System.IO.File.Exists(newFull));
-                    state.FinalSafeName = Path.GetFileName(newFull);
-                    finalFull = newFull;
-                }
-                if (state.Hasher != null)
-                {
-                    byte[] hashBytes = state.Hasher.GetHashAndReset();
-                    string hex = ToHex(hashBytes);
-                    state.FinalHash = hex;
-                    if (state.ExpectedHash != null && !hex.Equals(state.ExpectedHash, StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            System.IO.File.Delete(state.TempFilePath);
-                            if (System.IO.File.Exists(state.MetaFilePath))
-                            {
-                                System.IO.File.Delete(state.MetaFilePath);
-                            }
-                        }
-                        catch { }
-                        _ = _chunkStates.TryRemove(uploadId, out _);
-                        return UnprocessableEntity(new { error = "hash_mismatch", expected = state.ExpectedHash, actual = hex });
-                    }
-                }
-                System.IO.File.Move(state.TempFilePath, finalFull, overwrite: false);
-                if (System.IO.File.Exists(state.MetaFilePath))
-                {
-                    System.IO.File.Delete(state.MetaFilePath);
-                }
-                _ = _chunkStates.TryRemove(uploadId, out _);
+                    error = "upload_paused",
+                    status = new ChunkStatusResponse(status.UploadId, status.SafeFileName, status.UploadedBytes, status.TotalSize, status.IsCompleted, status.FinalHash, status.IsPaused)
+                });
             }
-            else
-            {
-                PersistChunkState(state, logger);
-            }
-            return Ok(new ChunkStatusResponse(uploadId, state.FinalSafeName, state.UploadedBytes, state.TotalSize, completed, state.FinalHash, state.Paused));
+            return NotFound();
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("quota"))
+        {
+            // Extract quota info from exception message if available
+            return StatusCode(StatusCodes.Status429TooManyRequests, "Daily upload quota exceeded");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("hash_mismatch"))
+        {
+            return UnprocessableEntity(new { error = "hash_mismatch", message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -394,65 +278,28 @@ public class GcodeFilesController(
         {
             return NotFound();
         }
-        if (_chunkStates.TryGetValue(uploadId, out ChunkUploadState? existing))
-        {
-            return Ok(new ChunkStatusResponse(existing.Id, existing.FinalSafeName, existing.UploadedBytes, existing.TotalSize, existing.UploadedBytes == existing.TotalSize, existing.FinalHash, existing.Paused));
-        }
-        // Attempt rehydrate by searching known temp roots (current web root gcode-library)
+
         try
         {
-            (string? root, string _, string _) = ResolveAndValidatePath("/");
-            List<string> metas = Directory.EnumerateFiles(root, $"*.{uploadId}.part.meta.json", SearchOption.AllDirectories).Take(1).ToList();
-            if (metas.Count == 0)
+            // Delegate to service - it handles both in-memory and recovery from metadata
+            var status = chunkedUploadService.GetOrResumeUpload(uploadId);
+            if (status == null)
             {
                 return NotFound();
             }
-            string metaFile = metas[0];
-            string json = System.IO.File.ReadAllText(metaFile);
-            JsonDocument doc = JsonDocument.Parse(json);
-            long totalSize = doc.RootElement.GetProperty("TotalSize").GetInt64();
-            long uploadedBytes = doc.RootElement.GetProperty("UploadedBytes").GetInt64();
-            string finalSafeName = doc.RootElement.GetProperty("FinalSafeName").GetString() ?? "unknown";
-            string targetDir = doc.RootElement.GetProperty("TargetDirectoryFullPath").GetString() ?? Path.GetDirectoryName(metaFile)!;
-            string tempPath = doc.RootElement.GetProperty("TempFilePath").GetString() ?? Path.Combine(targetDir, finalSafeName + "." + uploadId + ".part");
-            string? hashAlgo = doc.RootElement.TryGetProperty("HashAlgorithm", out JsonElement ha) ? ha.GetString() : null;
-            string? expectedHash = doc.RootElement.TryGetProperty("ExpectedHash", out JsonElement eh) ? eh.GetString() : null;
-            bool paused = doc.RootElement.TryGetProperty("Paused", out JsonElement pEl) && pEl.GetBoolean();
-            // Recreate IncrementalHash cannot continue (need bytes). Without full rehash we only allow resume if no hash specified.
-            IncrementalHash? hasher = null;
-            if (!string.IsNullOrWhiteSpace(hashAlgo) && uploadedBytes > 0)
-            {
-                // Can't reconstruct incremental state without re-reading file; do a full hash of existing partial content.
-                try
-                {
-                    hasher = hashAlgo == "sha1" ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    using FileStream fs = new(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    byte[] buffer = new byte[81920];
-                    int read;
-                    while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        hasher.AppendData(buffer, 0, read);
-                    }
-                }
-                catch { hasher = null; }
-            }
-            ChunkUploadState state = new()
-            {
-                Id = uploadId,
-                UserId = "anonymous", // Unknown after restart; treat quota via new requests only
-                TempFilePath = tempPath,
-                MetaFilePath = metaFile,
-                TargetDirectoryFullPath = targetDir,
-                FinalSafeName = finalSafeName,
-                TotalSize = totalSize,
-                UploadedBytes = uploadedBytes,
-                HashAlgorithm = hashAlgo,
-                ExpectedHash = expectedHash,
-                Hasher = hasher,
-                Paused = paused
-            };
-            _chunkStates[uploadId] = state;
-            return Ok(new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, state.UploadedBytes == state.TotalSize, state.FinalHash, state.Paused));
+
+            return Ok(new ChunkStatusResponse(
+                status.UploadId,
+                status.SafeFileName,
+                status.UploadedBytes,
+                status.TotalSize,
+                status.IsCompleted,
+                status.FinalHash,
+                status.IsPaused));
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return NotFound();
         }
         catch (Exception ex)
         {
@@ -466,18 +313,33 @@ public class GcodeFilesController(
     [ProducesResponseType(404)]
     public ActionResult<ChunkStatusResponse> PauseChunkUpload([FromRoute] string uploadId)
     {
-        if (string.IsNullOrWhiteSpace(uploadId) || !_chunkStates.TryGetValue(uploadId, out ChunkUploadState? state))
+        if (string.IsNullOrWhiteSpace(uploadId))
         {
             return NotFound();
         }
-        if (state.UploadedBytes == state.TotalSize)
+
+        try
         {
-            // Already completed – treat as not pausable; return final status.
-            return Ok(new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, true, state.FinalHash, false));
+            // Delegate to service
+            var status = chunkedUploadService.PauseUpload(uploadId);
+            if (status == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(new ChunkStatusResponse(
+                status.UploadId,
+                status.SafeFileName,
+                status.UploadedBytes,
+                status.TotalSize,
+                status.IsCompleted,
+                status.FinalHash,
+                status.IsPaused));
         }
-        state.Paused = true;
-        PersistChunkState(state, logger);
-        return Ok(new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, false, state.FinalHash, true));
+        catch (InvalidOperationException)
+        {
+            return NotFound();
+        }
     }
 
     [HttpPost("chunk/{uploadId}/resume")]
@@ -485,17 +347,33 @@ public class GcodeFilesController(
     [ProducesResponseType(404)]
     public ActionResult<ChunkStatusResponse> ResumeChunkUpload([FromRoute] string uploadId)
     {
-        if (string.IsNullOrWhiteSpace(uploadId) || !_chunkStates.TryGetValue(uploadId, out ChunkUploadState? state))
+        if (string.IsNullOrWhiteSpace(uploadId))
         {
             return NotFound();
         }
-        if (state.UploadedBytes == state.TotalSize)
+
+        try
         {
-            return Ok(new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, true, state.FinalHash, false));
+            // Delegate to service
+            var status = chunkedUploadService.ResumeUpload(uploadId);
+            if (status == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(new ChunkStatusResponse(
+                status.UploadId,
+                status.SafeFileName,
+                status.UploadedBytes,
+                status.TotalSize,
+                status.IsCompleted,
+                status.FinalHash,
+                status.IsPaused));
         }
-        state.Paused = false;
-        PersistChunkState(state, logger);
-        return Ok(new ChunkStatusResponse(state.Id, state.FinalSafeName, state.UploadedBytes, state.TotalSize, false, state.FinalHash, false));
+        catch (InvalidOperationException)
+        {
+            return NotFound();
+        }
     }
 
     [HttpDelete("chunk/{uploadId}")]
@@ -507,24 +385,22 @@ public class GcodeFilesController(
         {
             return NoContent();
         }
-        if (_chunkStates.TryRemove(uploadId, out ChunkUploadState? state))
+
+        try
         {
-            try
-            {
-                if (System.IO.File.Exists(state.TempFilePath))
-                {
-                    System.IO.File.Delete(state.TempFilePath);
-                }
-                if (System.IO.File.Exists(state.MetaFilePath))
-                {
-                    System.IO.File.Delete(state.MetaFilePath);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug($"Failed to delete temp file {state.TempFilePath}: {ex.Message}");
-            }
+            // Delegate to service - it handles cleanup of temp files and metadata
+            chunkedUploadService.CancelUpload(uploadId);
         }
+        catch (InvalidOperationException)
+        {
+            // Upload not found - that's fine, just return success (idempotent)
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug($"Failed to cancel upload {uploadId}: {ex.Message}");
+            // Still return success - we tried our best to clean up
+        }
+
         return NoContent();
     }
 
@@ -543,7 +419,7 @@ public class GcodeFilesController(
 
         try
         {
-            bool success = await gcodeFilesService.DeleteFilesAsync(request.FilePaths, recursive, env.WebRootPath, HttpContext.RequestAborted);
+            bool success = await gcodeFilesService.DeleteFilesAsync(request.FilePaths, recursive, HttpContext.RequestAborted);
             return Ok(new
             {
                 deleted = success ? request.FilePaths.Count : 0,
@@ -569,7 +445,7 @@ public class GcodeFilesController(
     {
         try
         {
-            (byte[] bytes, string fileName)? result = await gcodeFilesService.DownloadAsync(path, env.WebRootPath, HttpContext.RequestAborted);
+            (byte[] bytes, string fileName)? result = await gcodeFilesService.DownloadAsync(path, HttpContext.RequestAborted);
             if (result == null)
             {
                 return NotFound();
@@ -657,7 +533,7 @@ public class GcodeFilesController(
         try
         {
             GcodeFileEntryDto dto = await gcodeFilesService.UploadAsync(
-                path, file, uploadSettings, quotaService, env.WebRootPath, HttpContext.RequestAborted);
+                path, file, uploadSettings, quotaService, HttpContext.RequestAborted);
             return Created($"/api/gcode-files?path={Uri.EscapeDataString(Path.GetDirectoryName(dto.Path) ?? "/")}", dto);
         }
         catch (InvalidOperationException ex)
@@ -691,7 +567,7 @@ public class GcodeFilesController(
         try
         {
             MultiUploadResponse response = await gcodeFilesService.UploadMultipleAsync(
-                path, files, uploadSettings, quotaService, env.WebRootPath, HttpContext.RequestAborted);
+                path, files, uploadSettings, quotaService, HttpContext.RequestAborted);
             return Created($"/api/gcode-files?path={Uri.EscapeDataString(path ?? "/")}", response);
         }
         catch (Exception ex)
@@ -715,7 +591,7 @@ public class GcodeFilesController(
     {
         try
         {
-            GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, env.WebRootPath, HttpContext.RequestAborted);
+            GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, HttpContext.RequestAborted);
             return Created($"/api/gcode-files?path={Uri.EscapeDataString(Path.GetDirectoryName(dto.Path) ?? "/")}", dto);
         }
         catch (ArgumentException ex)
@@ -799,48 +675,8 @@ public class GcodeFilesController(
         return weak ? $"W/\"{core}\"" : $"\"{core}\"";
     }
 
-    private static void PersistChunkState(ChunkUploadState state, IUnifiedLoggingService logger)
-    {
-        try
-        {
-            var model = new
-            {
-                state.Id,
-                state.UserId,
-                state.TempFilePath,
-                state.TargetDirectoryFullPath,
-                state.FinalSafeName,
-                state.TotalSize,
-                state.UploadedBytes,
-                state.CreatedUtc,
-                state.HashAlgorithm,
-                state.ExpectedHash,
-                state.FinalHash,
-                state.Paused
-            };
-            string json = JsonSerializer.Serialize(model);
-            // CA3003: Path validated and generated by server logic, not user input
-#pragma warning disable CA3003 // Review code for file path injection vulnerabilities
-            System.IO.File.WriteAllText(state.MetaFilePath, json);
-#pragma warning restore CA3003
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug($"Failed to persist chunk state {state.Id}: {ex.Message}");
-        }
-    }
-
-    private static string ToHex(byte[] bytes)
-    {
-        char[] c = new char[bytes.Length * 2];
-        int i = 0;
-        foreach (byte b in bytes)
-        {
-            c[i++] = (char)(b >> 4 < 10 ? '0' + (b >> 4) : 'a' + (b >> 4) - 10);
-            c[i++] = (char)((b & 0xF) < 10 ? '0' + (b & 0xF) : 'a' + (b & 0xF) - 10);
-        }
-        return new string(c);
-    }
+    // Note: ToHex has been moved to IFileManagementService.ToHex() - use that instead
+    // Note: PersistChunkState has been moved to ChunkedUploadService - no longer needed here
 
     // ---------------- Settings & Move endpoints ----------------
     [HttpGet("settings")]
@@ -881,7 +717,7 @@ public class GcodeFilesController(
         try
         {
             (bool ok, string virtualPath, bool isDirectory) = await gcodeFilesService.MoveAsync(
-                request.SourcePath, request.DestinationPath, request.Overwrite, env.WebRootPath, HttpContext.RequestAborted);
+                request.SourcePath, request.DestinationPath, request.Overwrite, HttpContext.RequestAborted);
             if (!ok)
             {
                 return NotFound("Source not found");
