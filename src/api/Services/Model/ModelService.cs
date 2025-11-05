@@ -312,7 +312,6 @@ namespace Farm.Web.Api.Services.Model
                         {
                             _fileSystem.DeleteFile(finalFilePath);
                         }
-
                         // Move temp to final location
                         _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
                         _logger.LogDebug($"Model file moved from temp to final location: {modelId}");
@@ -374,7 +373,6 @@ namespace Farm.Web.Api.Services.Model
                     {
                         _fileSystem.DeleteFile(tempFilePath);
                     }
-
                     // Try to clean up final file if it was already moved
                     if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
                     {

@@ -40,7 +40,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         var scope = _factory.Services.CreateScope();
         _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
         // Setup test storage directories
         _modelStoragePath = Path.Combine(Path.GetTempPath(), "test_models_" + Guid.NewGuid());
         _gcodeStoragePath = Path.Combine(Path.GetTempPath(), "test_gcode_" + Guid.NewGuid());
@@ -54,7 +53,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     {
         _client?.Dispose();
         _dbContext?.Dispose();
-
         // Cleanup test directories
         if (Directory.Exists(_modelStoragePath))
         {
@@ -75,7 +73,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         var model1 = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
         var model2 = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
         var gcode1 = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
-
         await _dbContext.SaveChangesAsync();
 
         // Act
@@ -84,7 +81,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var content = await response.Content.ReadAsAsync<dynamic>();
-
         content.totalModel3DFiles.Should().Be(2);
         content.model3DHealthy.Should().Be(2);
         content.totalGcodeFiles.Should().Be(1);
@@ -99,7 +95,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         var healthyModel = CreateAndPersistModel3D("healthy.stl", FileHealthStatus.Healthy);
         var missingModel = CreateAndPersistModel3D("missing.stl", FileHealthStatus.Missing);
         var corruptedGcode = CreateAndPersistGcodeFile("corrupted.gcode", FileHealthStatus.Corrupted);
-
         await _dbContext.SaveChangesAsync();
 
         // Act
@@ -108,7 +103,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var content = await response.Content.ReadAsAsync<dynamic>();
-
         content.totalIssues.Should().Be(2);
         content.missingFiles.Should().Be(1);
         content.corruptedFiles.Should().Be(1);
@@ -122,7 +116,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         var model = CreateAndPersistModel3D("test.stl", FileHealthStatus.Healthy);
         model.LastHealthCheckDate = DateTime.UtcNow.AddMinutes(-5);
         model.LastVerificationResult = "{\"verified\": true, \"hash_match\": true}";
-
         await _dbContext.SaveChangesAsync();
 
         // Act
@@ -131,7 +124,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var content = await response.Content.ReadAsAsync<dynamic>();
-
         content.fileId.Should().Be(model.Id.ToString());
         content.healthStatus.Should().Be("Healthy");
         content.fileSize.Should().Be(model.FileSizeBytes);
@@ -191,7 +183,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var content = await response.Content.ReadAsAsync<List<dynamic>>();
-
         content.Should().HaveCount(2);
         ((DateTime)content[0].auditDate).Should().BeAfter((DateTime)content[1].auditDate);
     }
@@ -227,7 +218,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Assert
         var savedAudit = await _dbContext.FileHealthAudits
             .FirstOrDefaultAsync(a => a.Id == auditResult.Id);
-
         savedAudit.Should().NotBeNull();
         savedAudit!.MissingFiles.Should().Be(1);
         savedAudit.HasIssues.Should().BeTrue();
@@ -282,7 +272,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         CreateAndPersistModel3D("m2.stl", FileHealthStatus.Healthy);
         CreateAndPersistModel3D("m3.stl", FileHealthStatus.Missing);
         CreateAndPersistGcodeFile("g1.gcode", FileHealthStatus.Corrupted);
-
         await _dbContext.SaveChangesAsync();
 
         // Act
@@ -291,7 +280,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var content = await response.Content.ReadAsAsync<dynamic>();
-
         // 2 healthy out of 4 files = 50%
         content.overallHealthPercentage.Should().Be(50.0);
     }
@@ -309,7 +297,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-
         factoryWithoutAuth.Dispose();
         clientWithoutAuth.Dispose();
     }

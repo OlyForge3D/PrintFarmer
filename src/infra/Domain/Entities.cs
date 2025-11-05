@@ -164,7 +164,6 @@ public class GcodeFile
     public string[]? TargetPrinterModels { get; set; } // JSON field
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-
     // File health status (populated by FileConsistencyAuditService)
     public DateTime? LastHealthCheckDate { get; set; }
     public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
@@ -289,7 +288,6 @@ public class Model3D
     public User? UploadedByUser { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-
     // File health status (populated by FileConsistencyAuditService)
     public DateTime? LastHealthCheckDate { get; set; }
     public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
@@ -663,19 +661,16 @@ public class FileHealthAudit
     public Guid Id { get; set; }
     public DateTime AuditDate { get; set; }
     public FileAuditType AuditType { get; set; } // Model3D, GcodeFile, or Orphaned
-
     // Statistics
     public int FilesChecked { get; set; }
     public int HealthyFiles { get; set; }
     public int MissingFiles { get; set; }
     public int CorruptedFiles { get; set; }
     public int OrphanedFiles { get; set; }
-
     // Details - JSON arrays of file IDs/paths with issues
     public string? MissingFileIds { get; set; } // JSON array of Guids
     public string? CorruptedFileIds { get; set; } // JSON array of Guids
     public string? OrphanedFilePaths { get; set; } // JSON array of file paths
-
     // Summary & status
     public string? SummaryMessage { get; set; } // Human-readable audit summary
     public bool HasIssues { get; set; } // True if any files missing/corrupted/orphaned
