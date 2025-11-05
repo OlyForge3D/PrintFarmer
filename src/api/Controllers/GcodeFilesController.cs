@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services; // added for IGcodeUploadSettings & quota services
+using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
@@ -125,8 +125,8 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error listing G-code files (path={path}): {ex.Message}");
-            return Problem("Failed to retrieve files", statusCode: 500);
+            logger.LogError($"Error listing G-code files (path={path}): {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            return Problem($"Failed to retrieve files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
 

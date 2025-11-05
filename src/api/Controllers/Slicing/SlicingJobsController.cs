@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,13 +13,19 @@ public class SlicingJobsController : ControllerBase
     private readonly IUnifiedLoggingService _logger;
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator;
+    private readonly IFileManagementService _fileManagementService;
     private readonly string _tempRoot;
 
-    public SlicingJobsController(IUnifiedLoggingService logger, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
+    public SlicingJobsController(
+        IUnifiedLoggingService logger,
+        Infrastructure.Temp.ITempPathProvider tempPathProvider,
+        ISlicerOrchestrator orchestrator,
+        IFileManagementService fileManagementService)
     {
         _logger = logger;
         _tempPathProvider = tempPathProvider;
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
         _ = Directory.CreateDirectory(_tempRoot);
     }
@@ -146,7 +153,7 @@ public class SlicingJobsController : ControllerBase
         }
         string rebuiltPath = Path.Combine(tempRoot, fileName);
         string path = rebuiltPath;
-        if (!IsSafePath(path, tempRoot))
+        if (!_fileManagementService.IsSafePath(path, tempRoot))
         {
             return NotFound();
         }
@@ -158,25 +165,5 @@ public class SlicingJobsController : ControllerBase
         }
 
         return PhysicalFile(path, "text/plain; charset=utf-8", $"output_{jobId}.gcode");
-    }
-
-    private static bool IsSafePath(string candidatePath, string root)
-    {
-        try
-        {
-            string fullRoot = Path.GetFullPath(root);
-            string fullCandidate = Path.GetFullPath(candidatePath);
-            if (!fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-            string relative = Path.GetRelativePath(fullRoot, fullCandidate);
-            if (relative.Contains(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || relative.Contains(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                return false;
-            }
-            return true;
-        }
-        catch { return false; }
     }
 }

@@ -263,6 +263,24 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeFilesService, Farm.Web.Api.Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Farm.Web.Api.Repositories.Gcode.IGcodeRepository, Farm.Web.Api.Repositories.Gcode.EfGcodeRepository>();
 
+        // Gcode upload settings and quota service
+        _ = services.AddSingleton<Farm.Web.Api.Services.IGcodeUploadSettings, Farm.Web.Api.Services.InMemoryGcodeUploadSettings>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.IGcodeUploadQuotaService, Farm.Web.Api.Services.InMemoryGcodeUploadQuotaService>();
+
+        // Model file management services
+        // IModelRepository must be Scoped (uses EF DbContext which is scoped)
+        _ = services.AddScoped<Farm.Web.Api.Repositories.Model.IModelRepository, Farm.Web.Api.Repositories.Model.EfModelRepository>();
+        // IModelService is Scoped to match repository lifetime and per-request data patterns
+        _ = services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
+        // ModelAnalysisService is stateless and reusable - register as Singleton for efficiency
+        _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
+        // ClamAVVirusScanner is stateless after initialization - register as Singleton for efficiency
+        _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
+        // ThumbnailGenerationService manages path state but doesn't hold request-specific data - Singleton is safe
+        _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
+        // SystemFileSystem is a pure wrapper around static File/Directory APIs - stateless, register as Singleton
+        _ = services.AddSingleton<Farm.Web.Api.Services.IO.IFileSystem, Farm.Web.Api.Services.IO.SystemFileSystem>();
+
         // Background worker to process harvest file jobs from the queue
         if (!disableBg)
         {

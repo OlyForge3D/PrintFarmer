@@ -7,7 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Repositories.Model;
 using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.Interfaces; // for ModelAnalysisResult
+using Farm.Web.Api.Services.Interfaces; // for ModelAnalysisResult and IThumbnailGenerationService
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +24,7 @@ namespace Farm.Web.Api.Services.Model
         private readonly IModelAnalysisService? _analysisService;
         private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
         private readonly IFileManagementService _fileManagementService;
+        private readonly IThumbnailGenerationService? _thumbnailService;
 
         public ModelService(
             IModelRepository repository,
@@ -31,11 +32,13 @@ namespace Farm.Web.Api.Services.Model
             IConfiguration configuration,
             Farm.Web.Api.Services.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
-            IModelAnalysisService? analysisService = null)
+            IModelAnalysisService? analysisService = null,
+            IThumbnailGenerationService? thumbnailService = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _analysisService = analysisService;
+            _thumbnailService = thumbnailService;
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
             ArgumentNullException.ThrowIfNull(configuration);
@@ -274,7 +277,31 @@ namespace Farm.Web.Api.Services.Model
                 await _repository.AddAsync(model, ct);
                 await _repository.SaveChangesAsync(ct);
 
-                // Thumbnail generation omitted in service tests; optional
+                // Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
+                try
+                {
+                    if (_thumbnailService != null)
+                    {
+                        string thumbnailFileName = $"{modelId}_thumb{_thumbnailService.ThumbnailFileExtension}";
+                        string thumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
+
+                        if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
+                        {
+                            await _thumbnailService.GenerateAndSaveThumbnailAsync(filePath, thumbnailPath, ct);
+
+                            // Update model with thumbnail path
+                            model.ThumbnailPath = thumbnailPath;
+                            await _repository.SaveChangesAsync(ct);
+
+                            _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
+                        }
+                    }
+                }
+                catch (Exception thumbnailEx)
+                {
+                    _logger.LogWarning($"Failed to generate thumbnail for model {modelId}: {thumbnailEx.Message}. Continuing without thumbnail.");
+                    // Don't rethrow - upload should succeed even if thumbnail generation fails
+                }
 
                 return new Shared.Model3DUploadResultDto
                 {
