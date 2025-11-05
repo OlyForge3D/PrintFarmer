@@ -76,7 +76,7 @@ catch
 }
 
 // Register all PrintFarmer services
-builder.Services.AddPrintFarmerServices();
+builder.Services.AddPrintFarmerServices(builder.Configuration);
 
 builder.Services.AddApiApplicationServices(builder.Configuration, builder.Environment);
 

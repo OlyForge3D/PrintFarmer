@@ -100,7 +100,7 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddPrintFarmerServices(this IServiceCollection services)
+    public static IServiceCollection AddPrintFarmerServices(this IServiceCollection services, IConfiguration configuration)
     {
         // Caching
         _ = services.AddMemoryCache();
@@ -239,6 +239,9 @@ public static class ServiceCollectionExtensions
         // Startup tracking
         // Register StartupStatus as the implementation for IStartupStatus
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();
+
+        // Harvest configuration
+        _ = services.Configure<Farm.Infrastructure.Settings.GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
 
         // Harvest queue and gcode harvest service
         // IHarvestQueue must be Singleton because it's used by background tasks that outlive HTTP request scopes

@@ -39,6 +39,22 @@ export function HarvestWizardStep4Progress({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [startTime] = useState(Date.now());
 
+  // Initialize file statuses from selected files on component mount
+  useEffect(() => {
+    if (selectedFiles.length > 0 && fileStatuses.length === 0) {
+      const initialStatuses: FileImportStatus[] = selectedFiles.map(file => ({
+        fileId: file.id,
+        fileName: file.name,
+        status: 'pending',
+        progress: 0,
+      }));
+      setFileStatuses(initialStatuses);
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info(`[Step4] Initialized ${initialStatuses.length} files in pending state`);
+      }
+    }
+  }, [selectedFiles, fileStatuses.length]);
+
   // Update elapsed time
   useEffect(() => {
     if (!isImporting) return;
@@ -57,11 +73,11 @@ export function HarvestWizardStep4Progress({
     const unsubscribe = signalRService.onHarvestFileProgress((evt) => {
       if (evt.operationId === operationId) {
         setFileStatuses(prev => {
-          // Find or create file status using fileName as key
+          // Find or update file status using fileName as key
           let fileStatus = prev.find(f => f.fileName === evt.fileName);
           
           if (!fileStatus) {
-            // New file - create entry
+            // New file - create entry (shouldn't happen if initialized properly, but handle it)
             fileStatus = {
               fileId: evt.fileName, // Use fileName as fileId for tracking
               fileName: evt.fileName,
@@ -71,7 +87,7 @@ export function HarvestWizardStep4Progress({
             return [...prev, fileStatus];
           }
 
-          // Update existing file
+          // Update existing file from pending to importing
           return prev.map(f =>
             f.fileName === evt.fileName
               ? {

@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Repositories.Gcode;
@@ -13,6 +14,7 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services;
 
@@ -31,7 +33,8 @@ public partial class GcodeHarvestService(
     IHarvestQueue harvestQueue,
     IHubContext<HarvestHub> harvestHub,
     Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService metadataExtractor,
-    Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService) : IGcodeHarvestService
+    Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService,
+    IOptions<GcodeHarvestSettings> harvestOptions) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
@@ -112,6 +115,7 @@ public partial class GcodeHarvestService(
     private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
     private readonly Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
     private readonly Farm.Web.Api.Services.StorageManagement.IStoragePathService _storagePathService = storagePathService;
+    private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
 
     private static readonly string[] sourceArray = { "gcode" };
 
@@ -613,23 +617,30 @@ public partial class GcodeHarvestService(
         _logger.LogInformation($"ImportSelectedFilesAsync: Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
 
         HarvestDiscoveredFile[] selectedFiles = await _harvestRepo.GetDiscoveredFilesByIdsAsync(request.FileIds.ToList(), ct);
-        
+
         _logger.LogInformation($"ImportSelectedFilesAsync: Retrieved {selectedFiles.Length} files from database");
 
         List<string> importedFileIds = new();
         List<string> skippedFileIds = new();
         List<string> failedFileIds = new();
         Dictionary<string, string> errorDetails = new();
-        int importedCount = 0;
 
-        foreach (HarvestDiscoveredFile? discoveredFile in selectedFiles)
+        // Apply concurrency limiting using semaphore based on configuration
+        int maxConcurrent = _harvestSettings.MaxConcurrentImports;
+        _logger.LogInformation($"ImportSelectedFilesAsync: Using max concurrent imports: {maxConcurrent}");
+        using var semaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
+
+        // Create import tasks for all selected files with concurrency limiting
+        var importTasks = selectedFiles.Select(async discoveredFile =>
         {
+            // Acquire a semaphore slot (respects max concurrency)
+            await semaphore.WaitAsync(ct);
             try
             {
                 if (discoveredFile.AlreadyInLibrary)
                 {
                     skippedFileIds.Add(discoveredFile.Id.ToString());
-                    continue; // Skip files already in library
+                    return;
                 }
 
                 // Mark as in progress and emit update
@@ -657,7 +668,7 @@ public partial class GcodeHarvestService(
                         .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
                     failedFileIds.Add(discoveredFile.Id.ToString());
                     errorDetails[discoveredFile.Id.ToString()] = "Printer information not available";
-                    continue;
+                    return;
                 }
 
                 PrinterBackend backend = (PrinterBackend)operation.Printer.Backend;
@@ -673,7 +684,7 @@ public partial class GcodeHarvestService(
                         .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
                     failedFileIds.Add(discoveredFile.Id.ToString());
                     errorDetails[discoveredFile.Id.ToString()] = $"Failed to download {discoveredFile.FileName}";
-                    continue;
+                    return;
                 }
 
                 // Save to local storage
@@ -788,7 +799,6 @@ public partial class GcodeHarvestService(
 
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 importedFileIds.Add(discoveredFile.Id.ToString());
-                importedCount++;
 
                 // Increment the operation's FilesAdded counter (only when successfully imported to library)
                 operation.FilesAdded++;
@@ -805,6 +815,22 @@ public partial class GcodeHarvestService(
                 failedFileIds.Add(discoveredFile.Id.ToString());
                 errorDetails[discoveredFile.Id.ToString()] = $"Failed to import {discoveredFile.FileName}: {ex.Message}";
             }
+            finally
+            {
+                // Release the semaphore slot so another file can begin importing
+                semaphore.Release();
+            }
+        }).ToList();
+
+        // Wait for all import tasks to complete
+        try
+        {
+            await Task.WhenAll(importTasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during concurrent file imports");
+            // Individual errors already handled in task catch blocks
         }
 
         await _harvestRepo.SaveChangesAsync(ct);
@@ -813,9 +839,9 @@ public partial class GcodeHarvestService(
         var result = new GcodeHarvestResultDto(
             request.HarvestOperationId,
             true,
-            $"Imported {importedCount} files",
+            $"Imported {importedFileIds.Count} files",
             selectedFiles.Length,
-            importedCount,
+            importedFileIds.Count,
             failedFileIds.Count > 0 ? failedFileIds.ToArray() : null)
         {
             ImportedFileIds = importedFileIds.ToArray(),

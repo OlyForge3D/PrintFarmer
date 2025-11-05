@@ -32,12 +32,13 @@ namespace Farm.Web.Api.Tests.Services
             var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
             var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
             var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
 
             // Provide a real AutoMapper instance for mapping dependencies
             var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
             var mapper = mapperConfig.CreateMapper();
 
-            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper);
+            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
 
             var printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -63,11 +64,12 @@ namespace Farm.Web.Api.Tests.Services
             var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
             var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
             var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
 
             var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
             var mapper = mapperConfig.CreateMapper();
 
-            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper);
+            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
 
             var printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -200,6 +202,7 @@ namespace Farm.Web.Api.Tests.Services
             var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
             var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
             var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
 
             var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
             var mapper = mapperConfig.CreateMapper();
@@ -216,7 +219,8 @@ namespace Farm.Web.Api.Tests.Services
                 catalogMock.Object,
                 httpClientFactoryMock.Object,
                 loggerMock.Object,
-                mapper);
+                mapper,
+                hubContextMock.Object);
         }
     }
 }

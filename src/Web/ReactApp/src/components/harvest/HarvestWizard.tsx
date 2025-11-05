@@ -211,7 +211,11 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
   const handleStep3Complete = (selectedFileIds: string[]) => {
     // Store selected file details for Step 4 display
     const selectedFiles = state.discoveredFiles.filter(f => selectedFileIds.includes(f.id));
-    setState(prev => ({ ...prev, selectedFiles }));
+    setState(prev => ({ 
+      ...prev, 
+      selectedFiles,
+      selectedFileIds: new Set(selectedFileIds),
+    }));
     
     // Move to Step 4 with selected files
     setStep(4);
