@@ -221,7 +221,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(g => g.SlicerVersion).HasMaxLength(64);
             b.Property(g => g.RequiredMaterial).HasMaxLength(64);
             b.Property(g => g.SlicerSettings).HasColumnType("TEXT");
-            b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(0); // Unknown
+            b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             b.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
 
             // JSON array properties
@@ -570,7 +570,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(m => m.FileSizeBytes).IsRequired();
             b.Property(m => m.Tags).HasColumnType("TEXT");
             b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
-            b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(0); // Unknown
+            b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
 
             // Foreign Key
