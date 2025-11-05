@@ -30,6 +30,32 @@ namespace Farm.Web.Api.Tests.Services
             _files.TryRemove(path, out _);
         }
 
+        public void MoveFile(string sourceFileName, string destFileName, bool overwrite = false)
+        {
+            if (_files.TryRemove(sourceFileName, out var data))
+            {
+                if (!overwrite && _files.ContainsKey(destFileName))
+                {
+                    throw new IOException($"File already exists: {destFileName}");
+                }
+                _files[destFileName] = data;
+
+                // Move timestamps if they exist
+                if (_times.TryRemove(sourceFileName, out var times))
+                {
+                    _times[destFileName] = times;
+                }
+            }
+            else if (File.Exists(sourceFileName))
+            {
+                File.Move(sourceFileName, destFileName, overwrite);
+            }
+            else
+            {
+                throw new FileNotFoundException($"File not found: {sourceFileName}");
+            }
+        }
+
         public Stream OpenWrite(string path)
         {
             return new TestFileStream(this, path);

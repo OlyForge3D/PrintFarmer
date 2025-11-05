@@ -336,13 +336,20 @@ namespace Farm.Web.Api.Services.Model
                         if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
                         {
                             // Use final file path (not temp) for thumbnail generation
-                            await _thumbnailService.GenerateAndSaveThumbnailAsync(finalFilePath, thumbnailPath, ct);
+                            bool thumbSuccess = await _thumbnailService.GenerateThumbnailAsync(
+                                finalFilePath,
+                                model.FileFormat,
+                                thumbnailPath,
+                                ct: ct);
 
-                            // Update model with thumbnail path
-                            model.ThumbnailPath = thumbnailPath;
-                            await _repository.SaveChangesAsync(ct);
+                            if (thumbSuccess)
+                            {
+                                // Update model with thumbnail path
+                                model.ThumbnailPath = thumbnailPath;
+                                await _repository.SaveChangesAsync(ct);
 
-                            _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
+                                _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
+                            }
                         }
                     }
                 }

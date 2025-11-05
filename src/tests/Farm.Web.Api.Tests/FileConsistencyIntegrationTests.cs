@@ -4,7 +4,9 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -80,12 +82,14 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var content = await response.Content.ReadAsAsync<dynamic>();
-        content.totalModel3DFiles.Should().Be(2);
-        content.model3DHealthy.Should().Be(2);
-        content.totalGcodeFiles.Should().Be(1);
-        content.gcodeHealthy.Should().Be(1);
-        content.overallHealthPercentage.Should().Be(100.0);
+        var json = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        root.GetProperty("totalModel3DFiles").GetInt32().Should().Be(2);
+        root.GetProperty("model3DHealthy").GetInt32().Should().Be(2);
+        root.GetProperty("totalGcodeFiles").GetInt32().Should().Be(1);
+        root.GetProperty("gcodeHealthy").GetInt32().Should().Be(1);
+        root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(100.0);
     }
 
     [Fact]
@@ -102,11 +106,13 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var content = await response.Content.ReadAsAsync<dynamic>();
-        content.totalIssues.Should().Be(2);
-        content.missingFiles.Should().Be(1);
-        content.corruptedFiles.Should().Be(1);
-        ((List<dynamic>)content.issues).Should().HaveCount(2);
+        var json = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        root.GetProperty("totalIssues").GetInt32().Should().Be(2);
+        root.GetProperty("missingFiles").GetInt32().Should().Be(1);
+        root.GetProperty("corruptedFiles").GetInt32().Should().Be(1);
+        root.GetProperty("issues").GetArrayLength().Should().Be(2);
     }
 
     [Fact]
@@ -123,10 +129,12 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var content = await response.Content.ReadAsAsync<dynamic>();
-        content.fileId.Should().Be(model.Id.ToString());
-        content.healthStatus.Should().Be("Healthy");
-        content.fileSize.Should().Be(model.FileSizeBytes);
+        var json = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        root.GetProperty("fileId").GetString().Should().Be(model.Id.ToString());
+        root.GetProperty("healthStatus").GetString().Should().Be("Healthy");
+        root.GetProperty("fileSize").GetInt64().Should().Be(model.FileSizeBytes);
     }
 
     [Fact]
@@ -182,9 +190,13 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var content = await response.Content.ReadAsAsync<List<dynamic>>();
-        content.Should().HaveCount(2);
-        ((DateTime)content[0].auditDate).Should().BeAfter((DateTime)content[1].auditDate);
+        var json = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        root.GetArrayLength().Should().Be(2);
+        var audit1Date = DateTime.Parse(root[0].GetProperty("auditDate").GetString() ?? "");
+        var audit2Date = DateTime.Parse(root[1].GetProperty("auditDate").GetString() ?? "");
+        audit1Date.Should().BeAfter(audit2Date);
     }
 
     [Fact]
@@ -279,9 +291,11 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var content = await response.Content.ReadAsAsync<dynamic>();
+        var json = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
         // 2 healthy out of 4 files = 50%
-        content.overallHealthPercentage.Should().Be(50.0);
+        root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(50.0);
     }
 
     [Fact]
