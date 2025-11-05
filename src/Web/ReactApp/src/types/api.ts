@@ -973,3 +973,84 @@ export interface AuxiliaryTotals {
   description: string;
   units?: string;
 }
+
+// File Consistency Types
+export enum FileHealthStatus {
+  Unknown = 0,
+  Healthy = 1,
+  Missing = 2,
+  Corrupted = 3,
+  Inaccessible = 4,
+}
+
+export enum FileAuditType {
+  Model3D = 0,
+  GcodeFile = 1,
+  OrphanedFiles = 2,
+  FullAudit = 3,
+}
+
+export interface FileHealthSummaryDto {
+  totalFiles: number;
+  healthyFiles: number;
+  missingFiles: number;
+  corruptedFiles: number;
+  inaccessibleFiles: number;
+  healthPercentage: number;
+  lastAuditDate?: string;
+  lastAuditType?: FileAuditType;
+}
+
+export interface FileHealthAuditDto {
+  auditId: string;
+  auditDate: string;
+  auditType: FileAuditType;
+  filesChecked: number;
+  validCount: number;
+  missingCount: number;
+  corruptedCount: number;
+  orphanedCount: number;
+  hasIssues: boolean;
+  summaryMessage: string;
+  missingFileIds?: string[];
+  corruptedFileIds?: string[];
+  orphanedPaths?: string[];
+}
+
+export interface FileIssuesSummaryDto {
+  missingFiles: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    lastHealthCheckDate?: string;
+  }>;
+  corruptedFiles: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    lastVerificationResult?: string;
+  }>;
+  inaccessibleFiles: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    lastHealthCheckDate?: string;
+  }>;
+  totalIssues: number;
+}
+
+export interface FileHealthDetailDto {
+  fileId: string;
+  fileName: string;
+  fileType: string; // "Model3D" or "GcodeFile"
+  filePath?: string;
+  fileSize?: number;
+  currentHealthStatus: FileHealthStatus;
+  lastHealthCheckDate?: string;
+  lastVerificationResult?: string;
+  verificationHistory: Array<{
+    date: string;
+    status: FileHealthStatus;
+    details?: string;
+  }>;
+}

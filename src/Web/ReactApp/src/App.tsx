@@ -4,6 +4,7 @@ import { Layout } from '@/components/Layout';
 import { ObservabilityDashboard } from '@/components/ObservabilityDashboard';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 import { SetupWizard } from '@/components/SetupWizard';
+import { FileHealthDashboard } from '@/components/admin/file-health/FileHealthDashboard';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useUnifiedLogging } from '@/hooks/useUnifiedLogging';
@@ -148,6 +149,14 @@ function AuthenticatedAppRoutes() {
           element={
             <ProtectedRoute requiredRole="farm_admin">
               <LogsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/file-health"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <FileHealthDashboard />
             </ProtectedRoute>
           }
         />

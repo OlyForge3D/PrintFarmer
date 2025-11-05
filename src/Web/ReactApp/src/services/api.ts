@@ -870,6 +870,50 @@ export class ApiClient {
       return null;
     }
   }
+
+  // ============ File Consistency API methods ============
+
+  /**
+   * Get overall file health summary
+   */
+  async getFileHealthSummary(): Promise<import('@/types/api').FileHealthSummaryDto> {
+    const response = await this.client.get<import('@/types/api').FileHealthSummaryDto>('/fileconsistency/health/summary');
+    return response.data;
+  }
+
+  /**
+   * Get audit history with pagination
+   */
+  async getFileAuditHistory(pageSize: number = 20): Promise<import('@/types/api').FileHealthAuditDto[]> {
+    const response = await this.client.get<import('@/types/api').FileHealthAuditDto[]>('/fileconsistency/audits/history', {
+      params: { pageSize },
+    });
+    return response.data;
+  }
+
+  /**
+   * Get all files with health issues
+   */
+  async getFilesWithIssues(): Promise<import('@/types/api').FileIssuesSummaryDto> {
+    const response = await this.client.get<import('@/types/api').FileIssuesSummaryDto>('/fileconsistency/files/issues');
+    return response.data;
+  }
+
+  /**
+   * Get detailed health information for a specific Model3D file
+   */
+  async getModel3DHealth(id: string): Promise<import('@/types/api').FileHealthDetailDto> {
+    const response = await this.client.get<import('@/types/api').FileHealthDetailDto>(`/fileconsistency/model3d/${id}/health`);
+    return response.data;
+  }
+
+  /**
+   * Get detailed health information for a specific GcodeFile
+   */
+  async getGcodeFileHealth(id: string): Promise<import('@/types/api').FileHealthDetailDto> {
+    const response = await this.client.get<import('@/types/api').FileHealthDetailDto>(`/fileconsistency/gcode/${id}/health`);
+    return response.data;
+  }
 }
 
 // Export singleton instance

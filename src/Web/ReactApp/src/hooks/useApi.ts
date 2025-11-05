@@ -20,7 +20,11 @@ import {
   PrinterDetails,
   PrinterFast,
   StartDiscoveryRequest,
-  UpdatePrinterDto
+  UpdatePrinterDto,
+  FileHealthSummaryDto,
+  FileHealthAuditDto,
+  FileIssuesSummaryDto,
+  FileHealthDetailDto,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -46,6 +50,13 @@ export const queryKeys = {
   harvestOperation: (id: string) => ['harvest-operations', id] as const,
   jobQueue: (printerId?: string) => ['job-queue', printerId] as const,
   health: ['health'] as const,
+  fileConsistency: {
+    health: ['file-consistency', 'health'] as const,
+    auditHistory: (pageSize?: number) => ['file-consistency', 'audits', pageSize] as const,
+    filesWithIssues: ['file-consistency', 'issues'] as const,
+    model3DHealth: (id: string) => ['file-consistency', 'model3d', id] as const,
+    gcodeFileHealth: (id: string) => ['file-consistency', 'gcode', id] as const,
+  },
 } as const;
 
 // ============ Printer Hooks ============
@@ -804,5 +815,57 @@ export function usePrinterHistoryTotals(
     staleTime: 300000, // History totals don't change often
     enabled: !!printerId,
     ...queryOptions,
+  });
+}
+
+// ============ File Consistency Hooks ============
+
+export function useFileHealthSummary(options?: UseQueryOptions<FileHealthSummaryDto, ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.fileConsistency.health,
+    queryFn: () => apiClient.getFileHealthSummary(),
+    staleTime: 60000, // 1 minute
+    ...options,
+  });
+}
+
+export function useFileAuditHistory(
+  pageSize: number = 20,
+  options?: UseQueryOptions<FileHealthAuditDto[], ApiError>
+) {
+  return useQuery({
+    queryKey: queryKeys.fileConsistency.auditHistory(pageSize),
+    queryFn: () => apiClient.getFileAuditHistory(pageSize),
+    staleTime: 60000, // 1 minute
+    ...options,
+  });
+}
+
+export function useFilesWithIssues(options?: UseQueryOptions<FileIssuesSummaryDto, ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.fileConsistency.filesWithIssues,
+    queryFn: () => apiClient.getFilesWithIssues(),
+    staleTime: 60000, // 1 minute
+    ...options,
+  });
+}
+
+export function useModel3DHealth(id: string, options?: UseQueryOptions<FileHealthDetailDto, ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.fileConsistency.model3DHealth(id),
+    queryFn: () => apiClient.getModel3DHealth(id),
+    staleTime: 60000, // 1 minute
+    enabled: !!id,
+    ...options,
+  });
+}
+
+export function useGcodeFileHealth(id: string, options?: UseQueryOptions<FileHealthDetailDto, ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.fileConsistency.gcodeFileHealth(id),
+    queryFn: () => apiClient.getGcodeFileHealth(id),
+    staleTime: 60000, // 1 minute
+    enabled: !!id,
+    ...options,
   });
 }

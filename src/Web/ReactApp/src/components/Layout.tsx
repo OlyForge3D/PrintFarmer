@@ -81,6 +81,7 @@ const navigation: NavigationItem[] = [
       { name: 'Printers', href: '/admin/printers', icon: Printer },
       { name: 'Workers', href: '/admin/workers', icon: Cog },
       { name: 'Slicer Registry', href: '/admin/slicer-registry', icon: Layers },
+      { name: 'File Health', href: '/admin/file-health', icon: FileText },
       { name: 'Catalog', href: '/catalog', icon: Layers },
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Spools', href: '/spools', icon: Box },
