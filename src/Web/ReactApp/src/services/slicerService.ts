@@ -104,7 +104,11 @@ class SlicerService {
 
   async getAvailableProfiles(printerId: string): Promise<SlicerProfile[]> {
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/profiles?printerId=${printerId}`);
+    const response = await fetch(`${baseUrl}/slicer/profiles?printerId=${printerId}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
     if (!response.ok) {
       throw new Error(`Failed to fetch profiles: ${response.statusText}`);
     }
@@ -116,9 +120,12 @@ class SlicerService {
     formData.append('modelFile', file);
 
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/api/3d-models/validate`, {
+    const response = await fetch(`${baseUrl}/3d-models/validate`, {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
     });
 
     if (!response.ok) {
@@ -147,7 +154,11 @@ class SlicerService {
 
   async getSlicingJob(jobId: string): Promise<SliceResult> {
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/job/${jobId}`);
+    const response = await fetch(`${baseUrl}/slicer/job/${jobId}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
     if (!response.ok) {
       throw new Error(`Failed to fetch slicing job: ${response.statusText}`);
     }
@@ -157,7 +168,10 @@ class SlicerService {
   async cancelSlicingJob(jobId: string): Promise<void> {
     const baseUrl = this.getBaseUrl();
     const response = await fetch(`${baseUrl}/slicer/job/${jobId}/cancel`, {
-      method: 'POST'
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
     });
     if (!response.ok) {
       throw new Error(`Failed to cancel slicing job: ${response.statusText}`);
@@ -174,7 +188,10 @@ class SlicerService {
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
     });
 
     if (!response.ok) {
@@ -186,7 +203,11 @@ class SlicerService {
 
   async listModels(): Promise<SlicedModelSummary[]> {
     const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/3d-models`);
+    const response = await fetch(`${baseUrl}/3d-models`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.statusText}`);
     }
@@ -196,7 +217,10 @@ class SlicerService {
   async deleteModel(modelId: string): Promise<void> {
     const baseUrl = this.getBaseUrl();
     const response = await fetch(`${baseUrl}/3d-models/${modelId}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
     });
     if (!response.ok) {
       throw new Error(`Failed to delete model: ${response.statusText}`);
