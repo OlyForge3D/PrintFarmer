@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Settings } from 'lucide-react';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 // Lightweight mapping to match server DTOs
 type PerEngineSetting = { path?: string | null; argsTemplate?: string | null };
@@ -12,7 +13,9 @@ export const SlicerSettingsPage: React.FC = () => {
   const { data, isLoading } = useQuery<SlicerSettingsDto, Error>({
     queryKey: ['slicerSettings'],
     queryFn: async () => {
-      const res = await fetch('/api/slicer/settings');
+      const res = await fetch(`${getApiBaseUrl()}/slicer/settings`, {
+        headers: getAuthHeaders()
+      });
       if (!res.ok) throw new Error('Failed to fetch settings');
       return res.json();
     }
@@ -24,7 +27,14 @@ export const SlicerSettingsPage: React.FC = () => {
   // Enhance save mutation to surface server messages
   const saveMutation = useMutation<void, Error, SlicerSettingsDto>({
     mutationFn: async (payload: SlicerSettingsDto) => {
-      const res = await fetch('/api/slicer/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await fetch(`${getApiBaseUrl()}/slicer/settings`, { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        }, 
+        body: JSON.stringify(payload) 
+      });
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Save failed with status ${res.status}`);

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Health;
@@ -228,7 +228,7 @@ public class HealthCheckDiscoveryTests
         // Arrange
         string spoolmanBaseUrl = "http://spoolman.local:7912";
         string expectedPfarmVariable = "PFARM__Spoolman__BaseUrl";
-        
+
         // Act - simulate what deploy-docker.sh does
         var envVars = new Dictionary<string, string?>
         {
@@ -248,7 +248,7 @@ public class HealthCheckDiscoveryTests
         // Arrange
         string enableDiscovery = "true";
         string discoverySubnets = "192.168.0.0/16,10.0.0.0/8";
-        
+
         // Act - simulate what deploy-docker.sh does
         var envVars = new Dictionary<string, string?>
         {
@@ -261,7 +261,7 @@ public class HealthCheckDiscoveryTests
         // Assert
         envVars.Should().ContainKey("PFARM__NetworkDiscovery__EnableDiscovery");
         envVars["PFARM__NetworkDiscovery__EnableDiscovery"].Should().Be(enableDiscovery);
-        
+
         envVars.Should().ContainKey("PFARM__NetworkDiscovery__DiscoverySubnets");
         envVars["PFARM__NetworkDiscovery__DiscoverySubnets"].Should().Be(discoverySubnets);
     }

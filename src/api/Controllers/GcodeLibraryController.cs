@@ -2,11 +2,11 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Repositories.Gcode;
+using Farm.Web.Api.Repositories.Queue;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Farm.Web.Api.Repositories.Gcode;
-using Farm.Web.Api.Repositories.Queue;
 
 namespace Farm.Web.Api.Controllers;
 

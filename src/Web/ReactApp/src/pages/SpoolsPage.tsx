@@ -7,6 +7,7 @@ import { ColorSwatch } from '@/components/ColorSwatch';
 import { SpoolUsageBar } from '@/components/SpoolUsageBar';
 import { Skeleton } from '@/components/Skeleton';
 import { PageTemplate } from '@/components/PageTemplate';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import '@/components/spool-components.css';
 
 // Matches backend SpoolmanController (SpoolmanSpoolDto) serialized with camelCase
@@ -159,7 +160,9 @@ export function SpoolsPage() {
   useEffect(() => {
     const run = async () => {
       try {
-        const r = await fetch('/api/spoolman/health');
+        const r = await fetch(`${getApiBaseUrl()}/spoolman/health`, {
+          headers: getAuthHeaders()
+        });
         if (!r.ok) return;
         const data = await r.json();
         setHealth(data);
@@ -237,7 +240,12 @@ export function SpoolsPage() {
       setLoading(true);
       setSpoolmanError(null);
 
-  const response = await fetch('/api/spoolman/spools', { headers: { 'Accept': 'application/json' } });
+  const response = await fetch(`${getApiBaseUrl()}/spoolman/spools`, { 
+    headers: { 
+      'Accept': 'application/json',
+      ...getAuthHeaders()
+    } 
+  });
       if (!response.ok) {
         if (response.status === 503) {
           setSpoolmanError('Spoolman not configured or unavailable');
@@ -262,7 +270,9 @@ export function SpoolsPage() {
   useEffect(() => {
     const init = async () => {
       try {
-        const cfgResp = await fetch('/api/spoolman/config');
+        const cfgResp = await fetch(`${getApiBaseUrl()}/spoolman/config`, {
+          headers: getAuthHeaders()
+        });
         if (cfgResp.ok) {
           const cfg = await cfgResp.json();
           if (cfg?.baseUrl) setSpoolmanBaseUrl(cfg.baseUrl);

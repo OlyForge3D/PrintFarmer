@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
 
 namespace Farm.Infrastructure.Repositories.Printers;

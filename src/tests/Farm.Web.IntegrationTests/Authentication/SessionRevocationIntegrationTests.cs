@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Data;
@@ -30,13 +30,13 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
     {
         // Arrange
         var client = CreateClient();
-        
+
         // Create and login as admin
         var (adminToken, adminUserId) = await CreateAdminUserAsync();
-        
+
         // Create a regular user
         var (userToken, userId) = await CreateRegularUserAsync("testuser", "test@example.com", "TestPassword123!");
-        
+
         // Verify user can access protected endpoint with their token
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", userToken);
         var beforeRevocationResponse = await client.GetAsync("/api/users");
@@ -111,8 +111,8 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         // Act - Get revocation history
         var response = await client.GetAsync($"/api/users/{userId}/revoked-tokens");
 
-    // Assert
-    response.IsSuccessStatusCode.Should().BeTrue();
+        // Assert
+        response.IsSuccessStatusCode.Should().BeTrue();
         var revocations = (await response.Content.ReadFromJsonAsync<List<RevokedTokenDto>>()) ?? new List<RevokedTokenDto>();
         revocations.Should().NotBeEmpty();
         // Guarded use of FirstOrDefault() with explicit NotBeNull assertion to satisfy static analysis
@@ -196,7 +196,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
     {
         // Arrange - Create user and get multiple tokens (simulating multiple devices)
         var (token1, userId) = await CreateRegularUserAsync("multidevice", "multi@example.com", "Password123!");
-        
+
         // Login again to get a second token (different session)
         var client = CreateClient();
         var loginRequest = new LoginRequest { UsernameOrEmail = "multidevice", Password = "Password123!" };
@@ -232,11 +232,11 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
     private async Task<(string Token, Guid UserId)> CreateRegularUserAsync(string username, string email, string password)
     {
         var client = CreateClient();
-        
+
         // Register user
         var registerRequest = new RegisterRequest { Username = username, Email = email, Password = password, ConfirmPassword = password, FirstName = "Test", LastName = "User" };
         var registerResponse = await client.PostAsJsonAsync("/api/auth/register", registerRequest);
-        
+
         // If user already exists or needs approval, try to login
         if (!registerResponse.IsSuccessStatusCode)
         {
@@ -248,7 +248,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         }
 
         var registerResult = await registerResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
-        
+
         // If user needs approval, activate them via database
         if (registerResult!.Token == null)
         {
@@ -260,7 +260,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
                 user.IsActive = true;
                 await db.SaveChangesAsync();
             }
-            
+
             // Login after activation
             var loginRequest = new LoginRequest { UsernameOrEmail = username, Password = password };
             var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginRequest);

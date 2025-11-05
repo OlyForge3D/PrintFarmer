@@ -1,5 +1,6 @@
 import axios from 'axios';
 import React, { useCallback, useState, useRef, useEffect } from 'react';
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -19,8 +20,13 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
       setProgress(0);
       const form = new FormData();
       form.append('file', file, file.name);
-      const resp = await axios.post('/api/models', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const token = localStorage.getItem('auth-token');
+      const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const resp = await axios.post(`${getApiBaseUrl()}/models`, form, {
+        headers,
         onUploadProgress: (evt) => {
           if (evt.total) {
             setProgress(Math.round((evt.loaded / evt.total) * 100));

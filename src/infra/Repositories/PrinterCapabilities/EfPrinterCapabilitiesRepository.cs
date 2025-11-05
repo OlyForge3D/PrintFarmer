@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -62,8 +62,8 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
     }
 
     public async Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetStaleCapabilitiesAsync(
-        DateTime threshold, 
-        int limit, 
+        DateTime threshold,
+        int limit,
         CancellationToken ct = default)
     {
         return await _db.PrinterCapabilities
@@ -77,7 +77,7 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
     }
 
     public async Task LoadPrinterReferenceAsync(
-        Farm.Infrastructure.Domain.PrinterCapabilities capabilities, 
+        Farm.Infrastructure.Domain.PrinterCapabilities capabilities,
         CancellationToken ct = default)
     {
         await _db.Entry(capabilities)

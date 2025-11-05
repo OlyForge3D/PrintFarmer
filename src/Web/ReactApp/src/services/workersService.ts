@@ -4,26 +4,7 @@
  */
 
 import { WorkerResponse } from '@/types/worker';
-
-// Get API base URL with proper environment handling
-const getApiBaseUrl = (): string => {
-  const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  if (!rawBase || rawBase.trim() === '') return '/api';
-  const trimmed = rawBase.replace(/\/$/, '');
-  if (/\/(api)(\/|$)/.test(trimmed)) return trimmed;
-  return `${trimmed}/api`;
-};
-
-function getAuthHeaders(): HeadersInit {
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
-  const token = localStorage.getItem('auth-token');
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return headers;
-}
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 export interface WorkerJobResponse {
   jobId: string;

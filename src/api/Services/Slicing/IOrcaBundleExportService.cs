@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Slicing;
+﻿namespace Farm.Web.Api.Services.Slicing;
 
 using Farm.Web.Shared;
 

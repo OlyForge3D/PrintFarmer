@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.FileManagement;

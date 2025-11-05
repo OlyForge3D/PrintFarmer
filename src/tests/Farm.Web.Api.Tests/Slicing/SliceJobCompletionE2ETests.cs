@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using Farm.Infrastructure.Domain;
-using Farm.Web.Shared.Contracts.Slicing;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
@@ -24,7 +24,7 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         var userId = Guid.NewGuid();
-        
+
         // 1. Enqueue job
         var job = new SliceJob
         {

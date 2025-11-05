@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.RateLimiting;
+﻿namespace Farm.Web.Api.Services.RateLimiting;
 
 public class RateLimitOptions
 {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -23,7 +23,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         _factory = factory;
     }
 
-    [Fact(DisplayName="Slice job completion repository/service flow succeeds (single artifact)")]
+    [Fact(DisplayName = "Slice job completion repository/service flow succeeds (single artifact)")]
     public async Task SliceJob_Service_Completion_Flow_Succeeds()
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
@@ -57,7 +57,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
 
         // 3. Complete job
         string resultUrl = $"/api/artifacts/{artifact.Id}/download";
-        await jobRepo.MarkCompletedWithArtifactsAsync(job.Id, resultUrl, new[]{ artifact.Id }, 1234, 15.6m);
+        await jobRepo.MarkCompletedWithArtifactsAsync(job.Id, resultUrl, new[] { artifact.Id }, 1234, 15.6m);
         await jobRepo.SaveChangesAsync();
 
         // 4. Reload and assert
@@ -78,7 +78,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         Guid.Parse(ids[0]).Should().Be(artifact.Id);
     }
 
-    [Fact(DisplayName="Slice job completion persists multi-artifact summary")]
+    [Fact(DisplayName = "Slice job completion persists multi-artifact summary")]
     public async Task SliceJob_Completion_MultiArtifact_Summary()
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
@@ -102,10 +102,10 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
 
         // Upload multiple artifacts
         var gcode = await artifactsService.UploadAsync(new TestFormFile(System.Text.Encoding.UTF8.GetBytes(";gcode"), "a.gcode", "application/gcode"), job.Id, null, "gcode", default);
-        var preview = await artifactsService.UploadAsync(new TestFormFile(new byte[]{1,2,3,4,5}, "preview.png", "image/png"), job.Id, null, "preview", default);
+        var preview = await artifactsService.UploadAsync(new TestFormFile(new byte[] { 1, 2, 3, 4, 5 }, "preview.png", "image/png"), job.Id, null, "preview", default);
         var log = await artifactsService.UploadTextAsync("Log line A\nLog line B", "log.txt", job.Id, null, "log", default);
 
-        var artifactIds = new[]{ gcode.Id, preview.Id, log.Id };
+        var artifactIds = new[] { gcode.Id, preview.Id, log.Id };
         string resultUrl = $"/api/artifacts/{gcode.Id}/download";
         await jobRepo.MarkCompletedWithArtifactsAsync(job.Id, resultUrl, artifactIds, 999, 3.2m);
         await jobRepo.SaveChangesAsync();

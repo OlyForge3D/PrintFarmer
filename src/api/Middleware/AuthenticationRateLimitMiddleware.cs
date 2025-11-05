@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.RateLimiting;
 
 namespace Farm.Web.Api.Middleware;

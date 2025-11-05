@@ -6,6 +6,7 @@ import {
 } from '@microsoft/signalr';
 import { PrinterStatusUpdate, JobQueueUpdateDto, DiscoveryProgressDto, DiscoveryPrinterFoundDto, DiscoveryCompletedDto } from '@/types/api';
 import { apiClient } from '@/services/api';
+import { getHubUrl } from '@/utils/apiUrlHelpers';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
@@ -20,7 +21,7 @@ export class PrinterSignalRService {
   private lastStatuses: Map<string, unknown> = new Map();
 
   private buildConnection(): void {
-    const printersSignalrUrl = import.meta.env.VITE_SIGNALR_PRINTERS_URL || 'http://localhost:5245/hubs/printers';
+    const printersSignalrUrl = getHubUrl('/hubs/printers');
     // Only emit noisy connection debug when the developer debug flag is enabled
     if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.printerSignalR) {
       console.info('[printerSignalR] Building connection with URL:', printersSignalrUrl);

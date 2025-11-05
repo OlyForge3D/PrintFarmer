@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { X, AlertCircle, Check } from 'lucide-react';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface ManufacturerDto {
   id: string;
@@ -66,7 +67,9 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
 
   const loadManufacturers = async () => {
     try {
-      const response = await fetch('/api/catalog/manufacturers');
+      const response = await fetch(`${getApiBaseUrl()}/catalog/manufacturers`, {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setManufacturers(data);
@@ -78,7 +81,9 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
 
   const loadModels = async () => {
     try {
-      const response = await fetch('/api/catalog/printer-models');
+      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models`, {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setModels(data);
@@ -143,10 +148,11 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     setError('');
 
     try {
-      const response = await fetch('/api/printers', {
+      const response = await fetch(`${getApiBaseUrl()}/printers`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...getAuthHeaders(),
         },
         body: JSON.stringify(formData),
       });

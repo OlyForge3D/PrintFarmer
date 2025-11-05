@@ -1,14 +1,7 @@
 // Service for interacting with slicer profile API endpoints (Phase 6)
 // Provides list, import, export, and set-default operations.
 
-// Get API base URL with proper environment handling
-const getApiBaseUrl = (): string => {
-  const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  if (!rawBase || rawBase.trim() === '') return '/api/slicer/profiles';
-  const trimmed = rawBase.replace(/\/$/, '');
-  if (/\/(api)(\/|$)/.test(trimmed)) return `${trimmed}/slicer/profiles`;
-  return `${trimmed}/api/slicer/profiles`;
-};
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 export interface SlicerProfileListItem {
   id: string;
@@ -65,7 +58,7 @@ export interface SlicerProfileExportDto {
   metadata: Record<string, unknown>;
 }
 
-const base = getApiBaseUrl();
+const base = `${getApiBaseUrl()}/slicer/profiles`;
 
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {

@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.DTOs;
+﻿namespace Farm.Web.Api.DTOs;
 
 /// <summary>
 /// Overall file health summary for dashboard display.

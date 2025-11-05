@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Users
 {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -148,7 +148,7 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         // Assert - Verify persistence in new context to ensure actual DB save
         var newContext = new AppDbContext(_dbOptions);
         var newRepo = new EfHarvestRepository(newContext);
-        
+
         var persistedOp = await newRepo.GetOperationByIdAsync(operationId);
         persistedOp.Should().NotBeNull();
         persistedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled);

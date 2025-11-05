@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Artifacts;

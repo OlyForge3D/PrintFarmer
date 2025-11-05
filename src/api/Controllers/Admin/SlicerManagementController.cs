@@ -1,4 +1,4 @@
-using Farm.Web.Api.Infrastructure.Authorization;
+﻿using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

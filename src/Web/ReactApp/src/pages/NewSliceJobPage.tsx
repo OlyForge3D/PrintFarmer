@@ -6,6 +6,8 @@ import workersService from '@/services/workersService';
 import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
+import { getHubUrl } from '@/utils/apiUrlHelpers';
+
 // Lightweight model DTO interface for picker (subset of Model3DDto)
 interface ModelListItem {
   id: string;
@@ -82,7 +84,7 @@ export const NewSliceJobPage: React.FC = () => {
       }
 
       const hubConnection = builder
-        .withUrl('/hubs/slicer-registry')
+        .withUrl(getHubUrl('/hubs/slicer-registry'))
         .withAutomaticReconnect()
         .build();
 
@@ -151,7 +153,13 @@ export const NewSliceJobPage: React.FC = () => {
   const { data: models, isLoading: loadingModels, error: modelsError } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
     queryFn: async () => {
-      const res = await fetch('/api/3d-models');
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      const apiBase = !baseUrl || baseUrl.trim() === '' ? '/api' : baseUrl;
+      const token = localStorage.getItem('auth-token');
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      const res = await fetch(`${apiBase}/3d-models`, { headers });
       if (!res.ok) throw new Error(await res.text() || 'Failed to load models');
       const json = await res.json();
       // Map to minimal list items
@@ -173,7 +181,9 @@ export const NewSliceJobPage: React.FC = () => {
   useEffect(() => {
     if (useModelPicker && selectedModelId) {
       // Construct API file URL; ModelController exposes /api/3d-models/{id}/file
-      setModelFileUrl(`/api/3d-models/${selectedModelId}/file`);
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      const apiBase = !baseUrl || baseUrl.trim() === '' ? '/api' : baseUrl;
+      setModelFileUrl(`${apiBase}/3d-models/${selectedModelId}/file`);
       const mdl = models?.find(m => m.id === selectedModelId);
       if (mdl) {
         setModelFileName(mdl.fileName || mdl.originalFileName);

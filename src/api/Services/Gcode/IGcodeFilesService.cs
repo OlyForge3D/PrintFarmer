@@ -1,8 +1,8 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Gcode
 {

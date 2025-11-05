@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
-using Farm.Web.Api.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Repositories.Queue;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 

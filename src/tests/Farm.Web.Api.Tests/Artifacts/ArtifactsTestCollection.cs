@@ -1,4 +1,4 @@
-// Artifacts test collection placeholder.
+﻿// Artifacts test collection placeholder.
 // Parallelization is no longer disabled — metrics are per-instance and observable gauges aggregate across instances.
 // This file is intentionally left as a placeholder to avoid accidental reintroduction of DisableParallelization.
 

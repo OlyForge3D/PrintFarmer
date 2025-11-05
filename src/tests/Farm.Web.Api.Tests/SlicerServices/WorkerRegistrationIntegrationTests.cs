@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -124,7 +124,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
 
         var heartbeatJson = JsonSerializer.Serialize(heartbeatDto);
         var heartbeatContent = new StringContent(heartbeatJson, Encoding.UTF8, "application/json");
-        
+
         // Add API key header
         client.DefaultRequestHeaders.Clear();
         client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
@@ -138,7 +138,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         // Verify worker status was updated
         var getResponse = await client.GetAsync($"/api/slicers/{registration.Id}");
         getResponse.Should().BeSuccessful();
-        
+
         var workerJson = await getResponse.Content.ReadAsStringAsync();
         var worker = JsonSerializer.Deserialize<SlicerServiceDto>(workerJson, new JsonSerializerOptions
         {
@@ -179,7 +179,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         // Act - Deregister
         client.DefaultRequestHeaders.Clear();
         client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
-        
+
         var deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
 
         // Assert - Deregistration succeeded

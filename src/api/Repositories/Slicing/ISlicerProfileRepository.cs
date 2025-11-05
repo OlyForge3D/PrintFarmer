@@ -1,5 +1,5 @@
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Repositories.Slicing;

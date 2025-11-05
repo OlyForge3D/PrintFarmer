@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.JobDispatch;
+﻿namespace Farm.Web.Api.Services.JobDispatch;
 
 /// <summary>
 /// Configuration options for job dispatch retry behavior

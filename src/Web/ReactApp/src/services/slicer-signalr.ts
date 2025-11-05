@@ -5,6 +5,7 @@ import {
   LogLevel
 } from '@microsoft/signalr';
 import { apiClient } from '@/services/api';
+import { getHubUrl } from '@/utils/apiUrlHelpers';
 
 // Slicer progress update event
 export interface SlicingProgressUpdate {
@@ -114,7 +115,7 @@ export class SlicerSignalRService {
   }
 
   private buildConnection(): void {
-    const slicerSignalrUrl = import.meta.env.VITE_SIGNALR_SLICER_URL || 'http://localhost:5245/hubs/slicer';
+    const slicerSignalrUrl = getHubUrl('/hubs/slicer');
     
     this.connection = new HubConnectionBuilder()
       .withUrl(slicerSignalrUrl)

@@ -17,10 +17,10 @@ using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Microsoft.AspNetCore.Mvc;
 using Farm.Web.Shared;
 using FluentValidation;
 using FluentValidation.Results;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
 

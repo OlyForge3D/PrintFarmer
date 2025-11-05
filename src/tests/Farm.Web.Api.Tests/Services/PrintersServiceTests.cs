@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Services.Printers;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services;
 using Farm.Infrastructure;
+using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services.Printers;
 using Farm.Web.Shared;
 using Moq;
 using Xunit;

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Farm.Web.IntegrationTests;
@@ -31,7 +31,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         };
 
         // Act - Make 3 login attempts (well within the 10/minute limit)
-            client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.1");
+        client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.1");
         var response1 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
         var response2 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
         var response3 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);

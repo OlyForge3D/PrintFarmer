@@ -5,14 +5,13 @@ using Farm.Web.Shared;
 using Farm.Web.Shared.Contracts.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-
+using ChangePasswordRequest = Farm.Web.Shared.Contracts.Auth.ChangePasswordRequest;
+using ConfirmEmailRequest = Farm.Web.Shared.ConfirmEmailRequest;
+using ForgotPasswordRequest = Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest;
 using LoginRequest = Farm.Web.Shared.Contracts.Auth.LoginRequest;
 using RegisterRequest = Farm.Web.Shared.Contracts.Auth.RegisterRequest;
-using UserDto = Farm.Web.Shared.Contracts.Auth.UserDto;
-using ChangePasswordRequest = Farm.Web.Shared.Contracts.Auth.ChangePasswordRequest;
-using ForgotPasswordRequest = Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest;
 using ResetPasswordRequest = Farm.Web.Shared.Contracts.Auth.ResetPasswordRequest;
-using ConfirmEmailRequest = Farm.Web.Shared.ConfirmEmailRequest;
+using UserDto = Farm.Web.Shared.Contracts.Auth.UserDto;
 
 namespace Farm.Web.Api.Controllers;
 

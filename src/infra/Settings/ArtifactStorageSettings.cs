@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Settings;
+﻿namespace Farm.Infrastructure.Settings;
 
 /// <summary>
 /// Configuration options for local artifact storage. Cloud storage is intentionally out of scope.

@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Email;
+﻿namespace Farm.Web.Api.Services.Email;
 
 public sealed class EmailOptions
 {

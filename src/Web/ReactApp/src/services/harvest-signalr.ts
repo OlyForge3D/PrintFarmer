@@ -4,8 +4,9 @@ import {
   HubConnectionState,
   LogLevel
 } from '@microsoft/signalr';
-import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
+import { HarvestUpdateDto, JobQueueUpdateDto, PrinterStatusUpdate } from '@/types/api';
 import { apiClient } from '@/services/api';
+import { getHubUrl } from '@/utils/apiUrlHelpers';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
@@ -122,7 +123,7 @@ export class SignalRService {
 
   private buildConnection(): void {
     // Use harvest hub for harvest events, printers hub for discovery
-    const harvestSignalrUrl = import.meta.env.VITE_SIGNALR_HARVEST_URL || 'http://localhost:5245/hubs/harvest';
+    const harvestSignalrUrl = getHubUrl('/hubs/harvest');
     if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
       console.info('[SignalR] Building harvest connection with URL:', harvestSignalrUrl);
     }

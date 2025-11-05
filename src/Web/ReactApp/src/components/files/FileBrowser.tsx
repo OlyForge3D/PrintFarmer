@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { FileRow } from './FileRow';
 import { prefetchFileHash } from '@/hooks/useFileHash';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface FileBrowserProps {
   harvestId?: string;
@@ -323,7 +324,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
 
   const mkdirMutation = useMutation({
     mutationFn: async (name: string) => {
-      const resp = await fetch(`${import.meta.env.VITE_API_BASE_URL || '/api'}/gcode-files/mkdir?path=${encodeURIComponent(currentPath)}&name=${encodeURIComponent(name)}`, { method: 'POST' });
+      const resp = await fetch(`${getApiBaseUrl()}/gcode-files/mkdir?path=${encodeURIComponent(currentPath)}&name=${encodeURIComponent(name)}`, { 
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(text || 'Failed to create directory');

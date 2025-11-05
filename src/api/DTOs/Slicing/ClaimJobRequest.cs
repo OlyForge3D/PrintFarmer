@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.DTOs.Slicing;
+﻿namespace Farm.Web.Api.DTOs.Slicing;
 
 /// <summary>
 /// Request to claim the next available slice job (worker pull model)

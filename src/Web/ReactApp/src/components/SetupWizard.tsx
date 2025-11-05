@@ -6,6 +6,7 @@ import { useHealthStatus } from '@/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { apiClient } from '@/services/api';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 // Move password policy outside component to prevent unnecessary re-renders
 const passwordPolicy = { 
@@ -216,7 +217,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
   const checkSetupStatus = async () => {
     try {
-      const response = await fetch('/api/setup/status');
+      const response = await fetch(`${getApiBaseUrl()}/setup/status`, {
+        headers: getAuthHeaders()
+      });
       if (response.ok) {
         const data = await response.json();
         setNeedsSetup(data.needsSetup);
@@ -295,7 +298,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setSpoolmanTestResult('URL must start with http:// or https://');
         return;
       }
-      const resp = await fetch('/api/spoolman/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl: normalized }) });
+      const resp = await fetch(`${getApiBaseUrl()}/spoolman/test`, { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        }, 
+        body: JSON.stringify({ baseUrl: normalized }) 
+      });
       if (!resp.ok) {
         setSpoolmanTestOk(false);
         setSpoolmanTestResult(`Test request failed: HTTP ${resp.status}`);
@@ -374,7 +384,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     try {
       // 1. Ensure admin exists & login
       if (!adminCreated) {
-        const resp = await fetch('/api/setup/initial-admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: formData.username, email: formData.email, password: formData.password, firstName: formData.firstName, lastName: formData.lastName }) });
+        const resp = await fetch(`${getApiBaseUrl()}/setup/initial-admin`, { 
+          method: 'POST', 
+          headers: { 
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          }, 
+          body: JSON.stringify({ username: formData.username, email: formData.email, password: formData.password, firstName: formData.firstName, lastName: formData.lastName }) 
+        });
         if (!resp.ok) {
           const txt = await resp.text();
           throw new Error(txt || 'Admin creation failed');
@@ -402,7 +419,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           if (win.PrintFarmerDebug?.setupWizard) {
             console.log('[SetupWizard] JWT token before Spoolman config request:', token);
           }
-        const saveResp = await fetch('/api/spoolman/config', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ baseUrl: normalized }) });
+        const saveResp = await fetch(`${getApiBaseUrl()}/spoolman/config`, { 
+          method: 'POST', 
+          headers: { 
+            'Content-Type': 'application/json', 
+            ...getAuthHeaders()
+          }, 
+          body: JSON.stringify({ baseUrl: normalized }) 
+        });
         if (!saveResp.ok && saveResp.status !== 204) throw new Error('Failed to save Spoolman config');
         // Keep localStorage synchronized so Settings page reflects wizard-entered value immediately
         localStorage.setItem('spoolman-base-url', normalized);
@@ -413,10 +437,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         const enabled = filamentPresets.filter(f => f.enabled);
         const payload: Record<string, { hotend: number; bed: number }> = {};
         enabled.forEach(f => { payload[f.name] = { hotend: f.hotend, bed: f.bed }; });
-  await fetch('/api/filament-types/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ presets: payload }) });
+  await fetch(`${getApiBaseUrl()}/filament-types/presets`, { 
+    method: 'POST', 
+    headers: { 
+      'Content-Type': 'application/json',
+      ...getAuthHeaders()
+    }, 
+    body: JSON.stringify({ presets: payload }) 
+  });
         const disabledIds = filamentPresets.filter(f => !f.enabled && f.id).map(f => f.id!);
         for (const id of disabledIds) {
-          try { await fetch(`/api/filament-types/${id}`, { method: 'DELETE' }); } catch {/* ignore individual failures */}
+          try { await fetch(`${getApiBaseUrl()}/filament-types/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); } catch {/* ignore individual failures */}
         }
       }
 

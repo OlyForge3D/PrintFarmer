@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Slicing;
+﻿namespace Farm.Web.Api.Services.Slicing;
 
 using System.Text.Json;
 using Farm.Infrastructure.Data;

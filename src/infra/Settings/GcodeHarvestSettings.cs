@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Settings;
+﻿namespace Farm.Infrastructure.Settings;
 
 /// <summary>
 /// Configuration options for G-code harvest operations.

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
 import { useAuth } from '@/contexts/AuthHooks';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface User {
   id: string;
@@ -158,13 +159,12 @@ export function UserManagementPage() {
     try {
       setCreating(true);
       setCreateErrors({});
-      const token = localStorage.getItem('auth-token');
 
-      const response = await fetch('/api/users', {
+      const response = await fetch(`${getApiBaseUrl()}/users`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
         },
         body: JSON.stringify({
           username: newUser.username.trim(),
@@ -231,11 +231,10 @@ export function UserManagementPage() {
 
   const loadUsers = async () => {
     try {
-      const token = localStorage.getItem('auth-token');
-      const response = await fetch('/api/users', {
+      const response = await fetch(`${getApiBaseUrl()}/users`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
         }
       });
       
@@ -254,11 +253,10 @@ export function UserManagementPage() {
 
   const loadRoles = async () => {
     try {
-      const token = localStorage.getItem('auth-token');
-      const response = await fetch('/api/users/roles', {
+      const response = await fetch(`${getApiBaseUrl()}/users/roles`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
         }
       });
       

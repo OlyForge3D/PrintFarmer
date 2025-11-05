@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import workersService, { WorkerJobResponse } from '@/services/workersService';
 import { WorkerResponse } from '@/types/worker';
 import { getWorkerStatusColor, formatWorkerCapacity } from '@/types/worker';
+import { getHubUrl } from '@/utils/apiUrlHelpers';
 
 export default function SlicerRegistryPage() {
   const qc = useQueryClient();
@@ -41,7 +42,7 @@ export default function SlicerRegistryPage() {
 
   const setupSignalR = async () => {
     const hubConnection = new HubConnectionBuilder()
-      .withUrl('/hubs/slicer-registry')
+      .withUrl(getHubUrl('/hubs/slicer-registry'))
       .withAutomaticReconnect()
       .build();
 

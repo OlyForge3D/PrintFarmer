@@ -1,7 +1,7 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Api.Repositories.Slicing;
+using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Shared.Contracts.Workers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

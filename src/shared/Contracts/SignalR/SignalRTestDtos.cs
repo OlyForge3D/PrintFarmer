@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared.Contracts.SignalR
+﻿namespace Farm.Web.Shared.Contracts.SignalR
 {
     public class SignalRTestRequest
     {

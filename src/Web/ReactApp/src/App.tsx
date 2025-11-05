@@ -41,6 +41,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import { ConfirmEmailPage } from './pages/ConfirmEmailPage';
 import { useAuth } from '@/contexts/AuthHooks';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import './App.css';
 
 // Create a query client for React Query
@@ -236,7 +237,9 @@ function App() {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
       try {
-        const response = await fetch('/api/setup/status');
+        const response = await fetch(`${getApiBaseUrl()}/setup/status`, {
+          headers: getAuthHeaders()
+        });
         if (response.ok) {
           const data = await response.json();
           setSetupComplete(!data.needsSetup);

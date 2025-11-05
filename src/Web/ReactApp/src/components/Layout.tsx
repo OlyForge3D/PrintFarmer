@@ -443,7 +443,7 @@ export function Layout() {
                               e.preventDefault(); // Prevent native toggle
                               toggleExpand(item.name);
                             }}
-                            aria-expanded={isExpanded as any}
+                            aria-expanded={isExpanded}
                             tabIndex={0}
                             role="button"
                           >
@@ -516,7 +516,7 @@ export function Layout() {
                             e.preventDefault(); // Prevent native toggle
                             toggleExpand(item.name);
                           }}
-                          aria-expanded={isExpanded as any}
+                          aria-expanded={isExpanded}
                           tabIndex={0}
                           role="button"
                         >
