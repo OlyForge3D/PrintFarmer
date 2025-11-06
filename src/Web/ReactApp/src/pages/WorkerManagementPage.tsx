@@ -172,23 +172,23 @@ export default function WorkerManagementPage() {
           </div>
         <button
           onClick={loadWorkers}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          className="btn-base btn-md btn-primary"
         >
           Refresh
         </button>
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+        <div className="alert-base alert-error mb-4" role="alert">
           {error}
         </div>
       )}
 
       {/* Filter tabs */}
-      <div className="mb-4 flex space-x-2">
+      <div className="mb-4 flex gap-sm">
         <button
           onClick={() => setFilter('all')}
-          className={`px-4 py-2 rounded ${filter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+          className={filter === 'all' ? 'btn-base btn-md btn-primary' : 'btn-base btn-md btn-secondary'}
         >
           All ({workers.length})
         </button>
@@ -196,7 +196,7 @@ export default function WorkerManagementPage() {
           <button
             key={status}
             onClick={() => setFilter(status)}
-            className={`px-4 py-2 rounded ${filter === status ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+            className={filter === status ? 'btn-base btn-md btn-primary' : 'btn-base btn-md btn-secondary'}
           >
             {status}
           </button>
@@ -204,31 +204,19 @@ export default function WorkerManagementPage() {
       </div>
 
       {/* Workers table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+      <div className="card">
+        <table>
+          <thead>
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Worker
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Capacity
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Statistics
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Performance
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
+              <th>Worker</th>
+              <th>Status</th>
+              <th>Capacity</th>
+              <th>Statistics</th>
+              <th>Performance</th>
+              <th>Actions</th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody>
             {workers.map(worker => (
               <tr key={worker.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -264,8 +252,8 @@ export default function WorkerManagementPage() {
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
                     <div
-                      className="bg-blue-600 h-2 rounded-full"
-                      style={{ width: `${workerService.calculateUtilization(worker)}%` }}
+                      className="bg-blue-600 h-2 rounded-full progress-width"
+                      style={{ '--progress-width': `${workerService.calculateUtilization(worker)}%` } as React.CSSProperties}
                     />
                   </div>
                 </td>
@@ -295,11 +283,11 @@ export default function WorkerManagementPage() {
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  <div className="flex flex-col space-y-1">
+                  <div className="gap-sm flex-col">
                     {worker.isDisabled ? (
                       <button
                         onClick={() => handleEnableWorker(worker)}
-                        className="text-green-600 hover:text-green-900"
+                        className="btn-base btn-sm btn-success"
                       >
                         Enable
                       </button>
@@ -309,14 +297,14 @@ export default function WorkerManagementPage() {
                           setSelectedWorker(worker);
                           setShowDisableDialog(true);
                         }}
-                        className="text-yellow-600 hover:text-yellow-900"
+                        className="btn-base btn-sm btn-subtle"
                       >
                         Disable
                       </button>
                     )}
                     <button
                       onClick={() => handleDeleteWorker(worker)}
-                      className="text-red-600 hover:text-red-900"
+                      className="btn-base btn-sm btn-danger"
                     >
                       Delete
                     </button>
@@ -336,39 +324,41 @@ export default function WorkerManagementPage() {
 
       {/* Disable Worker Dialog */}
       {showDisableDialog && selectedWorker && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-4">Disable Worker</h2>
-            <p className="mb-4 text-gray-600">
+        <div className="modal-overlay">
+          <div className="modal modal-sm">
+            <div className="modal-header">
+              <h2 className="modal-header-title">Disable Worker</h2>
+            </div>
+            <div className="modal-body">
+            <p className="mb-4">
               Disable worker: <strong>{selectedWorker.name}</strong>
             </p>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Reason (required)
-              </label>
+            <div className="form-group">
+              <label className="form-label">Reason (required)</label>
               <textarea
                 value={disableReason}
                 onChange={(e) => setDisableReason(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="input-base w-full"
                 rows={3}
                 placeholder="Enter reason for disabling this worker..."
               />
             </div>
-            <div className="flex justify-end space-x-2">
+            </div>
+            <div className="modal-footer">
               <button
                 onClick={() => {
                   setShowDisableDialog(false);
                   setDisableReason('');
                   setSelectedWorker(null);
                 }}
-                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                className="btn-base btn-md btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDisableWorker}
                 disabled={!disableReason.trim()}
-                className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-base btn-md btn-danger"
               >
                 Disable Worker
               </button>

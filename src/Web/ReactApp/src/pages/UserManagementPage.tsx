@@ -48,16 +48,29 @@ export function UserManagementPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const { data: passwordPolicy } = usePasswordPolicy();
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
   const [creating, setCreating] = useState(false);
-  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
+  const [applicationAreas, setApplicationAreas] = useState<Array<{id: string; name: string; description: string}>>([]);
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [createErrors, setCreateErrors] = useState<{username?: string; email?: string; password?: string; general?: string; roles?: string}>({});
   type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>('idle');
   const [, setAvailabilityMessage] = useState('');
   const DEBOUNCE_MS = 450;
+
+  // Helper: Check if a role is admin role
+  const isAdminRole = (roleName: string | undefined) => roleName === 'farm_admin';
+
+  // Helper: Get primary role for display (admin > user > other)
+  const getPrimaryRole = (roleNames: string[]): string => {
+    if (roleNames.includes('farm_admin')) return 'farm_admin';
+    if (roleNames.includes('farm_user')) return 'farm_user';
+    return roleNames[0] || '';
+  };
 
   const passwordMeetsPolicy = () => {
     if (!passwordPolicy) return true; // don't block while loading
@@ -172,7 +185,8 @@ export function UserManagementPage() {
           password: newUser.password,
           firstName: newUser.firstName.trim() || undefined,
           lastName: newUser.lastName.trim() || undefined,
-          roleIds: selectedRoleIds
+          roleIds: selectedRoleId ? [selectedRoleId] : [],
+          accessibleAreas: selectedPermissions
         })
       });
 
@@ -215,7 +229,8 @@ export function UserManagementPage() {
       toast.success('User created');
       setShowCreateModal(false);
       setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
-      setSelectedRoleIds([]);
+      setSelectedRoleId('');
+      setSelectedPermissions([]);
     } catch (err) {
       console.error('Error creating user', err);
       toast.error('Unexpected error creating user');
@@ -227,7 +242,25 @@ export function UserManagementPage() {
   useEffect(() => {
     loadUsers();
     loadRoles();
+    loadApplicationAreas();
   }, []);
+
+  const loadApplicationAreas = async () => {
+    try {
+      // Start with common application areas. In future, these could come from API
+      setApplicationAreas([
+        { id: 'printers', name: 'Printers', description: 'View and manage printer configurations' },
+        { id: 'files', name: 'Files', description: 'Access harvested G-code files' },
+        { id: 'harvest', name: 'Harvest', description: 'Use the harvester interface' },
+        { id: 'jobs', name: 'Jobs', description: 'View and manage print jobs' },
+        { id: 'catalog', name: 'Catalog', description: 'Access manufacturer and model catalog' },
+        { id: 'settings', name: 'Settings', description: 'Modify account and application settings' },
+        { id: 'spools', name: 'Spools', description: 'Manage filament spools inventory' }
+      ]);
+    } catch (error) {
+      console.error('Error loading application areas:', error);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -339,12 +372,13 @@ export function UserManagementPage() {
         <button
           onClick={() => {
             const farmUserRole = roles.find(r => r.name === 'farm_user');
-            setSelectedRoleIds(farmUserRole ? [farmUserRole.id] : []);
+            setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
+            setSelectedPermissions([]);
             setCreateErrors({});
             setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
             setShowCreateModal(true);
           }}
-          className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-accent-dark focus:outline-none focus:ring-2 focus:ring-pf-accent flex items-center"
+          className="btn-base btn-md btn-primary"
         >
           <Plus className="h-4 w-4 mr-2" />
           Add User
@@ -360,25 +394,25 @@ export function UserManagementPage() {
             placeholder="Search users..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            className="pl-10 pr-4 input-base"
           />
         </div>
       </div>
       {/* Users Table */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-lg overflow-hidden">
+      <div className="card">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-pf-bg-2 border-b border-pf-border">
+          <table>
+            <thead>
               <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">User</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">Roles</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">Status</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">Last Login</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">Created</th>
-                <th className="px-6 py-3 text-right text-sm font-medium text-pf-text-primary">Actions</th>
+                <th>User</th>
+                <th>Roles</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th>Created</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-pf-border">
+            <tbody>
               {filteredUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-pf-bg-2">
                   <td className="px-6 py-4">
@@ -431,6 +465,16 @@ export function UserManagementPage() {
                       <button
                         onClick={() => {
                           setSelectedUser(user);
+                          setShowPermissionsModal(true);
+                        }}
+                        className="p-2 text-pf-text-secondary hover:text-pf-accent rounded-md hover:bg-pf-bg-2"
+                        title="Manage permissions"
+                      >
+                        <Shield className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedUser(user);
                           setShowEditModal(true);
                         }}
                         className="p-2 text-pf-text-secondary hover:text-pf-accent rounded-md hover:bg-pf-bg-2"
@@ -471,21 +515,28 @@ export function UserManagementPage() {
           </div>
         )}
       </div>
-      {/* User count */}
-      <div className="mt-4 text-sm text-pf-text-secondary">
-        Showing {filteredUsers.length} of {users.length} users
-      </div>
-      {/* TODO: Modals for create/edit users */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-pf-bg-1 rounded-lg p-6 max-w-lg w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Create New User</h3>
+
+      {/* User count and modals section */}
+      <div>
+        {/* User count */}
+        <div className="mt-4 text-sm text-pf-text-secondary">
+          Showing {filteredUsers.length} of {users.length} users
+        </div>
+
+        {/* TODO: Modals for create/edit users */}
+        {showCreateModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-lg">
+            <div className="modal-header">
+              <h3 className="modal-header-title">Create New User</h3>
+            </div>
+            <div className="modal-body">
             {createErrors.general && (
-              <div className="mb-4 p-2 rounded bg-red-50 text-red-600 text-sm" role="alert">
+              <div className="alert-base alert-error mb-4" role="alert">
                 {createErrors.general}
               </div>
             )}
-            <div className="space-y-4">
+            <div className="gap-md flex-col" role="group" aria-label="Create user form">
               <div>
                 <label htmlFor="create-username" className="block text-sm font-medium mb-1">Username</label>
                 <input
@@ -587,52 +638,82 @@ export function UserManagementPage() {
                 )}
               </div>
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="block text-sm font-medium">Roles</span>
-                  {roles.length > 0 && (
-                    <div className="flex gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedRoleIds(roles.map(r => r.id))}
-                        className="text-pf-accent hover:underline"
-                      >Select All</button>
-                      <span className="text-pf-text-tertiary">|</span>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedRoleIds([])}
-                        className="text-pf-accent hover:underline"
-                      >Clear</button>
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2" role="group" aria-label="Assign roles">
+                <label htmlFor="create-role" className="block text-sm font-medium mb-1">Role</label>
+                <select
+                  id="create-role"
+                  value={selectedRoleId}
+                  onChange={(e) => {
+                    setSelectedRoleId(e.target.value);
+                    // Auto-select appropriate permissions based on role
+                    const selectedRole = roles.find(r => r.id === e.target.value);
+                    if (selectedRole?.name === 'farm_admin') {
+                      // Admins get access to everything
+                      setSelectedPermissions(applicationAreas.map(a => a.id));
+                    } else if (selectedRole?.name === 'farm_user') {
+                      // Regular users get basic access
+                      setSelectedPermissions(['printers', 'files', 'jobs', 'spools']);
+                    } else {
+                      setSelectedPermissions([]);
+                    }
+                  }}
+                  className="w-full input-base"
+                >
+                  <option value="">Select a role...</option>
                   {roles.map(role => (
-                    <label key={role.id} className="inline-flex items-center space-x-1 bg-pf-bg-0 border border-pf-border rounded px-2 py-1 text-xs cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        className="accent-pf-accent"
-                        checked={selectedRoleIds.includes(role.id)}
-                        onChange={() => setSelectedRoleIds(prev => prev.includes(role.id) ? prev.filter(id => id !== role.id) : [...prev, role.id])}
-                      />
-                      <span>{role.displayName}</span>
-                    </label>
+                    <option key={role.id} value={role.id}>
+                      {role.displayName}
+                    </option>
                   ))}
-                  {roles.length === 0 && (
-                    <span className="text-xs text-pf-text-tertiary">No roles available</span>
-                  )}
+                </select>
+                <p className="text-xs text-pf-text-tertiary mt-1">
+                  {selectedRoleId ? roles.find(r => r.id === selectedRoleId)?.description || '' : 'Choose a role to assign permissions'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Application Access</label>
+                <p className="text-xs text-pf-text-secondary mb-3">Select which areas of the application this user can access:</p>
+                <div className="space-y-2">
+                  {applicationAreas.map(area => {
+                    const isAdmin = isAdminRole(roles.find(r => r.id === selectedRoleId)?.name);
+                    const isDisabled = isAdmin; // Admins always have full access
+                    
+                    return (
+                      <label key={area.id} className="flex items-start gap-2 p-2 hover:bg-pf-bg-0 rounded cursor-pointer transition">
+                        <input
+                          type="checkbox"
+                          checked={selectedPermissions.includes(area.id)}
+                          onChange={() => {
+                            if (!isDisabled) {
+                              setSelectedPermissions(prev => 
+                                prev.includes(area.id) 
+                                  ? prev.filter(id => id !== area.id)
+                                  : [...prev, area.id]
+                              );
+                            }
+                          }}
+                          disabled={isDisabled}
+                          className="mt-0.5 cursor-pointer"
+                        />
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
+                          <div className="text-xs text-pf-text-secondary">{area.description}</div>
+                          {isDisabled && <div className="text-xs text-pf-warning-text mt-0.5">Included with admin role</div>}
+                        </div>
+                      </label>
+                    );
+                  })}
                 </div>
-                {createErrors.roles && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.roles}</p>}
               </div>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="modal-footer">
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-md"
+                className="btn-base btn-md btn-secondary"
               >Cancel</button>
                 <button
                   onClick={createUser}
                   disabled={creating || !newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
-                  className="px-4 py-2 bg-pf-accent text-white rounded-md disabled:opacity-50 flex items-center gap-2"
+                  className="btn-base btn-md btn-primary"
                 >{creating && (
                   <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -640,13 +721,17 @@ export function UserManagementPage() {
                   </svg>
                 )}Create</button>
             </div>
+            </div>
           </div>
         </div>
       )}
       {showEditModal && selectedUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-pf-bg-1 rounded-lg p-6 max-w-lg w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Edit User: {selectedUser.username}</h3>
+        <div className="modal-overlay">
+          <div className="modal modal-lg">
+            <div className="modal-header">
+              <h3 className="modal-header-title">Edit User: {selectedUser.username}</h3>
+            </div>
+            <div className="modal-body">
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -723,65 +808,224 @@ export function UserManagementPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Roles</label>
-                <div className="flex flex-wrap gap-2">
+                <label htmlFor="edit-role" className="block text-sm font-medium mb-1">Role</label>
+                <select
+                  id="edit-role"
+                  value={selectedUser.roles[0] || ''}
+                  onChange={(e) => {
+                    setSelectedUser(u => {
+                      if (!u) return u;
+                      const newRole = e.target.value;
+                      // Auto-update permissions based on role
+                      let newPermissions = u.permissions;
+                      if (newRole === 'farm_admin') {
+                        // Admins get access to everything
+                        newPermissions = applicationAreas.map(a => a.id);
+                      } else if (newRole === 'farm_user' && !newPermissions.includes('printers')) {
+                        // Regular users get basic access
+                        newPermissions = ['printers', 'files', 'jobs', 'spools'];
+                      }
+                      return {
+                        ...u,
+                        roles: newRole ? [newRole] : [],
+                        permissions: newPermissions
+                      };
+                    });
+                  }}
+                  className="w-full input-base"
+                >
+                  <option value="">Select a role...</option>
                   {roles.map(role => (
-                    <label key={role.id} className="flex items-center gap-1">
-                      <input
-                        type="checkbox"
-                        checked={selectedUser.roles.includes(role.name)}
-                        onChange={e => {
-                          setSelectedUser(u => {
-                            if (!u) return u;
-                            // removed unused hasRole variable
-                            return {
-                              ...u,
-                              roles: e.target.checked
-                                ? [...u.roles, role.name]
-                                : u.roles.filter(r => r !== role.name)
-                            };
-                          });
-                        }}
-                      />
-                      <span>{role.displayName}</span>
-                    </label>
+                    <option key={role.id} value={role.name}>
+                      {role.displayName}
+                    </option>
                   ))}
-                </div>
+                </select>
+                <p className="text-xs text-pf-text-tertiary mt-1">
+                  {selectedUser.roles[0] ? roles.find(r => r.name === selectedUser.roles[0])?.description || '' : 'Choose a role to assign permissions'}
+                </p>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Permissions</label>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium">Application Access</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedUser(u => u ? { ...u } : u);
+                      setShowPermissionsModal(true);
+                    }}
+                    className="text-xs text-pf-accent hover:underline"
+                  >
+                    Edit Permissions →
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 p-2 bg-pf-bg-0 rounded border border-pf-border">
                   {selectedUser.permissions.length > 0 ? (
-                    selectedUser.permissions.map(p => (
-                      <span key={p} className="inline-block bg-pf-bg-2 px-2 py-1 rounded text-xs">{p}</span>
-                    ))
+                    selectedUser.permissions.map(p => {
+                      const area = applicationAreas.find(a => a.id === p);
+                      return (
+                        <span key={p} className="inline-block bg-pf-bg-2 px-2 py-1 rounded text-xs" title={area?.description}>
+                          {area?.name || p}
+                        </span>
+                      );
+                    })
                   ) : (
-                    <span className="text-pf-text-tertiary text-xs">No permissions</span>
+                    <span className="text-pf-text-tertiary text-xs">No accessible areas configured</span>
                   )}
                 </div>
               </div>
-              <div className="flex justify-end gap-2 mt-6">
+            </form>
+            <div className="modal-footer">
                 <button
                   type="button"
                   onClick={() => {
                     setShowEditModal(false);
                     setSelectedUser(null);
                   }}
-                  className="px-4 py-2 bg-pf-border text-pf-text-primary rounded-md"
+                  className="btn-base btn-md btn-secondary"
                 >
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  className="px-4 py-2 bg-pf-accent text-white rounded-md"
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
+                        method: 'PUT',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...getAuthHeaders()
+                        },
+                        body: JSON.stringify({
+                          firstName: selectedUser.firstName,
+                          lastName: selectedUser.lastName,
+                          email: selectedUser.email,
+                          isActive: selectedUser.isActive,
+                          roles: selectedUser.roles,
+                          permissions: selectedUser.permissions
+                        })
+                      });
+                      if (response.ok) {
+                        toast.success('User updated successfully');
+                        setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+                        setShowEditModal(false);
+                        setSelectedUser(null);
+                      } else {
+                        const err = await response.json().catch(() => ({}));
+                        toast.error(err.message || 'Failed to update user');
+                      }
+                    } catch {
+                      toast.error('Error updating user');
+                    }
+                  }}
+                  className="btn-base btn-md btn-primary"
                 >
                   Save
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Permissions Modal */}
+      {showPermissionsModal && selectedUser && (
+        <div className="modal-overlay" onClick={() => setShowPermissionsModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="text-lg font-semibold text-pf-text-primary">
+                Manage Application Access for {selectedUser.username}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowPermissionsModal(false)}
+                className="text-pf-text-secondary hover:text-pf-text-primary transition"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body space-y-4">
+              <p className="text-sm text-pf-text-secondary">
+                Select which areas of the application this user can access:
+              </p>
+              <div className="space-y-3 bg-pf-bg-0 p-3 rounded border border-pf-border">
+                {applicationAreas.map(area => {
+                  const userRole = selectedUser.roles[0];
+                  const isAdmin = userRole === 'farm_admin';
+                  const isDisabled = isAdmin; // Admins always have full access
+                  const hasAccess = selectedUser.permissions?.includes(area.id) ?? false;
+                  
+                  return (
+                    <label key={area.id} className="flex items-start gap-2 p-2 hover:bg-pf-bg-1 rounded cursor-pointer transition">
+                      <input
+                        type="checkbox"
+                        checked={hasAccess}
+                        onChange={() => {
+                          if (!isDisabled) {
+                            const updatedPermissions = hasAccess
+                              ? selectedUser.permissions.filter(id => id !== area.id)
+                              : [...selectedUser.permissions, area.id];
+                            setSelectedUser({
+                              ...selectedUser,
+                              permissions: updatedPermissions
+                            });
+                          }
+                        }}
+                        disabled={isDisabled}
+                        className="mt-0.5 cursor-pointer"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
+                        <div className="text-xs text-pf-text-secondary">{area.description}</div>
+                        {isDisabled && <div className="text-xs text-pf-warning-text mt-0.5">Included with admin role</div>}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                onClick={() => setShowPermissionsModal(false)}
+                className="btn-base btn-md btn-secondary"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const response = await fetch(
+                      `${getApiBaseUrl()}/users/${selectedUser.id}`,
+                      {
+                        method: 'PUT',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...getAuthHeaders()
+                        },
+                        body: JSON.stringify({
+                          accessibleAreas: selectedUser.permissions
+                        })
+                      }
+                    );
+                    if (!response.ok) throw new Error('Failed to update permissions');
+                    toast.success('Permissions updated');
+                    setShowPermissionsModal(false);
+                    loadUsers();
+                  } catch (error) {
+                    toast.error('Failed to update permissions');
+                  }
+                }}
+                className="btn-base btn-md btn-primary"
+              >
+                Save Permissions
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
     </PageTemplate>
   );
 }

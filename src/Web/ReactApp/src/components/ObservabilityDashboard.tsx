@@ -103,7 +103,7 @@ export function ObservabilityDashboard() {
       actions={
         <button
           onClick={handleRefresh}
-          className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-success-hover transition-colors"
+          className="btn-base btn-md btn-primary"
         >
           Refresh Data
         </button>
@@ -112,7 +112,7 @@ export function ObservabilityDashboard() {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
-          <div key={index} className="bg-pf-bg-1 rounded-lg shadow-sm border border-pf-border p-6">
+          <div key={index} className="card flat">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-pf-text-secondary">{stat.title}</p>
@@ -126,7 +126,7 @@ export function ObservabilityDashboard() {
       </div>
 
       {/* OpenTelemetry Configuration */}
-      <div className="bg-pf-bg-1 rounded-lg shadow-sm border border-pf-border p-6">
+      <div className="card flat">
         <h3 className="text-lg font-semibold text-pf-text-primary mb-4">
           OpenTelemetry Configuration
         </h3>
@@ -153,7 +153,7 @@ export function ObservabilityDashboard() {
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-pf-bg-1 rounded-lg shadow-sm border border-pf-border p-6">
+      <div className="card flat">
         <h3 className="text-lg font-semibold text-pf-text-primary mb-4">
           Recent Telemetry Activity
         </h3>

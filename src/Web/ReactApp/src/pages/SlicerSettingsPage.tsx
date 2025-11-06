@@ -89,40 +89,42 @@ export const SlicerSettingsPage: React.FC = () => {
       maxWidth="max-w-4xl"
     >
 
-      <div className="bg-white rounded shadow p-4">
-        <label className="inline-flex items-center">
-          <input type="checkbox" checked={local.enabled} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocal({ ...local, enabled: e.target.checked })} className="mr-2" />
-          <span>Enable local slicer worker (process jobs locally)</span>
-        </label>
+      <div className="card">
+        <div className="form-group inline">
+          <label className="form-label" htmlFor="enable-worker">
+            <input id="enable-worker" type="checkbox" checked={local.enabled} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocal({ ...local, enabled: e.target.checked })} className="mr-2" />
+            Enable local slicer worker (process jobs locally)
+          </label>
+        </div>
       </div>
 
-      <div className="bg-white rounded shadow p-4">
+      <div className="card">
         <h3 className="font-medium mb-3">Per-engine executables</h3>
-        <div className="space-y-3">
+        <div className="gap-md flex-col">
           {(['PrusaSlicer', 'OrcaSlicer', 'SuperSlicer', 'Cura'] as string[]).map(engine => (
             <div key={engine} className="grid grid-cols-3 gap-3 items-center">
               <div className="font-medium">{engine}</div>
               <div>
-                <input type="text" value={local.perEngine[engine]?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'path', e.target.value)} placeholder="Path to binary" className="w-full border rounded px-2 py-1" />
-                <div className="text-xs text-gray-500 mt-1">Path to slicer executable (leave empty to attempt PATH discovery)</div>
+                <input type="text" value={local.perEngine[engine]?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'path', e.target.value)} placeholder="Path to binary" className="input-base w-full" />
+                <div className="form-helper mt-1">Path to slicer executable (leave empty to attempt PATH discovery)</div>
               </div>
               <div>
-                <input type="text" value={local.perEngine[engine]?.argsTemplate ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'argsTemplate', e.target.value)} placeholder="Args template" className="w-full border rounded px-2 py-1" />
-                <div className="text-xs text-gray-500 mt-1">Args template — use {'{input}'} and {'{output}'} placeholders</div>
+                <input type="text" value={local.perEngine[engine]?.argsTemplate ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'argsTemplate', e.target.value)} placeholder="Args template" className="input-base w-full" />
+                <div className="form-helper mt-1">Args template — use {'{input}'} and {'{output}'} placeholders</div>
 
                 {engine === 'OrcaSlicer' && (
                   <div className="mt-2">
-                    <button type="button" className="text-sm text-blue-600 underline mr-3" onClick={() => setOpenExamplesEngine(openExamplesEngine === engine ? null : engine)}>
+                    <button type="button" className="btn-link" onClick={() => setOpenExamplesEngine(openExamplesEngine === engine ? null : engine)}>
                       {openExamplesEngine === engine ? 'Hide examples' : 'Show Orca examples'}
                     </button>
                     {openExamplesEngine === engine && (
-                      <div className="mt-2 bg-gray-50 p-2 rounded">
-                        <div className="text-xs text-gray-700 mb-2">Recommended Orca templates (you can edit after inserting):</div>
-                        <div className="flex gap-2">
-                          <button type="button" className="px-2 py-1 bg-gray-200 rounded text-sm" onClick={() => updateEngineField(engine, 'argsTemplate', '--config "{config}" --output "{output}" {input}')}>Insert config example</button>
-                          <button type="button" className="px-2 py-1 bg-gray-200 rounded text-sm" onClick={() => updateEngineField(engine, 'argsTemplate', '--export-gcode -o {output} {input}')}>Insert simple export</button>
+                      <div className="panel mt-2">
+                        <div className="form-helper mb-2">Recommended Orca templates (you can edit after inserting):</div>
+                        <div className="gap-sm flex-row">
+                          <button type="button" className="btn-base btn-sm btn-secondary" onClick={() => updateEngineField(engine, 'argsTemplate', '--config "{config}" --output "{output}" {input}')}>Insert config example</button>
+                          <button type="button" className="btn-base btn-sm btn-secondary" onClick={() => updateEngineField(engine, 'argsTemplate', '--export-gcode -o {output} {input}')}>Insert simple export</button>
                         </div>
-                        <div className="text-xs text-gray-500 mt-2">Placeholders: <code>{'{input}'}</code> &ndash; model file; <code>{'{output}'}</code> &ndash; gcode output; <code>{'{config}'}</code> &ndash; generated config path (worker replaces this when present)</div>
+                        <div className="form-helper mt-2">Placeholders: <code>{'{input}'}</code> &ndash; model file; <code>{'{output}'}</code> &ndash; gcode output; <code>{'{config}'}</code> &ndash; generated config path (worker replaces this when present)</div>
                       </div>
                     )}
                   </div>
@@ -134,20 +136,20 @@ export const SlicerSettingsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded shadow p-4">
-        <label className="block">
-          <div className="font-medium">Retry jitter percent</div>
-          <div className="text-xs text-gray-500">Percentage +/- applied to retry backoff delays (e.g. 15 = +/-15%)</div>
-          <input type="number" step="0.1" min={0} max={100} value={local.jitterPercent ?? 15} onChange={(e: React.ChangeEvent<HTMLInputElement>) => onJitterChange(e.target.value)} className="mt-2 w-32 border rounded px-2 py-1" />
-          {validationError && <div className="text-sm text-red-600 mt-1">{validationError}</div>}
-        </label>
+      <div className="card">
+        <div className="form-group">
+          <label className="form-label" htmlFor="jitter-percent">Retry jitter percent</label>
+          <div className="form-helper">Percentage +/- applied to retry backoff delays (e.g. 15 = +/-15%)</div>
+          <input id="jitter-percent" type="number" step="0.1" min={0} max={100} value={local.jitterPercent ?? 15} onChange={(e: React.ChangeEvent<HTMLInputElement>) => onJitterChange(e.target.value)} className="input-base mt-2 w-32" />
+          {validationError && <div className="form-error mt-1">{validationError}</div>}
+        </div>
       </div>
 
-      <div className="flex justify-end">
-        <button onClick={() => local && saveMutation.mutate(local)} disabled={!!validationError || !local} className="px-4 py-2 bg-blue-600 text-white rounded">Save Settings</button>
+      <div className="card-footer">
+        <button onClick={() => local && saveMutation.mutate(local)} disabled={!!validationError || !local} className="btn-base btn-md btn-primary ms-auto">Save Settings</button>
       </div>
 
-      {(saveMutation.error || saveError) && <div className="text-red-600">{(saveError) ?? (saveMutation.error as Error)?.message ?? 'Failed to save settings'}</div>}
+      {(saveMutation.error || saveError) && <div className="alert-base alert-error">{(saveError) ?? (saveMutation.error as Error)?.message ?? 'Failed to save settings'}</div>}
     </PageTemplate>
   );
 };

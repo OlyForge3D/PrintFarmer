@@ -21,71 +21,90 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
   const [showDetails, setShowDetails] = React.useState(false);
 
   return (
-    <div>
-      <div className="pf-card pf-flex pf-items-center pf-justify-between pf-p-3 pf-mb-2">
-        <div className="pf-flex pf-items-center pf-gap-3">
-          <Server className="w-6 h-6 text-pf-text-secondary" />
-          <div>
-            <div className="pf-text-lg pf-font-medium">{s.name}</div>
-            <div className="pf-text-sm pf-text-muted">{s.slicerType || 'unknown'} • {s.version || 'n/a'}</div>
-            <div className="pf-text-sm">{s.host}</div>
+    <div className="gap-md flex flex-col">
+      <div className="card">
+        <div className="card-body">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Server className="w-6 h-6 text-pf-text-secondary" />
+              <div>
+                <div className="text-lg font-medium text-pf-text-primary">{s.name}</div>
+                <div className="text-sm text-pf-text-secondary">{s.slicerType || 'unknown'} • {s.version || 'n/a'}</div>
+                <div className="text-sm text-pf-text-secondary">{s.host}</div>
+              </div>
+            </div>
+            <div className="flex gap-2 items-center flex-wrap justify-end">
+              <div className="text-sm text-pf-text-secondary">{s.status || 'unknown'}</div>
+              {s.uiManifestUrl && (
+                <button
+                  className="btn-base btn-sm btn-secondary"
+                  onClick={() => window.open(s.uiManifestUrl, '_blank', 'noopener')}
+                  aria-label={`Open UI ${s.name}`}
+                  title="Open UI"
+                >
+                  Open UI
+                </button>
+              )}
+              <button
+                className="btn-base btn-sm btn-secondary"
+                onClick={() => setShowDetails(v => !v)}
+                /* eslint-disable-next-line jsx-a11y/aria-props */
+                aria-expanded={showDetails}
+                aria-controls={`slicer-details-${s.id}`}
+              >
+                {showDetails ? 'Hide' : 'Details'}
+              </button>
+              <button
+                className="btn-base btn-sm btn-danger flex items-center gap-2"
+                onClick={() => onRequestDeregister ? onRequestDeregister(s) : mutation.mutate(s.id)}
+                disabled={mutation.status === 'pending'}
+                aria-label={`Deregister ${s.name}`}
+              >
+                <Trash2 className="w-4 h-4" />
+                {mutation.status === 'pending' ? '...' : 'Deregister'}
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="pf-flex pf-gap-2 pf-items-center">
-          <div className="pf-text-sm pf-text-muted">{s.status || 'unknown'}</div>
-          {s.uiManifestUrl && (
-            <button
-              className="px-2 py-1 border rounded bg-pf-panel text-sm"
-              onClick={() => window.open(s.uiManifestUrl, '_blank', 'noopener')}
-              aria-label={`Open UI ${s.name}`}
-              title="Open UI"
-            >
-              Open UI
-            </button>
-          )}
-          <button
-            className="px-2 py-1 border rounded bg-pf-panel text-sm"
-            onClick={() => setShowDetails(v => !v)}
-            aria-expanded={showDetails}
-            aria-controls={`slicer-details-${s.id}`}
-          >
-            {showDetails ? 'Hide' : 'Details'}
-          </button>
-          <button
-            className="flex items-center gap-2 px-3 py-1 border rounded bg-red-600 text-white"
-            onClick={() => onRequestDeregister ? onRequestDeregister(s) : mutation.mutate(s.id)}
-            disabled={mutation.status === 'pending'}
-            aria-label={`Deregister ${s.name}`}
-          >
-            <Trash2 className="w-4 h-4" />
-            {mutation.status === 'pending' ? '...' : 'Deregister'}
-          </button>
         </div>
       </div>
 
       {showDetails && (
-        <div id={`slicer-details-${s.id}`} className="pf-p-3 pf-mb-3 pf-bg-panel border border-pf-border rounded">
-          <div className="pf-grid pf-grid-cols-2 pf-gap-3 pf-mb-2">
-            <div><strong>Last seen</strong><div className="pf-text-sm">{s.lastSeen ?? 'n/a'}</div></div>
-            <div><strong>Max concurrent jobs</strong><div className="pf-text-sm">{s.maxConcurrentJobs ?? 'n/a'}</div></div>
-            <div><strong>Tags</strong><div className="pf-text-sm">{(s.tags && s.tags.length > 0) ? s.tags.join(', ') : 'none'}</div></div>
-            <div><strong>Host</strong><div className="pf-text-sm">{s.host ?? 'n/a'}</div></div>
-          </div>
-          <div>
-            <strong>Capabilities</strong>
-            <div className="pf-mt-2 pf-text-sm pf-overflow-auto">
-              {s.capabilitiesJson ? (
-                (() => {
-                  try {
-                    const parsed = JSON.parse(s.capabilitiesJson as unknown as string);
-                    return <pre className="text-xs">{JSON.stringify(parsed, null, 2)}</pre>;
-                  } catch {
-                    return <pre className="text-xs">{s.capabilitiesJson}</pre>;
-                  }
-                })()
-              ) : (
-                <div className="pf-text-muted">No capabilities published</div>
-              )}
+        <div id={`slicer-details-${s.id}`} className="card">
+          <div className="card-body gap-md">
+            <div className="grid grid-cols-2 gap-md">
+              <div>
+                <div className="form-label">Last seen</div>
+                <div className="text-sm text-pf-text-secondary">{s.lastSeen ?? 'n/a'}</div>
+              </div>
+              <div>
+                <div className="form-label">Max concurrent jobs</div>
+                <div className="text-sm text-pf-text-secondary">{s.maxConcurrentJobs ?? 'n/a'}</div>
+              </div>
+              <div>
+                <div className="form-label">Tags</div>
+                <div className="text-sm text-pf-text-secondary">{(s.tags && s.tags.length > 0) ? s.tags.join(', ') : 'none'}</div>
+              </div>
+              <div>
+                <div className="form-label">Host</div>
+                <div className="text-sm text-pf-text-secondary">{s.host ?? 'n/a'}</div>
+              </div>
+            </div>
+            <div>
+              <div className="form-label mb-2">Capabilities</div>
+              <div className="text-sm text-pf-text-secondary overflow-auto">
+                {s.capabilitiesJson ? (
+                  (() => {
+                    try {
+                      const parsed = JSON.parse(s.capabilitiesJson as unknown as string);
+                      return <pre className="text-xs">{JSON.stringify(parsed, null, 2)}</pre>;
+                    } catch {
+                      return <pre className="text-xs">{s.capabilitiesJson}</pre>;
+                    }
+                  })()
+                ) : (
+                  <div className="text-pf-text-secondary">No capabilities published</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -122,13 +141,20 @@ export default function SlicersAdminPage() {
   return (
     <ProtectedRoute requiredRole="farm_admin">
       <PageTemplate title="Admin: Slicers" subtitle="Manage registered slicer services" maxWidth="max-w-3xl">
-        <div className="space-y-4">
+        <div className="gap-md flex flex-col">
           {isLoading ? (
-            <div className="pf-p-4">Loading slicers...</div>
+            <div className="card">
+              <div className="card-body">
+                <div className="text-pf-text-secondary">Loading slicers...</div>
+              </div>
+            </div>
           ) : error ? (
-            <div className="pf-p-4">Failed to load slicers.</div>
+            <div className="alert-base alert-error">
+              <div className="alert-title">Error</div>
+              <div>Failed to load slicers.</div>
+            </div>
           ) : (data && data.length > 0) ? (
-            <div>
+            <div className="gap-md flex flex-col">
               {data.map((s) => (
                 <div key={s.id} onDoubleClick={() => openConfirm(s)}>
                   <SlicerRow s={s} />
@@ -136,7 +162,11 @@ export default function SlicersAdminPage() {
               ))}
             </div>
           ) : (
-            <div className="pf-text-muted">No registered slicer services found.</div>
+            <div className="card">
+              <div className="card-body">
+                <div className="text-pf-text-secondary">No registered slicer services found.</div>
+              </div>
+            </div>
           )}
         </div>
 

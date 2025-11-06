@@ -88,11 +88,8 @@ export default function SlicerRegistryPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading worker registry...</p>
-        </div>
+      <div className="loading-overlay">
+        <div className="spinner lg" />
       </div>
     );
   }
@@ -100,15 +97,17 @@ export default function SlicerRegistryPage() {
   if (error) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h3 className="text-red-800 font-semibold mb-2">Error Loading Workers</h3>
-          <p className="text-red-600">{error.message}</p>
-          <button
-            onClick={() => loadServices()}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-          >
-            Retry
-          </button>
+        <div className="alert-base alert-error">
+          <div>
+            <div className="alert-title">Error Loading Workers</div>
+            <p>{error.message}</p>
+            <button
+              onClick={() => loadServices()}
+              className="btn-base btn-md btn-danger mt-4"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -130,12 +129,12 @@ export default function SlicerRegistryPage() {
       </div>
 
       {workers.length === 0 ? (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-          <svg className="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="card text-center">
+          <svg className="mx-auto h-12 w-12 text-pf-text-tertiary mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No Registered Workers</h3>
-          <p className="text-gray-600">
+          <h3 className="text-lg font-medium text-pf-text-primary mb-2">No Registered Workers</h3>
+          <p className="text-pf-text-secondary">
             Workers will appear here when they register with the API. Check worker configuration and network connectivity.
           </p>
         </div>
@@ -144,7 +143,7 @@ export default function SlicerRegistryPage() {
           {workers.map((worker) => (
             <div 
               key={worker.id} 
-              className="bg-white rounded-lg shadow-md border border-gray-200 p-6 hover:shadow-lg transition-shadow cursor-pointer"
+              className="card clickable"
               onClick={() => setSelectedWorkerId(worker.id === selectedWorkerId ? null : worker.id)}
             >
               {/* Header */}
@@ -183,11 +182,11 @@ export default function SlicerRegistryPage() {
               {worker.capabilities.length > 0 && (
                 <div className="mb-4">
                   <h4 className="text-xs font-semibold text-gray-700 uppercase mb-2">Capabilities</h4>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="gap-sm flex-row flex-wrap">
                     {worker.capabilities.map((cap, idx) => (
                       <span
                         key={idx}
-                        className="inline-block px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded"
+                        className="status-badge success"
                       >
                         {cap}
                       </span>
@@ -217,8 +216,8 @@ export default function SlicerRegistryPage() {
                           )}
                           <div className="mt-1 w-full bg-gray-200 rounded-full h-1">
                             <div 
-                              className="bg-blue-600 h-1 rounded-full transition-all" 
-                              style={{ width: `${job.progressPercent}%` }}
+                              className="bg-blue-600 h-1 rounded-full transition-all progress-width"
+                              style={{ '--progress-width': `${job.progressPercent}%` } as React.CSSProperties}
                             ></div>
                           </div>
                         </div>
@@ -238,7 +237,7 @@ export default function SlicerRegistryPage() {
       )}
 
       {/* Stats Footer */}
-      <div className="mt-8 bg-gray-50 rounded-lg p-4 border border-gray-200">
+      <div className="card mt-8">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
           <div>
             <div className="text-2xl font-bold text-gray-900">{workers.length}</div>

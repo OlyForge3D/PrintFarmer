@@ -50,30 +50,32 @@ export const SlicerJobStatusPage: React.FC = () => {
             maxWidth="max-w-4xl"
         >
 
-            <div className="bg-pf-bg-1 p-4 rounded border border-pf-border">
-                <label className="block font-medium mb-2 text-pf-text-primary">Job ID</label>
-                <div className="flex gap-2">
+            <div className="card">
+                <div className="form-group">
+                  <label className="form-label">Job ID</label>
+                  <div className="gap-md flex-row">
                     <input 
                         value={jobId} 
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobId(e.target.value)} 
                         placeholder="Enter job GUID" 
-                        className="border border-pf-border rounded px-2 py-1 flex-1 bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent" 
+                        className="input-base flex-1" 
                     />
                     <button 
                         type="button"
                         onClick={fetchStatus} 
                         disabled={loading || !jobId} 
-                        className="px-3 py-1 bg-pf-accent text-white rounded hover:bg-pf-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn-base btn-md btn-primary"
                     >
                         Fetch
                     </button>
+                  </div>
                 </div>
 
                 {loading && <div className="mt-3 text-sm text-pf-text-secondary">Loading...</div>}
-                {error && <div className="mt-3 text-sm text-pf-error-text">{error}</div>}
+                {error && <div className="alert-base alert-error mt-3">{error}</div>}
 
                 {status && (
-                    <div className="mt-4 bg-pf-bg-2 p-3 rounded border border-pf-border text-pf-text-primary">
+                    <div className="card mt-4">
                         <div><strong>Status:</strong> {status.status}</div>
                         <div><strong>Progress:</strong> {status.progress}%</div>
                         <div><strong>Retry Count:</strong> {status.retryCount}</div>

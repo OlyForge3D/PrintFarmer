@@ -443,19 +443,19 @@ export function PrintersAdminPage() {
   return (
     <ProtectedRoute requiredRole="farm_admin">
       <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
-        <div className="space-y-4">
+        <div className="gap-md flex flex-col">
           <div className="flex items-center gap-3">
             {discoveryAvailable && (
               <button
                 type="button"
                 aria-label="Trigger network discovery to find printers on local network"
                 onClick={() => setShowDiscovery(true)}
-                className="px-4 py-2 bg-pf-accent text-white rounded hover:opacity-90"
+                className="btn-base btn-md btn-primary"
               >
                 Discover Printers
               </button>
             )}
-            <button type="button" aria-label="Export printers as JSON" onClick={handleExport} className="px-4 py-2 bg-pf-accent text-white rounded hover:opacity-90" disabled={exporting}>
+            <button type="button" aria-label="Export printers as JSON" onClick={handleExport} className="btn-base btn-md btn-primary" disabled={exporting}>
               {exporting ? (
                 <span className="flex items-center gap-2">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
@@ -463,218 +463,231 @@ export function PrintersAdminPage() {
                 </span>
               ) : 'Export printers'}
             </button>
-            <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="px-4 py-2 bg-pf-accent text-white rounded hover:opacity-90">Import printers</button>
+            <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="btn-base btn-md btn-primary">Import printers</button>
             <input aria-label="Import printers JSON file" ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
 
-          <div className="p-4 bg-pf-bg-1 border border-pf-border rounded">
-            <h3 className="text-lg font-semibold">Available printers</h3>
-            {isLoading ? (
-              <div className="text-sm text-pf-text-secondary">Loading...</div>
-            ) : error ? (
-              <div className="text-sm text-pf-error-text">Failed to load printers</div>
-            ) : (!printers || printers.length === 0) ? (
-              <div className="text-sm text-pf-text-secondary">No printers found</div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm">{printers.length} printers</div>
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} className="px-2 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded text-sm hover:bg-pf-bg-3">Select all</button>
-                    <button type="button" onClick={() => { setSelectedIds([]); }} className="px-2 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded text-sm hover:bg-pf-bg-3">Select none</button>
-                    <button type="button" onClick={handleExport} className="px-2 py-1 bg-pf-accent text-white rounded text-sm hover:opacity-90">Export</button>
-                  </div>
+          <div className="card">
+            <div className="card-header">
+              <div className="card-header-title">Available printers</div>
+            </div>
+            <div className="card-body gap-md">
+              {isLoading ? (
+                <div className="text-sm text-pf-text-secondary">Loading...</div>
+              ) : error ? (
+                <div className="alert-base alert-error">
+                  <div className="alert-title">Error</div>
+                  <div>Failed to load printers</div>
                 </div>
-                {showExportOptions && (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <div className="flex gap-2">
-                      <button type="button" onClick={exportSelectedAsJson} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3" disabled={exporting}>Export JSON</button>
-                      <button type="button" onClick={exportSelectedServerJson} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3" disabled={exporting}>Export (server JSON)</button>
-                      <button type="button" onClick={exportSelectedServerCsv} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3" disabled={exporting}>Export (server CSV)</button>
-                      <button type="button" onClick={exportSelectedAsCsv} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3" disabled={exporting}>Export CSV</button>
-                      <button type="button" onClick={() => setShowExportOptions(false)} className="px-3 py-1 border border-pf-border bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-3" disabled={exporting}>Cancel</button>
+              ) : (!printers || printers.length === 0) ? (
+                <div className="text-sm text-pf-text-secondary">No printers found</div>
+              ) : (
+                <div className="gap-md flex flex-col">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-pf-text-secondary">{printers.length} printers</div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} className="btn-base btn-sm btn-secondary">Select all</button>
+                      <button type="button" onClick={() => { setSelectedIds([]); }} className="btn-base btn-sm btn-secondary">Select none</button>
+                      <button type="button" onClick={handleExport} className="btn-base btn-sm btn-primary">Export</button>
                     </div>
-                    {exportProgress !== null && (
-                      <div className="w-full bg-pf-bg-1 rounded overflow-hidden h-3">
-                        {(() => {
-                          const pct = Math.max(0, Math.min(100, exportProgress ?? 0));
-                          const nearest = Math.round(pct / 5) * 5; // nearest 5%
-                          const cls = `bg-pf-accent h-3 pf-export-progress-bar pf-export-progress-var-${nearest}`;
-                          return <div className={cls} />;
-                        })()}
-                        <div className="text-xs text-pf-text-tertiary mt-1">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
-                      </div>
-                    )}
                   </div>
-                )}
+                  {showExportOptions && (
+                    <div className="gap-md flex flex-col">
+                      <div className="flex gap-2 flex-wrap">
+                        <button type="button" onClick={exportSelectedAsJson} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export JSON</button>
+                        <button type="button" onClick={exportSelectedServerJson} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export (server JSON)</button>
+                        <button type="button" onClick={exportSelectedServerCsv} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export (server CSV)</button>
+                        <button type="button" onClick={exportSelectedAsCsv} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export CSV</button>
+                        <button type="button" onClick={() => setShowExportOptions(false)} className="btn-base btn-sm btn-secondary" disabled={exporting}>Cancel</button>
+                      </div>
+                      {exportProgress !== null && (
+                        <div className="w-full bg-pf-bg-1 rounded overflow-hidden h-3">
+                          {(() => {
+                            const pct = Math.max(0, Math.min(100, exportProgress ?? 0));
+                            const nearest = Math.round(pct / 5) * 5; // nearest 5%
+                            const cls = `bg-pf-accent h-3 pf-export-progress-bar pf-export-progress-var-${nearest}`;
+                            return <div className={cls} />;
+                          })()}
+                          <div className="text-xs text-pf-text-tertiary mt-1">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead className="bg-pf-bg-2 border-b border-pf-border">
-                      <tr>
-                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">
-                          <input
-                            aria-label="Select all printers"
-                            type="checkbox"
-                            checked={selectedIds.length === printers.length && printers.length > 0}
-                            onChange={(e) => {
-                              if (e.target.checked) setSelectedIds(printers.map(p => p.id));
-                              else setSelectedIds([]);
-                            }}
-                          />
-                        </th>
-                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Printer Name</th>
-                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Manufacturer</th>
-                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Model</th>
-                        <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Server URL</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-pf-border">
-                      {printers.map(p => (
-                        <tr key={p.id} className="hover:bg-pf-bg-2 transition-colors">
-                          <td className="px-3 py-2">
+                  <div className="overflow-x-auto">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>
                             <input
-                              aria-label={`Select printer ${p.name}`}
+                              aria-label="Select all printers"
                               type="checkbox"
-                              checked={selectedIds.includes(p.id)}
+                              checked={selectedIds.length === printers.length && printers.length > 0}
                               onChange={(e) => {
-                                if (e.target.checked) setSelectedIds(prev => Array.from(new Set([...prev, p.id])));
-                                else setSelectedIds(prev => prev.filter(id => id !== p.id));
+                                if (e.target.checked) setSelectedIds(printers.map(p => p.id));
+                                else setSelectedIds([]);
                               }}
                             />
-                          </td>
-                          <td className="px-3 py-2 text-pf-text-primary font-medium">{p.name}</td>
-                          <td className="px-3 py-2 text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
-                          <td className="px-3 py-2 text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
-                          <td className="px-3 py-2 text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>
+                          </th>
+                          <th>Printer Name</th>
+                          <th>Manufacturer</th>
+                          <th>Model</th>
+                          <th>Server URL</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {printers.map(p => (
+                          <tr key={p.id}>
+                            <td>
+                              <input
+                                aria-label={`Select printer ${p.name}`}
+                                type="checkbox"
+                                checked={selectedIds.includes(p.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) setSelectedIds(prev => Array.from(new Set([...prev, p.id])));
+                                  else setSelectedIds(prev => prev.filter(id => id !== p.id));
+                                }}
+                              />
+                            </td>
+                            <td className="text-pf-text-primary font-medium">{p.name}</td>
+                            <td className="text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
+                            <td className="text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
+                            <td className="text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {previewItems && (
-            <div className="p-4 bg-pf-bg-2 border border-pf-border rounded">
-              {(() => {
-                const totalItems = previewItems.length;
-                const completedItems = importResults?.length ?? 0;
-                const progressPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-                return (
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold">Import preview ({previewItems.length})</h3>
-                    {importing && (
-                      <div className="flex items-center gap-3">
-                        <div className="text-sm text-pf-text-secondary">
-                          <span className="font-semibold">{completedItems}/{totalItems}</span> processed • <span className="font-semibold">{progressPercent}%</span>
+            <div className="card">
+              <div className="card-header">
+                {(() => {
+                  const totalItems = previewItems.length;
+                  const completedItems = importResults?.length ?? 0;
+                  const progressPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+                  return (
+                    <div className="flex items-center justify-between w-full">
+                      <div className="card-header-title">Import preview ({previewItems.length})</div>
+                      {importing && (
+                        <div className="flex items-center gap-3">
+                          <div className="text-sm text-pf-text-secondary">
+                            <span className="font-semibold">{completedItems}/{totalItems}</span> processed • <span className="font-semibold">{progressPercent}%</span>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead className="bg-pf-bg-2 border-b border-pf-border">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Printer Name</th>
-                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Manufacturer</th>
-                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Model</th>
-                      <th className="text-left px-3 py-2 font-semibold text-pf-text-primary">Server URL</th>
-                      <th className="text-center px-3 py-2 font-semibold text-pf-text-primary">Status</th>
-                      <th className="text-center px-3 py-2 font-semibold text-pf-text-primary">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-pf-border">
-                    {previewItems.map(item => {
-                      const importResult = importResults?.find(r => r.index === item.__index);
-                      return (
-                        <tr key={item.__index} className="hover:bg-pf-bg-2 transition-colors">
-                          <td className="px-3 py-2 text-pf-text-primary font-medium">{item.name || <i className="text-pf-text-tertiary">(missing)</i>}</td>
-                          <td className="px-3 py-2 text-pf-text-secondary">{item.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
-                          <td className="px-3 py-2 text-pf-text-secondary">{item.modelName || <span className="text-pf-warning-text">-</span>}</td>
-                          <td className="px-3 py-2 text-pf-text-secondary">{item.serverUrl || <span className="text-pf-error-text">(missing)</span>}</td>
-                          <td className="px-3 py-2 text-center text-xs">
-                            {importResult ? (
-                              <>
-                                {importResult.status === 'Pending' && (
-                                  <div className="flex items-center justify-center gap-1">
-                                    <svg className="animate-spin h-3 w-3 text-pf-text-secondary" viewBox="0 0 24 24">
-                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    <span className="text-pf-text-secondary">Pending</span>
-                                  </div>
-                                )}
-                                {importResult.status === 'Imported' && <span className="text-pf-success-text font-semibold">Imported</span>}
-                                {importResult.status === 'Skipped' && <span className="text-pf-warning-text font-semibold">Skipped</span>}
-                                {importResult.status === 'Failed' && (
-                                  <div className="flex flex-col gap-1">
-                                    <span className="text-pf-error-text font-semibold">Failed</span>
-                                    {importResult.reason && <span className="text-pf-error-text text-xs">{importResult.reason}</span>}
-                                  </div>
-                                )}
-                              </>
-                            ) : (
-                              <span className="text-pf-text-tertiary">-</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <button
-                              disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
-                              onClick={() => handleRetryRow(item)}
-                              className="px-1.5 py-1 text-sm bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                              aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
-                              title={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Only failed imports can be retried'}
-                            >
-                              {retryingIndex === item.__index ? '↻' : '↻'}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
+              <div className="card-body gap-md">
+                <div className="overflow-x-auto">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Printer Name</th>
+                        <th>Manufacturer</th>
+                        <th>Model</th>
+                        <th>Server URL</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewItems.map(item => {
+                        const importResult = importResults?.find(r => r.index === item.__index);
+                        return (
+                          <tr key={item.__index}>
+                            <td className="text-pf-text-primary font-medium">{item.name || <i className="text-pf-text-tertiary">(missing)</i>}</td>
+                            <td className="text-pf-text-secondary">{item.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
+                            <td className="text-pf-text-secondary">{item.modelName || <span className="text-pf-warning-text">-</span>}</td>
+                            <td className="text-pf-text-secondary">{item.serverUrl || <span className="text-pf-error-text">(missing)</span>}</td>
+                            <td className="text-center text-xs">
+                              {importResult ? (
+                                <>
+                                  {importResult.status === 'Pending' && (
+                                    <div className="flex items-center justify-center gap-1">
+                                      <svg className="animate-spin h-3 w-3 text-pf-text-secondary" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                      </svg>
+                                      <span className="text-pf-text-secondary">Pending</span>
+                                    </div>
+                                  )}
+                                  {importResult.status === 'Imported' && <span className="text-pf-success-text font-semibold">Imported</span>}
+                                  {importResult.status === 'Skipped' && <span className="text-pf-warning-text font-semibold">Skipped</span>}
+                                  {importResult.status === 'Failed' && (
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-pf-error-text font-semibold">Failed</span>
+                                      {importResult.reason && <span className="text-pf-error-text text-xs">{importResult.reason}</span>}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-pf-text-tertiary">-</span>
+                              )}
+                            </td>
+                            <td className="text-center">
+                              <button
+                                disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
+                                onClick={() => handleRetryRow(item)}
+                                className="btn-base btn-sm btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                                aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
+                                title={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Only failed imports can be retried'}
+                              >
+                                {retryingIndex === item.__index ? '↻' : '↻'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
-              <div className="mt-3 flex gap-2">
-                <label className="flex items-center gap-2 text-sm">
-                  <span className="text-pf-text-secondary">Duplicate handling:</span>
-                  <select value={duplicateHandling} onChange={e => setDuplicateHandling(e.target.value as 'skip' | 'overwrite' | 'rename')} className="px-2 py-1 rounded border border-pf-border bg-pf-bg-1 text-pf-text-primary text-sm">
-                    <option value="skip">Skip</option>
-                    <option value="overwrite">Overwrite</option>
-                    <option value="rename">Rename</option>
-                  </select>
-                </label>
-                <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{importing ? 'Importing...' : 'Confirm Import'}</button>
-                <button type="button" disabled={importing} aria-label="Close import preview and review results" onClick={() => setPreviewItems(null)} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{importing ? 'Importing...' : 'Finish'}</button>
-                <button type="button" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" title={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'} onClick={handleRetryAllFailed} className="px-3 py-1 bg-pf-accent text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">Retry All</button>
+                <div className="flex gap-md flex-wrap items-center">
+                  <label className="form-group inline">
+                    <span className="text-pf-text-secondary">Duplicate handling:</span>
+                    <select value={duplicateHandling} onChange={e => setDuplicateHandling(e.target.value as 'skip' | 'overwrite' | 'rename')} className="input-base input-sm">
+                      <option value="skip">Skip</option>
+                      <option value="overwrite">Overwrite</option>
+                      <option value="rename">Rename</option>
+                    </select>
+                  </label>
+                  <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="btn-base btn-sm btn-primary disabled:opacity-50">{importing ? 'Importing...' : 'Confirm Import'}</button>
+                  <button type="button" disabled={importing} aria-label="Close import preview and review results" onClick={() => setPreviewItems(null)} className="btn-base btn-sm btn-secondary disabled:opacity-50">{importing ? 'Importing...' : 'Finish'}</button>
+                  <button type="button" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" title={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'} onClick={handleRetryAllFailed} className="btn-base btn-sm btn-secondary disabled:opacity-50">Retry All</button>
+                </div>
               </div>
             </div>
           )}
           {(!previewItems || previewItems.length === 0) && importResults && importResults.length > 0 && (
-            <div className="p-4 bg-pf-bg-2 border border-pf-border rounded">
-              <h3 className="text-lg font-semibold">Import results ({importResults.length})</h3>
-              <ul className="mt-2 space-y-2 text-sm text-pf-text-secondary">
+            <div className="card">
+              <div className="card-header">
+                <div className="card-header-title">Import results ({importResults.length})</div>
+              </div>
+              <div className="card-body gap-md">
                 {importResults.map(r => (
-                  <li key={r.index} className="flex justify-between items-center">
+                  <div key={r.index} className="flex justify-between items-center p-3 border border-pf-border rounded">
                     <div>
                       <div className="font-medium text-pf-text-primary">{r.name}</div>
-                      {r.reason && <div className="text-xs text-pf-error-text">{r.reason}</div>}
+                      {r.reason && <div className="text-xs text-pf-error-text mt-1">{r.reason}</div>}
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-xs">
-                        {r.status === 'Imported' ? <span className="text-pf-success-text">Imported</span> : r.status === 'Skipped' ? <span className="text-pf-warning-text">Skipped</span> : <span className="text-pf-error-text">Failed</span>}
+                        {r.status === 'Imported' ? <span className="text-pf-success-text font-semibold">Imported</span> : r.status === 'Skipped' ? <span className="text-pf-warning-text font-semibold">Skipped</span> : <span className="text-pf-error-text font-semibold">Failed</span>}
                       </div>
                       {r.id && (
-                        <a href={`/printers/${r.id}`} className="text-xs text-pf-accent underline" target="_blank" rel="noreferrer">Open</a>
+                        <a href={`/printers/${r.id}`} className="text-xs btn-link" target="_blank" rel="noreferrer">Open</a>
                       )}
                     </div>
-                  </li>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
         </div>

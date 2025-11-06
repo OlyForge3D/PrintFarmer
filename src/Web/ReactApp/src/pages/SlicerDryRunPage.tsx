@@ -47,26 +47,30 @@ export const SlicerDryRunPage: React.FC = () => {
             maxWidth="max-w-4xl"
         >
 
-            <div className="bg-pf-bg-1 p-4 rounded shadow-lg border border-pf-border">
-                <label className="block mb-2 font-medium text-pf-text-primary">Engine</label>
-                <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="border border-pf-border rounded px-2 py-1 bg-pf-bg-0 text-pf-text-primary">
+            <div className="card">
+                <div className="form-group">
+                  <label className="form-label">Engine</label>
+                  <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="input-base">
                     <option>OrcaSlicer</option>
                     <option>PrusaSlicer</option>
-                </select>
+                  </select>
+                </div>
 
-                <label className="block mt-4 mb-2 font-medium text-pf-text-primary">Args Template</label>
-                <textarea value={template} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplate(e.target.value)} rows={6} className="w-full border border-pf-border rounded p-2 bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent" placeholder={'e.g. --config "{config}" --output "{output}" {input}'} />
+                <div className="form-group">
+                  <label className="form-label">Args Template</label>
+                  <textarea value={template} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplate(e.target.value)} rows={6} className="input-base w-full" placeholder={'e.g. --config "{config}" --output "{output}" {input}'} />
+                </div>
 
-                <div className="mt-4 flex gap-2">
-                    <button onClick={doDryRun} disabled={loading} className="px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50">Validate Template</button>
-                    <button onClick={() => { setTemplate('--export-gcode -o {output} {input}'); }} className="px-4 py-2 bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-1 border border-pf-border">Insert Example</button>
+                <div className="gap-md flex-row">
+                    <button onClick={doDryRun} disabled={loading} className="btn-base btn-md btn-primary">Validate Template</button>
+                    <button onClick={() => { setTemplate('--export-gcode -o {output} {input}'); }} className="btn-base btn-md btn-secondary">Insert Example</button>
                 </div>
 
                 {loading && <div className="mt-3 text-sm text-pf-text-secondary">Validating...</div>}
-                {error && <div className="mt-3 text-sm text-pf-error-text">{error}</div>}
+                {error && <div className="alert-base alert-error mt-3">{error}</div>}
 
                 {result && (
-                    <div className="mt-4 bg-pf-bg-2 p-3 rounded border border-pf-border">
+                    <div className="card mt-4">
                         <div className="font-medium text-pf-text-primary">Rendered Args</div>
                         <pre className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">{renderUnknown(result.rendered)}</pre>
 
