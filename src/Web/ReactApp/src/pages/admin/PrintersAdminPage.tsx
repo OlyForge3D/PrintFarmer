@@ -2,6 +2,7 @@ import React from 'react';
 import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { printerHubService } from '@/services/printerHubService';
+import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { toast } from 'sonner';
@@ -44,8 +45,46 @@ export function PrintersAdminPage() {
   const [showExportOptions, setShowExportOptions] = React.useState(false);
   const [exportProgress, setExportProgress] = React.useState<number | null>(null);
   const [exporting, setExporting] = React.useState<boolean>(false);
+  const [showDiscovery, setShowDiscovery] = React.useState(false);
+  const [discoveryAvailable, setDiscoveryAvailable] = React.useState(false);
 
-  // Set up SignalR connection for real-time import progress updates
+  // Check if discovery service is available
+  React.useEffect(() => {
+    const checkDiscoveryAvailability = async () => {
+      try {
+        // Fetch network discovery settings
+        const settings = await apiClient.getSettings<import('@/types/NetworkDiscoverySettings').NetworkDiscoverySettings>('NetworkDiscovery');
+        console.log('Discovery settings:', settings);
+        
+        // Discovery is available if:
+        // 1. EnableDiscovery is true AND
+        // 2. LastHeartbeat is recent (within 60 seconds) - confirms service is actually running
+        const isEnabled = settings?.enableDiscovery === true;
+        const hasRecentHeartbeat = settings?.lastHeartbeat 
+          ? new Date().getTime() - new Date(settings.lastHeartbeat).getTime() < 60000 // 60 seconds
+          : false;
+        
+        console.log('Discovery check:', { isEnabled, lastHeartbeat: settings?.lastHeartbeat, hasRecentHeartbeat });
+        setDiscoveryAvailable(isEnabled && hasRecentHeartbeat);
+        
+        if (isEnabled && !hasRecentHeartbeat) {
+          console.warn('Discovery is enabled but service is not responding to heartbeats');
+        }
+      } catch (error) {
+        // If error, discovery is likely not available
+        console.error('Failed to check discovery availability:', error);
+        setDiscoveryAvailable(false);
+      }
+    };
+
+    // Check immediately on mount
+    checkDiscoveryAvailability();
+    
+    // Re-check every 30 seconds to catch service state changes
+    const interval = setInterval(checkDiscoveryAvailability, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
   React.useEffect(() => {
     let unsubscribe: (() => void) | null = null;
 
@@ -406,6 +445,16 @@ export function PrintersAdminPage() {
       <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
+            {discoveryAvailable && (
+              <button
+                type="button"
+                aria-label="Trigger network discovery to find printers on local network"
+                onClick={() => setShowDiscovery(true)}
+                className="px-4 py-2 bg-pf-accent text-white rounded hover:opacity-90"
+              >
+                Discover Printers
+              </button>
+            )}
             <button type="button" aria-label="Export printers as JSON" onClick={handleExport} className="px-4 py-2 bg-pf-accent text-white rounded hover:opacity-90" disabled={exporting}>
               {exporting ? (
                 <span className="flex items-center gap-2">
@@ -629,6 +678,16 @@ export function PrintersAdminPage() {
             </div>
           )}
         </div>
+
+        <PrinterDiscoveryModal
+          isOpen={showDiscovery}
+          onClose={() => setShowDiscovery(false)}
+          onSuccess={() => {
+            setShowDiscovery(false);
+            // Refetch the printers list to show newly discovered printers
+            // Note: usePrintersWithCameraUrls will automatically refetch when needed
+          }}
+        />
       </PageTemplate>
     </ProtectedRoute>
   );

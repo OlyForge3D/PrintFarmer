@@ -14,7 +14,8 @@
 #
 # Services started:
 #   1. API Backend (ASP.NET Core) - localhost:5245
-#   2. React Frontend (Vite) - localhost:3000
+#   2. Printer Discovery Service (ASP.NET Core) - localhost:5246
+#   3. React Frontend (Vite) - localhost:3000
 #
 # Config File Example (~/.start-local.conf):
 #   AUTO_ADMIN=true
@@ -80,9 +81,11 @@ done
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SRC_DIR="$ROOT_DIR/src"
 API_DIR="$SRC_DIR/api"
+DISCOVERY_DIR="$SRC_DIR/printer-discovery"
 REACT_DIR="$SRC_DIR/Web/ReactApp"
 
 API_URL=${API_URL:-http://localhost:5245}
+DISCOVERY_URL=${DISCOVERY_URL:-http://localhost:5246}
 REACT_URL=${REACT_URL:-http://localhost:3000}
 
 # Auto-admin defaults
@@ -95,6 +98,7 @@ AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
 LOG_DIR=${LOG_DIR:-"$ROOT_DIR/logs"}
 PID_DIR=${PID_DIR:-"$ROOT_DIR/.pids"}
 API_LOG="$LOG_DIR/api.log"
+DISCOVERY_LOG="$LOG_DIR/discovery.log"
 REACT_LOG="$LOG_DIR/react.log"
 META_FILE="$PID_DIR/services.meta"
 
@@ -120,13 +124,43 @@ fi
 fresh_cleanup() {
   log_info "Starting fresh cleanup - terminating all existing containers and processes..."
   
-  # Kill any processes on PrintFarmer ports
-  local ports=(5245 7281 3000)  # API HTTP/HTTPS and React ports
+  # First, try to kill services from metadata file if it exists
+  if [[ -f "$META_FILE" ]]; then
+    # Source metadata to get PIDs
+    local API_PID DISCOVERY_PID REACT_PID
+    if [[ -r "$META_FILE" ]]; then
+      eval "$(grep -E '^(API_PID|DISCOVERY_PID|REACT_PID)=' "$META_FILE" || true)"
+    fi
+    
+    # Kill processes if they're still running
+    if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" 2>/dev/null; then
+      log_warn "Terminating API process (PID: $API_PID)"
+      kill "$API_PID" 2>/dev/null || true
+    fi
+    
+    if [[ -n "${DISCOVERY_PID:-}" ]] && kill -0 "$DISCOVERY_PID" 2>/dev/null; then
+      log_warn "Terminating Discovery service process (PID: $DISCOVERY_PID)"
+      kill "$DISCOVERY_PID" 2>/dev/null || true
+    fi
+    
+    if [[ -n "${REACT_PID:-}" ]] && kill -0 "$REACT_PID" 2>/dev/null; then
+      log_warn "Terminating React dev server process (PID: $REACT_PID)"
+      kill "$REACT_PID" 2>/dev/null || true
+    fi
+    
+    sleep 1
+  fi
+  
+  # Kill any processes on PrintFarmer ports (backup method)
+  local ports=(5245 5246 3000)  # API HTTP, Discovery, and React ports
+  log_info "Checking ports: ${ports[*]}"
   for port in "${ports[@]}"; do
     if is_port_in_use "$port"; then
       log_warn "Terminating processes on port $port"
       free_port "$port" || true
       sleep 1
+    else
+      log_info "Port $port is free"
     fi
   done
   
@@ -187,6 +221,11 @@ cleanup() {
       log_warn "Stopped API server (PID: $API_PID)"
     fi
     
+    if [[ -n "${DISCOVERY_PID:-}" ]] && kill -0 "$DISCOVERY_PID" 2>/dev/null; then
+      kill "$DISCOVERY_PID" 2>/dev/null || true
+      log_warn "Stopped Discovery service (PID: $DISCOVERY_PID)"
+    fi
+    
     if [[ -n "${REACT_PID:-}" ]] && kill -0 "$REACT_PID" 2>/dev/null; then
       kill "$REACT_PID" 2>/dev/null || true
       log_warn "Stopped React dev server (PID: $REACT_PID)"
@@ -217,6 +256,13 @@ if [[ $TEAR_DOWN -eq 1 ]]; then
       log_success "API server stopped"
     fi
     
+    if [[ -n "${DISCOVERY_PID:-}" ]] && kill -0 "$DISCOVERY_PID" 2>/dev/null; then
+      log_info "Stopping Discovery service (PID: $DISCOVERY_PID)..."
+      kill "$DISCOVERY_PID" 2>/dev/null || true
+      sleep 1
+      log_success "Discovery service stopped"
+    fi
+    
     if [[ -n "${REACT_PID:-}" ]] && kill -0 "$REACT_PID" 2>/dev/null; then
       log_info "Stopping React dev server (PID: $REACT_PID)..."
       kill "$REACT_PID" 2>/dev/null || true
@@ -231,7 +277,7 @@ if [[ $TEAR_DOWN -eq 1 ]]; then
   
   # Also try to kill by port in case PIDs don't match
   log_info "Clearing ports..."
-  for port in 5245 7281 3000; do
+  for port in 5245 5246 3000; do
     if is_port_in_use "$port"; then
       log_info "Force-killing process on port $port..."
       free_port "$port" || true
@@ -294,6 +340,7 @@ fi
 # Check and free ports
 log_info "Checking ports..."
 free_port ${API_URL##*:}
+free_port ${DISCOVERY_URL##*:}
 free_port ${REACT_URL##*:}
 
 # Bootstrap dependencies if needed
@@ -343,6 +390,17 @@ else
   API_PID=$!
 fi
 
+# Start Printer Discovery service (requires host network for mDNS/broadcast)
+log_info "Starting Printer Discovery service..."
+cd "$SRC_DIR"
+if [[ $FOREGROUND -eq 1 ]]; then
+  ASPNETCORE_URLS="http://localhost:5246" Discovery__ApiBaseUrl="http://localhost:5245" dotnet run --project printer-discovery/PrinterDiscoveryService.csproj > "$DISCOVERY_LOG" 2>&1 &
+  DISCOVERY_PID=$!
+else
+  ASPNETCORE_URLS="http://localhost:5246" Discovery__ApiBaseUrl="http://localhost:5245" dotnet run --project printer-discovery/PrinterDiscoveryService.csproj > "$DISCOVERY_LOG" 2>&1 &
+  DISCOVERY_PID=$!
+fi
+
 # Start React dev server
 log_info "Starting React dev server..."
 cd "$REACT_DIR"
@@ -357,8 +415,10 @@ fi
 # Save service metadata
   cat > "$META_FILE" << EOF
 API_PID=$API_PID
+DISCOVERY_PID=$DISCOVERY_PID
 REACT_PID=$REACT_PID
 API_URL=$API_URL
+DISCOVERY_URL=$DISCOVERY_URL
 REACT_URL=$REACT_URL
 STARTED_AT=$(date)
 EOF
@@ -369,11 +429,17 @@ log_success "Services starting..."
 log_info "Waiting for services to be ready..."
 
 # Use common utilities for waiting
-if ! wait_for_api "$API_URL" 60 1; then
+# Increase timeout to account for first-run compilation/JIT
+if ! wait_for_api "$API_URL" 120 2; then
   log_error "API server failed to start. Check logs: $API_LOG"
 fi
 
-if ! wait_for_react "$REACT_URL" 60 1; then
+# Wait for discovery service (uses separate health check endpoint)
+if ! wait_for_discovery "$DISCOVERY_URL" 90 2; then
+  log_error "Discovery service failed to start. Check logs: $DISCOVERY_LOG"
+fi
+
+if ! wait_for_react "$REACT_URL" 90 2; then
   log_error "React dev server failed to start. Check logs: $REACT_LOG"
 fi
 
@@ -388,7 +454,9 @@ fi
 # Setup initial admin user if AUTO_ADMIN is enabled
 if [[ "$AUTO_ADMIN" == "true" ]]; then
   log_info "Setting up initial admin user..."
-  create_initial_admin "$API_URL" "$AUTO_ADMIN_USERNAME" "$AUTO_ADMIN_PASSWORD" "$AUTO_ADMIN_EMAIL"
+  if ! create_initial_admin "$API_URL" "$AUTO_ADMIN_USERNAME" "$AUTO_ADMIN_PASSWORD" "$AUTO_ADMIN_EMAIL"; then
+    log_warn "Could not create initial admin user - this may be expected if setup is not needed"
+  fi
 fi
 
 # Display summary
@@ -396,16 +464,19 @@ echo
 log_success "🚀 All services are ready!"
 echo
 echo "📊 Service URLs:"
-echo "  • API Backend:     $API_URL"
-echo "  • React Frontend:  $REACT_URL"
+echo "  • API Backend:             $API_URL"
+echo "  • Discovery Service:       $DISCOVERY_URL"
+echo "  • React Frontend:          $REACT_URL"
 echo
 echo "🔍 Health Checks:"
-echo "  • API Health:      $API_URL/healthz"
-echo "  • API Detailed:    $API_URL/health"
-echo "  • API Endpoints:   $API_URL/api/printers"
+echo "  • API Health:              $API_URL/healthz"
+echo "  • API Detailed:            $API_URL/health"
+echo "  • Discovery Health:        $DISCOVERY_URL/health"
+echo "  • API Endpoints:           $API_URL/api/printers"
 echo
 echo "📝 Log Files:"
 echo "  • API Logs:        $API_LOG"
+echo "  • Discovery Logs:  $DISCOVERY_LOG"
 echo "  • React Logs:      $REACT_LOG"
 echo
 echo "🛠️  Development URLs:"
@@ -432,13 +503,14 @@ if [[ $FOREGROUND -eq 1 ]]; then
 else
   log_info "Running in background mode."
   echo "To stop all services, run:"
-  echo "  kill $API_PID $REACT_PID"
+  echo "  kill $API_PID $DISCOVERY_PID $REACT_PID"
   echo
   echo "Or stop all services cleanly with:"
   echo "  ./scripts/start-all-local.sh --tear-down"
   echo
   echo "To monitor logs:"
   echo "  tail -f $API_LOG"
+  echo "  tail -f $DISCOVERY_LOG"
   echo "  tail -f $REACT_LOG"
   echo
   echo "Process IDs saved to: $META_FILE"

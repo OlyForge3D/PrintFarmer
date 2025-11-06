@@ -68,6 +68,7 @@ OPTIONS:
     --include-telemetry     Include telemetry/observability
     --include-security      Include security configurations  
     --include-registry      Include local registry
+    --include-discovery     Include printer discovery service (microservices only)
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
 
     --db-provider PROVIDER  Database provider (postgres|sqlserver|mysql, default: postgres)
@@ -137,6 +138,7 @@ parse_args() {
     INCLUDE_TELEMETRY="false"
     INCLUDE_SECURITY="false"
     INCLUDE_REGISTRY="false"
+    INCLUDE_DISCOVERY="false"
     ENABLE_ORCA_WORKER=""
     API_PORT=""
     DB_PROVIDER="${DB_PROVIDER:-postgres}"
@@ -159,6 +161,8 @@ parse_args() {
                 INCLUDE_SECURITY="true"; shift ;;
             --include-registry)
                 INCLUDE_REGISTRY="true"; shift ;;
+            --include-discovery)
+                INCLUDE_DISCOVERY="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
             --db-provider)
@@ -530,6 +534,20 @@ generate_compose() {
             addons_merged=true
         else
             log_warning "Failed to merge registry services, continuing without them"
+        fi
+    fi
+    
+    if [[ "$INCLUDE_DISCOVERY" == "true" ]]; then
+        # Printer discovery is only supported in microservices mode
+        if [[ "$arch" == "microservices" ]]; then
+            if merge_addon_services "$compose_file" "discovery"; then
+                log_info "Merged printer discovery service"
+                addons_merged=true
+            else
+                log_warning "Failed to merge discovery service, continuing without it"
+            fi
+        else
+            log_warning "Printer discovery service is only supported in microservices architecture (skipping)"
         fi
     fi
     

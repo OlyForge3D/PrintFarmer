@@ -1,0 +1,75 @@
+# PrintFarmer Printer Discovery Service
+# Microservice for automatic printer network discovery
+# Runs on host network to access local network for mDNS and broadcast discovery
+#
+# Architecture:
+#   - Runs in HOST network mode (can access local network)
+#   - Connects back to API in bridge network via host.docker.internal
+#   - Two operational modes: Push (periodic) + Pull (manual HTTP endpoint)
+#
+# Environment Variables:
+#   Discovery__ApiBaseUrl       - API base URL (http://host.docker.internal:5245)
+#   EnablePeriodicDiscovery     - Auto-scan periodically (true/false)
+#   ScanIntervalSeconds         - Interval between scans (default: 300)
+#   Subnets                     - Comma-separated CIDR subnets to scan
+#   ProbeTimeoutMs              - TCP probe timeout in ms (default: 1000)
+#   MaxConcurrentProbes         - Max concurrent TCP probes (default: 50)
+
+services:
+  printer-discovery:
+    build:
+      context: .
+      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
+      target: printer-discovery-runtime
+      args:
+        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
+    image: printfarmer-printer-discovery-multistage
+    container_name: printfarmer-printer-discovery
+    # Host network mode allows access to local network and broadcast/multicast
+    network_mode: host
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:5246
+      - Discovery__ApiBaseUrl=${DISCOVERY__API_BASE_URL:-http://localhost:5245}
+      - EnablePeriodicDiscovery=${ENABLE_PERIODIC_DISCOVERY:-true}
+      - ScanIntervalSeconds=${SCAN_INTERVAL_SECONDS:-300}
+      - Subnets=${DISCOVERY_SUBNETS:-192.168.0.0/16,10.0.0.0/8}
+      - ProbeTimeoutMs=${PROBE_TIMEOUT_MS:-1000}
+      - MaxConcurrentProbes=${MAX_CONCURRENT_PROBES:-50}
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - Logging__LogLevel__PrinterDiscoveryService=Information
+      # Import network discovery configuration from deployment
+      - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
+      - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-192.168.0.0/16,10.0.0.0/8}
+    ports:
+      - "5246:5246"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5246/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    ulimits:
+      nofile: 1024
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M

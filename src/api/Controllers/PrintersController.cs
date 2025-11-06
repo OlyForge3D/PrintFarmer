@@ -599,6 +599,98 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Register printers discovered by the network discovery service
+    /// </summary>
+    /// <param name="discoveredPrinters">List of discovered printers to register</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of registered printers</returns>
+    /// <response code="200">Successfully registered discovered printers</response>
+    /// <response code="400">Invalid printer data</response>
+    /// <response code="500">Server error</response>
+    [HttpPost("discovered")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<PrinterDto>>> RegisterDiscoveredAsync(
+        [FromBody] IEnumerable<RegisterDiscoveredPrinterDto> discoveredPrinters,
+        CancellationToken ct)
+    {
+        if (discoveredPrinters == null || !discoveredPrinters.Any())
+        {
+            return BadRequest("No printers provided");
+        }
+
+        var registered = new List<PrinterDto>();
+
+        foreach (var discovered in discoveredPrinters)
+        {
+            try
+            {
+                _logger.LogInformation(
+                    $"Processing discovered printer: {discovered.FriendlyName ?? discovered.Hostname} " +
+                    $"({discovered.IpAddress}:{discovered.Port}) - Backend: {discovered.PrinterBackend}");
+
+                // Check if printer already exists by IP
+                var existing = (await _printersService.GetAllAsync(ct))
+                    .FirstOrDefault(p => p.ServerUrl?.Contains(discovered.IpAddress) ?? false);
+
+                if (existing != null)
+                {
+                    _logger.LogInformation($"Printer already registered: {existing.Name}");
+
+                    // Convert Printer entity to PrinterDto
+                    var existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
+                    if (existingDto != null)
+                    {
+                        registered.Add(existingDto);
+                    }
+                    continue;
+                }
+
+                // Build server URL from discovered data
+                var serverUrl = $"http://{discovered.IpAddress}:{discovered.Port}";
+
+                // Parse backend enum from string
+                if (!Enum.TryParse<PrinterBackend>(discovered.PrinterBackend, ignoreCase: true, out var backend))
+                {
+                    _logger.LogWarning($"Unknown printer backend: {discovered.PrinterBackend}");
+                    backend = PrinterBackend.Moonraker;  // Default
+                }
+
+                // Create new printer from discovered data
+                var createDto = new CreatePrinterDto
+                {
+                    Name = discovered.FriendlyName ?? discovered.Hostname ?? $"{backend}-{discovered.IpAddress}",
+                    ServerUrl = serverUrl,
+                    Backend = backend,
+                    // Note: API key will need to be configured manually
+                };
+
+                var validationResult = await _validator.ValidateAsync(createDto, ct);
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning(
+                        $"Discovered printer validation failed: {string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage))}");
+                    continue;
+                }
+
+                // Create the printer
+                var created = await _printersService.CreatePrinterFromDtoAsync(createDto, ct);
+                registered.Add(created);
+
+                _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to register discovered printer: {discovered.Hostname}");
+                // Continue with next printer on error
+            }
+        }
+
+        return Ok(registered);
+    }
+
+    /// <summary>
     /// Sets the maintenance mode for a printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer</param>

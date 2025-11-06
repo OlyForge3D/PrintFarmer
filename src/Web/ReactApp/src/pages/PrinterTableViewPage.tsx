@@ -4,17 +4,14 @@ import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
-import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import type { Printer } from '@/types/api';
-import { Search } from 'lucide-react';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 
 export function PrinterTableViewPage() {
   const { hasPermission } = useAuth();
   const { data: printers, isLoading, error, refetch } = usePrinters();
   
-  const [showDiscovery, setShowDiscovery] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [printersToDelete, setPrintersToDelete] = useState<Printer[]>([]);
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
@@ -127,16 +124,7 @@ export function PrinterTableViewPage() {
         
         <div className="flex flex-col sm:flex-row gap-3">
           {hasPermission('printers', 'create') && (
-            <>
-              <button
-                onClick={() => setShowDiscovery(true)}
-                className="inline-flex items-center px-4 py-2 border border-pf-border-light shadow-sm text-sm font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2"
-              >
-                <Search className="h-4 w-4 mr-2" />
-                Discover Printers
-              </button>
-              <AddPrinterButton onSuccess={() => refetch()} />
-            </>
+            <AddPrinterButton onSuccess={() => refetch()} />
           )}
         </div>
       </div>
@@ -177,15 +165,6 @@ export function PrinterTableViewPage() {
       )}
 
       {/* Modals */}
-      <PrinterDiscoveryModal
-        isOpen={showDiscovery}
-        onClose={() => setShowDiscovery(false)}
-        onSuccess={() => {
-          setShowDiscovery(false);
-          refetch();
-        }}
-      />
-
       <DeleteConfirmationModal
         isOpen={deleteModalOpen}
         printers={printersToDelete}

@@ -41,6 +41,14 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     [JsonPropertyName("maxRetries")]
     public int MaxRetries { get; set; } = 2; // Valid range: 0-10
 
+    /// <summary>
+    /// UTC timestamp of the last heartbeat from the discovery service.
+    /// Used to determine if the discovery service is actively running.
+    /// </summary>
+    [JsonPropertyName("lastHeartbeat")]
+    [System.Text.Json.Serialization.JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? LastHeartbeat { get; set; }
+
     public void Validate()
     {
         EnsureUniqueSubnets();

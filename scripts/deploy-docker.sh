@@ -122,7 +122,8 @@ generate_deployment_config() {
     local include_telemetry="${3:-false}"
     local include_security="${4:-false}"
     local include_registry="${5:-false}"
-    local output_dir="${6:-$(pwd)}"
+    local include_discovery="${6:-false}"
+    local output_dir="${7:-$(pwd)}"
     
     print_info "Generating deployment configuration for $architecture architecture..."
     
@@ -142,6 +143,9 @@ generate_deployment_config() {
     fi
     if [ "$include_registry" = "true" ]; then
         generator_args+=("--include-registry")
+    fi
+    if [ "$include_discovery" = "true" ]; then
+        generator_args+=("--include-discovery")
     fi
     
     # Add worker configuration
@@ -725,6 +729,7 @@ COMPOSE GENERATOR OPTIONS:
         --include-telemetry Include telemetry/observability (OpenTelemetry)
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
+        --include-discovery Include network printer discovery service (microservices only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
 VERIFY / UTILITY OPTIONS:
@@ -777,8 +782,14 @@ EXAMPLES:
     # Deploy monolithic with security and registry
     ./scripts/deploy-docker.sh --architecture monolithic --include-security --include-registry
     
+    # Deploy microservices with printer discovery service
+    ./scripts/deploy-docker.sh --architecture microservices --include-discovery
+    
+    # Deploy with monitoring + discovery + auto-admin
+    ./scripts/deploy-docker.sh --architecture microservices --include-monitoring --include-discovery --auto-admin
+    
     # Non-interactive deployment with all options
-    ./scripts/deploy-docker.sh --non-interactive --architecture microservices --include-monitoring --include-telemetry --include-security
+    ./scripts/deploy-docker.sh --non-interactive --architecture microservices --include-monitoring --include-telemetry --include-security --include-discovery
 
 DEPLOYMENT MODES:
     1. Monolithic      - All services in one container (simplest)
@@ -797,9 +808,19 @@ NETWORK MODES:
     1. Bridge          - Standard Docker networking (default)
     2. Host            - Direct host network access (for printer discovery)
 
+PRINTER DISCOVERY (MICROSERVICES ONLY):
+    The network printer discovery service automatically scans your local network 
+    to find compatible 3D printers (Moonraker, PrusaLink, OctoPrint, SDCP).
+    - Enabled by default in microservices deployments
+    - Runs in host network mode to access local network
+    - Scans configurable IP ranges periodically
+    - Supports both automatic push and manual pull discovery modes
+    - Accessible via API endpoint: POST /api/discovery/scan
+
 For more information, see:
     - DOCKER_DEPLOYMENT.md
     - LOCAL_DEVELOPMENT.md
+    - docs/PRINTER_DISCOVERY_ARCHITECTURE.md
     - README.md
 
 EOF
@@ -968,6 +989,7 @@ INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
 INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
 INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
 INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
+INCLUDE_DISCOVERY=${INCLUDE_DISCOVERY:-false}
 
 # Distributed Slicing
 ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
@@ -2196,6 +2218,15 @@ configure_additional() {
     if [ -n "${MONITORING_STACK_MODE:-}" ]; then
         persist_env_key "MONITORING_STACK_MODE" "${MONITORING_STACK_MODE}"
     fi
+    if [ -n "${INCLUDE_SECURITY:-}" ]; then
+        persist_env_key "INCLUDE_SECURITY" "${INCLUDE_SECURITY}"
+    fi
+    if [ -n "${INCLUDE_REGISTRY:-}" ]; then
+        persist_env_key "INCLUDE_REGISTRY" "${INCLUDE_REGISTRY}"
+    fi
+    if [ -n "${INCLUDE_DISCOVERY:-}" ]; then
+        persist_env_key "INCLUDE_DISCOVERY" "${INCLUDE_DISCOVERY}"
+    fi
     
     if [ "${CLI_INCLUDE_SECURITY:-false}" = "false" ]; then
         prompt_yes_no "Enable security configurations (enhanced security headers, HTTPS)?" "no" "INCLUDE_SECURITY_CHOICE"
@@ -2215,6 +2246,27 @@ configure_additional() {
     else
         print_info "Local Docker registry enabled via CLI flag"
         INCLUDE_REGISTRY="true"
+    fi
+    
+    if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "false" ]; then
+        # Only offer discovery in microservices mode
+        if [ "$ARCHITECTURE" = "microservices" ]; then
+            prompt_yes_no "Enable network printer discovery service (scans local network for 3D printers)?" "yes" "INCLUDE_DISCOVERY_CHOICE"
+            if [ "$INCLUDE_DISCOVERY_CHOICE" = "yes" ]; then
+                INCLUDE_DISCOVERY="true"
+            fi
+        else
+            print_info "Printer discovery service is only available in microservices architecture"
+            INCLUDE_DISCOVERY="false"
+        fi
+    else
+        if [ "$ARCHITECTURE" = "microservices" ]; then
+            print_info "Printer discovery service enabled via CLI flag"
+            INCLUDE_DISCOVERY="true"
+        else
+            print_warning "Printer discovery service requested but not supported in $ARCHITECTURE architecture"
+            INCLUDE_DISCOVERY="false"
+        fi
     fi
     
 
@@ -4299,7 +4351,7 @@ main() {
     # Determine output directory (CLI option or default to current directory)
     local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
 
-    if generate_deployment_config "$ARCHITECTURE" "$include_monitoring" "$include_telemetry" "$include_security" "$include_registry" "$output_dir"; then
+    if generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
         print_success "Using new compose generator"
     else
         print_warning "Falling back to legacy compose generation"

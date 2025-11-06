@@ -536,6 +536,31 @@ public class DiscoveredPrinterDto
     public string? CameraSnapshotUrl { get; set; }
 }
 
+/// <summary>
+/// DTO for registering a discovered printer with the central API.
+/// Used by printer-discovery service to register newly found printers.
+/// </summary>
+public class RegisterDiscoveredPrinterDto
+{
+    /// <summary>Hostname or local name of the printer</summary>
+    public string Hostname { get; set; } = string.Empty;
+
+    /// <summary>IP address of the printer</summary>
+    public string IpAddress { get; set; } = string.Empty;
+
+    /// <summary>Port number where printer is accessible</summary>
+    public int Port { get; set; } = 80;
+
+    /// <summary>Backend type (moonraker, prusalink, octoprint, sdcp)</summary>
+    public string PrinterBackend { get; set; } = string.Empty;
+
+    /// <summary>Friendly display name for the printer</summary>
+    public string? FriendlyName { get; set; }
+
+    /// <summary>Timestamp when printer was discovered</summary>
+    public DateTime DiscoveredAt { get; set; } = DateTime.UtcNow;
+}
+
 // Discovery progress events for SignalR streaming
 /// <summary>
 /// Periodic progress update for an active network discovery session.

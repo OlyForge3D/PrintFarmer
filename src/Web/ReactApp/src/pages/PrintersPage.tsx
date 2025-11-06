@@ -6,13 +6,12 @@ import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
-import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
 import { PageTemplate } from '@/components/PageTemplate';
 import type { Printer } from '@/types/api';
 
-import { Printer as PrinterIcon, Search, LayoutGrid, List } from 'lucide-react';
+import { Printer as PrinterIcon, LayoutGrid, List } from 'lucide-react';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -32,7 +31,6 @@ export function PrintersPage() {
   } = usePrintersWithCameraUrls();
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
-  const [showDiscovery, setShowDiscovery] = useState(false);
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
@@ -232,19 +230,7 @@ export function PrintersPage() {
             </button>
           </div>
           {hasPermission('printers', 'create') && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDiscovery(true);
-                }}
-                className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
-              >
-                <Search className="h-4 w-4" />
-                <span>Discover</span>
-              </button>
-              <AddPrinterButton onSuccess={refetchPrinters} />
-            </>
+            <AddPrinterButton onSuccess={refetchPrinters} />
           )}
         </div>
       </div>
@@ -258,19 +244,9 @@ export function PrintersPage() {
               <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
               <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer.</p>
-              <div className="flex justify-center space-x-4">
+              <div className="flex justify-center">
                 {hasPermission('printers', 'create') && (
-                  <>
-                    <AddPrinterButton onSuccess={refetchPrinters} />
-                    <button
-                      type="button"
-                      onClick={() => setShowDiscovery(true)}
-                      className="flex items-center space-x-2 px-4 py-2 bg-pf-bg-1 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-bg-2 transition-colors"
-                    >
-                      <Search className="h-4 w-4" />
-                      <span>Discover Printers</span>
-                    </button>
-                  </>
+                  <AddPrinterButton onSuccess={refetchPrinters} />
                 )}
               </div>
             </div>
@@ -296,12 +272,6 @@ export function PrintersPage() {
         </div>
 
         {/* Modals */}
-        <PrinterDiscoveryModal
-          isOpen={showDiscovery}
-          onClose={() => setShowDiscovery(false)}
-          onSuccess={refetchPrinters}
-        />
-        
         <DeleteConfirmationModal
           isOpen={deleteConfirmation.isOpen}
           printers={deleteConfirmation.printers}

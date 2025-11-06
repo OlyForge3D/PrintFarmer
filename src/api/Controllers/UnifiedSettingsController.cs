@@ -242,6 +242,47 @@ public class UnifiedSettingsController : ControllerBase
     }
 
     /// <summary>
+    /// Heartbeat endpoint for discovery service.
+    /// Updates the LastHeartbeat timestamp in NetworkDiscoverySettings to confirm service is alive.
+    /// </summary>
+    /// <param name="keyName">The key name - should be "NetworkDiscovery".</param>
+    /// <returns>NoContent on success.</returns>
+    [HttpPost("{keyName}/heartbeat")]
+    public ActionResult SendHeartbeat(string keyName)
+    {
+        try
+        {
+            if (keyName != "NetworkDiscovery")
+            {
+                return BadRequest(new { message = "Heartbeat endpoint only supports NetworkDiscovery settings" });
+            }
+
+            // Get current discovery settings
+            var currentSettings = _modularSettingsService.GetByKey(keyName) as Farm.Infrastructure.Settings.NetworkDiscoverySettings;
+            if (currentSettings == null)
+            {
+                _logger.LogWarning("Failed to get NetworkDiscoverySettings for heartbeat");
+                return BadRequest(new { message = "Failed to get NetworkDiscoverySettings" });
+            }
+
+            // Update the heartbeat timestamp
+            currentSettings.LastHeartbeat = DateTime.UtcNow;
+
+            // Save the updated settings
+            _modularSettingsService.Save(currentSettings);
+
+            _logger.LogDebug("Heartbeat received and recorded for NetworkDiscoverySettings at {Timestamp}", currentSettings.LastHeartbeat);
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process heartbeat for key '{KeyName}'", keyName);
+            return StatusCode(500, new { message = $"Failed to process heartbeat: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Updates the settings for a specific section by keyName.
     /// </summary>
     /// <param name="keyName">The key name of the settings section.</param>

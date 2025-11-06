@@ -92,7 +92,10 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("Failed to register with API: {StatusCode} - {Error}", response.StatusCode, error);
-                throw new InvalidOperationException($"Registration failed: {response.StatusCode}");
+                _logger.LogError("Registration DTO: {RegistrationData}", json);
+                _logger.LogError("API Base URL: {ApiBaseUrl}, Service Name: {ServiceName}, Host: {ServiceHost}",
+                    _apiBaseUrl, _serviceName, _serviceHost);
+                throw new InvalidOperationException($"Registration failed: {response.StatusCode} - {error}");
             }
 
             var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);

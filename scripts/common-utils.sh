@@ -64,9 +64,9 @@ require_command() {
 is_port_in_use() {
     local port="$1"
     if command -v lsof >/dev/null 2>&1; then
-        lsof -Pi ":$port" -sTCP:LISTEN -t >/dev/null 2>&1
+        lsof -Pi ":$port" -sTCP:LISTEN -t >/dev/null 2>&1 && return 0 || return 1
     elif command -v netstat >/dev/null 2>&1; then
-        netstat -tuln 2>/dev/null | grep -q ":$port "
+        netstat -tuln 2>/dev/null | grep -q ":$port " && return 0 || return 1
     else
         log_warn "Cannot check port $port (lsof or netstat not found)"
         return 1
@@ -145,7 +145,7 @@ create_initial_admin() {
         }" 2>/dev/null || echo '{"success":false,"error":"Connection failed"}')
     
     local success_check
-    success_check=$(echo "$response" | grep -o '"success":\s*true' || echo "")
+    success_check=$(echo "$response" | grep -o '"success": *true' || echo "")
     
     if [[ -n "$success_check" ]]; then
         log_success "✅ Initial admin user created successfully!"
@@ -172,6 +172,21 @@ check_api_basic_health() {
     response=$(curl -s -m "$timeout" "$api_url/healthz" 2>/dev/null)
     
     if [[ -n "$response" ]] && (echo "$response" | grep -q '"status":"ok"' || echo "$response" | grep -q '^OK$'); then
+        return 0  # Success
+    else
+        return 1  # Failed
+    fi
+}
+
+# Check if Discovery service is responding to health endpoint
+check_discovery_health() {
+    local discovery_url="$1"
+    local timeout="${2:-5}"
+    
+    local response
+    response=$(curl -s -m "$timeout" "$discovery_url/api/discovery/health" 2>/dev/null)
+    
+    if [[ -n "$response" ]] && echo "$response" | grep -q '"status":"healthy"'; then
         return 0  # Success
     else
         return 1  # Failed
@@ -327,6 +342,31 @@ wait_for_api() {
     return 1
 }
 
+# Wait for Discovery service to become healthy
+wait_for_discovery() {
+    local discovery_url="$1"
+    local max_attempts="${2:-60}"
+    local interval="${3:-1}"
+    
+    log_info "Waiting for Discovery service to be ready at $discovery_url..."
+    
+    local attempt=0
+    while [[ $attempt -lt $max_attempts ]]; do
+        if check_discovery_health "$discovery_url" "$interval"; then
+            log_success "Discovery service ready at $discovery_url"
+            return 0
+        fi
+        
+        attempt=$((attempt + 1))
+        if [[ $attempt -lt $max_attempts ]]; then
+            sleep "$interval"
+        fi
+    done
+    
+    log_error "Discovery service failed to start within $((max_attempts * interval)) seconds"
+    return 1
+}
+
 # Wait for React dev server
 wait_for_react() {
     local react_url="$1"
@@ -360,7 +400,7 @@ export -f log_info log_success log_warn log_error log_header
 export -f print_info print_success print_warning print_error print_header
 export -f require_command is_port_in_use free_port
 export -f create_initial_admin
-export -f check_api_basic_health check_api_comprehensive_health
+export -f check_api_basic_health check_discovery_health check_api_comprehensive_health
 export -f check_setup_endpoint check_catalog_endpoint check_react_dev_server
 export -f run_health_check_suite
-export -f wait_for_api wait_for_react
+export -f wait_for_api wait_for_discovery wait_for_react
