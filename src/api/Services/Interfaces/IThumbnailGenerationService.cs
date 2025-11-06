@@ -13,16 +13,16 @@ public interface IThumbnailGenerationService
     /// <param name="modelFilePath">Path to the 3D model file</param>
     /// <param name="fileFormat">Format of the 3D model file</param>
     /// <param name="outputPath">Path where the thumbnail should be saved</param>
-    /// <param name="width">Desired thumbnail width in pixels (default: 256)</param>
-    /// <param name="height">Desired thumbnail height in pixels (default: 256)</param>
+    /// <param name="width">Desired thumbnail width in pixels (default: 512)</param>
+    /// <param name="height">Desired thumbnail height in pixels (default: 512)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if thumbnail was generated successfully, false otherwise</returns>
     Task<bool> GenerateThumbnailAsync(
         string modelFilePath,
         ModelFileFormat fileFormat,
         string outputPath,
-        int width = 256,
-        int height = 256,
+        int width = 512,
+        int height = 512,
         CancellationToken ct = default);
 
     /// <summary>

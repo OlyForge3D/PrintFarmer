@@ -60,16 +60,16 @@ export const ModelsPage: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
-  const [slicerModal, setSlicerModal] = useState<{ 
-    isOpen: boolean; 
-    modelFile?: File; 
-    modelId?: string; 
-    modelName?: string; 
+  const [slicerModal, setSlicerModal] = useState<{
+    isOpen: boolean;
+    modelFile?: File;
+    modelId?: string;
+    modelName?: string;
   }>({
     isOpen: false
   });
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
-  
+
   const queryClient = useQueryClient();
 
   // Fetch models
@@ -112,8 +112,8 @@ export const ModelsPage: React.FC = () => {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    
-    const files = Array.from(e.dataTransfer.files).filter(file => 
+
+    const files = Array.from(e.dataTransfer.files).filter(file =>
       ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
     );
     setSelectedFiles(prev => [...prev, ...files]);
@@ -121,7 +121,7 @@ export const ModelsPage: React.FC = () => {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files).filter(file => 
+      const files = Array.from(e.target.files).filter(file =>
         ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
       );
       setSelectedFiles(prev => [...prev, ...files]);
@@ -132,7 +132,7 @@ export const ModelsPage: React.FC = () => {
     for (const file of selectedFiles) {
       try {
         setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
-        
+
         // Simulate progress for now (in real implementation, use XMLHttpRequest for progress)
         const progressInterval = setInterval(() => {
           setUploadProgress(prev => {
@@ -145,7 +145,7 @@ export const ModelsPage: React.FC = () => {
         }, 200);
 
         await uploadMutation.mutateAsync(file);
-        
+
         clearInterval(progressInterval);
         setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
       } catch (error) {
@@ -199,9 +199,8 @@ export const ModelsPage: React.FC = () => {
       {/* Upload Area */}
       <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border">
         <div
-          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-            dragOver ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20' : 'border-pf-border'
-          }`}
+          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${dragOver ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20' : 'border-pf-border'
+            }`}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
@@ -210,7 +209,7 @@ export const ModelsPage: React.FC = () => {
             <div className="mx-auto w-16 h-16 bg-pf-bg-2 rounded-full flex items-center justify-center">
               <Box className="w-8 h-8 text-pf-text-tertiary" />
             </div>
-            
+
             <div>
               <label htmlFor="file-upload" className="cursor-pointer">
                 <span className="text-lg font-medium text-pf-text-primary">
@@ -296,21 +295,21 @@ export const ModelsPage: React.FC = () => {
       {/* Models Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {models.map((model: Model) => (
-          <div key={model.id} className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden">
+          <div key={model.id} className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden flex flex-col">
             {/* Model Preview */}
-            <div className="h-48 bg-pf-bg-2 relative">
+            <div className="flex-1 aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-64">
               {model.thumbnailUrl ? (
-                <img 
-                  src={model.thumbnailUrl} 
+                <img
+                  src={model.thumbnailUrl}
                   alt={model.name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
                   <Box className="w-12 h-12 text-pf-text-tertiary" />
                 </div>
               )}
-              
+
               {/* Quick actions overlay */}
               <div className="absolute top-2 right-2 flex space-x-1">
                 <button
@@ -339,8 +338,8 @@ export const ModelsPage: React.FC = () => {
                 <button
                   onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
                   onFocus={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
-                  onClick={() => setSlicerModal({ 
-                    isOpen: true, 
+                  onClick={() => setSlicerModal({
+                    isOpen: true,
                     modelId: model.id,
                     modelName: model.name
                   })}
@@ -377,7 +376,7 @@ export const ModelsPage: React.FC = () => {
               </button>
             </div>
             <div className="p-4">
-              <Suspense fallback={<ViewerSkeleton variant="model" />}> 
+              <Suspense fallback={<ViewerSkeleton variant="model" />}>
                 {viewerModel.url && viewerModel.fileType && (
                   <ModelViewer
                     modelUrl={viewerModel.url}
@@ -405,7 +404,7 @@ export const ModelsPage: React.FC = () => {
               </button>
             </div>
             <div className="p-4">
-              <Suspense fallback={<ViewerSkeleton variant="gcode" />}> 
+              <Suspense fallback={<ViewerSkeleton variant="gcode" />}>
                 <GCodeViewer gcodeUrl={gcodeViewer.url} />
               </Suspense>
             </div>
