@@ -24,6 +24,17 @@
    4. When new control types are needed, add them here first
    5. Keep Tailwind utilities in components for layout only
    
+   EXCEPTIONS:
+   Some specialized components (e.g., ExpandablePrinterCard) with unique UI patterns
+   (custom control grids, state-dependent styling) may have component-specific styles.
+   This is acceptable when:
+   - Control logic is tightly coupled to component state
+   - Styling is specific to that component's use case
+   - Standard controls cannot accommodate the requirements
+   
+   Always start with controls.css first, and only add component-specific styles as
+   exceptions when truly needed.
+   
    ============================================================================= */
 
 @layer components {
