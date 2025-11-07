@@ -1220,7 +1220,7 @@ const { mutate: deleteTag } = useMutation({
 
 ### Configuration & Integration
 
-
+#### React Query Configuration
 
 **Cache Strategy:**
 
