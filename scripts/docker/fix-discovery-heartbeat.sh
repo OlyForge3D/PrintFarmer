@@ -80,10 +80,11 @@ echo ""
 echo "[4/4] Starting discovery service with fixed configuration..."
 # Use full docker-compose from repo root
 cd "$REPO_ROOT"
-# Use --no-deps to skip rebuilding dependencies, and --build to rebuild discovery image
+# Use --no-deps to skip rebuilding dependencies
+# Don't rebuild - image should already exist from initial deployment
 docker-compose -f "scripts/docker/compose-templates/docker-compose.yml" \
                 -f "scripts/docker/compose-templates/docker-compose.discovery.yml" \
-                up -d --no-deps --build printer-discovery
+                up -d --no-deps printer-discovery
 
 echo ""
 echo "=== Waiting for discovery service to initialize ==="

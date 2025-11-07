@@ -52,9 +52,11 @@ docker rm -f printfarmer-printer-discovery 2>/dev/null || echo "  (no container 
 
 echo ""
 echo "[4/5] Starting printer-discovery service..."
+# Use --no-deps to skip rebuilding dependencies
+# Don't rebuild - image should already exist from initial deployment
 docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
                 -f scripts/docker/compose-templates/docker-compose.discovery.yml \
-                up -d --no-deps --build printer-discovery
+                up -d --no-deps printer-discovery
 
 echo ""
 echo "[5/5] Waiting for service to initialize (30 seconds)..."
