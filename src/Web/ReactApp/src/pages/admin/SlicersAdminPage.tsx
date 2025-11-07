@@ -48,7 +48,6 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
               <button
                 className="btn-base btn-sm btn-secondary"
                 onClick={() => setShowDetails(v => !v)}
-                /* eslint-disable-next-line jsx-a11y/aria-props */
                 aria-expanded={showDetails}
                 aria-controls={`slicer-details-${s.id}`}
               >

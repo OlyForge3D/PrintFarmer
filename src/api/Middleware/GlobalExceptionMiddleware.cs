@@ -64,7 +64,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 
     private static (HttpStatusCode StatusCode, string Message, string? Details) MapExceptionToResponse(Exception ex)
     {
-        return ex switch
+        var result = ex switch
         {
             // Domain-specific exceptions
             PrinterNotFoundException => (HttpStatusCode.NotFound, "Printer not found", ex.Message),
@@ -91,9 +91,12 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
             Farm.Infrastructure.CircuitBreakerOpenException =>
                 (HttpStatusCode.ServiceUnavailable, "Service temporarily unavailable", ex.Message),
 
-            // Default for all other exceptions
-            _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred", null)
+            // Default for all other exceptions - include full error chain for debugging
+            _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred",
+                $"{ex.GetType().Name}: {ex.Message}" + (ex.InnerException != null ? $" -> {ex.InnerException.GetType().Name}: {ex.InnerException.Message}" : ""))
         };
+
+        return result;
     }
 }
 

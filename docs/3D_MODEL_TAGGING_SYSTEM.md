@@ -1,10 +1,12 @@
 # PrintFarmer 3D Model Tagging System - Complete Implementation Guide
 
 **Status:** ✅ ALL FEATURES IMPLEMENTED AND TESTED  
-**Date:** November 6, 2025  
+**Date:** November 7, 2025  
 **Implementation Date:** November 6, 2025  
+**Last Updated:** November 7, 2025 (Tag Creation/Assignment Fixes)  
 **Build Status:** PASSING (0 errors)  
-**Feature Completeness:** 100%
+**Feature Completeness:** 100%  
+**Tag System:** ✅ WORKING (Tag creation, assignment, and all CRUD operations functional)
 
 ---
 
@@ -1180,7 +1182,45 @@ const { mutate: deleteTag } = useMutation({
 
 ## Technical Implementation Details
 
-### React Query Configuration
+### Critical Fixes & Implementation Details (November 7, 2025)
+
+**Issue 1: JSON Serialization Mismatch**
+- **Problem:** Frontend was sending PascalCase properties (`Name`, `Color`, `Description`, `TagIds`) but API configured for camelCase
+- **Solution:** Updated React to send camelCase: `name`, `color`, `description`, `tagIds`
+- **File:** `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx` (Lines 110-115, 144)
+- **Result:** ✅ Tag creation requests now properly deserialized
+
+**Issue 2: Tag Creation Routing Error**
+- **Problem:** `CreatedAtAction(nameof(GetTagsAsync), new { id = result.Id })` tried to generate route for endpoint with no `id` parameter
+- **Error:** "No route matches the supplied values" (InvalidOperationException)
+- **Solution:** Changed to explicit URL: `Created($"/api/3d-models/tags/{result.Id}", result)`
+- **File:** `/src/api/Controllers/ModelController.cs` (Line 360)
+- **Result:** ✅ Tag creation now returns 201 Created with proper Location header
+
+**Issue 3: Inadequate Error Reporting**
+- **Problem:** GlobalExceptionMiddleware was returning `null` in error details field
+- **Solution:** Enhanced to include full exception chain: `"{ExceptionType}: {Message}" + InnerException details`
+- **File:** `/src/api/Middleware/GlobalExceptionMiddleware.cs` (Line 95)
+- **Result:** ✅ Developers now see actual error causes, not generic messages
+
+**Files Modified:**
+1. `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx` - Fixed JSON property names
+2. `/src/api/Controllers/ModelController.cs` - Fixed CreatedAtAction routing, added error details
+3. `/src/api/Middleware/GlobalExceptionMiddleware.cs` - Enhanced error responses
+4. `/src/api/Services/Tags/TagService.cs` - Added comprehensive logging
+5. `/src/api/Controllers/ModelController.cs` - Enhanced AssignTagsAsync error handling
+
+**Verification:**
+- ✅ Tag creation returns 201 with normalized tag object
+- ✅ Tag assignment works without errors
+- ✅ Tags persist in database after creation
+- ✅ Tag names properly normalized to PascalCase (e.g., "final-test-tag" → "FinalTestTag")
+- ✅ API builds with 0 errors
+- ✅ No more 500 errors on tag operations
+
+### Configuration & Integration
+
+
 
 **Cache Strategy:**
 
@@ -1276,6 +1316,8 @@ interface BulkAssignmentPayload {
 
 ### Error Handling
 
+**Frontend Error Handling:**
+
 ```typescript
 // API error types
 const handleApiError = (error: AxiosError) => {
@@ -1301,6 +1343,44 @@ const { error } = useQuery({
     toast.error(handleApiError(error));
   }
 });
+```
+
+**Backend Error Handling - GlobalExceptionMiddleware:**
+
+The global exception middleware provides comprehensive error responses with full exception details:
+
+```csharp
+// Exception responses include:
+{
+  "statusCode": 500,
+  "message": "An unexpected error occurred",
+  "innerMessage": "InvalidOperationException: No route matches the supplied values.",
+  "details": "InvalidOperationException: No route matches the supplied values. -> System.InvalidOperationException: No route matches the supplied values.",
+  "correlationId": "0HMG3T12ABCDE:00000001"
+}
+```
+
+**Key Implementation Details:**
+- All unhandled exceptions caught by global middleware
+- Error responses include full exception type chain
+- Details field shows: `{ExceptionType}: {Message} -> {InnerExceptionType}: {InnerMessage}`
+- Helps developers debug API issues without guessing
+- Correlation IDs enable request tracing
+
+**API Endpoint Error Responses:**
+
+```csharp
+// Tag creation errors
+if (tag == null)
+  return BadRequest(new { message = "Invalid tag data" });
+
+// Duplicate tag name
+catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE constraint"))
+  return Conflict(new { message = "Tag with this name already exists" });
+
+// Model not found
+if (model == null)
+  return NotFound(new { message = $"Model {modelId} not found" });
 ```
 
 ### Performance Optimizations

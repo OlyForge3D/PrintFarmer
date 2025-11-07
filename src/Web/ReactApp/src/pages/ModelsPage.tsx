@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Upload, Box, Trash2, Eye, Settings, Search, Tag, Grid3x3, List, X, FileText } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
+import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
@@ -78,6 +79,7 @@ export const ModelsPage: React.FC = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showTagFilter, setShowTagFilter] = useState(false);
+  const [showBulkTagModal, setShowBulkTagModal] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -85,7 +87,7 @@ export const ModelsPage: React.FC = () => {
   const { data: allTags = [] } = useQuery<ModelTag[]>({
     queryKey: ['model-tags'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/api/3d-models/tags`, {
+      const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
         headers: getAuthHeaders()
       });
       if (!response.ok) throw new Error('Failed to fetch tags');
@@ -99,7 +101,7 @@ export const ModelsPage: React.FC = () => {
   const { data: searchResult, isLoading } = useQuery({
     queryKey: ['models-search', searchQuery, selectedTags],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/api/3d-models/search`, {
+      const response = await fetch(`${getApiBaseUrl()}/3d-models/search`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -366,14 +368,14 @@ export const ModelsPage: React.FC = () => {
             Tags {selectedTags.length > 0 && `(${selectedTags.length})`}
           </button>
 
-          {/* Bulk tagging button - Disabled for now */}
+          {/* Bulk tagging button */}
           <button
-            disabled
-            className="flex items-center gap-2 px-4 py-2 bg-pf-bg-1 border border-pf-border rounded hover:bg-pf-bg-2 text-sm font-medium text-pf-text-primary opacity-50 cursor-not-allowed"
-            title="Bulk tagging feature coming soon"
+            onClick={() => setShowBulkTagModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-pf-bg-1 border border-pf-border rounded hover:bg-pf-bg-2 text-sm font-medium text-pf-text-primary"
+            title="Assign tags to multiple models at once"
           >
             <Tag className="w-4 h-4" />
-            Bulk Tag (Soon)
+            Bulk Tag
           </button>
 
           {/* View mode toggle */}
@@ -699,6 +701,11 @@ export const ModelsPage: React.FC = () => {
                 }
               }
             }}
+          />
+
+          <BulkTagAssignmentModal
+            isOpen={showBulkTagModal}
+            onClose={() => setShowBulkTagModal(false)}
           />
         </Suspense>
       )}

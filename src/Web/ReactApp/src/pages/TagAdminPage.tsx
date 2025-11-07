@@ -33,14 +33,14 @@ export const TagAdminPage: React.FC = () => {
         queryKey: ['admin-all-tags'],
         queryFn: async () => {
             // Fetch tags
-            const tagsResponse = await fetch(`${getApiBaseUrl()}/api/3d-models/tags`, {
+            const tagsResponse = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
                 headers: getAuthHeaders()
             });
             if (!tagsResponse.ok) throw new Error('Failed to fetch tags');
             const tagsData = await tagsResponse.json();
 
             // Fetch models to calculate usage count
-            const modelsResponse = await fetch(`${getApiBaseUrl()}/api/3d-models`, {
+            const modelsResponse = await fetch(`${getApiBaseUrl()}/3d-models`, {
                 headers: getAuthHeaders()
             });
             if (!modelsResponse.ok) throw new Error('Failed to fetch models');
@@ -70,7 +70,7 @@ export const TagAdminPage: React.FC = () => {
         mutationFn: async () => {
             if (!newTagName.trim()) throw new Error('Tag name is required');
 
-            const response = await fetch(`${getApiBaseUrl()}/api/3d-models/tags`, {
+            const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -104,7 +104,7 @@ export const TagAdminPage: React.FC = () => {
     const deleteTagMutation = useMutation({
         mutationFn: async (tagId: string) => {
             const response = await fetch(
-                `${getApiBaseUrl()}/api/3d-models/tags/${tagId}`,
+                `${getApiBaseUrl()}/3d-models/tags/${tagId}`,
                 {
                     method: 'DELETE',
                     headers: getAuthHeaders()

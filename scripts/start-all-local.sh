@@ -358,6 +358,11 @@ if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
   log_info "Installing React dependencies..."
   npm install --legacy-peer-deps
 fi
+
+# Always clear Vite cache to ensure fresh dev server with latest code
+log_info "Clearing Vite cache for fresh development..."
+rm -rf "$REACT_DIR/node_modules/.vite" "$REACT_DIR/dist" 2>/dev/null || true
+
 cd "$SRC_DIR"
 
 # Redis is not started by this script (slicing integration paused)

@@ -8,6 +8,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Repositories.Model;
 using Farm.Web.Api.Repositories.Tags;
 using Farm.Web.Shared;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Tags
 {
@@ -83,20 +84,30 @@ namespace Farm.Web.Api.Services.Tags
 
                 if (string.IsNullOrWhiteSpace(dto.Name))
                 {
-                    throw new ArgumentException("Tag name is required", nameof(dto.Name));
+                    throw new ArgumentException("Tag name is required", nameof(dto));
                 }
 
-                // Check if tag already exists
-                var existing = await _tagRepository.GetByNameAsync(dto.Name, ct);
+                var trimmedName = dto.Name.Trim();
+                var normalizedName = ToPascalCase(trimmedName);
+
+                // Check if tag already exists (after normalization)
+                var existing = await _tagRepository.GetByNameAsync(normalizedName, ct);
                 if (existing != null)
                 {
-                    throw new InvalidOperationException($"Tag '{dto.Name}' already exists");
+                    // Return the existing tag
+                    return new Model3DTagDto
+                    {
+                        Id = existing.Id,
+                        Name = existing.Name,
+                        Color = existing.Color,
+                        Description = existing.Description
+                    };
                 }
 
                 var tag = new Model3DTag
                 {
                     Id = Guid.NewGuid(),
-                    Name = dto.Name.Trim(),
+                    Name = normalizedName,
                     Color = dto.Color,
                     Description = dto.Description,
                     CreatedAt = DateTime.UtcNow,
@@ -104,7 +115,29 @@ namespace Farm.Web.Api.Services.Tags
                 };
 
                 await _tagRepository.AddAsync(tag, ct);
-                await _tagRepository.SaveChangesAsync(ct);
+                try
+                {
+                    await _tagRepository.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE constraint failed") == true
+                    || ex.InnerException?.Message.Contains("Violation of PRIMARY KEY") == true
+                    || ex.InnerException?.Message.Contains("duplicate key") == true)
+                {
+                    // Handle race condition: tag was created between check and insert
+                    // Fetch and return the existing tag
+                    var existingTag = await _tagRepository.GetByNameAsync(normalizedName, ct);
+                    if (existingTag != null)
+                    {
+                        return new Model3DTagDto
+                        {
+                            Id = existingTag.Id,
+                            Name = existingTag.Name,
+                            Color = existingTag.Color,
+                            Description = existingTag.Description
+                        };
+                    }
+                    throw;
+                }
 
                 return new Model3DTagDto
                 {
@@ -116,9 +149,37 @@ namespace Farm.Web.Api.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to create tag: {ex.Message}");
+                _logger.LogError($"Failed to create tag: {ex.Message}\n{ex.StackTrace}");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Convert string to PascalCase (capitalize first letter of each word)
+        /// </summary>
+        private static string ToPascalCase(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return input;
+
+            // First, convert to lowercase to normalize
+            var lowered = input.ToLowerInvariant();
+
+            var words = lowered.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Handle case where input was only delimiters
+            if (words.Length == 0)
+                return input;
+
+            var pascalWords = words.Select(word =>
+            {
+                // Safety check in case word is somehow empty
+                if (string.IsNullOrEmpty(word))
+                    return "";
+                return char.ToUpperInvariant(word[0]) + (word.Length > 1 ? word.Substring(1) : "");
+            });
+
+            return string.Concat(pascalWords);
         }
 
         public async Task DeleteTagAsync(Guid tagId, CancellationToken ct)
@@ -147,18 +208,23 @@ namespace Farm.Web.Api.Services.Tags
             try
             {
                 var tagIdList = tagIds?.ToList() ?? new List<Guid>();
+                _logger.LogInformation($"Assigning {tagIdList.Count} tags to model {modelId}");
 
                 // Verify model exists
                 var model = await _modelRepository.GetByIdAsync(modelId, ct);
                 if (model == null)
                 {
+                    _logger.LogError($"Model {modelId} not found");
                     throw new KeyNotFoundException($"Model {modelId} not found");
                 }
+                _logger.LogInformation($"Model {modelId} found, proceeding with tag assignment");
 
                 // Remove existing tag mappings
+                _logger.LogInformation($"Removing existing tag mappings for model {modelId}");
                 await _mappingRepository.RemoveByModelIdAsync(modelId, ct);
 
                 // Add new tag mappings
+                _logger.LogInformation($"Adding {tagIdList.Count} new tag mappings");
                 foreach (var tagId in tagIdList)
                 {
                     var tag = await _tagRepository.GetByIdAsync(tagId, ct);
@@ -171,15 +237,23 @@ namespace Farm.Web.Api.Services.Tags
                             TagId = tagId,
                             TaggedAt = DateTime.UtcNow
                         };
+                        _logger.LogInformation($"Adding tag mapping: Model={modelId}, Tag={tagId}");
                         await _mappingRepository.AddAsync(mapping, ct);
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Tag {tagId} not found");
                     }
                 }
 
+                _logger.LogInformation($"Saving changes to database");
                 await _mappingRepository.SaveChangesAsync(ct);
+                _logger.LogInformation($"Successfully assigned tags to model {modelId}");
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to assign tags to model {modelId}: {ex.Message}");
+                _logger.LogError($"Failed to assign tags to model {modelId}: {ex.GetType().Name} - {ex.Message}");
+                _logger.LogError($"Stack trace: {ex.StackTrace}");
                 throw;
             }
         }

@@ -1262,6 +1262,14 @@ public class AssignTagsToModelDto
 }
 
 /// <summary>
+/// Request to update 3D model properties
+/// </summary>
+public class UpdateModel3DDto
+{
+    public string? Name { get; set; }
+}
+
+/// <summary>
 /// Request to bulk assign tags to multiple models
 /// </summary>
 public class BulkAssignTagsDto

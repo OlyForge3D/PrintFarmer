@@ -167,7 +167,7 @@ public class ModelController : ControllerBase
                 Name = model.DisplayName,
                 FileName = model.OriginalFileName,
                 FileSize = model.FileSizeBytes,
-                FileType = model.FileFormat.ToString(),
+                FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
                 Url = $"/api/3d-models/{model.Id}/file",
                 ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null,
@@ -269,6 +269,41 @@ public class ModelController : ControllerBase
     }
 
     /// <summary>
+    /// Update model name (display name)
+    /// </summary>
+    /// <param name="id">Model ID</param>
+    /// <param name="dto">Update request with new name</param>
+    /// <param name="db">Database context</param>
+    /// <returns>No content if successful</returns>
+    [HttpPut("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModel3DDto dto, [FromServices] AppDbContext db)
+    {
+        try
+        {
+            var model = await db.Models3D.FirstOrDefaultAsync(m => m.Id == id);
+            if (model == null)
+            {
+                return NotFound();
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.Name))
+            {
+                model.DisplayName = dto.Name.Trim();
+            }
+
+            await db.SaveChangesAsync();
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to update model {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to update model");
+        }
+    }
+
+    /// <summary>
     /// Validate a model file
     /// </summary>
     /// <param name="modelFile">The model file to validate</param>
@@ -318,12 +353,13 @@ public class ModelController : ControllerBase
     [HttpPost("tags")]
     [ProducesResponseType(typeof(Model3DTagDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CreateTagAsync(CreateModel3DTagDto dto, CancellationToken ct = default)
+    public async Task<IActionResult> CreateTagAsync([FromBody] CreateModel3DTagDto dto, CancellationToken ct = default)
     {
         try
         {
             var result = await _tagService.CreateTagAsync(dto, ct);
-            return CreatedAtAction(nameof(GetTagsAsync), new { id = result.Id }, result);
+            // Return 201 Created with the location of the created resource
+            return Created($"/api/3d-models/tags/{result.Id}", result);
         }
         catch (ArgumentException ex)
         {
@@ -335,8 +371,17 @@ public class ModelController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to create tag: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create tag");
+            Console.WriteLine($"[CreateTagAsync] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[CreateTagAsync] InnerException: {ex.InnerException?.GetType().Name}: {ex.InnerException?.Message}");
+            Console.WriteLine($"[CreateTagAsync] StackTrace: {ex.StackTrace}");
+            _logger.LogError($"Failed to create tag: {ex.GetType().Name} - {ex.Message}\nInnerException: {ex.InnerException?.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = "An unexpected error occurred",
+                message = ex.Message,
+                innerMessage = ex.InnerException?.Message,
+                details = ex.StackTrace
+            });
         }
     }
 
@@ -381,16 +426,20 @@ public class ModelController : ControllerBase
     {
         try
         {
-            await _tagService.AssignTagsToModelAsync(modelId, dto.TagIds ?? [], ct);
+            _logger.LogInformation($"AssignTagsAsync called: modelId={modelId}, tagCount={dto?.TagIds?.Length ?? 0}");
+            await _tagService.AssignTagsToModelAsync(modelId, dto?.TagIds ?? [], ct);
+            _logger.LogInformation($"Successfully assigned tags to model {modelId}");
             return NoContent();
         }
-        catch (KeyNotFoundException)
+        catch (KeyNotFoundException ex)
         {
+            _logger.LogError($"Model not found: {ex.Message}");
             return NotFound();
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to assign tags to model {modelId}: {ex.Message}");
+            _logger.LogError($"Failed to assign tags to model {modelId}: {ex.GetType().Name} - {ex.Message}");
+            _logger.LogError($"Stack trace: {ex.StackTrace}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to assign tags");
         }
     }
@@ -513,29 +562,30 @@ public class ModelController : ControllerBase
                 .Take(request.PageSize)
                 .Include(m => m.TagMappings)
                 .ThenInclude(tm => tm.Tag)
-                .Select(m => new Model3DDto
-                {
-                    Id = m.Id,
-                    Name = m.DisplayName,
-                    FileName = m.OriginalFileName,
-                    FileSize = m.FileSizeBytes,
-                    FileType = m.FileFormat.ToString(),
-                    UploadedAt = m.UploadedAt,
-                    Url = $"/api/3d-models/{m.Id}/file",
-                    ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null,
-                    Tags = m.TagMappings.Select(tm => new Model3DTagDto
-                    {
-                        Id = tm.Tag!.Id,
-                        Name = tm.Tag!.Name,
-                        Color = tm.Tag!.Color,
-                        Description = tm.Tag!.Description
-                    }).ToArray()
-                })
                 .ToListAsync();
+
+            var modelDtos = models.Select(m => new Model3DDto
+            {
+                Id = m.Id,
+                Name = m.DisplayName,
+                FileName = m.OriginalFileName,
+                FileSize = m.FileSizeBytes,
+                FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
+                UploadedAt = m.UploadedAt,
+                Url = $"/api/3d-models/{m.Id}/file",
+                ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null,
+                Tags = m.TagMappings.Select(tm => new Model3DTagDto
+                {
+                    Id = tm.Tag!.Id,
+                    Name = tm.Tag!.Name,
+                    Color = tm.Tag!.Color,
+                    Description = tm.Tag!.Description
+                }).ToArray()
+            }).ToList();
 
             var result = new Model3DSearchResultDto
             {
-                Models = models.ToArray(),
+                Models = modelDtos.ToArray(),
                 TotalCount = totalCount,
                 Page = request.Page,
                 PageSize = request.PageSize,

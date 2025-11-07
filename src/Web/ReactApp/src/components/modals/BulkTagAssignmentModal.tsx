@@ -37,7 +37,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
     const { data: models = [] } = useQuery<ModelOption[]>({
         queryKey: ['all-models-bulk'],
         queryFn: async () => {
-            const response = await fetch(`${getApiBaseUrl()}/api/3d-models`, {
+            const response = await fetch(`${getApiBaseUrl()}/3d-models`, {
                 headers: getAuthHeaders()
             });
             if (!response.ok) throw new Error('Failed to fetch models');
@@ -52,7 +52,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
     const { data: allTags = [] } = useQuery<TagOption[]>({
         queryKey: ['all-tags-bulk'],
         queryFn: async () => {
-            const response = await fetch(`${getApiBaseUrl()}/api/3d-models/tags`, {
+            const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
                 headers: getAuthHeaders()
             });
             if (!response.ok) throw new Error('Failed to fetch tags');
@@ -71,7 +71,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
             }
 
             const response = await fetch(
-                `${getApiBaseUrl()}/api/3d-models/bulk/assign-tags`,
+                `${getApiBaseUrl()}/3d-models/bulk/assign-tags`,
                 {
                     method: 'POST',
                     headers: {

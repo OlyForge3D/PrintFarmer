@@ -31,6 +31,7 @@ namespace Farm.Web.Api.Repositories.Tags
                 return null;
             }
 
+            // Since tags are normalized to PascalCase on creation, we can do exact matching
             return await _dbContext.Model3DTags
                 .FirstOrDefaultAsync(t => t.Name == name, ct);
         }

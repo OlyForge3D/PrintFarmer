@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Edit2, Save, X, Tag, Plus } from 'lucide-react';
+import { ArrowLeft, Save, X, Tag, Plus, Edit2 } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
+import { TagEditor } from '@/components/TagEditor';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface ModelDetail {
@@ -28,15 +29,18 @@ export const ModelDetailPage: React.FC = () => {
     const { modelId } = useParams<{ modelId: string }>();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
-    const [isEditing, setIsEditing] = useState(false);
     const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+    const [newTags, setNewTags] = useState<{ name: string; color?: string; description?: string }[]>([]);
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editedName, setEditedName] = useState('');
+    const [isEditingTags, setIsEditingTags] = useState(false);
 
     // Fetch model details
     const { data: model, isLoading: modelLoading } = useQuery<ModelDetail>({
         queryKey: ['model-detail', modelId],
         queryFn: async () => {
             const response = await fetch(
-                `${getApiBaseUrl()}/api/3d-models/${modelId}/details`,
+                `${getApiBaseUrl()}/3d-models/${modelId}/details`,
                 { headers: getAuthHeaders() }
             );
             if (!response.ok) throw new Error('Failed to fetch model');
@@ -51,7 +55,7 @@ export const ModelDetailPage: React.FC = () => {
     const { data: allTags = [] } = useQuery<TagOption[]>({
         queryKey: ['model-tags'],
         queryFn: async () => {
-            const response = await fetch(`${getApiBaseUrl()}/api/3d-models/tags`, {
+            const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
                 headers: getAuthHeaders()
             });
             if (!response.ok) throw new Error('Failed to fetch tags');
@@ -61,32 +65,104 @@ export const ModelDetailPage: React.FC = () => {
         gcTime: 10 * 60 * 1000
     });
 
+    // Update model name mutation
+    const updateNameMutation = useMutation({
+        mutationFn: async (newName: string) => {
+            const response = await fetch(
+                `${getApiBaseUrl()}/3d-models/${modelId}`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ name: newName })
+                }
+            );
+            if (!response.ok) throw new Error('Failed to update model name');
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['model-detail', modelId] });
+            setIsEditingName(false);
+        }
+    });
+
     // Update model tags mutation
     const updateTagsMutation = useMutation({
-        mutationFn: async (tagIds: string[]) => {
+        mutationFn: async (payload: {
+            tagIds: string[];
+            newTags?: { name: string; color?: string; description?: string }[];
+        }) => {
+            // First, create any new tags
+            let finalTagIds = payload.tagIds.filter(id => !id.startsWith('temp-'));
+
+            if (payload.newTags && payload.newTags.length > 0) {
+                for (const newTag of payload.newTags) {
+                    try {
+                        const createResponse = await fetch(
+                            `${getApiBaseUrl()}/3d-models/tags`,
+                            {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    ...getAuthHeaders()
+                                },
+                                body: JSON.stringify({
+                                    name: newTag.name,
+                                    color: newTag.color,
+                                    description: newTag.description
+                                })
+                            }
+                        );
+                        if (createResponse.ok) {
+                            const createdTag = await createResponse.json();
+                            // Add the new tag ID to the list
+                            if (createdTag.id && !finalTagIds.includes(createdTag.id)) {
+                                finalTagIds = [...finalTagIds, createdTag.id];
+                            }
+                        } else {
+                            const errorText = await createResponse.text();
+                            console.error(`Failed to create tag "${newTag.name}":`, createResponse.status, errorText);
+                            throw new Error(`Failed to create tag: ${errorText}`);
+                        }
+                    } catch (error) {
+                        console.error('Failed to create tag:', error);
+                        throw error;
+                    }
+                }
+            }
+
+            // Then update the model with all tag IDs (only real IDs, no temp IDs)
             const response = await fetch(
-                `${getApiBaseUrl()}/api/3d-models/${modelId}/tags`,
+                `${getApiBaseUrl()}/3d-models/${modelId}/tags`,
                 {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ tagIds })
+                    body: JSON.stringify({ tagIds: finalTagIds })
                 }
             );
-            if (!response.ok) throw new Error('Failed to update tags');
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to update tags: ${errorText}`);
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['model-detail', modelId] });
-            setIsEditing(false);
+            queryClient.invalidateQueries({ queryKey: ['model-tags'] });
+            setIsEditingTags(false);
         }
     });
 
-    // Initialize selected tags when model loads
+    // Initialize selected tags and name when model loads
     React.useEffect(() => {
         if (model?.tags) {
             setSelectedTagIds(model.tags.map(t => t.id));
+        }
+        if (model?.name) {
+            setEditedName(model.name);
         }
     }, [model]);
 
@@ -135,9 +211,13 @@ export const ModelDetailPage: React.FC = () => {
     };
 
     const currentTags = model.tags || [];
-    const availableTagsForEditing = allTags.filter(
-        t => !selectedTagIds.includes(t.id)
-    );
+
+    // Check if there are unsaved changes: either tag selection changed or new tags were added
+    const hasUnsavedChanges =
+        selectedTagIds.length !== currentTags.length ||
+        selectedTagIds.some(id => !id.startsWith('temp-') && !currentTags.some(t => t.id === id)) ||
+        currentTags.some(t => !selectedTagIds.includes(t.id)) ||
+        newTags.length > 0;
 
     return (
         <PageTemplate
@@ -154,29 +234,6 @@ export const ModelDetailPage: React.FC = () => {
                 >
                     <ArrowLeft className="w-5 h-5" />
                     Back to Models
-                </button>
-                <button
-                    onClick={() => {
-                        if (isEditing) {
-                            setSelectedTagIds(currentTags.map(t => t.id));
-                            setIsEditing(false);
-                        } else {
-                            setIsEditing(true);
-                        }
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-pf-bg-1 border border-pf-border rounded hover:bg-pf-bg-2"
-                >
-                    {isEditing ? (
-                        <>
-                            <X className="w-4 h-4" />
-                            Cancel
-                        </>
-                    ) : (
-                        <>
-                            <Edit2 className="w-4 h-4" />
-                            Edit Tags
-                        </>
-                    )}
                 </button>
             </div>
 
@@ -202,6 +259,54 @@ export const ModelDetailPage: React.FC = () => {
                 {/* Model Info */}
                 <div className="md:col-span-2">
                     <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-6 space-y-4">
+                        {/* Model Name - Editable */}
+                        <div>
+                            <label className="text-sm text-pf-text-tertiary">Model Name</label>
+                            {isEditingName ? (
+                                <div className="flex gap-2 mt-2">
+                                    <input
+                                        type="text"
+                                        value={editedName}
+                                        onChange={(e) => setEditedName(e.target.value)}
+                                        className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded outline-none text-pf-text-primary"
+                                        placeholder="Model name"
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            if (editedName.trim() && editedName !== model?.name) {
+                                                updateNameMutation.mutate(editedName.trim());
+                                            } else {
+                                                setIsEditingName(false);
+                                            }
+                                        }}
+                                        disabled={updateNameMutation.isPending}
+                                        className="px-3 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50"
+                                    >
+                                        <Save className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setEditedName(model?.name || '');
+                                            setIsEditingName(false);
+                                        }}
+                                        className="px-3 py-2 bg-pf-bg-2 border border-pf-border rounded hover:bg-pf-bg-0"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-between">
+                                    <p className="text-pf-text-primary font-medium">{model.name}</p>
+                                    <button
+                                        onClick={() => setIsEditingName(true)}
+                                        className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
+                                    >
+                                        <Edit2 className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
                         <div>
                             <label className="text-sm text-pf-text-tertiary">File Name</label>
                             <p className="text-pf-text-primary font-medium">{model.fileName}</p>
@@ -245,78 +350,38 @@ export const ModelDetailPage: React.FC = () => {
                     Tags
                 </h3>
 
-                {isEditing ? (
+                {isEditingTags ? (
                     <div className="space-y-4">
-                        {/* Current Tags */}
-                        {selectedTagIds.length > 0 && (
-                            <div>
-                                <label className="text-sm font-medium text-pf-text-secondary mb-2 block">
-                                    Current Tags
-                                </label>
-                                <div className="flex flex-wrap gap-2">
-                                    {allTags
-                                        .filter(t => selectedTagIds.includes(t.id))
-                                        .map(tag => (
-                                            <div
-                                                key={tag.id}
-                                                className="flex items-center gap-2 px-3 py-1 rounded-full text-white text-sm"
-                                                style={{ backgroundColor: tag.color || '#6366f1' }}
-                                            >
-                                                {tag.name}
-                                                <button
-                                                    onClick={() =>
-                                                        setSelectedTagIds(prev =>
-                                                            prev.filter(id => id !== tag.id)
-                                                        )
-                                                    }
-                                                    className="ml-1 hover:opacity-80"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Available Tags to Add */}
-                        {availableTagsForEditing.length > 0 && (
-                            <div>
-                                <label className="text-sm font-medium text-pf-text-secondary mb-2 block">
-                                    Available Tags
-                                </label>
-                                <div className="flex flex-wrap gap-2">
-                                    {availableTagsForEditing.map(tag => (
-                                        <button
-                                            key={tag.id}
-                                            onClick={() =>
-                                                setSelectedTagIds(prev => [...prev, tag.id])
+                        <TagEditor
+                            allTags={allTags}
+                            selectedTagIds={selectedTagIds}
+                            onTagsChange={(tagIds, newTags) => {
+                                setSelectedTagIds(tagIds);
+                                if (newTags && newTags.length > 0) {
+                                    // Accumulate new tags that haven't been created yet
+                                    setNewTags(prev => {
+                                        const accumulated = [...prev];
+                                        for (const newTag of newTags) {
+                                            // Check if we already have this tag
+                                            if (!accumulated.some(t => t.name === newTag.name)) {
+                                                accumulated.push(newTag);
                                             }
-                                            className="flex items-center gap-2 px-3 py-1 rounded-full text-white text-sm transition-opacity hover:opacity-80"
-                                            style={{ backgroundColor: tag.color || '#6366f1', opacity: 0.6 }}
-                                        >
-                                            <Plus className="w-3 h-3" />
-                                            {tag.name}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {allTags.length === 0 && (
-                            <p className="text-pf-text-secondary text-sm">
-                                No tags available. Create some tags first.
-                            </p>
-                        )}
+                                        }
+                                        return accumulated;
+                                    });
+                                }
+                            }}
+                            placeholder="Search and add tags..."
+                        />
 
                         {/* Save Button */}
-                        <div className="mt-6 flex gap-2">
+                        <div className="flex gap-2">
                             <button
                                 onClick={() =>
-                                    updateTagsMutation.mutate(selectedTagIds)
+                                    updateTagsMutation.mutate({ tagIds: selectedTagIds, newTags })
                                 }
-                                disabled={updateTagsMutation.isPending}
-                                className="flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50"
+                                disabled={updateTagsMutation.isPending || !hasUnsavedChanges}
+                                className="flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <Save className="w-4 h-4" />
                                 {updateTagsMutation.isPending ? 'Saving...' : 'Save Tags'}
@@ -324,7 +389,8 @@ export const ModelDetailPage: React.FC = () => {
                             <button
                                 onClick={() => {
                                     setSelectedTagIds(currentTags.map(t => t.id));
-                                    setIsEditing(false);
+                                    setNewTags([]);
+                                    setIsEditingTags(false);
                                 }}
                                 className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded hover:bg-pf-bg-0"
                             >
@@ -334,21 +400,46 @@ export const ModelDetailPage: React.FC = () => {
                     </div>
                 ) : (
                     <div>
-                        {currentTags.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
+                        {currentTags.length > 0 || isEditingTags ? (
+                            <div className="flex flex-wrap gap-2 items-center">
                                 {currentTags.map(tag => (
-                                    <span
+                                    <div
                                         key={tag.id}
-                                        className="inline-block px-3 py-1 rounded-full text-white text-sm"
+                                        className="flex items-center gap-1 px-3 py-1 rounded-full text-white text-sm"
                                         style={{ backgroundColor: tag.color || '#6366f1' }}
-                                        title={tag.description}
                                     >
-                                        {tag.name}
-                                    </span>
+                                        <span>{tag.name}</span>
+                                        <button
+                                            onClick={() => {
+                                                setSelectedTagIds(selectedTagIds.filter(id => id !== tag.id));
+                                                setIsEditingTags(true);
+                                            }}
+                                            className="hover:opacity-80 transition-opacity ml-1"
+                                            title="Remove tag"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
                                 ))}
+                                <button
+                                    onClick={() => setIsEditingTags(true)}
+                                    className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
+                                    title="Add a new tag"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                </button>
                             </div>
                         ) : (
-                            <p className="text-pf-text-secondary">No tags assigned to this model.</p>
+                            <div className="flex items-center gap-2">
+                                <p className="text-pf-text-secondary">No tags assigned to this model.</p>
+                                <button
+                                    onClick={() => setIsEditingTags(true)}
+                                    className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
+                                    title="Add a new tag"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
                         )}
                     </div>
                 )}

@@ -449,6 +449,15 @@ npm run dev
 - **Schema changes**: Modify domain models directly; `EnsureCreated()` will rebuild schema on fresh DB
 - **Migration strategy**: Deferred until production readiness; development uses drop/recreate workflow
 
+**Tag Management (Model3DTag):**
+- **Normalization**: All tag names are normalized to PascalCase at service layer (TagService.cs)
+- **PascalCase Strategy**: "my tag" → "MyTag", "MY_TAG" → "MyTag", "my-tag" → "MyTag"
+- **Database**: Simple unique index on Model3DTag.Name (works identically on all backends)
+- **Lookup**: Exact-match queries only (EfTagRepository.GetByNameAsync) - no case-insensitive logic needed
+- **Exception Handling**: DbUpdateException caught for constraint violations; returns existing tag on race conditions
+- **Implementation Files**: TagService.cs (normalization + exception handling), EfTagRepository.cs (exact-match lookup)
+- **See**: TAG_NORMALIZATION_IMPLEMENTATION.md for complete details
+
 **SignalR:**
 - Background service disabled during testing environment
 - Real-time updates flow: External API → Background Service → Hub → Clients
