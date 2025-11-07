@@ -27,10 +27,12 @@ services:
     container_name: printfarmer-printer-discovery
     # Host network mode allows access to local network and broadcast/multicast
     network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5246
-      - Discovery__ApiBaseUrl=${DISCOVERY__API_BASE_URL:-http://localhost:5245}
+      - Discovery__ApiBaseUrl=${DISCOVERY__API_BASE_URL:-http://host.docker.internal:5245}
       - EnablePeriodicDiscovery=${ENABLE_PERIODIC_DISCOVERY:-true}
       - ScanIntervalSeconds=${SCAN_INTERVAL_SECONDS:-300}
       - Subnets=${DISCOVERY_SUBNETS:-192.168.0.0/16,10.0.0.0/8}
