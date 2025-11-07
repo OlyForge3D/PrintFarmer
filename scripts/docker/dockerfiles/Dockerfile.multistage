@@ -222,8 +222,11 @@ COPY --from=frontend-build /app/dist .
 # Copy nginx configuration
 COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
 
+# Install curl for health checks (required in alpine image)
+RUN apk add --no-cache curl
+
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:80/health || exit 1
 
 EXPOSE 80

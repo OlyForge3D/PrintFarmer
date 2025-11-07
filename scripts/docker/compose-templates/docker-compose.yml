@@ -141,7 +141,7 @@ services:
     image: nginx:alpine
     container_name: printfarmer-nginx-proxy
     ports:
-      - "8080:8080"
+      - "8080:80"
     volumes:
       - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -149,9 +149,10 @@ services:
       - api
       - orcaslicer-worker
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:80/health >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 10s
+      start-period: 15s
       retries: 3
     networks:
       - printfarmer-network
