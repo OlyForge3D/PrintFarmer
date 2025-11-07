@@ -189,7 +189,7 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 ############################################################
 # React Frontend Build Stage
 ############################################################
-FROM --platform=${TARGETPLATFORM} node:18-alpine AS frontend-build
+FROM --platform=${TARGETPLATFORM} node:20-alpine AS frontend-build
 WORKDIR /app
 
 # Accept build arguments for frontend configuration
