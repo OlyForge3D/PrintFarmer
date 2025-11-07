@@ -36,6 +36,14 @@ Fixed invalid healthcheck syntax in nginx-proxy service:
 - Changed `start-period` to `start_period` (Docker Compose requires underscore, not hyphen)
 - Ensures compose files are valid and services start correctly
 
+#### Script Improvements (Applied to fix scripts)
+
+Both fix scripts now:
+- Stop/remove discovery containers using `docker` commands directly (simpler and safer)
+- Use `--no-deps` flag to avoid trying to recreate the API and other services
+- Use `--build` flag to rebuild the discovery image with latest configuration
+- Prevents namespace conflicts when running on existing deployments
+
 **What this does:**
 - `network_mode: host` - Runs discovery service with access to host network (needed for printer scanning)
 - `extra_hosts` - Maps `host.docker.internal` to the Docker host gateway for cross-network communication

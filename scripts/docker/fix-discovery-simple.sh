@@ -44,21 +44,17 @@ fi
 
 echo ""
 echo "[2/5] Stopping old printer-discovery service..."
-docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
-                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
-                stop printer-discovery 2>/dev/null || echo "  (service not running)"
+docker stop printfarmer-printer-discovery 2>/dev/null || echo "  (service not running)"
 
 echo ""
 echo "[3/5] Removing old printer-discovery container..."
-docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
-                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
-                rm -f printer-discovery 2>/dev/null || echo "  (no container to remove)"
+docker rm -f printfarmer-printer-discovery 2>/dev/null || echo "  (no container to remove)"
 
 echo ""
 echo "[4/5] Starting printer-discovery service..."
 docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
                 -f scripts/docker/compose-templates/docker-compose.discovery.yml \
-                up -d printer-discovery
+                up -d --no-deps --build printer-discovery
 
 echo ""
 echo "[5/5] Waiting for service to initialize (30 seconds)..."

@@ -69,21 +69,21 @@ fi
 
 echo ""
 echo "[2/4] Stopping old discovery service..."
-docker-compose -f "$COMPOSE_DIR/docker-compose.yml" \
-                -f "$COMPOSE_DIR/docker-compose.discovery.yml" \
-                stop printer-discovery 2>/dev/null || echo "  (service not running)"
+# Stop just the discovery container directly (simplest approach)
+docker stop printfarmer-printer-discovery 2>/dev/null || echo "  (service not running)"
 
 echo ""
 echo "[3/4] Removing old discovery container..."
-docker-compose -f "$COMPOSE_DIR/docker-compose.yml" \
-                -f "$COMPOSE_DIR/docker-compose.discovery.yml" \
-                rm -f printer-discovery 2>/dev/null || echo "  (no container to remove)"
+docker rm -f printfarmer-printer-discovery 2>/dev/null || echo "  (no container to remove)"
 
 echo ""
 echo "[4/4] Starting discovery service with fixed configuration..."
-docker-compose -f "$COMPOSE_DIR/docker-compose.yml" \
-                -f "$COMPOSE_DIR/docker-compose.discovery.yml" \
-                up -d printer-discovery
+# Use full docker-compose from repo root
+cd "$REPO_ROOT"
+# Use --no-deps to skip rebuilding dependencies, and --build to rebuild discovery image
+docker-compose -f "scripts/docker/compose-templates/docker-compose.yml" \
+                -f "scripts/docker/compose-templates/docker-compose.discovery.yml" \
+                up -d --no-deps --build printer-discovery
 
 echo ""
 echo "=== Waiting for discovery service to initialize ==="
