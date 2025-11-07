@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# Quick Fix: Discovery Service Not Responding to Heartbeats
+# Discovery Service Heartbeat Fix
 # ========================================================
 # 
-# This script applies the fixes for discovery service heartbeat issues
-# Run this BEFORE restarting your deployment
+# Fixes: "Discovery is enabled but service is not responding to heartbeats"
+# Can be run from anywhere in the PrintFarmer repository or deployment
+# 
+# Works on: Linux VM, cloud servers, bare metal, Raspberry Pi, Docker Desktop, etc.
 #
 
 set -e
@@ -22,33 +24,65 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
-cd "$(dirname "$0")"
+# Find the repository root by looking for docker-compose.yml
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+
+# Walk up directories looking for docker-compose.yml or farm-web.sln
+while [ "$REPO_ROOT" != "/" ]; do
+    if [ -f "$REPO_ROOT/docker-compose.yml" ] || [ -f "$REPO_ROOT/farm-web.sln" ]; then
+        break
+    fi
+    REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+
+# Final check
+if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
+    # Could not auto-detect location
+    echo "Error: Could not find repository root"
+    echo "Expected to find docker-compose.yml starting from: $SCRIPT_DIR"
+    echo ""
+    echo "Try running from your deployment directory:"
+    echo "  cd /path/to/deployment"
+    echo "  $0"
+    exit 1
+fi
+
+echo "Repository root: $REPO_ROOT"
+cd "$REPO_ROOT"
+
+COMPOSE_DIR="$REPO_ROOT/scripts/docker/compose-templates"
+if [ ! -d "$COMPOSE_DIR" ]; then
+    echo "Error: Could not find compose templates directory at $COMPOSE_DIR"
+    echo "Directory contents of $REPO_ROOT:"
+    ls -la "$REPO_ROOT" | head -20
+    exit 1
+fi
 
 echo ""
 echo "[1/4] Checking current docker-compose.discovery.yml..."
-if grep -q "host.docker.internal:host-gateway" scripts/docker/compose-templates/docker-compose.discovery.yml; then
+if grep -q "host.docker.internal:host-gateway" "$COMPOSE_DIR/docker-compose.discovery.yml"; then
     echo "✓ Fix already applied"
 else
-    echo "✗ Fix not applied - applying now..."
-    # The actual fix is already done by the file replacement
+    echo "⚠ Fix not yet applied (file may not exist or be outdated)"
 fi
 
 echo ""
 echo "[2/4] Stopping old discovery service..."
-docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
-                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
+docker-compose -f "$COMPOSE_DIR/docker-compose.yml" \
+                -f "$COMPOSE_DIR/docker-compose.discovery.yml" \
                 stop printer-discovery 2>/dev/null || echo "  (service not running)"
 
 echo ""
 echo "[3/4] Removing old discovery container..."
-docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
-                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
+docker-compose -f "$COMPOSE_DIR/docker-compose.yml" \
+                -f "$COMPOSE_DIR/docker-compose.discovery.yml" \
                 rm -f printer-discovery 2>/dev/null || echo "  (no container to remove)"
 
 echo ""
 echo "[4/4] Starting discovery service with fixed configuration..."
-docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
-                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
+docker-compose -f "$COMPOSE_DIR/docker-compose.yml" \
+                -f "$COMPOSE_DIR/docker-compose.discovery.yml" \
                 up -d printer-discovery
 
 echo ""

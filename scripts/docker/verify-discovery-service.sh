@@ -2,6 +2,9 @@
 
 # Diagnostic script to verify PrinterDiscovery service connectivity
 # Usage: ./verify-discovery-service.sh
+# Can be run from any directory in the repository or deployment
+# 
+# Works on: Linux VM, cloud servers, bare metal, Raspberry Pi, Docker Desktop, etc.
 
 set -e
 
@@ -13,6 +16,21 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Find the repository root
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+while [ "$REPO_ROOT" != "/" ] && [ ! -f "$REPO_ROOT/docker-compose.yml" ]; do
+    REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+
+if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
+    echo -e "${RED}✗ Could not find repository root${NC}"
+    echo "Please run this script from within the PrintFarmer repository"
+    exit 1
+fi
+
+echo "Repository: $REPO_ROOT"
+echo ""
 
 # Check if discovery service container exists
 echo "[*] Checking for printer-discovery container..."

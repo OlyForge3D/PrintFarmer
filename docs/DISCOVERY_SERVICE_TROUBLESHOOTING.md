@@ -4,6 +4,8 @@
 
 This error appears in the React frontend when the Network Discovery service (running in a separate container) is not sending heartbeat updates to the API backend.
 
+**Affected Deployments**: Linux VM, cloud servers, bare metal, Raspberry Pi, and other Docker environments
+
 ### Root Cause
 
 The printer discovery service runs as a **separate microservice in host network mode** to access the local network for printer discovery. It needs to:
@@ -185,23 +187,188 @@ These can be customized in `.env` file or passed to docker-compose:
 - `scripts/docker/verify-discovery-service.sh`
   - New diagnostic script to verify all components
 
+### Fix Scripts Available
+
+Three automated scripts are available to help:
+
+**Option 1: Simple Fix** (if you can navigate to deployment directory)
+```bash
+cd /path/to/deployment
+./scripts/docker/fix-discovery-simple.sh
+```
+
+**Option 2: Auto-Detection Fix** (if running from repository)
+```bash
+./scripts/docker/fix-discovery-heartbeat.sh
+```
+
+**Option 3: Diagnostics** (check status without making changes)
+```bash
+./scripts/docker/verify-discovery-service.sh
+```
+
+### Manual Fix Steps
+
+If you prefer to fix manually:
+
+**Step 1: Navigate to Deployment**
+```bash
+cd /path/to/deployment  # wherever docker-compose.yml is located
+```
+
+**Step 2: Restart Discovery Service**
+```bash
+# Stop old service
+docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
+                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
+                down printer-discovery 2>/dev/null || true
+
+# Start new service with fixed configuration
+docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
+                -f scripts/docker/compose-templates/docker-compose.discovery.yml \
+                up -d printer-discovery
+```
+
+**Step 3: Verify It's Working**
+
+Wait 30 seconds, then check:
+
+```bash
+# Check container is running
+docker ps | grep printer-discovery
+
+# Check logs
+docker logs printfarmer-printer-discovery --tail 20
+
+# Test connection from discovery to API
+docker exec printfarmer-printer-discovery \
+  wget -q -O- http://host.docker.internal:5245/healthz 2>&1 | head -1
+
+# Check if heartbeat is recorded (should be recent)
+curl -s http://localhost:5245/api/settings/NetworkDiscovery | grep lastHeartbeat
+```
+
+**Step 4: Reload React Frontend**
+
+Refresh your web browser. Discovery should now be available! ✓
+
+### Verify Fix is Complete
+
+Run full diagnostic check:
+
+```bash
+# 1. Check discovery container
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep printer-discovery
+
+# 2. Check discovery service health
+docker exec printfarmer-printer-discovery \
+  wget -q -O- http://localhost:5246/health 2>&1 | head -20
+
+# 3. Check if API is reachable from discovery
+docker exec printfarmer-printer-discovery \
+  wget -q -O- http://host.docker.internal:5245/healthz 2>&1
+
+# 4. Check last recorded heartbeat
+curl -s http://localhost:5245/api/settings/NetworkDiscovery | \
+  grep -o '"lastHeartbeat":"[^"]*"'
+
+# 5. Check heartbeat age (should be < 60 seconds)
+curl -s http://localhost:5245/api/settings/NetworkDiscovery | \
+  python3 -c "import sys, json, datetime; \
+  d=json.load(sys.stdin); \
+  hb=d.get('lastHeartbeat'); \
+  age=(datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(hb.replace('Z','+00:00'))).total_seconds(); \
+  print(f'Heartbeat age: {age:.0f} seconds')"
+```
+
+If heartbeat age is < 60 seconds, everything is working! ✓
+
 ### Next Steps
 
-1. Rebuild containers with new configuration:
+1. Rebuild containers with new configuration (if needed):
    ```bash
    docker-compose -f docker-compose.yml -f docker-compose.discovery.yml up -d --build
    ```
 
 2. Wait 30-60 seconds for discovery service to start and send first heartbeat
 
-3. Run diagnostic script:
-   ```bash
-   ./scripts/docker/verify-discovery-service.sh
-   ```
-
-4. Check React frontend - discovery should now be available in Printers > Admin page
+3. Check React frontend - discovery should now be available in Printers > Admin page
 
 ### Still Having Issues?
+
+**Problem: "Cannot reach http://host.docker.internal:5245"**
+
+On Linux, `host.docker.internal` needs to be mapped to the host gateway:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+Verify it's configured:
+```bash
+grep -A 5 "extra_hosts" scripts/docker/compose-templates/docker-compose.discovery.yml
+```
+
+**Problem: "API container not running"**
+
+```bash
+# Check API is running
+docker ps | grep printfarmer-api
+
+# If not, start API
+docker-compose -f scripts/docker/compose-templates/docker-compose.yml up -d api
+```
+
+**Problem: "Permission denied - Docker socket"**
+
+```bash
+# Make sure user can access Docker
+sudo usermod -aG docker $USER
+
+# Restart Docker socket
+sudo systemctl restart docker
+
+# Re-login or source bashrc
+newgrp docker
+```
+
+**Problem: "Compose files don't exist"**
+
+The docker-compose templates need to be present:
+
+```bash
+# If you have git access
+cd /path/to/deployment
+git pull origin feature/orcaslicer-reimplementation
+
+# Or manually copy from repository
+cp /path/to/repo/scripts/docker/compose-templates/* scripts/docker/compose-templates/
+```
+
+### Key Configuration Files
+
+After the fix, these should be in place:
+
+**`scripts/docker/compose-templates/docker-compose.discovery.yml`**
+```yaml
+services:
+  printer-discovery:
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - Discovery__ApiBaseUrl=http://host.docker.internal:5245
+```
+
+**`scripts/docker/compose-templates/docker-compose.yml`** - Should have nginx-proxy with correct port mapping:
+```yaml
+  nginx-proxy:
+    ports:
+      - "8080:80"  # External:Internal mapping
+```
+
+### Advanced Debugging
 
 1. Enable debug logging:
    ```bash
@@ -226,7 +393,21 @@ These can be customized in `.env` file or passed to docker-compose:
    curl -v http://localhost:5245/api/settings/NetworkDiscovery
    ```
 
-5. Review full API and discovery logs:
+5. Manually test heartbeat endpoint:
+   ```bash
+   curl -X POST http://localhost:5245/api/settings/NetworkDiscovery/heartbeat \
+        -H "Content-Type: application/json" \
+        -d '{"timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'
+   ```
+
+6. Validate compose file:
+   ```bash
+   docker-compose -f scripts/docker/compose-templates/docker-compose.yml \
+                   -f scripts/docker/compose-templates/docker-compose.discovery.yml \
+                   config
+   ```
+
+7. Review full logs:
    ```bash
    docker logs -f printfarmer-api --tail 100
    docker logs -f printfarmer-printer-discovery --tail 100
