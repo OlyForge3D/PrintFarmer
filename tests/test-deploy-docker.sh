@@ -235,6 +235,7 @@ test_worker_configuration() {
 ARCHITECTURE=microservices
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=2
+ENABLE_DISTRIBUTED_SLICING=true
 DB_PROVIDER=postgres
 EOF
     
@@ -1061,6 +1062,99 @@ EOFTEST
     pass_test
 }
 
+# Test: Slicer worker API key generation
+test_slicer_worker_api_key_generation() {
+    start_test "Slicer worker API key generation"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create config with OrcaSlicer workers enabled
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=2
+ENABLE_DISTRIBUTED_SLICING=true
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    local env_file=".env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
+    fi
+
+    assert_file_exists "$env_file" "Should create env file with API key configuration"
+    
+    local env_content
+    env_content=$(cat "$env_file")
+
+    # Verify API keys are generated and present in the env file
+    assert_contains "$env_content" "SlicerRegistry__ApiKey=" "Should include primary SlicerRegistry__ApiKey for worker registration"
+    
+    # For scaled workers (count > 1), verify individual worker keys are generated
+    assert_contains "$env_content" "SlicerRegistry__ApiKey__orcaslicer_worker" "Should include individual API keys for scaled workers"
+
+    # Verify the key has actual content (not just the key name)
+    local key_line
+    key_line=$(grep "^SlicerRegistry__ApiKey=" "$env_file" | head -1)
+    local key_value
+    key_value=$(echo "$key_line" | cut -d'=' -f2-)
+    
+    assert_not_equals "$key_value" "" "API key value should not be empty"
+
+    # Clean up
+    rm -f .deploy-config "$env_file" || true
+
+    pass_test
+}
+
+# Test: Slicer worker API key generation with single worker
+test_slicer_worker_api_key_single_worker() {
+    start_test "Slicer worker API key generation (single worker)"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Create config with single OrcaSlicer worker
+    cat > .deploy-config << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_DISTRIBUTED_SLICING=true
+EOF
+
+    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    local output=$(get_output)
+
+    local env_file=".env"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
+    fi
+
+    assert_file_exists "$env_file" "Should create env file with API key configuration"
+    
+    local env_content
+    env_content=$(cat "$env_file")
+
+    # Verify API key is present for single worker
+    assert_contains "$env_content" "SlicerRegistry__ApiKey=" "Should include SlicerRegistry__ApiKey for single worker"
+
+    # Verify the key has actual content (not just the key name)
+    local key_line
+    key_line=$(grep "^SlicerRegistry__ApiKey=" "$env_file" | head -1)
+    local key_value
+    key_value=$(echo "$key_line" | cut -d'=' -f2-)
+    
+    assert_not_equals "$key_value" "" "API key value should not be empty"
+
+    # Clean up
+    rm -f .deploy-config "$env_file" || true
+
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -1095,6 +1189,8 @@ run_all_tests() {
     test_pfarm_network_discovery_subnets_in_env
     test_pfarm_variables_complete_set
     test_pfarm_variables_sourcing
+    test_slicer_worker_api_key_generation
+    test_slicer_worker_api_key_single_worker
     
     teardown
 }

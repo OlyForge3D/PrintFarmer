@@ -2351,9 +2351,9 @@ generate_slicer_worker_api_keys() {
 
     print_header "🔑 Generating Slicer Worker API Keys"
     
-    # Initialize arrays for storing worker info
-    declare -g SLICER_WORKER_API_KEYS=()
-    declare -g SLICER_WORKER_NAMES=()
+    # Initialize arrays for storing worker info (without -g for cross-shell compatibility)
+    SLICER_WORKER_API_KEYS=()
+    SLICER_WORKER_NAMES=()
     
     # Generate unique API keys for each worker replica
     for ((i=1; i<=ORCA_WORKER_COUNT; i++)); do
@@ -2421,8 +2421,12 @@ EOF
     fi
 }
 
-
+# Generate the main environment file for docker deployment
+generate_env_file() {
     print_header "📝 Generating Configuration"
+    
+    # Set default env file if not already set
+    ENV_FILE="${ENV_FILE:-.env}"
     
     print_info "Creating environment file: $ENV_FILE"
     
@@ -2648,23 +2652,6 @@ EOF
 
     print_warning "Generated passwords are sensitive. Store .env files securely and restrict access (chmod 600)."
     print_info "To view the full credentials, run: grep 'POSTGRES_PASSWORD\|MSSQL_SA_PASSWORD\|MYSQL_PASSWORD' $ENV_FILE || true"
-
-    # Display generated slicer worker API keys
-    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
-        echo
-        print_info "🔑 Slicer Worker API Keys (for automatic registration):"
-        if [ "$ORCA_WORKER_COUNT" -eq 1 ]; then
-            echo "  OrcaSlicer Worker 1: $(echo "${SLICER_WORKER_API_KEYS[0]}" | cut -c1-12)..."
-        else
-            for ((i=0; i<${#SLICER_WORKER_API_KEYS[@]}; i++)); do
-                local replica_num=$((i+1))
-                echo "  OrcaSlicer Worker $replica_num: $(echo "${SLICER_WORKER_API_KEYS[$i]}" | cut -c1-12)..."
-            done
-        fi
-        echo
-        print_info "Full API keys are available in: $ENV_FILE"
-        print_info "Workers will automatically use these keys to register with the API on startup."
-    fi
     
     if [ "$ARCHITECTURE" = "microservices" ]; then
         cat >> "$ENV_FILE" << EOF
@@ -2703,6 +2690,23 @@ EOF
     # This ensures workers can authenticate with the API during registration
     generate_slicer_worker_api_keys
     export_slicer_worker_api_keys
+    
+    # Display generated slicer worker API keys (now that they're generated)
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
+        echo
+        print_info "🔑 Slicer Worker API Keys (for automatic registration):"
+        if [ "$ORCA_WORKER_COUNT" -eq 1 ]; then
+            echo "  OrcaSlicer Worker 1: $(echo "${SLICER_WORKER_API_KEYS[0]}" | cut -c1-12)..."
+        else
+            for ((i=0; i<${#SLICER_WORKER_API_KEYS[@]}; i++)); do
+                local replica_num=$((i+1))
+                echo "  OrcaSlicer Worker $replica_num: $(echo "${SLICER_WORKER_API_KEYS[$i]}" | cut -c1-12)..."
+            done
+        fi
+        echo
+        print_info "Full API keys are available in: $ENV_FILE"
+        print_info "Workers will automatically use these keys to register with the API on startup."
+    fi
     
     print_success "Environment file created: $ENV_FILE"
     
