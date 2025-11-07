@@ -30,6 +30,12 @@ printer-discovery:
     - Discovery__ApiBaseUrl=http://host.docker.internal:5245
 ```
 
+#### Additional Fix (Applied to docker-compose.yml - nginx-proxy healthcheck)
+
+Fixed invalid healthcheck syntax in nginx-proxy service:
+- Changed `start-period` to `start_period` (Docker Compose requires underscore, not hyphen)
+- Ensures compose files are valid and services start correctly
+
 **What this does:**
 - `network_mode: host` - Runs discovery service with access to host network (needed for printer scanning)
 - `extra_hosts` - Maps `host.docker.internal` to the Docker host gateway for cross-network communication
