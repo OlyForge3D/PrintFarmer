@@ -1229,6 +1229,80 @@ public class Model3DDto
     public DateTime UploadedAt { get; set; }
     public string Url { get; set; } = string.Empty;
     public string? ThumbnailUrl { get; set; }
+    public Model3DTagDto[]? Tags { get; set; }
+}
+
+/// <summary>
+/// Tag for organizing and categorizing 3D models
+/// </summary>
+public class Model3DTagDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Color { get; set; } // Hex color for UI display
+    public string? Description { get; set; }
+}
+
+/// <summary>
+/// Request to create or update a tag
+/// </summary>
+public class CreateModel3DTagDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Color { get; set; }
+    public string? Description { get; set; }
+}
+
+/// <summary>
+/// Request to assign tags to a model
+/// </summary>
+public class AssignTagsToModelDto
+{
+    public Guid[] TagIds { get; set; } = [];
+}
+
+/// <summary>
+/// Request to bulk assign tags to multiple models
+/// </summary>
+public class BulkAssignTagsDto
+{
+    public Guid[] ModelIds { get; set; } = [];
+    public Guid[] TagIds { get; set; } = [];
+    public bool ReplaceExisting { get; set; } = false; // If true, replaces all existing tags
+}
+
+/// <summary>
+/// Result of bulk operation
+/// </summary>
+public class BulkOperationResultDto
+{
+    public int SuccessCount { get; set; }
+    public int TotalCount { get; set; }
+}
+
+/// <summary>
+/// Search/filter parameters for 3D models
+/// </summary>
+public class Model3DSearchRequestDto
+{
+    public string? Query { get; set; } // Search in name/description
+    public Guid[]? TagIds { get; set; } // Filter by tags (AND logic - must have all specified tags)
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 20;
+    public string? SortBy { get; set; } = "uploadedAt"; // uploadedAt, name, size
+    public bool Descending { get; set; } = true;
+}
+
+/// <summary>
+/// Paginated search results for 3D models
+/// </summary>
+public class Model3DSearchResultDto
+{
+    public Model3DDto[] Models { get; set; } = [];
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public int TotalPages { get; set; }
 }
 
 public class Model3DUploadResultDto

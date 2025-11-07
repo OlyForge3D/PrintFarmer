@@ -275,7 +275,6 @@ public class Model3D
     public ModelFileFormat FileFormat { get; set; }
     public DateTime UploadedAt { get; set; }
     public string? Description { get; set; }
-    public string? Tags { get; set; } // JSON array of tags
     public double? DimensionX { get; set; } // in mm
     public double? DimensionY { get; set; } // in mm  
     public double? DimensionZ { get; set; } // in mm
@@ -292,6 +291,9 @@ public class Model3D
     public DateTime? LastHealthCheckDate { get; set; }
     public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
     public string? LastVerificationResult { get; set; } // JSON object with verification details
+
+    // Navigation property for tags
+    public ICollection<Model3DTagMapping> TagMappings { get; set; } = new List<Model3DTagMapping>();
 }
 
 public enum ModelFileFormat
@@ -695,4 +697,35 @@ public class PasswordPolicyEntity
     public bool RequireDigit { get; set; }
     public bool RequireSymbol { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Tag for organizing and categorizing 3D models
+/// </summary>
+public class Model3DTag
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty; // e.g., "functional", "decorative", "tools"
+    public string? Color { get; set; } // Optional hex color for UI display (e.g., "#FF5733")
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Navigation
+    public ICollection<Model3DTagMapping> TagMappings { get; set; } = new List<Model3DTagMapping>();
+}
+
+/// <summary>
+/// Join table for many-to-many relationship between Model3D and Model3DTag
+/// </summary>
+public class Model3DTagMapping
+{
+    public Guid Id { get; set; }
+    public Guid Model3DId { get; set; }
+    public Guid TagId { get; set; }
+    public DateTime TaggedAt { get; set; }
+
+    // Navigation properties
+    public Model3D? Model3D { get; set; }
+    public Model3DTag? Tag { get; set; }
 }

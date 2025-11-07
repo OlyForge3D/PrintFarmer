@@ -154,7 +154,9 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 float maxDim = Math.Max(size.X, Math.Max(size.Y, size.Z));
 
                 if (maxDim <= 0 || float.IsNaN(maxDim))
+                {
                     return;
+                }
 
                 // Set up projection with better camera positioning
                 // X maps left-right, Z maps top-bottom, Y provides depth
@@ -197,9 +199,9 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                     var triangleColor = new Color(new Rgba32(r, g, b, 255));
 
                     // Project vertices to 2D
-                    var p0 = ProjectVertexIsometric(v0, minBounds, size.X, size.Z, scale, offsetX, offsetY);
-                    var p1 = ProjectVertexIsometric(v1, minBounds, size.X, size.Z, scale, offsetX, offsetY);
-                    var p2 = ProjectVertexIsometric(v2, minBounds, size.X, size.Z, scale, offsetX, offsetY);
+                    var p0 = ProjectVertexIsometric(v0, minBounds, scale, offsetX, offsetY);
+                    var p1 = ProjectVertexIsometric(v1, minBounds, scale, offsetX, offsetY);
+                    var p2 = ProjectVertexIsometric(v2, minBounds, scale, offsetX, offsetY);
 
                     // Only draw if triangle is visible (has area)
                     if (IsTriangleVisible(p0, p1, p2))
@@ -236,7 +238,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         }
     }
 
-    private PointF ProjectVertexIsometric(Vector3 vertex, Vector3 minBounds, float sizeX, float sizeZ, float scale, float offsetX, float offsetY)
+    private PointF ProjectVertexIsometric(Vector3 vertex, Vector3 minBounds, float scale, float offsetX, float offsetY)
     {
         Vector3 relative = vertex - minBounds;
         // Isometric: X (width) maps to screen X (left-right), Z (depth) maps to screen Y (top-bottom)

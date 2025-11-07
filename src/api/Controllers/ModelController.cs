@@ -7,6 +7,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Model;
+using Farm.Web.Api.Services.Tags;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -29,6 +30,7 @@ public class ModelController : ControllerBase
     private readonly string _modelsPath;
     private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
     private readonly IFileManagementService _fileManagementService;
+    private readonly ITagService _tagService;
 
     public ModelController(
         IUnifiedLoggingService logger,
@@ -38,12 +40,14 @@ public class ModelController : ControllerBase
         IVirusScanner virusScanner,
         IThumbnailGenerationService thumbnailService,
         Farm.Web.Api.Services.IO.IFileSystem fileSystem,
-        IFileManagementService fileManagementService)
+        IFileManagementService fileManagementService,
+        ITagService tagService)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+        _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
@@ -131,6 +135,58 @@ public class ModelController : ControllerBase
             return NotFound();
         }
         return Ok(dto);
+    }
+
+    /// <summary>
+    /// Get full model details including tags
+    /// </summary>
+    /// <param name="id">Model ID</param>
+    /// <param name="db"></param>
+    /// <returns>Detailed model information with tags</returns>
+    [HttpGet("{id:guid}/details")]
+    [ProducesResponseType(typeof(Model3DDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetModelDetailsAsync(Guid id, [FromServices] AppDbContext db)
+    {
+        try
+        {
+            var model = await db.Models3D
+                .Where(m => m.Id == id)
+                .Include(m => m.TagMappings)
+                .ThenInclude(tm => tm.Tag)
+                .FirstOrDefaultAsync();
+
+            if (model == null)
+            {
+                return NotFound();
+            }
+
+            var dto = new Model3DDto
+            {
+                Id = model.Id,
+                Name = model.DisplayName,
+                FileName = model.OriginalFileName,
+                FileSize = model.FileSizeBytes,
+                FileType = model.FileFormat.ToString(),
+                UploadedAt = model.UploadedAt,
+                Url = $"/api/3d-models/{model.Id}/file",
+                ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null,
+                Tags = model.TagMappings.Select(tm => new Model3DTagDto
+                {
+                    Id = tm.Tag!.Id,
+                    Name = tm.Tag!.Name,
+                    Color = tm.Tag!.Color,
+                    Description = tm.Tag!.Description
+                }).ToArray()
+            };
+
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to get model details {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get model details");
+        }
     }
 
     /// <summary>
@@ -230,6 +286,268 @@ public class ModelController : ControllerBase
         catch (ArgumentException ae)
         {
             return BadRequest(ae.Message);
+        }
+    }
+
+    /// <summary>
+    /// Get all available tags
+    /// </summary>
+    /// <returns>List of all tags</returns>
+    [HttpGet("tags")]
+    [ProducesResponseType(typeof(Model3DTagDto[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTagsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var tags = await _tagService.GetAllTagsAsync(ct);
+            return Ok(tags);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to get tags: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get tags");
+        }
+    }
+
+    /// <summary>
+    /// Create a new tag
+    /// </summary>
+    /// <param name="dto">Tag creation parameters</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Created tag</returns>
+    [HttpPost("tags")]
+    [ProducesResponseType(typeof(Model3DTagDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateTagAsync(CreateModel3DTagDto dto, CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await _tagService.CreateTagAsync(dto, ct);
+            return CreatedAtAction(nameof(GetTagsAsync), new { id = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to create tag: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create tag");
+        }
+    }
+
+    /// <summary>
+    /// Delete a tag
+    /// </summary>
+    /// <param name="tagId">Tag ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content if successful</returns>
+    [HttpDelete("tags/{tagId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteTagAsync(Guid tagId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tagService.DeleteTagAsync(tagId, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to delete tag {tagId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete tag");
+        }
+    }
+
+    /// <summary>
+    /// Assign tags to a model
+    /// </summary>
+    /// <param name="modelId">Model ID</param>
+    /// <param name="dto">Tag IDs to assign</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content if successful</returns>
+    [HttpPost("{modelId:guid}/tags")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AssignTagsAsync(Guid modelId, AssignTagsToModelDto dto, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tagService.AssignTagsToModelAsync(modelId, dto.TagIds ?? [], ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to assign tags to model {modelId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to assign tags");
+        }
+    }
+
+    /// <summary>
+    /// Remove a tag from a model
+    /// </summary>
+    /// <param name="modelId">Model ID</param>
+    /// <param name="tagId">Tag ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content if successful</returns>
+    [HttpDelete("{modelId:guid}/tags/{tagId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveTagAsync(Guid modelId, Guid tagId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tagService.RemoveTagFromModelAsync(modelId, tagId, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to remove tag {tagId} from model {modelId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to remove tag");
+        }
+    }
+
+    /// <summary>
+    /// Bulk assign tags to multiple models
+    /// </summary>
+    /// <param name="bulkRequest">Model IDs and tag IDs</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Number of models updated</returns>
+    [HttpPost("bulk/assign-tags")]
+    [ProducesResponseType(typeof(BulkOperationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BulkAssignTagsAsync(BulkAssignTagsDto bulkRequest, CancellationToken ct = default)
+    {
+        try
+        {
+            if (bulkRequest.ModelIds == null || bulkRequest.ModelIds.Length == 0)
+            {
+                return BadRequest("No models specified");
+            }
+
+            if (bulkRequest.TagIds == null || bulkRequest.TagIds.Length == 0)
+            {
+                return BadRequest("No tags specified");
+            }
+
+            await _tagService.BulkAssignTagsAsync(bulkRequest.ModelIds, bulkRequest.TagIds, ct);
+
+            return Ok(new BulkOperationResultDto { SuccessCount = bulkRequest.ModelIds.Length, TotalCount = bulkRequest.ModelIds.Length });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to bulk assign tags: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to bulk assign tags");
+        }
+    }
+
+    /// <summary>
+    /// Search and filter models with pagination
+    /// </summary>
+    /// <param name="request">Search parameters</param>
+    /// <param name="db"></param>
+    /// <returns>Paginated search results</returns>
+    [HttpPost("search")]
+    [ProducesResponseType(typeof(Model3DSearchResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SearchModelsAsync(Model3DSearchRequestDto request, [FromServices] AppDbContext db)
+    {
+        try
+        {
+            if (request.Page < 1)
+            {
+                request.Page = 1;
+            }
+
+            if (request.PageSize < 1 || request.PageSize > 100)
+            {
+                request.PageSize = 20;
+            }
+
+            var query = db.Models3D.AsQueryable();
+
+            // Text search
+            if (!string.IsNullOrWhiteSpace(request.Query))
+            {
+                var searchTerm = request.Query.ToLower();
+                query = query.Where(m => m.DisplayName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
+                                        (m.Description != null && m.Description.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)));
+            }
+
+            // Tag filtering (AND logic - must have all tags)
+            if (request.TagIds?.Length > 0)
+            {
+                foreach (var tagId in request.TagIds)
+                {
+                    query = query.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
+                }
+            }
+
+            // Sorting
+            query = (request.SortBy?.ToLower()) switch
+            {
+                "name" => request.Descending ? query.OrderByDescending(m => m.DisplayName) : query.OrderBy(m => m.DisplayName),
+                "size" => request.Descending ? query.OrderByDescending(m => m.FileSizeBytes) : query.OrderBy(m => m.FileSizeBytes),
+                _ => request.Descending ? query.OrderByDescending(m => m.UploadedAt) : query.OrderBy(m => m.UploadedAt) // default: uploadedAt
+            };
+
+            var totalCount = await query.CountAsync();
+            var models = await query
+                .Skip((request.Page - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .Include(m => m.TagMappings)
+                .ThenInclude(tm => tm.Tag)
+                .Select(m => new Model3DDto
+                {
+                    Id = m.Id,
+                    Name = m.DisplayName,
+                    FileName = m.OriginalFileName,
+                    FileSize = m.FileSizeBytes,
+                    FileType = m.FileFormat.ToString(),
+                    UploadedAt = m.UploadedAt,
+                    Url = $"/api/3d-models/{m.Id}/file",
+                    ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null,
+                    Tags = m.TagMappings.Select(tm => new Model3DTagDto
+                    {
+                        Id = tm.Tag!.Id,
+                        Name = tm.Tag!.Name,
+                        Color = tm.Tag!.Color,
+                        Description = tm.Tag!.Description
+                    }).ToArray()
+                })
+                .ToListAsync();
+
+            var result = new Model3DSearchResultDto
+            {
+                Models = models.ToArray(),
+                TotalCount = totalCount,
+                Page = request.Page,
+                PageSize = request.PageSize,
+                TotalPages = (int)Math.Ceiling((double)totalCount / request.PageSize)
+            };
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to search models: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to search models");
         }
     }
 }

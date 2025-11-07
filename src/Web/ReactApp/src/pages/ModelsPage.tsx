@@ -1,6 +1,7 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Box, Trash2, Eye, Settings } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Upload, Box, Trash2, Eye, Settings, Search, Tag, Grid3x3, List, X, FileText } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 // Lazy load heavy three.js based viewers with manual preload support
@@ -44,7 +45,10 @@ type Model = SlicedModelSummary & {
   uploadedAt?: string; // alias of createdAt
   url?: string;
   thumbnailUrl?: string;
+  tags?: Array<{ id: string; name: string; color?: string }>;
 };
+
+type ModelTag = { id: string; name: string; color?: string; description?: string };
 
 interface GCodeFile {
   id: string;
@@ -56,6 +60,7 @@ interface GCodeFile {
 }
 
 export const ModelsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [dragOver, setDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
@@ -69,16 +74,54 @@ export const ModelsPage: React.FC = () => {
     isOpen: false
   });
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showTagFilter, setShowTagFilter] = useState(false);
 
   const queryClient = useQueryClient();
 
-  // Fetch models
-  const { data: models = [], isLoading } = useQuery<Model[]>({
-    queryKey: ['models'],
-    queryFn: () => slicerService.listModels(),
-    staleTime: 2 * 60 * 1000, // Cache for 2 minutes
-    gcTime: 5 * 60 * 1000 // Keep in cache for 5 minutes
+  // Fetch tags
+  const { data: allTags = [] } = useQuery<ModelTag[]>({
+    queryKey: ['model-tags'],
+    queryFn: async () => {
+      const response = await fetch(`${getApiBaseUrl()}/api/3d-models/tags`, {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) throw new Error('Failed to fetch tags');
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000
   });
+
+  // Fetch models with search/filter
+  const { data: searchResult, isLoading } = useQuery({
+    queryKey: ['models-search', searchQuery, selectedTags],
+    queryFn: async () => {
+      const response = await fetch(`${getApiBaseUrl()}/api/3d-models/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          query: searchQuery || undefined,
+          tagIds: selectedTags.length > 0 ? selectedTags : undefined,
+          page: 1,
+          pageSize: 100,
+          sortBy: 'uploadedAt',
+          descending: true
+        })
+      });
+      if (!response.ok) throw new Error('Failed to search models');
+      return response.json();
+    },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 5 * 60 * 1000
+  });
+
+  const models = searchResult?.models || [];
 
   // Fetch available printers for slicing (using fast endpoint without status checks)
   const { data: availablePrinters = [] } = useQuery({
@@ -87,15 +130,15 @@ export const ModelsPage: React.FC = () => {
       const response = await fetch(`${getApiBaseUrl()}/printers/fast`, { headers: getAuthHeaders() });
       return response.json();
     },
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    gcTime: 10 * 60 * 1000 // Keep in cache for 10 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000
   });
 
   // Upload mutation
   const uploadMutation = useMutation({
     mutationFn: (file: File) => slicerService.uploadModel(file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models'] });
+      queryClient.invalidateQueries({ queryKey: ['models-search'] });
       setSelectedFiles([]);
       setUploadProgress({});
     }
@@ -105,7 +148,7 @@ export const ModelsPage: React.FC = () => {
   const deleteMutation = useMutation({
     mutationFn: (modelId: string) => slicerService.deleteModel(modelId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models'] });
+      queryClient.invalidateQueries({ queryKey: ['models-search'] });
     }
   });
 
@@ -133,7 +176,6 @@ export const ModelsPage: React.FC = () => {
       try {
         setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
 
-        // Simulate progress for now (in real implementation, use XMLHttpRequest for progress)
         const progressInterval = setInterval(() => {
           setUploadProgress(prev => {
             const current = prev[file.name] || 0;
@@ -151,7 +193,6 @@ export const ModelsPage: React.FC = () => {
       } catch (error) {
         console.error('Upload failed:', error);
         setUploadProgress(prev => {
-          // Create a shallow copy and remove the failed file key to avoid unused var warnings
           const rest = { ...prev };
           delete rest[file.name];
           return rest;
@@ -164,6 +205,14 @@ export const ModelsPage: React.FC = () => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const toggleTag = (tagId: string) => {
+    setSelectedTags(prev =>
+      prev.includes(tagId)
+        ? prev.filter(id => id !== tagId)
+        : [...prev, tagId]
+    );
+  };
+
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -172,9 +221,7 @@ export const ModelsPage: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // Removed unused getFileType helper
-
-  if (isLoading) {
+  if (isLoading && models.length === 0) {
     return (
       <PageTemplate
         title="3D Models"
@@ -255,7 +302,7 @@ export const ModelsPage: React.FC = () => {
                           {(() => {
                             const pct = uploadProgress[file.name] ?? 0;
                             const bucket = Math.min(100, Math.max(0, Math.round(pct / 5) * 5));
-                            const widthClass = `w-[${bucket}%]` as const; // Tailwind arbitrary width
+                            const widthClass = `w-[${bucket}%]` as const;
                             return (
                               <div
                                 className={`bg-pf-accent h-1 rounded-full transition-all duration-300 ${widthClass}`}
@@ -292,75 +339,298 @@ export const ModelsPage: React.FC = () => {
         )}
       </div>
 
-      {/* Models Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {models.map((model: Model) => (
-          <div key={model.id} className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden flex flex-col">
-            {/* Model Preview */}
-            <div className="flex-1 aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-64">
-              {model.thumbnailUrl ? (
-                <img
-                  src={model.thumbnailUrl}
-                  alt={model.name}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Box className="w-12 h-12 text-pf-text-tertiary" />
-                </div>
-              )}
+      {/* Search and Filter Bar */}
+      <div className="space-y-4 mt-6">
+        <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center">
+          {/* Search box */}
+          <div className="flex-1 relative">
+            <Search className="w-5 h-5 absolute left-3 top-3 text-pf-text-tertiary pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search models by name or description..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+            />
+          </div>
 
-              {/* Quick actions overlay */}
-              <div className="absolute top-2 right-2 flex space-x-1">
-                <button
-                  onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                  onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                  onClick={() => setViewerModel(model)}
-                  className="p-2 bg-pf-bg-1 bg-opacity-80 hover:bg-pf-bg-1 rounded shadow border border-pf-border"
-                  title="View 3D Model"
-                >
-                  <Eye className="w-4 h-4 text-pf-text-primary" />
-                </button>
-              </div>
+          {/* Tag filter button */}
+          <button
+            onClick={() => setShowTagFilter(!showTagFilter)}
+            className={`px-4 py-2 rounded border flex items-center gap-2 transition-colors ${selectedTags.length > 0
+              ? 'bg-pf-accent-bg text-pf-accent border-pf-accent'
+              : 'bg-pf-bg-1 text-pf-text-primary border-pf-border hover:bg-pf-bg-2'
+              }`}
+          >
+            <Tag className="w-4 h-4" />
+            Tags {selectedTags.length > 0 && `(${selectedTags.length})`}
+          </button>
+
+          {/* Bulk tagging button - Disabled for now */}
+          <button
+            disabled
+            className="flex items-center gap-2 px-4 py-2 bg-pf-bg-1 border border-pf-border rounded hover:bg-pf-bg-2 text-sm font-medium text-pf-text-primary opacity-50 cursor-not-allowed"
+            title="Bulk tagging feature coming soon"
+          >
+            <Tag className="w-4 h-4" />
+            Bulk Tag (Soon)
+          </button>
+
+          {/* View mode toggle */}
+          <div className="flex gap-2 border border-pf-border rounded p-1 bg-pf-bg-1">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-2 rounded transition-colors ${viewMode === 'grid'
+                ? 'bg-pf-accent text-white'
+                : 'text-pf-text-tertiary hover:bg-pf-bg-2'
+                }`}
+              title="Grid view"
+            >
+              <Grid3x3 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded transition-colors ${viewMode === 'list'
+                ? 'bg-pf-accent text-white'
+                : 'text-pf-text-tertiary hover:bg-pf-bg-2'
+                }`}
+              title="List view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Tag filter dropdown */}
+        {showTagFilter && (
+          <div className="bg-pf-bg-1 border border-pf-border rounded p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-medium text-pf-text-primary">Filter by Tags</h4>
+              <button
+                onClick={() => {
+                  setShowTagFilter(false);
+                  setSelectedTags([]);
+                }}
+                className="text-xs text-pf-text-tertiary hover:text-pf-text-primary"
+              >
+                Clear All
+              </button>
             </div>
-
-            {/* Model Info */}
-            <div className="p-4">
-              <h3 className="font-medium text-lg mb-1 text-pf-text-primary">{model.name}</h3>
-              <div className="text-sm text-pf-text-secondary space-y-1">
-                {model.fileType && <div>Type: {model.fileType.toUpperCase()}</div>}
-                {typeof model.fileSize === 'number' && <div>Size: {formatFileSize(model.fileSize)}</div>}
-                <div>Uploaded: {new Date(model.uploadedAt || (model as { createdAt?: string; updatedAt?: string }).createdAt || (model as { updatedAt?: string }).updatedAt || Date.now()).toLocaleDateString()}</div>
-              </div>
-
-              {/* Actions */}
-              <div className="mt-4 flex space-x-2">
-                <button
-                  onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
-                  onFocus={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
-                  onClick={() => setSlicerModal({
-                    isOpen: true,
-                    modelId: model.id,
-                    modelName: model.name
-                  })}
-                  className="flex-1 px-3 py-2 bg-pf-accent-bg bg-opacity-20 text-pf-accent rounded hover:bg-pf-accent-bg hover:bg-opacity-30 text-sm font-medium border border-pf-accent"
-                >
-                  <Settings className="w-4 h-4 inline mr-1" />
-                  Slice
-                </button>
-                <button
-                  onClick={() => deleteMutation.mutate(model.id)}
-                  disabled={deleteMutation.isPending}
-                  className="px-3 py-2 bg-pf-error-bg text-pf-error-text rounded hover:bg-pf-error border border-pf-error-border"
-                  title="Delete Model"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {allTags.length > 0 ? (
+                allTags.map(tag => (
+                  <button
+                    key={tag.id}
+                    onClick={() => toggleTag(tag.id)}
+                    className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${selectedTags.includes(tag.id)
+                      ? 'ring-2 ring-offset-2 ring-offset-pf-bg-0 ring-pf-accent'
+                      : ''
+                      }`}
+                    style={{
+                      backgroundColor: tag.color || '#6366f1',
+                      color: 'white',
+                      opacity: selectedTags.includes(tag.id) ? 1 : 0.6
+                    }}
+                    title={tag.description}
+                  >
+                    {tag.name}
+                  </button>
+                ))
+              ) : (
+                <p className="text-pf-text-secondary text-sm">No tags available</p>
+              )}
             </div>
           </div>
-        ))}
+        )}
       </div>
+
+      {/* Models Display */}
+      {models.length === 0 ? (
+        <div className="text-center py-12">
+          <Box className="w-12 h-12 text-pf-text-tertiary mx-auto mb-4 opacity-50" />
+          <p className="text-pf-text-secondary">No models found</p>
+        </div>
+      ) : viewMode === 'grid' ? (
+        // Grid View
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {models.map((model: Model) => (
+            <div key={model.id} className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden flex flex-col">
+              {/* Model Preview */}
+              <div className="flex-1 aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-64">
+                {model.thumbnailUrl ? (
+                  <img
+                    src={model.thumbnailUrl}
+                    alt={model.name}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Box className="w-12 h-12 text-pf-text-tertiary" />
+                  </div>
+                )}
+
+                {/* Quick actions overlay */}
+                <div className="absolute top-2 right-2 flex space-x-1">
+                  <button
+                    onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                    onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                    onClick={() => setViewerModel(model)}
+                    className="p-2 bg-pf-bg-1 bg-opacity-80 hover:bg-pf-bg-1 rounded shadow border border-pf-border"
+                    title="View 3D Model"
+                  >
+                    <Eye className="w-4 h-4 text-pf-text-primary" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Model Info */}
+              <div className="p-4 flex-1 flex flex-col">
+                <h3 className="font-medium text-lg mb-1 text-pf-text-primary">{model.name}</h3>
+
+                {/* Tags */}
+                {model.tags && model.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {model.tags.map(tag => (
+                      <span
+                        key={tag.id}
+                        className="inline-block px-2 py-1 text-xs rounded text-white"
+                        style={{ backgroundColor: tag.color || '#6366f1' }}
+                      >
+                        {tag.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="text-sm text-pf-text-secondary space-y-1 mb-4 flex-1">
+                  {model.fileType && <div>Type: {model.fileType.toUpperCase()}</div>}
+                  {typeof model.fileSize === 'number' && <div>Size: {formatFileSize(model.fileSize)}</div>}
+                  <div>Uploaded: {new Date(model.uploadedAt || (model as { createdAt?: string; updatedAt?: string }).createdAt || (model as { updatedAt?: string }).updatedAt || Date.now()).toLocaleDateString()}</div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => navigate(`/models/${model.id}`)}
+                    className="flex-1 px-3 py-2 bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-1 text-sm font-medium border border-pf-border"
+                    title="View Details"
+                  >
+                    <FileText className="w-4 h-4 inline mr-1" />
+                    Details
+                  </button>
+                  <button
+                    onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
+                    onFocus={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
+                    onClick={() => setSlicerModal({
+                      isOpen: true,
+                      modelId: model.id,
+                      modelName: model.name
+                    })}
+                    className="flex-1 px-3 py-2 bg-pf-accent-bg bg-opacity-20 text-pf-accent rounded hover:bg-pf-accent-bg hover:bg-opacity-30 text-sm font-medium border border-pf-accent"
+                  >
+                    <Settings className="w-4 h-4 inline mr-1" />
+                    Slice
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate(model.id)}
+                    disabled={deleteMutation.isPending}
+                    className="px-3 py-2 bg-pf-error-bg text-pf-error-text rounded hover:bg-pf-error border border-pf-error-border"
+                    title="Delete Model"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        // List View
+        <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-pf-border bg-pf-bg-2">
+                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Name</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Type</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Size</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Tags</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Uploaded</th>
+                <th className="px-4 py-3 text-right text-sm font-medium text-pf-text-primary">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-pf-border">
+              {models.map((model: Model) => (
+                <tr key={model.id} className="hover:bg-pf-bg-2 transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-pf-text-primary">{model.name}</div>
+                  </td>
+                  <td className="px-4 py-3 text-pf-text-secondary">{model.fileType?.toUpperCase() || '-'}</td>
+                  <td className="px-4 py-3 text-pf-text-secondary">{typeof model.fileSize === 'number' ? formatFileSize(model.fileSize) : '-'}</td>
+                  <td className="px-4 py-3">
+                    {model.tags && model.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {model.tags.map(tag => (
+                          <span
+                            key={tag.id}
+                            className="inline-block px-2 py-1 text-xs rounded text-white"
+                            style={{ backgroundColor: tag.color || '#6366f1' }}
+                          >
+                            {tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-pf-text-tertiary">-</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-pf-text-secondary text-sm">
+                    {new Date(model.uploadedAt || (model as { createdAt?: string }).createdAt || Date.now()).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                        onClick={() => setViewerModel(model)}
+                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-text-primary"
+                        title="View 3D Model"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => navigate(`/models/${model.id}`)}
+                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-text-primary"
+                        title="View Details"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                      <button
+                        onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
+                        onClick={() => setSlicerModal({
+                          isOpen: true,
+                          modelId: model.id,
+                          modelName: model.name
+                        })}
+                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-accent"
+                        title="Slice Model"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => deleteMutation.mutate(model.id)}
+                        disabled={deleteMutation.isPending}
+                        className="p-2 hover:bg-pf-error hover:bg-opacity-20 rounded text-pf-error"
+                        title="Delete Model"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Model Viewer Modal */}
       {viewerModel && (
@@ -372,7 +642,7 @@ export const ModelsPage: React.FC = () => {
                 onClick={() => setViewerModel(null)}
                 className="p-1 hover:bg-pf-bg-2 rounded text-pf-text-primary"
               >
-                ×
+                <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-4">
@@ -400,7 +670,7 @@ export const ModelsPage: React.FC = () => {
                 onClick={() => setGcodeViewer(null)}
                 className="p-1 hover:bg-pf-bg-2 rounded text-pf-text-primary"
               >
-                ×
+                <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-4">
@@ -428,7 +698,6 @@ export const ModelsPage: React.FC = () => {
                   console.log('Slicing completed:', result);
                 }
               }
-              // Could navigate to G-code viewer or print queue
             }}
           />
         </Suspense>

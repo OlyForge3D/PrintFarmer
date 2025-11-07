@@ -136,6 +136,11 @@ public static class ApiApplicationServiceCollectionExtensions
         _ = services.AddScoped<Farm.Web.Api.Services.SystemLogs.ISystemLogService, Farm.Web.Api.Services.SystemLogs.SystemLogService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeLibraryService, Farm.Web.Api.Services.Gcode.GcodeLibraryService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeFilesService, Farm.Web.Api.Services.Gcode.GcodeFilesService>();
+
+        // Tag services and repositories
+        _ = services.AddScoped<Farm.Web.Api.Repositories.Tags.ITagRepository, Farm.Web.Api.Repositories.Tags.EfTagRepository>();
+        _ = services.AddScoped<Farm.Web.Api.Repositories.Tags.IModelTagMappingRepository, Farm.Web.Api.Repositories.Tags.EfModelTagMappingRepository>();
+        _ = services.AddScoped<Farm.Web.Api.Services.Tags.ITagService, Farm.Web.Api.Services.Tags.TagService>();
     }
 
     private static void RegisterPrinterAndSetupServices(IServiceCollection services)

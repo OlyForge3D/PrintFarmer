@@ -13,6 +13,8 @@ import { FilesPage } from '@/pages/FilesPage';
 import { HarvestPage } from '@/pages/HarvestPage';
 import { HarvestHistoryPage } from '@/pages/HarvestHistoryPage';
 import { ModelsPage } from '@/pages/ModelsPage';
+import { ModelDetailPage } from '@/pages/ModelDetailPage';
+import { TagAdminPage } from '@/pages/TagAdminPage';
 import { PrintersPage } from '@/pages/PrintersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
@@ -104,6 +106,7 @@ function AuthenticatedAppRoutes() {
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
         <Route path="models" element={<ModelsPage />} />
+        <Route path="models/:modelId" element={<ModelDetailPage />} />
         <Route path="harvest/*">
           <Route index element={<HarvestPage />} />
           <Route path="history" element={<HarvestHistoryPage />} />
@@ -113,6 +116,14 @@ function AuthenticatedAppRoutes() {
         <Route path="catalog" element={<CatalogPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="spools" element={<SpoolsPage />} />
+        <Route
+          path="admin/tags"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <TagAdminPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="admin/users"
           element={
@@ -228,9 +239,9 @@ function App() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
   // Initialize unified logging for the main App component
-  const { logger } = useUnifiedLogging({ 
-    component: 'App', 
-    logLifecycle: true 
+  const { logger } = useUnifiedLogging({
+    component: 'App',
+    logLifecycle: true
   });
 
   useEffect(() => {
@@ -243,19 +254,19 @@ function App() {
         if (response.ok) {
           const data = await response.json();
           setSetupComplete(!data.needsSetup);
-          logger.info('Setup status retrieved', { 
-            needsSetup: data.needsSetup, 
-            setupComplete: !data.needsSetup 
+          logger.info('Setup status retrieved', {
+            needsSetup: data.needsSetup,
+            setupComplete: !data.needsSetup
           });
         } else {
           setSetupComplete(false);
-          logger.warn('Setup status check failed - assuming setup needed', { 
-            status: response.status 
+          logger.warn('Setup status check failed - assuming setup needed', {
+            status: response.status
           });
         }
       } catch (error) {
-        logger.error('Error checking setup status', { 
-          error: error instanceof Error ? error.message : String(error) 
+        logger.error('Error checking setup status', {
+          error: error instanceof Error ? error.message : String(error)
         });
         setSetupComplete(false);
       } finally {

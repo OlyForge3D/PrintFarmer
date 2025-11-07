@@ -32,6 +32,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
+    public DbSet<Model3DTag> Model3DTags => Set<Model3DTag>();
+    public DbSet<Model3DTagMapping> Model3DTagMappings => Set<Model3DTagMapping>();
     public DbSet<SlicerProfile> SlicerProfiles => Set<SlicerProfile>();
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
@@ -568,7 +570,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
             b.Property(m => m.FileFormat).HasConversion<int>();
             b.Property(m => m.FileSizeBytes).IsRequired();
-            b.Property(m => m.Tags).HasColumnType("TEXT");
             b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
             b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
@@ -579,6 +580,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(m => m.UploadedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            // Navigation: Model3D -> TagMappings
+            b.HasMany(m => m.TagMappings)
+                .WithOne(tm => tm.Model3D)
+                .HasForeignKey(tm => tm.Model3DId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             // Indexes
             b.HasIndex(m => m.FileHash).IsUnique();
             b.HasIndex(m => m.UploadedAt);
@@ -587,6 +594,49 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(m => m.UploadedByUserId);
             b.HasIndex(m => m.HealthStatus); // Index for dashboard queries
             b.HasIndex(m => m.LastHealthCheckDate); // Index for recent health checks
+        });
+
+        // Model3DTag Entity Configuration
+        modelBuilder.Entity<Model3DTag>(b =>
+        {
+            b.HasKey(t => t.Id);
+            b.Property(t => t.Name).IsRequired().HasMaxLength(128);
+            b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
+            b.Property(t => t.Description).HasMaxLength(512);
+
+            // Navigation: Model3DTag -> TagMappings
+            b.HasMany(t => t.TagMappings)
+                .WithOne(tm => tm.Tag)
+                .HasForeignKey(tm => tm.TagId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Index for quick tag lookups
+            b.HasIndex(t => t.Name).IsUnique();
+        });
+
+        // Model3DTagMapping Entity Configuration
+        modelBuilder.Entity<Model3DTagMapping>(b =>
+        {
+            b.HasKey(tm => tm.Id);
+            b.Property(tm => tm.Model3DId).IsRequired();
+            b.Property(tm => tm.TagId).IsRequired();
+
+            // Foreign Keys
+            b.HasOne(tm => tm.Model3D)
+                .WithMany(m => m.TagMappings)
+                .HasForeignKey(tm => tm.Model3DId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(tm => tm.Tag)
+                .WithMany(t => t.TagMappings)
+                .HasForeignKey(tm => tm.TagId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Composite index to prevent duplicate tag assignments
+            b.HasIndex(tm => new { tm.Model3DId, tm.TagId }).IsUnique();
+
+            // Index for finding all models with a tag
+            b.HasIndex(tm => tm.TagId);
         });
 
         // SlicerProfile Entity Configuration
