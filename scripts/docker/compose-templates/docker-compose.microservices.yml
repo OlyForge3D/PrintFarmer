@@ -1,5 +1,7 @@
 # PrintFarmer Microservices Architecture with OrcaSlicer Worker
 # Supports OrcaSlicer worker for distributed slicing
+# NOTE: Health check and shared definitions are automatically injected by compose-generator.sh
+# from docker-compose.common.yml during deployment
 
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
@@ -73,22 +75,12 @@ services:
     depends_on:
       database:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5245/healthz"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 60s
+    healthcheck: *api-healthcheck
 
   # OrcaSlicer Worker - Distributed slicing microservice with multi-stage build
   orcaslicer-worker:
     build:
-      context: .
-      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
-      target: orcaslicer-worker
-      args:
-        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
-        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+      <<: *orcaslicer-build
     image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
     ports:
@@ -106,33 +98,13 @@ services:
       - Logging__LogLevel__Default=Information
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
-    volumes:
-      - printfarmer-orcaslicer-temp:/app/temp
-      - printfarmer-gcode-storage:/app/gcode
+    volumes: *worker-volumes
     depends_on:
       api:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cap_drop:
-      - ALL
-    ulimits:
-      nofile: 1024
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
+    healthcheck: *worker-healthcheck
+    <<: *worker-security
+    deploy: *worker-deployment
 
 
 
@@ -163,11 +135,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    healthcheck: *frontend-healthcheck
   nginx-proxy:
     image: nginx:alpine
     container_name: printfarmer-nginx-proxy
@@ -178,18 +146,12 @@ services:
     depends_on:
       - frontend
       - api
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    healthcheck: *nginx-healthcheck
     networks:
       - printfarmer-network
 
 networks:
-  printfarmer-network:
-    name: printfarmer-network
-    driver: bridge
+  printfarmer-network: *printfarmer-network
 
 volumes:
   printfarmer-database:  # Generic database volume (PostgreSQL, SQL Server, MySQL)

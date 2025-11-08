@@ -1,3 +1,8 @@
+# PrintFarmer - Monolithic Deployment
+# All services on single docker-compose, single host network
+# NOTE: Health check and shared definitions are automatically injected by compose-generator.sh
+# from docker-compose.common.yml during deployment
+
 services:
   # .NET API Backend - Multi-stage build for efficiency
   api:
@@ -47,12 +52,7 @@ services:
 
     networks:
       - printfarmer-network
-    healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:5245/healthz && curl -f http://localhost:5245/health | grep -q 'Healthy' && curl -f http://localhost:5245/api/signalrtest/connection-stats"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 40s
+    healthcheck: *api-healthcheck
 
   # React Frontend with Nginx - Multi-stage build
   frontend:
@@ -78,21 +78,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    healthcheck: *frontend-healthcheck
 
   # OrcaSlicer Worker for distributed slicing - Multi-stage build
   orcaslicer-worker:
     build:
-      context: .
-      dockerfile: Dockerfile.multistage
-      target: orcaslicer-worker
-      args:
-        ALLOW_STUB: "false"  # Production: require real OrcaSlicer binary
-        ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+      <<: *orcaslicer-build
     image: printfarmer-orcaslicer-worker-multistage
     container_name: printfarmer-orcaslicer-worker
     environment:
@@ -104,37 +95,15 @@ services:
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
-    volumes:
-      - printfarmer-orcaslicer-temp:/app/temp
-      - printfarmer-gcode-storage:/app/gcode
+    volumes: *worker-volumes
     depends_on:
       api:
         condition: service_healthy
     networks:
       - printfarmer-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    ulimits:
-      nofile: 1024
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
+    healthcheck: *worker-healthcheck
+    <<: *worker-security
+    deploy: *worker-deployment
 
   # Optional: Load balancer / Reverse proxy
   nginx-proxy:
@@ -148,12 +117,7 @@ services:
       - frontend
       - api
       - orcaslicer-worker
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:80/health >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 15s
-      retries: 3
+    healthcheck: *nginx-healthcheck
     networks:
       - printfarmer-network
 
@@ -165,6 +129,4 @@ volumes:
   printfarmer-orcaslicer-temp:
 
 networks:
-  printfarmer-network:
-    name: printfarmer-network
-    driver: bridge
+  printfarmer-network: *printfarmer-network

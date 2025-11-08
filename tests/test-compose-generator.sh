@@ -1736,6 +1736,15 @@ run_all_tests() {
     test_missing_required_architecture_argument
     test_invalid_database_provider
     test_output_directory_nonexistent_path
+    
+    # Anchor Injection Tests
+    test_common_yml_exists
+    test_anchor_injection_monolithic
+    test_anchor_injection_microservices
+    test_anchor_references
+    test_healthcheck_properties
+    test_generated_compose_validates
+    test_anchor_consistency_across_architectures
     test_addon_services_no_duplicates
     test_environment_variable_references_resolved
     test_orcaslicer_worker_count_validation
@@ -1785,7 +1794,208 @@ run_all_tests() {
     teardown
 }
 
-# Test: Validate all addon templates have correct YAML syntax
+# Test: Anchor injection from common.yml
+test_anchor_injection_monolithic() {
+    start_test "anchor injection into monolithic compose"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    
+    local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
+    
+    # Verify anchors are injected
+    assert_contains "$compose_content" "x-api-healthcheck:" "Should inject x-api-healthcheck anchor"
+    assert_contains "$compose_content" "&api-healthcheck" "Should define api-healthcheck anchor"
+    assert_contains "$compose_content" "x-worker-healthcheck:" "Should inject x-worker-healthcheck anchor"
+    assert_contains "$compose_content" "&worker-healthcheck" "Should define worker-healthcheck anchor"
+    assert_contains "$compose_content" "x-frontend-healthcheck:" "Should inject x-frontend-healthcheck anchor"
+    assert_contains "$compose_content" "&frontend-healthcheck" "Should define frontend-healthcheck anchor"
+    assert_contains "$compose_content" "x-nginx-healthcheck:" "Should inject x-nginx-healthcheck anchor"
+    assert_contains "$compose_content" "&nginx-healthcheck" "Should define nginx-healthcheck anchor"
+    
+    # Verify build anchors
+    assert_contains "$compose_content" "x-orcaslicer-build:" "Should inject x-orcaslicer-build anchor"
+    assert_contains "$compose_content" "&orcaslicer-build" "Should define orcaslicer-build anchor"
+    
+    # Verify volume anchors
+    assert_contains "$compose_content" "x-worker-volumes:" "Should inject x-worker-volumes anchor"
+    assert_contains "$compose_content" "&worker-volumes" "Should define worker-volumes anchor"
+    
+    # Verify deployment/security anchors
+    assert_contains "$compose_content" "x-worker-deployment:" "Should inject x-worker-deployment anchor"
+    assert_contains "$compose_content" "&worker-deployment" "Should define worker-deployment anchor"
+    assert_contains "$compose_content" "x-worker-security:" "Should inject x-worker-security anchor"
+    assert_contains "$compose_content" "&worker-security" "Should define worker-security anchor"
+    
+    # Verify network anchor
+    assert_contains "$compose_content" "x-printfarmer-network:" "Should inject x-printfarmer-network anchor"
+    assert_contains "$compose_content" "&printfarmer-network" "Should define printfarmer-network anchor"
+    
+    pass_test
+}
+
+# Test: Anchor injection into microservices compose
+test_anchor_injection_microservices() {
+    start_test "anchor injection into microservices compose"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    
+    local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
+    
+    # Verify all anchors are injected in microservices too
+    assert_contains "$compose_content" "x-api-healthcheck:" "Should inject x-api-healthcheck anchor"
+    assert_contains "$compose_content" "&api-healthcheck" "Should define api-healthcheck anchor"
+    assert_contains "$compose_content" "x-worker-healthcheck:" "Should inject x-worker-healthcheck anchor"
+    assert_contains "$compose_content" "x-frontend-healthcheck:" "Should inject x-frontend-healthcheck anchor"
+    assert_contains "$compose_content" "x-nginx-healthcheck:" "Should inject x-nginx-healthcheck anchor"
+    assert_contains "$compose_content" "x-orcaslicer-build:" "Should inject x-orcaslicer-build anchor"
+    assert_contains "$compose_content" "x-worker-volumes:" "Should inject x-worker-volumes anchor"
+    assert_contains "$compose_content" "x-worker-deployment:" "Should inject x-worker-deployment anchor"
+    assert_contains "$compose_content" "x-worker-security:" "Should inject x-worker-security anchor"
+    assert_contains "$compose_content" "x-printfarmer-network:" "Should inject x-printfarmer-network anchor"
+    
+    pass_test
+}
+
+# Test: Anchor references used correctly
+test_anchor_references() {
+    start_test "anchor references are used correctly in services"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    
+    local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
+    
+    # Verify anchors are actually referenced (using aliases)
+    assert_contains "$compose_content" "*api-healthcheck" "Should reference api-healthcheck in services"
+    assert_contains "$compose_content" "*worker-healthcheck" "Should reference worker-healthcheck in services"
+    assert_contains "$compose_content" "*frontend-healthcheck" "Should reference frontend-healthcheck in services"
+    assert_contains "$compose_content" "*nginx-healthcheck" "Should reference nginx-healthcheck in services"
+    assert_contains "$compose_content" "*orcaslicer-build" "Should reference orcaslicer-build in services"
+    assert_contains "$compose_content" "*worker-volumes" "Should reference worker-volumes in services"
+    assert_contains "$compose_content" "*worker-deployment" "Should reference worker-deployment in services"
+    assert_contains "$compose_content" "*worker-security" "Should reference worker-security in services"
+    assert_contains "$compose_content" "*printfarmer-network" "Should reference printfarmer-network in services"
+    
+    pass_test
+}
+
+# Test: Common.yml file consistency
+test_common_yml_exists() {
+    start_test "common.yml file contains all required anchors"
+    
+    local common_file="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.common.yml"
+    assert_file_exists "$common_file"
+    
+    local common_content=$(cat "$common_file")
+    
+    # Verify all anchor definitions exist in common file
+    assert_contains "$common_content" "x-api-healthcheck: &api-healthcheck" "Common file should define x-api-healthcheck"
+    assert_contains "$common_content" "x-worker-healthcheck: &worker-healthcheck" "Common file should define x-worker-healthcheck"
+    assert_contains "$common_content" "x-frontend-healthcheck: &frontend-healthcheck" "Common file should define x-frontend-healthcheck"
+    assert_contains "$common_content" "x-nginx-healthcheck: &nginx-healthcheck" "Common file should define x-nginx-healthcheck"
+    assert_contains "$common_content" "x-orcaslicer-build: &orcaslicer-build" "Common file should define x-orcaslicer-build"
+    assert_contains "$common_content" "x-worker-volumes: &worker-volumes" "Common file should define x-worker-volumes"
+    assert_contains "$common_content" "x-worker-deployment: &worker-deployment" "Common file should define x-worker-deployment"
+    assert_contains "$common_content" "x-worker-security: &worker-security" "Common file should define x-worker-security"
+    assert_contains "$common_content" "x-printfarmer-network: &printfarmer-network" "Common file should define x-printfarmer-network"
+    
+    pass_test
+}
+
+# Test: Health check properties consistency
+test_healthcheck_properties() {
+    start_test "health check anchors have required properties"
+    
+    local common_file="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.common.yml"
+    local common_content=$(cat "$common_file")
+    
+    # API healthcheck should have comprehensive test
+    assert_contains "$common_content" "curl -f http://localhost:5245/healthz" "API healthcheck should test /healthz endpoint"
+    assert_contains "$common_content" "curl -f http://localhost:5245/health" "API healthcheck should test /health endpoint"
+    assert_contains "$common_content" "connection-stats" "API healthcheck should test SignalR connection"
+    
+    # Worker healthcheck properties - verify endpoint
+    assert_contains "$common_content" "http://localhost:8080/healthz" "Worker healthcheck should test /healthz endpoint"
+    
+    # Frontend healthcheck properties - verify it exists
+    assert_contains "$common_content" "x-frontend-healthcheck" "Should have frontend healthcheck definition"
+    
+    # Verify timing properties for API healthcheck
+    assert_contains "$common_content" "interval: 30s" "Healthchecks should have interval property"
+    assert_contains "$common_content" "timeout: 15s" "API healthcheck should have 15s timeout"
+    
+    # Verify worker has longer start period for compilation
+    assert_contains "$common_content" "start_period: 90s" "Worker healthcheck should have 90s start period"
+    
+    # Verify API has 60s start period
+    assert_contains "$common_content" "start_period: 60s" "API healthcheck should have 60s start period"
+    
+    pass_test
+}
+
+# Test: Validate generated compose with docker compose config
+test_generated_compose_validates() {
+    start_test "generated compose files validate with docker compose config"
+    
+    # Test monolithic
+    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    
+    if command -v docker-compose >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
+        local compose_cmd="docker-compose"
+        if ! command -v docker-compose >/dev/null 2>&1; then
+            compose_cmd="docker compose"
+        fi
+        
+        # Validate the generated compose file
+        local validation_output
+        if validation_output=$($compose_cmd -f "$TEST_TEMP_DIR/docker-compose.yml" config --quiet 2>&1); then
+            test_info "✓ Generated compose file passed docker compose validation"
+        else
+            # Check if error is just about missing env vars (acceptable)
+            if echo "$validation_output" | grep -q "is not set"; then
+                test_info "✓ Generated compose file passed validation (env var warnings acceptable)"
+            else
+                print_fail "Generated compose file failed validation: $validation_output"
+                fail_test
+                return 1
+            fi
+        fi
+    else
+        test_info "⚠ docker-compose not available, skipping validation"
+    fi
+    
+    pass_test
+}
+
+# Test: Anchor templates match across architectures
+test_anchor_consistency_across_architectures() {
+    start_test "anchors are consistent across all architectures"
+    
+    local temp_mono="$TEST_TEMP_DIR/mono"
+    local temp_micro="$TEST_TEMP_DIR/micro"
+    mkdir -p "$temp_mono" "$temp_micro"
+    
+    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $temp_mono"
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $temp_micro"
+    
+    # Extract anchor definitions from both
+    local mono_anchors=$(grep "^x-" "$temp_mono/docker-compose.yml" | sort)
+    local micro_anchors=$(grep "^x-" "$temp_micro/docker-compose.yml" | sort)
+    
+    # They should be identical
+    if [ "$mono_anchors" = "$micro_anchors" ]; then
+        test_info "✓ Anchors are consistent between monolithic and microservices"
+    else
+        print_fail "Anchors differ between architectures"
+        test_info "Monolithic anchors: $mono_anchors"
+        test_info "Microservices anchors: $micro_anchors"
+        fail_test
+        return 1
+    fi
+    
+    pass_test
+}
+
+# Test: Validate all addon templates YAML syntax
 test_addon_templates_yaml_syntax() {
     start_test "addon templates YAML syntax validation"
     

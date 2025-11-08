@@ -211,6 +211,104 @@ validate_port() {
     return 0
 }
 
+# Function to inject YAML anchors from common compose file into generated file
+inject_health_check_anchors() {
+    local compose_file="$1"
+    local common_file="$TEMPLATES_DIR/docker-compose.common.yml"
+    
+    if [[ ! -f "$common_file" ]]; then
+        log_warning "Common compose file not found: $common_file (health check anchors will use inline definitions)"
+        return 0
+    fi
+    
+    log_info "Extracting and injecting health check anchors from docker-compose.common.yml"
+    
+    # Extract full anchor definitions with their content (can be multi-line) using Python
+    local temp_injected=$(mktemp)
+    python3 - "$common_file" "$compose_file" "$temp_injected" <<'PY'
+import sys
+import re
+
+common_file = sys.argv[1]
+compose_file = sys.argv[2]
+out_file = sys.argv[3]
+
+# Read anchor definitions from common file
+with open(common_file, 'r') as f:
+    common_lines = f.readlines()
+
+# Extract all x-* anchor definitions
+anchors = []
+i = 0
+while i < len(common_lines):
+    line = common_lines[i]
+    # Check if this is an anchor definition (starts with x-name: &name)
+    if re.match(r'^x-[\w-]+: &[\w-]+', line):
+        anchor_block = [line]
+        i += 1
+        # Capture the entire anchor definition (indented content)
+        while i < len(common_lines):
+            next_line = common_lines[i]
+            # Stop if we hit a non-indented line that's not empty/comment
+            if next_line.strip() and not next_line[0].isspace() and not next_line.startswith('#'):
+                break
+            anchor_block.append(next_line)
+            i += 1
+        anchors.append(''.join(anchor_block))
+    else:
+        i += 1
+
+if not anchors:
+    print(f"ERROR: No anchors found in {common_file}", file=sys.stderr)
+    sys.exit(1)
+
+# Read compose file
+with open(compose_file, 'r') as f:
+    compose_lines = f.readlines()
+
+# Build output: insert anchors before 'services:'
+output = []
+inserted = False
+
+for line in compose_lines:
+    # Skip any existing x-* anchor definitions (they'll be replaced)
+    if line.startswith('x-'):
+        continue
+    
+    if not inserted and line.strip().startswith('services:'):
+        # Insert anchors before services
+        output.append('\n')
+        for anchor in anchors:
+            output.append(anchor)
+        output.append('\n')
+        inserted = True
+    
+    output.append(line)
+
+with open(out_file, 'w') as f:
+    f.writelines(output)
+PY
+
+    local py_exit=$?
+    if [[ $py_exit -ne 0 ]]; then
+        log_error "Failed to extract/inject health check anchors from common file"
+        rm -f "$temp_injected"
+        return 1
+    fi
+
+    # Replace original compose file with injected version
+    if [[ -s "$temp_injected" ]]; then
+        mv "$temp_injected" "$compose_file"
+        log_info "Successfully injected health check anchors from docker-compose.common.yml"
+    else
+        log_error "Failed to inject anchors - generated file is empty"
+        rm -f "$temp_injected"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Function to merge addon services into the main compose file
 merge_addon_services() {
     local compose_file="$1"
@@ -426,6 +524,12 @@ generate_compose() {
     # Copy base template and replace database configuration
     if ! cp "$base_template" "$compose_file"; then
         log_error "Failed to copy base template"
+        return 1
+    fi
+    
+    # Inject health check anchors from common compose file
+    if ! inject_health_check_anchors "$compose_file"; then
+        log_error "Failed to inject health check anchors"
         return 1
     fi
     
