@@ -49,7 +49,28 @@ export class PrinterSignalRService {
           return Math.max(1000, delay + jitter);
         },
       })
-      .configureLogging(this.getLogLevel())
+      .configureLogging({
+        log: (logLevel: any, message: string) => {
+          // Suppress the benign SignalR warning about unregistered client methods
+          // This happens during initialization before all handlers are attached
+          if (message?.includes("No client method with the name")) {
+            return;
+          }
+          if (this.signalrSettings?.consoleLoggingEnabled) {
+            const logLevelName =
+              [
+                "Trace",
+                "Debug",
+                "Information",
+                "Warning",
+                "Error",
+                "Critical",
+                "None",
+              ][logLevel] || "Unknown";
+            console.log(`[SignalR ${logLevelName}] ${message}`);
+          }
+        },
+      })
       .build();
     this.setupEventHandlers();
   }
