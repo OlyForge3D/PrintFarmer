@@ -909,7 +909,7 @@ public sealed class MoonrakerSubscriptionService(
         // Track successful status update time
         _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
 
-        await hub.Clients.All.SendAsync("PrinterUpdated", update, ct);
+        await hub.Clients.All.SendAsync("printerupdated", update, ct);
         _logger.LogDebug($"Sent status update for printer {printerId}");
     }
 
@@ -928,7 +928,7 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: null
             );
 
-            await hub.Clients.All.SendAsync("PrinterUpdated", offlineUpdate, ct);
+            await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
             _logger.LogDebug($"Sent offline status for printer {printerId}");
         }
         catch (Exception ex)
@@ -952,7 +952,7 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: null
             );
 
-            await hub.Clients.All.SendAsync("PrinterUpdated", shutdownUpdate, ct);
+            await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
             _logger.LogDebug($"Sent shutdown status for printer {printerId}");
         }
         catch (Exception ex)
@@ -1090,7 +1090,7 @@ public sealed class MoonrakerSubscriptionService(
                     spoolInfo
                 );
 
-                await hub.Clients.All.SendAsync("PrinterUpdated", statusUpdate, ct);
+                await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
 
                 // Update last poll time and reset parse error count since HTTP polling succeeded
                 _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;

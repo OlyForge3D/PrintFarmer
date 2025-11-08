@@ -2,10 +2,10 @@ import {
   HubConnection,
   HubConnectionBuilder,
   HubConnectionState,
-  LogLevel
-} from '@microsoft/signalr';
-import { apiClient } from '@/services/api';
-import { getHubUrl } from '@/utils/apiUrlHelpers';
+  LogLevel,
+} from "@microsoft/signalr";
+import { apiClient } from "@/services/api";
+import { getHubUrl } from "@/utils/apiUrlHelpers";
 
 // Slicer progress update event
 export interface SlicingProgressUpdate {
@@ -75,7 +75,10 @@ export class SlicerSignalRService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
-  private signalrSettings: { logLevel: string; consoleLoggingEnabled: boolean } | null = null;
+  private signalrSettings: {
+    logLevel: string;
+    consoleLoggingEnabled: boolean;
+  } | null = null;
 
   private progressCallbacks: ProgressCallback[] = [];
   private completionCallbacks: CompletionCallback[] = [];
@@ -91,10 +94,16 @@ export class SlicerSignalRService {
 
   private async loadSettings(): Promise<void> {
     try {
-      this.signalrSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
+      this.signalrSettings = await apiClient.getSettings<{
+        logLevel: string;
+        consoleLoggingEnabled: boolean;
+      }>("SignalR");
     } catch (error) {
-      console.warn('Failed to load SignalR settings, using defaults:', error);
-      this.signalrSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
+      console.warn("Failed to load SignalR settings, using defaults:", error);
+      this.signalrSettings = {
+        logLevel: "Information",
+        consoleLoggingEnabled: true,
+      };
     }
   }
 
@@ -103,20 +112,28 @@ export class SlicerSignalRService {
       return LogLevel.None;
     }
     switch (this.signalrSettings.logLevel?.toLowerCase()) {
-      case 'critical': return LogLevel.Critical;
-      case 'error': return LogLevel.Error;
-      case 'warning': return LogLevel.Warning;
-      case 'information': return LogLevel.Information;
-      case 'debug': return LogLevel.Debug;
-      case 'trace': return LogLevel.Trace;
-      case 'none': return LogLevel.None;
-      default: return LogLevel.Information;
+      case "critical":
+        return LogLevel.Critical;
+      case "error":
+        return LogLevel.Error;
+      case "warning":
+        return LogLevel.Warning;
+      case "information":
+        return LogLevel.Information;
+      case "debug":
+        return LogLevel.Debug;
+      case "trace":
+        return LogLevel.Trace;
+      case "none":
+        return LogLevel.None;
+      default:
+        return LogLevel.Information;
     }
   }
 
   private buildConnection(): void {
-    const slicerSignalrUrl = getHubUrl('/hubs/slicer');
-    
+    const slicerSignalrUrl = getHubUrl("/hubs/slicer");
+
     this.connection = new HubConnectionBuilder()
       .withUrl(slicerSignalrUrl)
       .withAutomaticReconnect({
@@ -127,7 +144,7 @@ export class SlicerSignalRService {
           );
           const jitter = delay * 0.1 * (Math.random() - 0.5);
           return Math.max(1000, delay + jitter);
-        }
+        },
       })
       .configureLogging(this.getLogLevel())
       .build();
@@ -139,60 +156,102 @@ export class SlicerSignalRService {
     if (!this.connection) return;
 
     // Slicer progress events
-    this.connection.on('SlicingProgress', (update: SlicingProgressUpdate) => {
-      this.progressCallbacks.forEach(cb => {
-        try { cb(update); } catch (e) { console.error('Progress cb error:', e); }
+    this.connection.on("slicingprogress", (update: SlicingProgressUpdate) => {
+      this.progressCallbacks.forEach((cb) => {
+        try {
+          cb(update);
+        } catch (e) {
+          console.error("Progress cb error:", e);
+        }
       });
     });
 
     // Slicer completion events
-    this.connection.on('SlicingCompleted', (notification: SlicingCompletionNotification) => {
-      this.completionCallbacks.forEach(cb => {
-        try { cb(notification); } catch (e) { console.error('Completion cb error:', e); }
-      });
-    });
+    this.connection.on(
+      "slicingcompleted",
+      (notification: SlicingCompletionNotification) => {
+        this.completionCallbacks.forEach((cb) => {
+          try {
+            cb(notification);
+          } catch (e) {
+            console.error("Completion cb error:", e);
+          }
+        });
+      }
+    );
 
     // Slicer failure events
-    this.connection.on('SlicingFailed', (notification: SlicingFailureNotification) => {
-      this.failureCallbacks.forEach(cb => {
-        try { cb(notification); } catch (e) { console.error('Failure cb error:', e); }
-      });
-    });
+    this.connection.on(
+      "slicingfailed",
+      (notification: SlicingFailureNotification) => {
+        this.failureCallbacks.forEach((cb) => {
+          try {
+            cb(notification);
+          } catch (e) {
+            console.error("Failure cb error:", e);
+          }
+        });
+      }
+    );
 
     // Slice job lifecycle events (from SliceJobEventService)
-    this.connection.on('JobQueued', (event: SliceJobEvent) => {
-      this.jobEventCallbacks.forEach(cb => {
-        try { cb({ ...event, eventType: 'JobQueued' }); } catch (e) { console.error('Job event cb error:', e); }
+    this.connection.on("slicejobevent", (event: SliceJobEvent) => {
+      this.jobEventCallbacks.forEach((cb) => {
+        try {
+          cb({ ...event, eventType: "JobQueued" });
+        } catch (e) {
+          console.error("Job event cb error:", e);
+        }
       });
     });
 
-    this.connection.on('JobStarted', (event: SliceJobEvent) => {
-      this.jobEventCallbacks.forEach(cb => {
-        try { cb({ ...event, eventType: 'JobStarted' }); } catch (e) { console.error('Job event cb error:', e); }
+    this.connection.on("slicejobevent", (event: SliceJobEvent) => {
+      this.jobEventCallbacks.forEach((cb) => {
+        try {
+          cb({ ...event, eventType: "JobStarted" });
+        } catch (e) {
+          console.error("Job event cb error:", e);
+        }
       });
     });
 
-    this.connection.on('JobProgress', (event: SliceJobEvent) => {
-      this.jobEventCallbacks.forEach(cb => {
-        try { cb({ ...event, eventType: 'JobProgress' }); } catch (e) { console.error('Job event cb error:', e); }
+    this.connection.on("slicejobevent", (event: SliceJobEvent) => {
+      this.jobEventCallbacks.forEach((cb) => {
+        try {
+          cb({ ...event, eventType: "JobProgress" });
+        } catch (e) {
+          console.error("Job event cb error:", e);
+        }
       });
     });
 
-    this.connection.on('JobCompleted', (event: SliceJobEvent) => {
-      this.jobEventCallbacks.forEach(cb => {
-        try { cb({ ...event, eventType: 'JobCompleted' }); } catch (e) { console.error('Job event cb error:', e); }
+    this.connection.on("slicejobevent", (event: SliceJobEvent) => {
+      this.jobEventCallbacks.forEach((cb) => {
+        try {
+          cb({ ...event, eventType: "JobCompleted" });
+        } catch (e) {
+          console.error("Job event cb error:", e);
+        }
       });
     });
 
-    this.connection.on('JobFailed', (event: SliceJobEvent) => {
-      this.jobEventCallbacks.forEach(cb => {
-        try { cb({ ...event, eventType: 'JobFailed' }); } catch (e) { console.error('Job event cb error:', e); }
+    this.connection.on("slicejobevent", (event: SliceJobEvent) => {
+      this.jobEventCallbacks.forEach((cb) => {
+        try {
+          cb({ ...event, eventType: "JobFailed" });
+        } catch (e) {
+          console.error("Job event cb error:", e);
+        }
       });
     });
 
-    this.connection.on('JobCancelled', (event: SliceJobEvent) => {
-      this.jobEventCallbacks.forEach(cb => {
-        try { cb({ ...event, eventType: 'JobCancelled' }); } catch (e) { console.error('Job event cb error:', e); }
+    this.connection.on("slicejobevent", (event: SliceJobEvent) => {
+      this.jobEventCallbacks.forEach((cb) => {
+        try {
+          cb({ ...event, eventType: "JobCancelled" });
+        } catch (e) {
+          console.error("Job event cb error:", e);
+        }
       });
     });
 
@@ -206,8 +265,12 @@ export class SlicerSignalRService {
   }
 
   private notifyConnectionState(connected: boolean): void {
-    this.connectionStateCallbacks.forEach(cb => {
-      try { cb(connected); } catch (e) { console.error('Connection state cb error:', e); }
+    this.connectionStateCallbacks.forEach((cb) => {
+      try {
+        cb(connected);
+      } catch (e) {
+        console.error("Connection state cb error:", e);
+      }
     });
   }
 
@@ -222,9 +285,9 @@ export class SlicerSignalRService {
       this.reconnectAttempts = 0;
       this.notifyConnectionState(true);
     } catch (error) {
-      console.error('[slicerSignalR] connect failed', error);
+      console.error("[slicerSignalR] connect failed", error);
       this.notifyConnectionState(false);
-      
+
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         const delay = Math.min(
           this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
@@ -237,7 +300,10 @@ export class SlicerSignalRService {
   }
 
   public async disconnect(): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
+    if (
+      this.connection &&
+      this.connection.state === HubConnectionState.Connected
+    ) {
       await this.connection.stop();
     }
   }
@@ -246,8 +312,11 @@ export class SlicerSignalRService {
    * Subscribe to a specific job's events
    */
   public async subscribeToJob(jobId: string): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.invoke('SubscribeToJob', jobId);
+    if (
+      this.connection &&
+      this.connection.state === HubConnectionState.Connected
+    ) {
+      await this.connection.invoke("SubscribeToJob", jobId);
     }
   }
 
@@ -255,8 +324,11 @@ export class SlicerSignalRService {
    * Unsubscribe from a specific job's events
    */
   public async unsubscribeFromJob(jobId: string): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.invoke('UnsubscribeFromJob', jobId);
+    if (
+      this.connection &&
+      this.connection.state === HubConnectionState.Connected
+    ) {
+      await this.connection.invoke("UnsubscribeFromJob", jobId);
     }
   }
 
@@ -264,8 +336,11 @@ export class SlicerSignalRService {
    * Join the monitoring group to receive all job events
    */
   public async joinMonitoringGroup(): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.invoke('JoinMonitoringGroup');
+    if (
+      this.connection &&
+      this.connection.state === HubConnectionState.Connected
+    ) {
+      await this.connection.invoke("JoinMonitoringGroup");
     }
   }
 
@@ -273,8 +348,11 @@ export class SlicerSignalRService {
    * Leave the monitoring group
    */
   public async leaveMonitoringGroup(): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.invoke('LeaveMonitoringGroup');
+    if (
+      this.connection &&
+      this.connection.state === HubConnectionState.Connected
+    ) {
+      await this.connection.invoke("LeaveMonitoringGroup");
     }
   }
 
@@ -311,7 +389,9 @@ export class SlicerSignalRService {
     };
   }
 
-  public onConnectionStateChange(callback: ConnectionStateCallback): () => void {
+  public onConnectionStateChange(
+    callback: ConnectionStateCallback
+  ): () => void {
     this.connectionStateCallbacks.push(callback);
     return () => {
       const idx = this.connectionStateCallbacks.indexOf(callback);
@@ -338,7 +418,7 @@ export class SlicerSignalRService {
     this.failureCallbacks = [];
     this.jobEventCallbacks = [];
     this.connectionStateCallbacks = [];
-    
+
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

@@ -52,7 +52,7 @@ public partial class GcodeHarvestService(
 
         // Emit SignalR update to clients
         await _harvestHub.Clients.Group($"harvest-{operationId}")
-            .SendAsync("HarvestFileUpdated", MapToDto(file), ct);
+            .SendAsync("harvestfileupdated", MapToDto(file), ct);
 
         return true;
     }
@@ -98,7 +98,7 @@ public partial class GcodeHarvestService(
 
         // Emit SignalR update to clients
         await _harvestHub.Clients.Group($"harvest-{operationId}")
-            .SendAsync("HarvestFileUpdated", MapToDto(file), ct);
+            .SendAsync("harvestfileupdated", MapToDto(file), ct);
 
         return true;
     }

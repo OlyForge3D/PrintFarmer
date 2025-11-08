@@ -1,4 +1,4 @@
-import * as signalR from '@microsoft/signalr';
+import * as signalR from "@microsoft/signalr";
 
 /**
  * SignalR hub events broadcast by the backend
@@ -6,7 +6,7 @@ import * as signalR from '@microsoft/signalr';
 export interface PrinterImportProgress {
   index: number;
   name: string;
-  status: 'Pending' | 'Imported' | 'Skipped' | 'Failed';
+  status: "Pending" | "Imported" | "Skipped" | "Failed";
   id?: string;
   reason?: string;
 }
@@ -24,53 +24,59 @@ export class PrinterHubService {
   /**
    * Start the SignalR connection to the PrinterHub
    */
-  async start(baseUrl: string = ''): Promise<void> {
+  async start(baseUrl: string = ""): Promise<void> {
     if (this.connection) {
-      console.warn('PrinterHub connection already exists');
+      console.warn("PrinterHub connection already exists");
       return;
     }
 
     const hubUrl = `${baseUrl}/hubs/printers`;
-    
+
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
         withCredentials: true,
         skipNegotiation: false,
-        transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents | signalR.HttpTransportType.LongPolling
+        transport:
+          signalR.HttpTransportType.WebSockets |
+          signalR.HttpTransportType.ServerSentEvents |
+          signalR.HttpTransportType.LongPolling,
       })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           if (retryContext.previousRetryCount >= this.maxReconnectAttempts) {
             return null; // Stop reconnecting
           }
-          return Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000);
-        }
+          return Math.min(
+            1000 * Math.pow(2, retryContext.previousRetryCount),
+            30000
+          );
+        },
       })
       .configureLogging(signalR.LogLevel.Information)
       .build();
 
     this.connection.onclose((error) => {
-      console.log('PrinterHub connection closed', error);
+      console.log("PrinterHub connection closed", error);
       if (error && this.reconnectAttempts < this.maxReconnectAttempts) {
         setTimeout(() => this.reconnect(), this.reconnectDelay);
       }
     });
 
     this.connection.onreconnecting((error) => {
-      console.log('PrinterHub reconnecting...', error);
+      console.log("PrinterHub reconnecting...", error);
     });
 
     this.connection.onreconnected((connectionId) => {
-      console.log('PrinterHub reconnected:', connectionId);
+      console.log("PrinterHub reconnected:", connectionId);
       this.reconnectAttempts = 0;
     });
 
     try {
       await this.connection.start();
-      console.log('PrinterHub connected successfully');
+      console.log("PrinterHub connected successfully");
       this.reconnectAttempts = 0;
     } catch (error) {
-      console.error('Failed to connect to PrinterHub:', error);
+      console.error("Failed to connect to PrinterHub:", error);
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.reconnectAttempts++;
         setTimeout(() => this.reconnect(), this.reconnectDelay);
@@ -86,9 +92,9 @@ export class PrinterHubService {
       try {
         await this.connection.stop();
         this.connection = null;
-        console.log('PrinterHub connection stopped');
+        console.log("PrinterHub connection stopped");
       } catch (error) {
-        console.error('Error stopping PrinterHub connection:', error);
+        console.error("Error stopping PrinterHub connection:", error);
       }
     }
   }
@@ -97,13 +103,16 @@ export class PrinterHubService {
    * Attempt to reconnect
    */
   private async reconnect(): Promise<void> {
-    if (this.connection && this.connection.state === signalR.HubConnectionState.Disconnected) {
+    if (
+      this.connection &&
+      this.connection.state === signalR.HubConnectionState.Disconnected
+    ) {
       try {
         await this.connection.start();
-        console.log('PrinterHub reconnected');
+        console.log("PrinterHub reconnected");
         this.reconnectAttempts = 0;
       } catch (error) {
-        console.error('Reconnection failed:', error);
+        console.error("Reconnection failed:", error);
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++;
           setTimeout(() => this.reconnect(), this.reconnectDelay);
@@ -115,17 +124,21 @@ export class PrinterHubService {
   /**
    * Subscribe to printer import progress updates
    */
-  onPrinterImportProgress(callback: (progress: PrinterImportProgress) => void): (() => void) {
+  onPrinterImportProgress(
+    callback: (progress: PrinterImportProgress) => void
+  ): () => void {
     if (!this.connection) {
-      throw new Error('PrinterHub connection not established. Call start() first.');
+      throw new Error(
+        "PrinterHub connection not established. Call start() first."
+      );
     }
 
-    this.connection.on('printerImportProgress', callback);
+    this.connection.on("printerimportprogress", callback);
 
     // Return unsubscribe function
     return () => {
       if (this.connection) {
-        this.connection.off('printerImportProgress', callback);
+        this.connection.off("printerimportprogress", callback);
       }
     };
   }

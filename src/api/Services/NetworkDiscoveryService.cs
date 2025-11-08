@@ -232,7 +232,7 @@ public partial class NetworkDiscoveryService(
             _progressCache.Set(sessionId, finalProgress);
             await _hubContext.Clients
                 .Group($"discovery-{sessionId}")
-                .SendAsync("DiscoveryProgress", finalProgress, cancellationToken);
+                .SendAsync("discoveryprogress", finalProgress, cancellationToken);
         }
 
         // Send completion signal
@@ -438,7 +438,7 @@ public partial class NetworkDiscoveryService(
                         autoDetectedNetworks
                     );
                     _progressCache.Set(sessionId, progressDto);
-                    await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryProgress", progressDto, cancellationToken);
+                    await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("discoveryprogress", progressDto, cancellationToken);
 
                     DiscoveredPrinterDto? result = await ScanHostAsync(host, settings, existingServerUrls, cancellationToken);
                     if (result != null && !existingServerUrls.Contains(NormalizeUrl(result.ServerUrl)))
@@ -452,7 +452,7 @@ public partial class NetworkDiscoveryService(
                         // Mark as seen to avoid duplicate notifications
                         _ = existingServerUrls.Add(NormalizeUrl(result.ServerUrl));
 
-                        await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("DiscoveryPrinterFound", new DiscoveryPrinterFoundDto(sessionId, result), cancellationToken);
+                        await _hubContext.Clients.Group($"discovery-{sessionId}").SendAsync("discoveryprinterfound", new DiscoveryPrinterFoundDto(sessionId, result), cancellationToken);
                     }
                     else if (result != null)
                     {

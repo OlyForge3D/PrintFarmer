@@ -459,6 +459,12 @@ npm run dev
 - **See**: TAG_NORMALIZATION_IMPLEMENTATION.md for complete details
 
 **SignalR:**
+- **Event Names**: ALL SignalR event names MUST be lowercase (e.g., `printerupdated`, `discoveryprogress`, `slicingcompleted`)
+  - API sends events with lowercase names using `SendAsync("eventname", data)`
+  - Frontend listens for lowercase names only: `connection.on('eventname', handler)`
+  - NO duplicate PascalCase listeners - standardize to lowercase everywhere
+  - Lowercase prevents SignalR case-sensitivity warnings and ensures consistent behavior
+  - Implementation files: `MoonrakerSubscriptionService.cs`, `NetworkDiscoveryService.cs`, `SliceJobEventService.cs`, `SignalRSlicerProgressNotifier.cs`, `printer-signalr.ts`, `slicer-signalr.ts`
 - Background service disabled during testing environment
 - Real-time updates flow: External API → Background Service → Hub → Clients
 

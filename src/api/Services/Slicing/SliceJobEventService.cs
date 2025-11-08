@@ -191,10 +191,10 @@ public class SliceJobEventService : ISliceJobEventService
         await _hubContext.Clients.All.SendAsync($"SliceJob_{evt.JobId}", evt, cancellationToken);
 
         // Send to user group (all clients connected for this user)
-        await _hubContext.Clients.Group($"User-{userId}").SendAsync("SliceJobEvent", evt, cancellationToken);
+        await _hubContext.Clients.Group($"User-{userId}").SendAsync("slicejobevent", evt, cancellationToken);
 
         // Send to monitoring group (admin dashboards, etc.)
-        await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SliceJobEvent", evt, cancellationToken);
+        await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicejobevent", evt, cancellationToken);
     }
 }
 
