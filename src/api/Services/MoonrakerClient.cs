@@ -276,8 +276,8 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             UriBuilder builder = new(baseUri)
             {
                 Port = port,
-                Path = "/webcam/?action=stream",
-                Query = null
+                Path = "/webcam/",
+                Query = "action=stream"
             };
 
             return Task.FromResult<string?>(builder.Uri.ToString());
@@ -308,8 +308,8 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             UriBuilder builder = new(baseUri)
             {
                 Port = port,
-                Path = "/webcam/?action=snapshot",
-                Query = null
+                Path = "/webcam/",
+                Query = "action=snapshot"
             };
 
             return Task.FromResult<string?>(builder.Uri.ToString());

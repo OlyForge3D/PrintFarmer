@@ -32,11 +32,12 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IPrinterCapabilityDiscoveryService _capabilityDiscovery;
         private readonly IDefaultCatalogService _defaultCatalog;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly INetworkUrlRewriteService _urlRewriter;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
         private readonly IHubContext<Farm.Web.Api.Hubs.PrinterHub> _hubContext;
 
-        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Farm.Web.Api.Services.Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Farm.Web.Api.Hubs.PrinterHub> hubContext)
+        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Farm.Web.Api.Services.Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, INetworkUrlRewriteService urlRewriter, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Farm.Web.Api.Hubs.PrinterHub> hubContext)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _moon = moon ?? throw new ArgumentNullException(nameof(moon));
@@ -48,6 +49,7 @@ namespace Farm.Web.Api.Services.Printers
             _defaultCatalog = defaultCatalog ?? throw new ArgumentNullException(nameof(defaultCatalog));
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+            _urlRewriter = urlRewriter ?? throw new ArgumentNullException(nameof(urlRewriter));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
             _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
@@ -263,6 +265,18 @@ namespace Farm.Web.Api.Services.Printers
             }));
 
             return dtos;
+        }
+
+        /// <summary>
+        /// Rewrites camera URLs to be accessible from the frontend client environment
+        /// </summary>
+        private string? RewriteCameraUrl(string? url)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+                return url;
+            }
+            return _urlRewriter.RewriteUrl(url, "camera");
         }
 
         public async Task<Farm.Web.Shared.PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
