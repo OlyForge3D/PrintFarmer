@@ -10,6 +10,11 @@ environment:
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 ports:
   - "5432:5432"
+networks:
+  printfarmer-network:
+    aliases:
+      - postgres
+      - database
 volumes:
   - printfarmer-database:/var/lib/postgresql/data
 restart: unless-stopped

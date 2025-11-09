@@ -11,6 +11,11 @@ environment:
   MYSQL_PASSWORD: ${MYSQL_PASSWORD}
 ports:
   - "3306:3306"
+networks:
+  printfarmer-network:
+    aliases:
+      - mysql
+      - database
 volumes:
   - printfarmer-database:/var/lib/mysql
 restart: unless-stopped

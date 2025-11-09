@@ -10,6 +10,11 @@ environment:
   MSSQL_PID: ${MSSQL_PID:-Developer}
 ports:
   - "1433:1433"
+networks:
+  printfarmer-network:
+    aliases:
+      - sqlserver
+      - database
 volumes:
   - printfarmer-database:/var/opt/mssql
 restart: unless-stopped

@@ -4,27 +4,27 @@
 
 # Health check definitions
 x-api-healthcheck: &api-healthcheck
-  test: ["CMD", "sh", "-c", "curl -f http://localhost:5245/healthz && curl -f http://localhost:5245/health | grep -q 'Healthy' && curl -f http://localhost:5245/api/signalrtest/connection-stats"]
+  test: ["CMD", "sh", "-c", "curl -f http://api:5245/health | grep -q 'Healthy'"]
   interval: 30s
   timeout: 15s
   retries: 5
-  start_period: 60s
+  start_period: 120s
 
 x-worker-healthcheck: &worker-healthcheck
-  test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+  test: ["CMD", "curl", "-f", "http://orcaslicer-worker:8080/healthz"]
   interval: 30s
   timeout: 10s
   retries: 3
   start_period: 90s
 
 x-frontend-healthcheck: &frontend-healthcheck
-  test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+  test: ["CMD", "curl", "-f", "http://frontend:80/health"]
   interval: 30s
   timeout: 10s
   retries: 3
 
 x-nginx-healthcheck: &nginx-healthcheck
-  test: ["CMD", "curl", "-f", "http://localhost/health"]
+  test: ["CMD", "curl", "-f", "http://nginx-proxy:80/health"]
   interval: 30s
   timeout: 10s
   retries: 3

@@ -1628,14 +1628,13 @@ configure_database() {
 configure_networking() {
     print_header "🌐 Network Configuration"
     
-    # For microservices, networking is fixed:
-    # - API always runs in host mode (for network discovery and direct port binding)
-    # - All other services run in bridge mode (on docker network)
+    # For microservices, all services run on the docker bridge network for service discovery by hostname
+    # Printer discovery runs on host network to enable local network scanning
     if [ "$ARCHITECTURE" = "microservices" ]; then
-        print_success "Microservices architecture: API in host mode, other services in bridge mode (fixed)"
-        NETWORK_MODE="host"
-        print_info "API will bind to port ${API_PORT:-5245} on the host"
-        print_info "Other services (frontend, nginx-proxy, workers, etc.) run on docker network"
+        print_success "Microservices architecture: all services on bridge network with service discovery"
+        NETWORK_MODE="bridge"
+        print_info "API will be accessible at http://api:5245 within the docker network"
+        print_info "Printer discovery service runs on host network for local network scanning"
     else
         # For monolithic, allow user to choose network mode
         echo -e "${BLUE}Network Mode for Container:${NC}"

@@ -690,11 +690,11 @@ generate_compose() {
         log_info "Docker Compose validation skipped (command not available)"
     fi
 
-    # When generating microservices deployment, allow API to run in host network mode
-    # while keeping other services on the bridge network. Use a small Python snippet
-    # to perform the rewriting in a robust and portable way (avoids awk dialect issues).
+    # When generating microservices deployment, remove frontend ports to avoid conflicts
+    # with nginx-proxy (the only service that should bind host ports in microservices).
+    # API stays on bridge network for service discovery by hostname.
     if [[ "$arch" == "microservices" ]]; then
-        log_info "Applying microservices adjustments: API -> host network, frontend on bridge network"
+        log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
 
     python3 - "$compose_file" <<'PY'
 import sys
@@ -741,63 +741,6 @@ if f_start is not None:
     frontend_block = txt[f_start:f_end]
     new_frontend_block = remove_ports(frontend_block)
     txt = txt[:f_start] + new_frontend_block + txt[f_end:]
-
-start, end = find_block(txt, 'api')
-if start is not None:
-    block = txt[start:end]
-    # remove ports entries under api
-    new_block = remove_ports(block)
-    
-    # When using network_mode: "host", networks: section must be removed
-    # (Docker doesn't allow both - they're mutually exclusive)
-    # Use a cleaner approach: remove the entire networks: section and its contents
-    filtered = []
-    i = 0
-    while i < len(new_block):
-        line = new_block[i]
-        # Check if this line defines "networks:" as a key (must be followed by : with optional value)
-        stripped = line.lstrip()
-        if stripped.startswith('networks:') and not stripped.startswith('#'):
-            # Skip this line and all following indented lines that belong to networks
-            i += 1
-            while i < len(new_block):
-                next_line = new_block[i]
-                next_stripped = next_line.lstrip()
-                # Stop skipping when we hit an empty line or a line at same/lower indentation that's a new key
-                if not next_stripped:
-                    i += 1
-                    continue
-                # If line starts with spaces (indented under networks:), skip it
-                if next_line.startswith('    ') and next_stripped and not next_stripped[0].isalpha():
-                    i += 1
-                    continue
-                # If it's a new key at the same level, stop skipping
-                if next_stripped[0].isalpha() and ':' in next_line:
-                    break
-                i += 1
-            continue
-        filtered.append(line)
-        i += 1
-    new_block = filtered
-    
-    # ensure network_mode: "host" exists under api
-    if not any(l.strip().startswith('network_mode:') for l in new_block[1:3]):
-        # insert after header line
-        new_block.insert(1, '    network_mode: "host"')
-    # replace
-    txt = txt[:start] + new_block + txt[end:]
-
-    # Also remove any stray literal port mapping for API that may remain (guard against template artifacts)
-    # e.g. lines like: - "${API_PORT:-5245}:5245"
-    start2, end2 = find_block(txt, 'api')
-    if start2 is not None:
-        cleaned = []
-        for l in txt[start2:end2]:
-            if l.strip() == '- "${API_PORT:-5245}:5245"' or l.strip() == "- \"${API_PORT:-5245}:5245\"":
-                # skip stray port mapping
-                continue
-            cleaned.append(l)
-        txt = txt[:start2] + cleaned + txt[end2:]
 
 start, end = find_block(txt, 'nginx-proxy')
 if start is not None:

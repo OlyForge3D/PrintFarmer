@@ -56,7 +56,7 @@ services:
 
   # Secrets management service
   vault:
-    image: vault:1.15
+    image: hashicorp/vault:1.15
     container_name: printfarmer-vault
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: myroot
