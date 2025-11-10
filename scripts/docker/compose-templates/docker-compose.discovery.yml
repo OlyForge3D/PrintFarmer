@@ -44,8 +44,6 @@ services:
       # Import network discovery configuration from deployment
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-192.168.0.0/16,10.0.0.0/8}
-    ports:
-      - "5246:5246"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
