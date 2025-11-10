@@ -15,26 +15,9 @@ const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>
 const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>>(
   () => import('@/components/3d/GCodeViewer3D').then(m => ({ default: m.GCodeViewer }))
 );
-const SlicerConfigModal = lazyWithPreload<{
-  isOpen: boolean;
-  onClose: () => void;
-  modelFile?: File;
-  modelId?: string;
-  modelName?: string;
-  availablePrinters: { id: string; name: string; backend: string; isReachable: boolean }[];
-  onSliceComplete?: (result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => void;
-}, React.FC<{
-  isOpen: boolean;
-  onClose: () => void;
-  modelFile?: File;
-  modelId?: string;
-  modelName?: string;
-  availablePrinters: { id: string; name: string; backend: string; isReachable: boolean }[];
-  onSliceComplete?: (result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => void;
-}>>(
-  () => import('@/components/slicer/SlicerConfigModal').then(m => ({ default: m.SlicerConfigModal }))
-);
-import { slicerService } from '@/services/slicerService';
+// Slicing now redirects to NewSliceJobPage for better UX with 3D preview
+// const SlicerConfigModal = lazyWithPreload<{...}>(...)
+// import { slicerService } from '@/services/slicerService';
 import type { SlicedModelSummary } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 
@@ -66,14 +49,7 @@ export const ModelsPage: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
-  const [slicerModal, setSlicerModal] = useState<{
-    isOpen: boolean;
-    modelFile?: File;
-    modelId?: string;
-    modelName?: string;
-  }>({
-    isOpen: false
-  });
+  // Slicing now redirects to NewSliceJobPage instead of using modal
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -521,14 +497,9 @@ export const ModelsPage: React.FC = () => {
                     Details
                   </button>
                   <button
-                    onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
-                    onFocus={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
-                    onClick={() => setSlicerModal({
-                      isOpen: true,
-                      modelId: model.id,
-                      modelName: model.name
-                    })}
+                    onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
                     className="flex-1 px-3 py-2 bg-pf-accent-bg bg-opacity-20 text-pf-accent rounded hover:bg-pf-accent-bg hover:bg-opacity-30 text-sm font-medium border border-pf-accent"
+                    title="Slice this model"
                   >
                     <Settings className="w-4 h-4 inline mr-1" />
                     Slice
@@ -606,12 +577,7 @@ export const ModelsPage: React.FC = () => {
                         <FileText className="w-4 h-4" />
                       </button>
                       <button
-                        onMouseEnter={() => (SlicerConfigModal as typeof SlicerConfigModal).preload?.()}
-                        onClick={() => setSlicerModal({
-                          isOpen: true,
-                          modelId: model.id,
-                          modelName: model.name
-                        })}
+                        onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
                         className="p-2 hover:bg-pf-bg-2 rounded text-pf-accent"
                         title="Slice Model"
                       >
@@ -684,31 +650,11 @@ export const ModelsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Slicer Configuration Modal */}
-      {slicerModal.isOpen && (
-        <Suspense fallback={<div>Loading slicer...</div>}>
-          <SlicerConfigModal
-            isOpen={slicerModal.isOpen}
-            onClose={() => setSlicerModal({ isOpen: false })}
-            modelFile={slicerModal.modelFile}
-            modelId={slicerModal.modelId}
-            modelName={slicerModal.modelName}
-            availablePrinters={availablePrinters}
-            onSliceComplete={(result: { jobId: string; gcodeUrl: string; printTime: number; filamentUsed: number }) => {
-              if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.modelsPage) {
-                if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.modelsPage) {
-                  console.log('Slicing completed:', result);
-                }
-              }
-            }}
-          />
-
-          <BulkTagAssignmentModal
-            isOpen={showBulkTagModal}
-            onClose={() => setShowBulkTagModal(false)}
-          />
-        </Suspense>
-      )}
+      {/* Bulk Tag Assignment Modal */}
+      <BulkTagAssignmentModal
+        isOpen={showBulkTagModal}
+        onClose={() => setShowBulkTagModal(false)}
+      />
     </PageTemplate>
   );
 };
