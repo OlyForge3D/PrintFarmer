@@ -14,7 +14,7 @@ import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 
 // Lazy load the 3D model viewer for better performance
-const ModelViewer3D = React.lazy(() => 
+const ModelViewer3D = React.lazy(() =>
   import('@/components/3d/ModelViewer3D').then(mod => ({ default: mod.ModelViewer }))
 );
 
