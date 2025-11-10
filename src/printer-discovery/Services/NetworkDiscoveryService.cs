@@ -189,7 +189,9 @@ public class ApiClient : IApiClient
     {
         try
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(dto);
+            // API endpoint expects an array of discovered printers
+            var dtoArray = new[] { dto };
+            var json = System.Text.Json.JsonSerializer.Serialize(dtoArray);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
             var response = await _httpClient.PostAsync("/api/printers/discovered", content, cancellationToken);
