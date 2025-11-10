@@ -30,6 +30,7 @@ import JobQueueDashboardPage from '@/pages/JobQueueDashboardPage';
 import NewSliceJobPage from '@/pages/NewSliceJobPage';
 import SlicerProfilesPage from '@/pages/SlicerProfilesPage';
 import SlicerRegistryPage from '@/pages/SlicerRegistryPage';
+import ImportOfficialProfilesPage from '@/pages/ImportOfficialProfilesPage';
 import { OrcaImportWizard } from '@/components/profiles/OrcaImportWizard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
@@ -227,6 +228,14 @@ function AuthenticatedAppRoutes() {
           element={
             <ProtectedRoute requiredRole="farm_admin">
               <OrcaImportWizard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="profiles/import/official"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <ImportOfficialProfilesPage />
             </ProtectedRoute>
           }
         />

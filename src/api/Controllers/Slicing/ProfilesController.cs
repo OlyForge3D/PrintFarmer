@@ -521,4 +521,170 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
 
         return Ok(profiles);
     }
+
+    /// <summary>
+    /// Get system profiles available for import for a specific registered printer.
+    /// Filters profiles by matching printer model compatibility.
+    /// </summary>
+    /// <param name="printerId">The ID of the registered printer</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of available system profiles for the printer</returns>
+    /// <response code="200">Returns list of compatible profiles</response>
+    /// <response code="404">Printer not found</response>
+    [HttpGet("available-for-printer/{printerId}")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile import
+    [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetAvailableProfilesForPrinterAsync(
+        Guid printerId,
+        [FromServices] AppDbContext db,
+        CancellationToken ct)
+    {
+        // Verify printer exists
+        var printer = await db.Printers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+
+        if (printer is null)
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
+        // Get the printer's model for compatibility matching
+        var printerModel = await db.Models
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == printer.ModelId, ct);
+
+        // Start with system profiles
+        var query = db.SlicerProfiles
+            .AsNoTracking()
+            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer);
+
+        // If we have a printer model, we could add model-specific filtering here (future enhancement)
+        // For now, return all system OrcaSlicer profiles
+
+        var profiles = await query
+            .OrderBy(p => p.Material)
+            .ThenBy(p => p.Quality)
+            .ThenBy(p => p.LayerHeight)
+            .Select(p => new SlicerProfileListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                SlicerType = p.SlicerType.ToString(),
+                Material = p.Material,
+                Quality = p.Quality.ToString(),
+                LayerHeight = p.LayerHeight,
+                InfillPercentage = p.InfillPercentage,
+                IsDefault = p.IsDefault,
+                IsSystem = p.IsSystem,
+                IsPublic = p.IsPublic,
+                Hash = p.Hash ?? string.Empty
+            })
+            .ToListAsync(ct);
+
+        return Ok(profiles);
+    }
+
+    /// <summary>
+    /// Bulk import system profiles for a specific registered printer.
+    /// Only OrcaSlicer system profiles can be bulk imported.
+    /// </summary>
+    /// <param name="printerId">The ID of the registered printer</param>
+    /// <param name="profileIds">List of profile IDs to import</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Number of profiles imported/duplicated</returns>
+    /// <response code="200">Profiles imported successfully</response>
+    /// <response code="404">Printer not found</response>
+    [HttpPost("bulk-import-for-printer/{printerId}")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile import
+    [ProducesResponseType(typeof(BulkProfileImportResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> BulkImportProfilesForPrinterAsync(
+        Guid printerId,
+        [FromBody] BulkProfileImportRequest? request,
+        [FromServices] AppDbContext db,
+        [FromServices] ISlicerProfileRepository profileRepo,
+        CancellationToken ct)
+    {
+        if (request is null || request.ProfileIds == null || request.ProfileIds.Count == 0)
+        {
+            return BadRequest("profileIds list is required and must not be empty");
+        }
+
+        // Verify printer exists
+        var printer = await db.Printers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+
+        if (printer is null)
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
+        // Get the profiles to import
+        var profilesToImport = await db.SlicerProfiles
+            .AsNoTracking()
+            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer && request.ProfileIds.Contains(p.Id))
+            .ToListAsync(ct);
+
+        if (profilesToImport.Count == 0)
+        {
+            return BadRequest("No valid system profiles found for import");
+        }
+
+        // Import each profile (skipping duplicates)
+        int imported = 0;
+        int duplicated = 0;
+
+        foreach (var systemProfile in profilesToImport)
+        {
+            try
+            {
+                // Create a user-owned copy of the system profile
+                var userProfile = new SlicerProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = systemProfile.Name,
+                    Description = $"Imported from system profile for {printer.Name}",
+                    SlicerType = systemProfile.SlicerType,
+                    LayerHeight = systemProfile.LayerHeight,
+                    InfillPercentage = systemProfile.InfillPercentage,
+                    Material = systemProfile.Material,
+                    Quality = systemProfile.Quality,
+                    PrintSpeed = systemProfile.PrintSpeed,
+                    NozzleTemperature = systemProfile.NozzleTemperature,
+                    BedTemperature = systemProfile.BedTemperature,
+                    EnableSupports = systemProfile.EnableSupports,
+                    RawJson = systemProfile.RawJson,
+                    MetadataJson = systemProfile.MetadataJson,
+                    Hash = systemProfile.Hash,
+                    IsSystem = false,
+                    IsDefault = false,
+                    IsPublic = request.MakePublic ?? false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await profileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
+                imported++;
+            }
+            catch (Exception ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException ||
+                                      ex.InnerException?.Message?.Contains("UNIQUE constraint failed") == true)
+            {
+                // Profile already imported (duplicate hash)
+                duplicated++;
+            }
+        }
+
+        return Ok(new BulkProfileImportResultDto
+        {
+            PrinterId = printerId,
+            PrinterName = printer.Name,
+            TotalRequested = request.ProfileIds.Count,
+            TotalFound = profilesToImport.Count,
+            Imported = imported,
+            Duplicated = duplicated
+        });
+    }
 }

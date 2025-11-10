@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
@@ -9,8 +9,6 @@ import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
-import { lazyWithPreload } from '@/utils/lazyWithPreload';
-import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 
 // Lazy load the 3D model viewer for better performance
@@ -25,9 +23,10 @@ interface ModelListItem {
   originalFileName: string;
   fileFormat: number;
   uploadedAt: string;
-  filePath?: string; // may not be exposed; we derive URL from id
+  filePath?: string;
 }
-import { PageTemplate } from '@/components/PageTemplate'; // Page layout component
+
+import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { FormField } from '@/components/ui/FormField';
@@ -37,17 +36,76 @@ import { WorkerSelector } from '@/components/WorkerSelector';
 import { Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthHooks';
 
+// Material/Filament type and temperature presets
+type MaterialType = 'PLA' | 'PETG' | 'ABS' | 'TPU' | 'Nylon' | 'Carbon' | 'Other';
+interface MaterialPreset {
+  name: MaterialType;
+  nozzleTemp: number;
+  bedTemp: number;
+}
+
+const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
+  'PLA': { name: 'PLA', nozzleTemp: 210, bedTemp: 60 },
+  'PETG': { name: 'PETG', nozzleTemp: 240, bedTemp: 80 },
+  'ABS': { name: 'ABS', nozzleTemp: 245, bedTemp: 100 },
+  'TPU': { name: 'TPU', nozzleTemp: 225, bedTemp: 60 },
+  'Nylon': { name: 'Nylon', nozzleTemp: 260, bedTemp: 80 },
+  'Carbon': { name: 'Carbon', nozzleTemp: 250, bedTemp: 90 },
+  'Other': { name: 'Other', nozzleTemp: 220, bedTemp: 60 }
+};
+
+type QualityPreset = 'Draft' | 'Standard' | 'Fine';
+interface QualitySettings {
+  name: QualityPreset;
+  layerHeight: number;
+  infill: number;
+  printSpeed: number;
+  wallThickness: number;
+}
+
+const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
+  'Draft': { name: 'Draft', layerHeight: 0.28, infill: 15, printSpeed: 200, wallThickness: 1.0 },
+  'Standard': { name: 'Standard', layerHeight: 0.2, infill: 20, printSpeed: 120, wallThickness: 1.2 },
+  'Fine': { name: 'Fine', layerHeight: 0.12, infill: 20, printSpeed: 60, wallThickness: 1.6 }
+};
+
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
 
+  // === Main Sidebar Controls ===
+  const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
+  const [printerSearchText, setPrinterSearchText] = useState('');
+  const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
+  const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'quality' | 'strength' | 'speed' | 'support' | 'material' | 'other'>('quality');
+
+  // === Quality & Custom Settings ===
+  const [selectedQualityPreset, setSelectedQualityPreset] = useState<QualityPreset>('Standard');
+  const [customSettings, setCustomSettings] = useState({
+    layerHeight: QUALITY_PRESETS.Standard.layerHeight,
+    infill: QUALITY_PRESETS.Standard.infill,
+    printSpeed: QUALITY_PRESETS.Standard.printSpeed,
+    wallThickness: QUALITY_PRESETS.Standard.wallThickness,
+    nozzleTemp: MATERIAL_PRESETS.PLA.nozzleTemp,
+    bedTemp: MATERIAL_PRESETS.PLA.bedTemp,
+    enableSupports: false,
+    supportDensity: 15,
+    supportPattern: 'linear',
+    topLayerCount: 4,
+    bottomLayerCount: 4,
+    travelSpeed: 150,
+    topSurfaceFinish: 'standard',
+  });
+
+  // === Model Selection ===
   const [modelFileUrl, setModelFileUrl] = useState('');
   const [modelFileName, setModelFileName] = useState('');
   const [useModelPicker, setUseModelPicker] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
-  const [slicerEngine, setSlicerEngine] = useState<number>(1);
   const [useProfile, setUseProfile] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [rawProfileJson, setRawProfileJson] = useState('');
@@ -59,121 +117,68 @@ export const NewSliceJobPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | undefined>(undefined);
 
-  // Fetch available workers
+  // === Queries ===
   const { data: availableWorkers = [], isLoading: loadingWorkers } = useQuery<WorkerResponse[], Error>({
     queryKey: ['workers-available'],
     queryFn: () => workersService.getAvailableWorkers(),
     staleTime: 10_000,
-    refetchInterval: 15_000, // Auto-refresh every 15 seconds
+    refetchInterval: 15_000,
   });
 
-  // Fetch available slicer services
   const { data: availableSlicers = [] } = useQuery({
     queryKey: ['slicers-available'],
     queryFn: () => slicerRegistry.getSlicers(),
     staleTime: 10_000,
-    refetchInterval: 15_000, // Auto-refresh every 15 seconds
+    refetchInterval: 15_000,
   });
 
-  // Build engine options from available slicers
-  const engineOptions = React.useMemo(() => {
+  const slicerEngine = useMemo(() => {
+    const found = availableSlicers.find(s => s.slicerType === 'OrcaSlicer');
+    return found ? 2 : 1;
+  }, [availableSlicers]);
+
+  const engineOptions = useMemo(() => {
     return availableSlicers.map(slicer => ({
       label: slicer.name || slicer.slicerType || 'Unknown',
-      value: slicer.slicerType === 'PrusaSlicer' ? 1 : 0
+      value: slicer.slicerType === 'PrusaSlicer' ? 1 : slicer.slicerType === 'OrcaSlicer' ? 2 : 0
     }));
   }, [availableSlicers]);
 
-  // Filter workers by required capabilities
-  const filteredWorkers = React.useMemo(() => {
+  const filteredWorkers = useMemo(() => {
     if (parsedCapabilities.length === 0) {
       return availableWorkers;
     }
     return availableWorkers.filter(worker => hasRequiredCapabilities(worker, parsedCapabilities));
   }, [availableWorkers, parsedCapabilities]);
 
-  // Connect to SlicerHub for real-time worker updates
-  useEffect(() => {
-    try {
-      // Defensive: in test environments the SignalR package or builder may be mocked
-      // in a way that doesn't implement the full fluent API. Guard against that
-      // so tests don't crash when the builder is unavailable.
-      if (!signalR || typeof signalR.HubConnectionBuilder !== 'function') {
-        return;
-      }
+  // Fetch printers for dropdown
+  const { data: printers = [] } = useQuery({
+    queryKey: ['printers'],
+    queryFn: async () => {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/printers`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Failed to load printers');
+      return res.json() as Promise<Array<{ id: string; name: string; model?: string }>>;
+    },
+    staleTime: 30_000
+  });
 
-      const builder = new signalR.HubConnectionBuilder();
-      if (!builder || typeof builder.withUrl !== 'function') {
-        return;
-      }
-
-      const hubConnection = builder
-        .withUrl(getHubUrl('/hubs/slicer-registry'))
-        .withAutomaticReconnect()
-        .build();
-
-      // Handle slicer registered event
-      hubConnection.on('SlicerRegistered', () => {
-        qc.invalidateQueries({ queryKey: ['workers-available'] });
-      });
-
-      // Handle slicer heartbeat event
-      hubConnection.on('SlicerHeartbeat', () => {
-        qc.invalidateQueries({ queryKey: ['workers-available'] });
-      });
-
-      // Handle slicer deregistered event
-      hubConnection.on('SlicerDeregistered', () => {
-        qc.invalidateQueries({ queryKey: ['workers-available'] });
-      });
-
-      hubConnection
-        .start()
-        .then(() => {
-          console.log('Connected to SlicerHub for real-time worker updates');
-        })
-        .catch(err => {
-          console.error('Failed to connect to SlicerHub:', err);
-        });
-
-      return () => {
-        hubConnection.stop();
-      };
-    } catch {
-      // Swallow errors in test environments where globals/mocks may differ.
-      return;
-    }
-  }, [qc]);
-
-  // Restore persisted selections
-  useEffect(() => {
-    try {
-      const savedCaps = localStorage.getItem('sliceJob.requiredCapabilities');
-      if (savedCaps) setRequiredCapabilitiesJson(savedCaps);
-      const savedProfileId = localStorage.getItem('sliceJob.selectedProfileId');
-      if (savedProfileId) setSelectedProfileId(savedProfileId);
-    } catch { /* ignore storage errors */ }
-  }, []);
-
-  // Persist capabilities & profile selection
-  useEffect(() => {
-    try { localStorage.setItem('sliceJob.requiredCapabilities', requiredCapabilitiesJson); } catch { /* ignore */ }
-  }, [requiredCapabilitiesJson]);
-  useEffect(() => {
-    try {
-      if (selectedProfileId) localStorage.setItem('sliceJob.selectedProfileId', selectedProfileId);
-      else localStorage.removeItem('sliceJob.selectedProfileId');
-    } catch { /* ignore */ }
-  }, [selectedProfileId]);
+  // Filter printers by search text
+  const filteredPrinters = useMemo(() => {
+    if (!printerSearchText.trim()) return printers;
+    const search = printerSearchText.toLowerCase();
+    return printers.filter(p => p.name.toLowerCase().includes(search) || p.model?.toLowerCase().includes(search));
+  }, [printers, printerSearchText]);
 
   // Fetch extended profiles for selection
-  const { data: profiles, isLoading: loadingProfiles } = useQuery<SlicerProfileListItem[], Error>({
+  const { data: profiles = [] } = useQuery<SlicerProfileListItem[], Error>({
     queryKey: ['slicerProfilesExtended'],
     queryFn: () => slicerProfilesService.listExtended(),
     staleTime: 15_000
   });
 
   // Fetch models for picker
-  const { data: models, isLoading: loadingModels, error: modelsError } = useQuery<ModelListItem[], Error>({
+  const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
     queryFn: async () => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -185,7 +190,6 @@ export const NewSliceJobPage: React.FC = () => {
       const res = await fetch(`${apiBase}/3d-models`, { headers });
       if (!res.ok) throw new Error(await res.text() || 'Failed to load models');
       const json = await res.json();
-      // Map to minimal list items
       return (json as unknown[]).map(obj => {
         const m = obj as { id: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
         return {
@@ -200,10 +204,73 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 20_000
   });
 
+  // Connect to SlicerHub for real-time updates
+  useEffect(() => {
+    try {
+      if (!signalR || typeof signalR.HubConnectionBuilder !== 'function') {
+        return;
+      }
+
+      const builder = new signalR.HubConnectionBuilder();
+      if (!builder || typeof builder.withUrl !== 'function') {
+        return;
+      }
+
+      const hubConnection = builder
+        .withUrl(getHubUrl('/hubs/slicer-registry'))
+        .withAutomaticReconnect()
+        .build();
+
+      hubConnection.on('SlicerRegistered', () => {
+        qc.invalidateQueries({ queryKey: ['workers-available'] });
+      });
+
+      hubConnection.on('SlicerHeartbeat', () => {
+        qc.invalidateQueries({ queryKey: ['workers-available'] });
+      });
+
+      hubConnection.on('SlicerDeregistered', () => {
+        qc.invalidateQueries({ queryKey: ['workers-available'] });
+      });
+
+      hubConnection
+        .start()
+        .catch(err => {
+          console.error('Failed to connect to SlicerHub:', err);
+        });
+
+      return () => {
+        hubConnection.stop();
+      };
+    } catch {
+      return;
+    }
+  }, [qc]);
+
+  // Persist selections
+  useEffect(() => {
+    try {
+      const savedCaps = localStorage.getItem('sliceJob.requiredCapabilities');
+      if (savedCaps) setRequiredCapabilitiesJson(savedCaps);
+      const savedProfileId = localStorage.getItem('sliceJob.selectedProfileId');
+      if (savedProfileId) setSelectedProfileId(savedProfileId);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('sliceJob.requiredCapabilities', requiredCapabilitiesJson); } catch { /* ignore */ }
+  }, [requiredCapabilitiesJson]);
+
+  useEffect(() => {
+    try {
+      if (selectedProfileId) localStorage.setItem('sliceJob.selectedProfileId', selectedProfileId);
+      else localStorage.removeItem('sliceJob.selectedProfileId');
+    } catch { /* ignore */ }
+  }, [selectedProfileId]);
+
   // Derive model file URL when selected
   useEffect(() => {
     if (useModelPicker && selectedModelId) {
-      // Construct API file URL; ModelController exposes /api/3d-models/{id}/file
       const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
       const apiBase = !baseUrl || baseUrl.trim() === '' ? '/api' : baseUrl;
       setModelFileUrl(`${apiBase}/3d-models/${selectedModelId}/file`);
@@ -214,7 +281,7 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [useModelPicker, selectedModelId, models]);
 
-  // Capabilities JSON validation (live)
+  // Capabilities JSON validation
   useEffect(() => {
     const text = requiredCapabilitiesJson.trim();
     if (!text) {
@@ -235,7 +302,7 @@ export const NewSliceJobPage: React.FC = () => {
         setParsedCapabilities(parsed as string[]);
       }
     } catch {
-      setCapabilitiesError('Invalid JSON syntax'); // Error handling for invalid JSON
+      setCapabilitiesError('Invalid JSON syntax');
       setParsedCapabilities([]);
     }
   }, [requiredCapabilitiesJson]);
@@ -245,7 +312,6 @@ export const NewSliceJobPage: React.FC = () => {
     onSuccess: (res) => {
       setMessage(`Job queued (id ${res.jobId.substring(0, 8)}) position ${res.queuePosition}`);
       setError(null);
-      // Reset basic fields but keep capabilities / engine for convenience
       setModelFileUrl('');
       setModelFileName('');
       setRawProfileJson('');
@@ -290,7 +356,7 @@ export const NewSliceJobPage: React.FC = () => {
       setError('Fix capabilities JSON errors before submitting');
       return;
     }
-    // Canonicalize capabilities JSON
+
     const capabilities = parsedCapabilities.length > 0 ? JSON.stringify(parsedCapabilities) : '[]';
 
     const request: SubmitSliceJobRequest = {
@@ -299,7 +365,7 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrl: modelFileUrl,
       modelFileName: modelFileName,
       slicerEngine,
-      slicerProfileJson: useProfile ? '{}' : rawProfileJson, // server ignores if profileId set
+      slicerProfileJson: useProfile ? '{}' : rawProfileJson,
       slicerProfileId: useProfile ? selectedProfileId : undefined,
       requiredCapabilitiesJson: capabilities,
       priority
@@ -308,7 +374,6 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation.mutate(request);
   };
 
-  // Determine file type for 3D viewer
   const getFileType = (): 'stl' | '3mf' | 'obj' | 'ply' => {
     if (modelFileName) {
       const ext = modelFileName.split('.').pop()?.toLowerCase();
@@ -319,254 +384,500 @@ export const NewSliceJobPage: React.FC = () => {
     return 'stl';
   };
 
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [expandedSection, setExpandedSection] = useState<string | null>('model');
+  // Update custom settings when quality preset changes
+  const applyQualityPreset = (preset: QualityPreset) => {
+    setSelectedQualityPreset(preset);
+    setCustomSettings(prev => ({
+      ...prev,
+      layerHeight: QUALITY_PRESETS[preset].layerHeight,
+      infill: QUALITY_PRESETS[preset].infill,
+      printSpeed: QUALITY_PRESETS[preset].printSpeed,
+      wallThickness: QUALITY_PRESETS[preset].wallThickness,
+    }));
+  };
 
-  const toggleSection = (section: string) => {
-    setExpandedSection(expandedSection === section ? null : section);
+  // Update temps when filament changes
+  const applyFilamentMaterial = (material: MaterialType) => {
+    setSelectedFilamentMaterial(material);
+    setCustomSettings(prev => ({
+      ...prev,
+      nozzleTemp: MATERIAL_PRESETS[material].nozzleTemp,
+      bedTemp: MATERIAL_PRESETS[material].bedTemp,
+    }));
   };
 
   return (
     <PageTemplate
       title="New Slice Job"
-      subtitle="Submit a distributed slicing job with 3D preview"
+      subtitle="OrcaSlicer-style distributed slicing"
       icon={Layers}
       maxWidth="max-w-7xl"
     >
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
-        {/* LEFT SIDEBAR: Form Controls */}
-        <div className="w-full lg:w-80 space-y-4 flex-shrink-0">
-          {/* Basic/Advanced Toggle */}
-          <div className="sticky top-0 z-10 bg-pf-background pb-2 border-b border-pf-border">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-sm font-medium text-pf-accent hover:text-pf-accent-hover transition-colors"
+        {/* LEFT SIDEBAR: OrcaSlicer Menu */}
+        <div className="w-full lg:w-96 space-y-4 flex-shrink-0 pb-4 max-h-screen overflow-y-auto">
+
+          {/* SLICER SELECTION */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+            <label className="block text-sm font-semibold text-pf-text mb-2">Slicer</label>
+            <Select
+              value={selectedSlicerId}
+              onChange={e => setSelectedSlicerId(Number(e.target.value))}
+              className="w-full"
             >
-              {showAdvanced ? '← Basic' : 'Advanced →'}
-            </button>
+              {engineOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </Select>
           </div>
 
-          {/* Model Selection Section */}
-          <div className="card bg-pf-panel border border-pf-border">
-            <button
-              type="button"
-              onClick={() => toggleSection('model')}
-              className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
+          {/* PRINTER SELECTION with Search */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+            <label className="block text-sm font-semibold text-pf-text mb-2">Printer</label>
+            <Input
+              type="text"
+              placeholder="Search printers..."
+              value={printerSearchText}
+              onChange={e => setPrinterSearchText(e.target.value)}
+              className="mb-2 text-sm"
+            />
+            <Select
+              value={selectedPrinterId}
+              onChange={e => setSelectedPrinterId(e.target.value)}
+              className="w-full"
             >
-              <span className="font-semibold text-pf-text">Model</span>
-              <span className="text-pf-text-muted">{expandedSection === 'model' ? '−' : '+'}</span>
-            </button>
-            {expandedSection === 'model' && (
-              <div className="card-body space-y-3">
-                <FormField
-                  label="Use Model Picker"
-                  helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
-                  inline
+              <option value="">-- Select Printer --</option>
+              {filteredPrinters.map(p => (
+                <option key={p.id} value={p.id}>{p.name} {p.model ? `(${p.model})` : ''}</option>
+              ))}
+            </Select>
+          </div>
+
+          {/* FILAMENT / MATERIAL PROFILE */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+            <label className="block text-sm font-semibold text-pf-text mb-2">Filament</label>
+            <Select
+              value={selectedFilamentMaterial}
+              onChange={e => applyFilamentMaterial(e.target.value as MaterialType)}
+              className="w-full"
+            >
+              {Object.keys(MATERIAL_PRESETS).map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </Select>
+            <div className="text-xs text-pf-text-muted mt-2">
+              {MATERIAL_PRESETS[selectedFilamentMaterial].nozzleTemp}°C nozzle, {MATERIAL_PRESETS[selectedFilamentMaterial].bedTemp}°C bed
+            </div>
+          </div>
+
+          {/* PROCESS PRESETS */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+            <label className="block text-sm font-semibold text-pf-text mb-2">Process</label>
+
+            {/* Quality Preset Quick Select */}
+            <div className="flex gap-2 mb-3">
+              {(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => applyQualityPreset(preset)}
+                  className={`flex-1 px-2 py-1 text-xs font-medium rounded transition-colors ${selectedQualityPreset === preset
+                      ? 'bg-pf-accent text-pf-accent-text'
+                      : 'bg-pf-border text-pf-text hover:bg-pf-hover'
+                    }`}
                 >
-                  <input
-                    id="useModelPicker"
-                    type="checkbox"
-                    checked={useModelPicker}
-                    onChange={() => {
-                      setUseModelPicker(v => !v);
-                      if (useModelPicker) {
-                        setSelectedModelId('');
-                        setModelFileUrl('');
-                        setModelFileName('');
-                      }
-                    }}
-                  />
-                </FormField>
+                  {preset}
+                </button>
+              ))}
+            </div>
 
-                {useModelPicker ? (
-                  <>
-                    <FormField
-                      label="Model"
-                      error={modelsError ? modelsError.message : undefined}
-                    >
-                      {models && models.length > 0 ? (
-                        <Select
-                          value={selectedModelId}
-                          onChange={e => setSelectedModelId(e.target.value)}
-                        >
-                          <option value="">-- Select model --</option>
-                          {models.map(m => (
-                            <option key={m.id} value={m.id}>{m.fileName}</option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <select disabled className="border rounded p-2 text-sm bg-pf-disabled w-full">
-                          <option>-- No models --</option>
-                        </select>
-                      )}
-                    </FormField>
-                  </>
-                ) : (
-                  <>
-                    <FormField label="File URL" required>
-                      <Input
-                        type="text"
-                        value={modelFileUrl}
-                        onChange={e => setModelFileUrl(e.target.value)}
-                        placeholder="https://... or /storage/..."
-                      />
-                    </FormField>
-                    <FormField label="File Name" required>
-                      <Input
-                        type="text"
-                        value={modelFileName}
-                        onChange={e => setModelFileName(e.target.value)}
-                        placeholder="model.stl"
-                      />
-                    </FormField>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Slicer Configuration Section */}
-          <div className="card bg-pf-panel border border-pf-border">
-            <button
-              type="button"
-              onClick={() => toggleSection('slicer')}
-              className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
+            {/* Process Presets Dropdown */}
+            <Select
+              value={selectedProcessPresetId}
+              onChange={e => setSelectedProcessPresetId(e.target.value)}
+              className="w-full mb-3"
             >
-              <span className="font-semibold text-pf-text">Slicer Config</span>
-              <span className="text-pf-text-muted">{expandedSection === 'slicer' ? '−' : '+'}</span>
-            </button>
-            {expandedSection === 'slicer' && (
-              <div className="card-body space-y-3">
-                <div className="space-y-3">
-                  <FormField label="Engine (fallback)">
-                    <Select
-                      value={slicerEngine}
-                      onChange={e => setSlicerEngine(Number(e.target.value))}
-                    >
-                      {engineOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                    </Select>
-                    <div className="text-xs text-pf-text-muted mt-1">Overridden by profile if selected.</div>
-                  </FormField>
+              <option value="">-- Search for Setting --</option>
+              {profiles.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
 
-                  <div className="flex gap-3">
-                    <label className="inline-flex items-center gap-2 text-sm">
-                      <input type="radio" name="mode" checked={useProfile} onChange={() => setUseProfile(true)} />
-                      <span>Profile</span>
+            {/* Settings Tabs */}
+            <div className="flex gap-1 border-b border-pf-border mb-3 text-xs">
+              {(['quality', 'strength', 'speed', 'support', 'material', 'other'] as const).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveSettingsTab(tab)}
+                  className={`pb-2 px-2 transition-colors capitalize ${activeSettingsTab === tab
+                      ? 'border-b-2 border-pf-accent text-pf-accent font-medium'
+                      : 'text-pf-text-muted hover:text-pf-text'
+                    }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Settings Panel Content */}
+            <div className="space-y-3 text-sm">
+              {activeSettingsTab === 'quality' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Layer Height: {customSettings.layerHeight.toFixed(2)}mm
                     </label>
-                    <label className="inline-flex items-center gap-2 text-sm">
-                      <input type="radio" name="mode" checked={!useProfile} onChange={() => setUseProfile(false)} />
-                      <span>JSON</span>
-                    </label>
+                    <input
+                      type="range"
+                      min="0.08"
+                      max="0.4"
+                      step="0.04"
+                      value={customSettings.layerHeight}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, layerHeight: parseFloat(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Layer Height"
+                    />
                   </div>
-                </div>
-
-                {useProfile ? (
-                  <FormField label="Profile">
-                    {profiles && profiles.length > 0 ? (
-                      <Select
-                        value={selectedProfileId}
-                        onChange={e => setSelectedProfileId(e.target.value)}
-                      >
-                        <option value="">-- Select --</option>
-                        {profiles.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} ({p.slicerType})
-                          </option>
-                        ))}
-                      </Select>
-                    ) : (
-                      <Select disabled className="bg-pf-disabled">
-                        <option>-- No profiles --</option>
-                      </Select>
-                    )}
-                  </FormField>
-                ) : (
-                  <FormField label="Raw JSON">
-                    <textarea
-                      value={rawProfileJson}
-                      onChange={e => setRawProfileJson(e.target.value)}
-                      rows={4}
-                      className="border rounded p-2 font-mono text-xs w-full"
-                      placeholder='{"layer_height": 0.2}'
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Wall Thickness: {customSettings.wallThickness.toFixed(1)}mm
+                    </label>
+                    <input
+                      type="range"
+                      min="0.8"
+                      max="2.4"
+                      step="0.2"
+                      value={customSettings.wallThickness}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, wallThickness: parseFloat(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Wall Thickness"
                     />
-                  </FormField>
-                )}
-              </div>
-            )}
-          </div>
+                  </div>
+                </>
+              )}
 
-          {/* Worker Selection Section */}
-          <div className="card bg-pf-panel border border-pf-border">
-            <button
-              type="button"
-              onClick={() => toggleSection('worker')}
-              className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
-            >
-              <span className="font-semibold text-pf-text">Worker</span>
-              <span className="text-pf-text-muted">{expandedSection === 'worker' ? '−' : '+'}</span>
-            </button>
-            {expandedSection === 'worker' && (
-              <div className="card-body space-y-3">
-                <WorkerSelector
-                  workers={filteredWorkers}
-                  selectedWorkerId={selectedWorkerId}
-                  onWorkerSelect={setSelectedWorkerId}
-                  loading={loadingWorkers}
-                  showCapabilities={true}
-                  highlightAvailable={true}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Advanced Section */}
-          {showAdvanced && (
-            <div className="card bg-pf-panel border border-pf-border">
-              <button
-                type="button"
-                onClick={() => toggleSection('advanced')}
-                className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
-              >
-                <span className="font-semibold text-pf-text">Advanced</span>
-                <span className="text-pf-text-muted">{expandedSection === 'advanced' ? '−' : '+'}</span>
-              </button>
-              {expandedSection === 'advanced' && (
-                <div className="card-body space-y-3">
-                  <FormField label="Priority">
-                    <Select
-                      value={priority}
-                      onChange={e => setPriority(Number(e.target.value))}
-                    >
-                      <option value={0}>Low</option>
-                      <option value={1}>Normal</option>
-                      <option value={2}>High</option>
-                      <option value={3}>Critical</option>
-                    </Select>
-                  </FormField>
-
-                  <FormField
-                    label="Capabilities"
-                    error={capabilitiesError || undefined}
-                  >
-                    <textarea
-                      value={requiredCapabilitiesJson}
-                      onChange={e => setRequiredCapabilitiesJson(e.target.value)}
-                      rows={3}
-                      className="border rounded p-2 font-mono text-xs w-full"
-                      placeholder='["orcaslicer"]'
+              {activeSettingsTab === 'strength' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Infill: {customSettings.infill}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={customSettings.infill}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, infill: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Infill Percentage"
                     />
-                  </FormField>
-                </div>
+                  </div>
+                </>
+              )}
+
+              {activeSettingsTab === 'speed' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Print Speed: {customSettings.printSpeed}mm/s
+                    </label>
+                    <input
+                      type="range"
+                      min="20"
+                      max="200"
+                      step="10"
+                      value={customSettings.printSpeed}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, printSpeed: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Print Speed"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Travel Speed: {customSettings.travelSpeed}mm/s
+                    </label>
+                    <input
+                      type="range"
+                      min="100"
+                      max="300"
+                      step="10"
+                      value={customSettings.travelSpeed}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, travelSpeed: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Travel Speed"
+                    />
+                  </div>
+                </>
+              )}
+
+              {activeSettingsTab === 'support' && (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={customSettings.enableSupports}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, enableSupports: e.target.checked }))}
+                      title="Enable Supports"
+                    />
+                    <span>Enable Supports</span>
+                  </label>
+                  {customSettings.enableSupports && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Density: {customSettings.supportDensity}%
+                        </label>
+                        <input
+                          type="range"
+                          min="5"
+                          max="50"
+                          step="5"
+                          value={customSettings.supportDensity}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, supportDensity: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Support Density"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">Pattern</label>
+                        <Select
+                          value={customSettings.supportPattern}
+                          onChange={e => {
+                            const value = e.target.value;
+                            if (value === 'linear' || value === 'grid' || value === 'honeycomb') {
+                              setCustomSettings(prev => ({ ...prev, supportPattern: value }));
+                            }
+                          }}
+                          className="w-full text-xs"
+                        >
+                          <option value="linear">Linear</option>
+                          <option value="grid">Grid</option>
+                          <option value="honeycomb">Honeycomb</option>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              {activeSettingsTab === 'material' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Nozzle: {customSettings.nozzleTemp}°C
+                    </label>
+                    <input
+                      type="range"
+                      min="190"
+                      max="280"
+                      step="5"
+                      value={customSettings.nozzleTemp}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, nozzleTemp: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Nozzle Temperature"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Bed: {customSettings.bedTemp}°C
+                    </label>
+                    <input
+                      type="range"
+                      min="20"
+                      max="120"
+                      step="5"
+                      value={customSettings.bedTemp}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, bedTemp: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Bed Temperature"
+                    />
+                  </div>
+                </>
+              )}
+
+              {activeSettingsTab === 'other' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Top Layers: {customSettings.topLayerCount}
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={customSettings.topLayerCount}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, topLayerCount: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Top Layer Count"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-pf-text mb-1">
+                      Bottom Layers: {customSettings.bottomLayerCount}
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={customSettings.bottomLayerCount}
+                      onChange={e => setCustomSettings(prev => ({ ...prev, bottomLayerCount: parseInt(e.target.value) }))}
+                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                      title="Bottom Layer Count"
+                    />
+                  </div>
+                </>
               )}
             </div>
-          )}
+          </div>
 
-          {/* Status Messages */}
+          {/* MODEL & ADVANCED SETTINGS */}
+          <details className="bg-pf-panel border border-pf-border rounded-lg">
+            <summary className="p-4 cursor-pointer font-semibold text-pf-text hover:bg-pf-hover">
+              Model & Advanced
+            </summary>
+            <div className="p-4 space-y-3 border-t border-pf-border">
+              <FormField
+                label="Use Model Picker"
+                helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
+                inline
+              >
+                <input
+                  id="useModelPicker"
+                  type="checkbox"
+                  checked={useModelPicker}
+                  onChange={() => {
+                    setUseModelPicker(v => !v);
+                    if (useModelPicker) {
+                      setSelectedModelId('');
+                      setModelFileUrl('');
+                      setModelFileName('');
+                    }
+                  }}
+                  title="Use Model Picker"
+                />
+              </FormField>
+
+              {useModelPicker ? (
+                <FormField label="Model" error={modelsError ? modelsError.message : undefined}>
+                  {models && models.length > 0 ? (
+                    <Select value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)}>
+                      <option value="">-- Select model --</option>
+                      {models.map(m => (
+                        <option key={m.id} value={m.id}>{m.fileName}</option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Select disabled className="bg-pf-disabled" title="No models available">
+                      <option>-- No models --</option>
+                    </Select>
+                  )}
+                </FormField>
+              ) : (
+                <>
+                  <FormField label="File URL" required>
+                    <Input
+                      type="text"
+                      value={modelFileUrl}
+                      onChange={e => setModelFileUrl(e.target.value)}
+                      placeholder="https://... or /storage/..."
+                    />
+                  </FormField>
+                  <FormField label="File Name" required>
+                    <Input
+                      type="text"
+                      value={modelFileName}
+                      onChange={e => setModelFileName(e.target.value)}
+                      placeholder="model.stl"
+                    />
+                  </FormField>
+                </>
+              )}
+
+              <div className="flex gap-3">
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input type="radio" name="mode" checked={useProfile} onChange={() => setUseProfile(true)} title="Use Profile Mode" />
+                  <span>Profile</span>
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input type="radio" name="mode" checked={!useProfile} onChange={() => setUseProfile(false)} title="Use JSON Mode" />
+                  <span>JSON</span>
+                </label>
+              </div>
+
+              {useProfile ? (
+                <FormField label="Profile">
+                  {profiles && profiles.length > 0 ? (
+                    <Select value={selectedProfileId} onChange={e => setSelectedProfileId(e.target.value)}>
+                      <option value="">-- Select --</option>
+                      {profiles.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.slicerType})</option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Select disabled className="bg-pf-disabled" title="No profiles available">
+                      <option>-- No profiles --</option>
+                    </Select>
+                  )}
+                </FormField>
+              ) : (
+                <FormField label="Raw JSON">
+                  <textarea
+                    value={rawProfileJson}
+                    onChange={e => setRawProfileJson(e.target.value)}
+                    rows={4}
+                    className="border rounded p-2 font-mono text-xs w-full bg-pf-panel text-pf-text"
+                    placeholder='{"layer_height": 0.2}'
+                  />
+                </FormField>
+              )}
+
+              <FormField label="Priority">
+                <Select value={priority} onChange={e => setPriority(Number(e.target.value))}>
+                  <option value={0}>Low</option>
+                  <option value={1}>Normal</option>
+                  <option value={2}>High</option>
+                  <option value={3}>Critical</option>
+                </Select>
+              </FormField>
+
+              <FormField label="Capabilities" error={capabilitiesError || undefined}>
+                <textarea
+                  value={requiredCapabilitiesJson}
+                  onChange={e => setRequiredCapabilitiesJson(e.target.value)}
+                  rows={3}
+                  className="border rounded p-2 font-mono text-xs w-full bg-pf-panel text-pf-text"
+                  placeholder='["orcaslicer"]'
+                />
+              </FormField>
+            </div>
+          </details>
+
+          {/* WORKER SELECTOR */}
+          <details className="bg-pf-panel border border-pf-border rounded-lg">
+            <summary className="p-4 cursor-pointer font-semibold text-pf-text hover:bg-pf-hover">
+              Worker
+            </summary>
+            <div className="p-4 border-t border-pf-border">
+              <WorkerSelector
+                workers={filteredWorkers}
+                selectedWorkerId={selectedWorkerId}
+                onWorkerSelect={setSelectedWorkerId}
+                loading={loadingWorkers}
+                showCapabilities={true}
+                highlightAvailable={true}
+              />
+            </div>
+          </details>
+
+          {/* STATUS MESSAGES */}
           {error && <Alert type="error">{error}</Alert>}
           {message && <Alert type="success">{message}</Alert>}
 
-          {/* Action Buttons */}
+          {/* ACTION BUTTONS */}
           <div className="flex flex-col gap-2 sticky bottom-0 bg-pf-background pt-2 border-t border-pf-border">
             <Button type="submit" loading={submitMutation.isPending} variant="primary" className="w-full">
               Submit Job

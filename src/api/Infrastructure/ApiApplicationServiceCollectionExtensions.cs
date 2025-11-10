@@ -101,9 +101,7 @@ public static class ApiApplicationServiceCollectionExtensions
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleParsingService, Farm.Web.Api.Services.Slicing.OrcaBundleParsingService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaPresetMappingService, Farm.Web.Api.Services.Slicing.OrcaPresetMappingService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaBundleExportService, Farm.Web.Api.Services.Slicing.OrcaBundleExportService>();
-        _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IOrcaDefaultProfileSeeder, Farm.Web.Api.Services.Slicing.OrcaDefaultProfileSeeder>();
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileDuplicateFilter, Farm.Web.Api.Services.Slicing.ProfileDuplicateFilter>();
-        _ = services.AddHostedService<Farm.Web.Api.Services.Slicing.OrcaDefaultProfileSeedingHostedService>();
         _ = services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISlicersRepository, Farm.Web.Api.Repositories.Slicing.EfSlicersRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.ISlicersService, Farm.Web.Api.Services.Slicing.SlicersService>();
         _ = services.AddScoped<Farm.Web.Shared.ISlicerJobQueue, Farm.Web.Api.Services.SlicerServices.DbSlicerJobQueue>();

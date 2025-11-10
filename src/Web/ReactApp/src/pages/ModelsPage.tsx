@@ -102,7 +102,7 @@ export const ModelsPage: React.FC = () => {
   const models = searchResult?.models || [];
 
   // Fetch available printers for slicing (using fast endpoint without status checks)
-  const { data: availablePrinters = [] } = useQuery({
+  useQuery({
     queryKey: ['printers-fast'],
     queryFn: async () => {
       const response = await fetch(`${getApiBaseUrl()}/printers/fast`, { headers: getAuthHeaders() });

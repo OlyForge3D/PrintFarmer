@@ -50,7 +50,7 @@ export class PrinterSignalRService {
         },
       })
       .configureLogging({
-        log: (logLevel: any, message: string) => {
+        log: (logLevel: number, message: string) => {
           // Suppress benign SignalR warnings about unregistered client methods
           // This happens during initialization before all handlers are attached
           // or when the server sends messages the client hasn't registered yet

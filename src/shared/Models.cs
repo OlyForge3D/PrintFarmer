@@ -1475,6 +1475,22 @@ public class SlicerProfileListItemDto
     public string Hash { get; set; } = string.Empty;
 }
 
+public class BulkProfileImportRequest
+{
+    public List<Guid>? ProfileIds { get; set; }
+    public bool? MakePublic { get; set; }
+}
+
+public class BulkProfileImportResultDto
+{
+    public Guid PrinterId { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+    public int TotalRequested { get; set; }
+    public int TotalFound { get; set; }
+    public int Imported { get; set; }
+    public int Duplicated { get; set; }
+}
+
 // Queue Management DTOs
 public class QueueOverviewDto
 {

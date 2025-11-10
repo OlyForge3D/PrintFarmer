@@ -216,6 +216,14 @@ export const SlicerProfilesPage: React.FC = () => {
             Import from OrcaSlicer
           </Button>
           <Button
+            variant="primary"
+            onClick={() => navigate('/profiles/import/official')}
+            className="flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Import for Printers
+          </Button>
+          <Button
             variant="secondary"
             onClick={exportOrcaBundle}
             loading={exportingBundle}
