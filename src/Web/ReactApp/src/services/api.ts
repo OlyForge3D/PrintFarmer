@@ -193,14 +193,14 @@ export class ApiClient {
   // ============ Printer API methods ============
 
   async getPrinters(): Promise<Printer[]> {
-    // Use fast summary endpoint for lighter list retrieval
-    const response = await this.client.get<PrinterFast[]>('/printers/fast');
+    // Get lightweight list of all printers
+    const response = await this.client.get<PrinterFast[]>('/printers');
     // Cast to Printer[] for compatibility; fast objects are subset of Printer
     return response.data as unknown as Printer[];
   }
 
   async getPrintersFast(): Promise<PrinterFast[]> {
-    const response = await this.client.get<PrinterFast[]>('/printers/fast');
+    const response = await this.client.get<PrinterFast[]>('/printers');
     return response.data;
   }
 

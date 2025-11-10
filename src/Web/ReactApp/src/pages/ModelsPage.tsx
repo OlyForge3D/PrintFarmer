@@ -105,7 +105,7 @@ export const ModelsPage: React.FC = () => {
   useQuery({
     queryKey: ['printers-fast'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/printers/fast`, { headers: getAuthHeaders() });
+      const response = await fetch(`${getApiBaseUrl()}/printers`, { headers: getAuthHeaders() });
       return response.json();
     },
     staleTime: 5 * 60 * 1000,

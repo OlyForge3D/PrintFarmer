@@ -47,7 +47,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
             const headers: HeadersInit = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            const res = await fetch(`${baseUrl}/printers/fast`, { headers });
+            const res = await fetch(`${baseUrl}/printers`, { headers });
             if (!res.ok) throw new Error('Failed to load printers');
 
             const json = await res.json() as unknown[];

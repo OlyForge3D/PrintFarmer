@@ -81,14 +81,15 @@ public class PrintersController(
 
     /// <summary>
     /// Retrieves a lightweight list of all printers with minimal data for quick loading.
+    /// This is the default GET endpoint for the printers resource.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>A lightweight list of all printers with basic information</returns>
     /// <response code="200">Returns the list of lightweight printer data</response>
-    [HttpGet("fast")]
+    [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<PrinterFastDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetFastAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetAsync(CancellationToken ct)
     {
         try
         {
@@ -97,12 +98,12 @@ public class PrintersController(
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
-            _logger.LogWarning($"[FAST] Startup DB exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            _logger.LogWarning($"[GET] Startup DB exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
             return Ok(Array.Empty<PrinterFastDto>());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
