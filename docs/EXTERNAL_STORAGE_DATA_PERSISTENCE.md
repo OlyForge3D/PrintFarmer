@@ -35,13 +35,14 @@ The deploy-docker script now supports **binding Docker container paths to extern
 
 ```yaml
 volumes:
-  - /var/lib/printfarmer/models:/app/uploads
-  - /var/lib/printfarmer/gcode:/app/gcode
-  - /var/lib/printfarmer/slicer-profiles:/app/profiles
+  - $HOME/.printfarmer/models:/app/uploads
+  - $HOME/.printfarmer/gcode:/app/gcode
+  - $HOME/.printfarmer/slicer-profiles:/app/profiles
 ```
 
 **Benefits:**
 - ✅ Direct access from host filesystem
+- ✅ No sudo/root access required (defaults to user home directory)
 - ✅ Easy backup/restore
 - ✅ Data persists across container recreation, rebuild, and updates
 - ✅ Data lifecycle tied to explicit filesystem cleanup, not Docker cleanup operations
@@ -59,21 +60,18 @@ During interactive deployment, you'll be prompted:
 Model Uploads & G-Code Files Storage
 These critical data files should persist independently from container lifecycles.
 
-Use external host directories for model uploads and G-code? (Recommended: YES for production) [Y/n]: y
+Use external host directories for model uploads and G-code? (Required for data persistence) [Y/n]: y
 
 External storage enabled - data will persist on host filesystem
 
-Host directory for 3D model uploads: [/var/lib/printfarmer/models]: /srv/printfarmer/models
-Creating models directory: /srv/printfarmer/models
-  Directory created successfully
+Host directory for 3D model uploads: [/home/user/.printfarmer/models]: 
+Models directory ready: /home/user/.printfarmer/models
 
-Host directory for generated G-code: [/var/lib/printfarmer/gcode]: /srv/printfarmer/gcode
-Creating G-code directory: /srv/printfarmer/gcode
-  Directory created successfully
+Host directory for generated G-code: [/home/user/.printfarmer/gcode]: 
+G-code directory ready: /home/user/.printfarmer/gcode
 
-Host directory for slicer profiles (optional): [/var/lib/printfarmer/slicer-profiles]: /srv/printfarmer/profiles
-Creating slicer profiles directory: /srv/printfarmer/slicer-profiles
-  Directory created successfully
+Host directory for slicer profiles (optional): [/home/user/.printfarmer/slicer-profiles]: 
+Slicer profiles directory ready: /home/user/.printfarmer/slicer-profiles
 ```
 
 Configuration is **automatically saved** to `.deploy-config` for future deployments.
@@ -84,9 +82,9 @@ Set environment variables before running:
 
 ```bash
 export USE_EXTERNAL_STORAGE=yes
-export EXTERNAL_MODELS_PATH=/var/lib/printfarmer/models
-export EXTERNAL_GCODE_PATH=/var/lib/printfarmer/gcode
-export EXTERNAL_PROFILES_PATH=/var/lib/printfarmer/slicer-profiles
+export EXTERNAL_MODELS_PATH=$HOME/.printfarmer/models
+export EXTERNAL_GCODE_PATH=$HOME/.printfarmer/gcode
+export EXTERNAL_PROFILES_PATH=$HOME/.printfarmer/slicer-profiles
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
@@ -109,9 +107,9 @@ The generated `.env` file includes:
 ```bash
 # External Storage Configuration (P0 - Critical Data Persistence)
 USE_EXTERNAL_STORAGE=yes
-EXTERNAL_MODELS_PATH=/var/lib/printfarmer/models
-EXTERNAL_GCODE_PATH=/var/lib/printfarmer/gcode
-EXTERNAL_PROFILES_PATH=/var/lib/printfarmer/slicer-profiles
+EXTERNAL_MODELS_PATH=/home/user/.printfarmer/models
+EXTERNAL_GCODE_PATH=/home/user/.printfarmer/gcode
+EXTERNAL_PROFILES_PATH=/home/user/.printfarmer/slicer-profiles
 ```
 
 These are passed to Docker Compose via `.env` file substitution.
@@ -126,7 +124,7 @@ These are passed to Docker Compose via `.env` file substitution.
 - System reboot: Mounted host directories persist
 
 ✅ **Data deleted only when:**
-- Explicitly removing the host directory: `rm -rf /var/lib/printfarmer/models`
+- Explicitly removing the host directory: `rm -rf $HOME/.printfarmer/models`
 - Manual backup cleanup by administrator
 - Explicit database wipe (separate operation)
 
@@ -139,25 +137,30 @@ These are passed to Docker Compose via `.env` file substitution.
 
 ## Directory Permissions & Ownership
 
-The deploy script creates directories with recommended permissions:
+The deploy script creates directories in the user's home directory automatically:
 
 ```bash
-sudo mkdir -p /var/lib/printfarmer/{models,gcode,slicer-profiles}
-sudo chmod 755 /var/lib/printfarmer
+# Directories are created in the user's home (default)
+mkdir -p $HOME/.printfarmer/{models,gcode,slicer-profiles}
 ```
 
-**For Docker container access:**
+**Benefits:**
+- ✅ No sudo/root access required
+- ✅ User owns the directories directly
+- ✅ Docker container can write as the host user via bind mount
+- ✅ Easy to backup and restore
+- ✅ Works seamlessly across different systems
 
-If running Docker daemon without root privileges, ensure the directories are writable by the Docker user:
+**If using custom paths** that require special permissions:
 
 ```bash
 # Option 1: Use Docker group
-sudo chown -R root:docker /var/lib/printfarmer
-sudo chmod 755 /var/lib/printfarmer
-sudo chmod 775 /var/lib/printfarmer/{models,gcode,slicer-profiles}
+sudo chown -R $USER:docker /custom/path/printfarmer
+sudo chmod 755 /custom/path/printfarmer
+sudo chmod 775 /custom/path/printfarmer/{models,gcode,slicer-profiles}
 
 # Option 2: Open world-writable (less secure)
-sudo chmod 777 /var/lib/printfarmer/{models,gcode,slicer-profiles}
+sudo chmod 777 /custom/path/printfarmer/{models,gcode,slicer-profiles}
 ```
 
 ### SELinux & AppArmor
@@ -188,8 +191,8 @@ sudo mount -t cifs //nas.example.com/printfarmer /var/lib/printfarmer \
 Then set external storage paths to the mounted location:
 
 ```bash
-export EXTERNAL_MODELS_PATH=/var/lib/printfarmer/models
-export EXTERNAL_GCODE_PATH=/var/lib/printfarmer/gcode
+export EXTERNAL_MODELS_PATH=$HOME/.printfarmer/models
+export EXTERNAL_GCODE_PATH=$HOME/.printfarmer/gcode
 ```
 
 ## Backup & Restore
@@ -199,10 +202,10 @@ export EXTERNAL_GCODE_PATH=/var/lib/printfarmer/gcode
 ```bash
 # Simple tarball backup
 tar -czf /mnt/backup/printfarmer-data-$(date +%Y%m%d).tar.gz \
-  /var/lib/printfarmer/
+  $HOME/.printfarmer/
 
 # Or per-component
-cp -r /var/lib/printfarmer/models /mnt/backup/models-$(date +%Y%m%d)
+cp -r $HOME/.printfarmer/models /mnt/backup/models-$(date +%Y%m%d)
 ```
 
 ### Restore from Backup
@@ -212,7 +215,7 @@ cp -r /var/lib/printfarmer/models /mnt/backup/models-$(date +%Y%m%d)
 tar -xzf /mnt/backup/printfarmer-data-20250110.tar.gz -C /
 
 # Or selective restore
-rsync -av /mnt/backup/models-20250110/ /var/lib/printfarmer/models/
+rsync -av /mnt/backup/models-20250110/ $HOME/.printfarmer/models/
 ```
 
 ### Docker Volume Backup (for comparison)
@@ -243,21 +246,21 @@ docker run --rm -v printfarmer-model-uploads:/data \
   alpine tar czf /backup/models-export.tar.gz /data
 
 # 2. Create external storage directories
-mkdir -p /var/lib/printfarmer/{models,gcode,slicer-profiles}
+mkdir -p $HOME/.printfarmer/{models,gcode,slicer-profiles}
 
 # 3. Extract into external storage
-cd /var/lib/printfarmer/models
+cd $HOME/.printfarmer/models
 tar xzf /tmp/models-export.tar.gz --strip-components=1
 
 # 4. Update configuration (will be asked on next deployment)
 export USE_EXTERNAL_STORAGE=yes
-export EXTERNAL_MODELS_PATH=/var/lib/printfarmer/models
+export EXTERNAL_MODELS_PATH=$HOME/.printfarmer/models
 
 # 5. Redeploy
 ./scripts/deploy-docker.sh --redeploy
 
 # 6. Verify data is accessible
-ls -la /var/lib/printfarmer/models/
+ls -la $HOME/.printfarmer/models/
 ```
 
 ## Troubleshooting
