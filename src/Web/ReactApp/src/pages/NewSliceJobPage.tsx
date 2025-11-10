@@ -32,7 +32,6 @@ import { Alert } from '@/components/ui/Alert';
 import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { WorkerSelector } from '@/components/WorkerSelector';
 import { Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthHooks';
 
@@ -54,21 +53,6 @@ const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
   'Other': { name: 'Other', nozzleTemp: 220, bedTemp: 60 }
 };
 
-type QualityPreset = 'Draft' | 'Standard' | 'Fine';
-interface QualitySettings {
-  name: QualityPreset;
-  layerHeight: number;
-  infill: number;
-  printSpeed: number;
-  wallThickness: number;
-}
-
-const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
-  'Draft': { name: 'Draft', layerHeight: 0.28, infill: 15, printSpeed: 200, wallThickness: 1.0 },
-  'Standard': { name: 'Standard', layerHeight: 0.2, infill: 20, printSpeed: 120, wallThickness: 1.2 },
-  'Fine': { name: 'Fine', layerHeight: 0.12, infill: 20, printSpeed: 60, wallThickness: 1.6 }
-};
-
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -81,15 +65,15 @@ export const NewSliceJobPage: React.FC = () => {
   const [printerSearchText, setPrinterSearchText] = useState('');
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'quality' | 'strength' | 'speed' | 'support' | 'material' | 'other'>('quality');
 
-  // === Quality & Custom Settings ===
-  const [selectedQualityPreset, setSelectedQualityPreset] = useState<QualityPreset>('Standard');
+  // === Custom Settings ===
   const [customSettings, setCustomSettings] = useState({
-    layerHeight: QUALITY_PRESETS.Standard.layerHeight,
-    infill: QUALITY_PRESETS.Standard.infill,
-    printSpeed: QUALITY_PRESETS.Standard.printSpeed,
-    wallThickness: QUALITY_PRESETS.Standard.wallThickness,
+    layerHeight: 0.2,
+    infill: 20,
+    printSpeed: 120,
+    wallThickness: 1.2,
     nozzleTemp: MATERIAL_PRESETS.PLA.nozzleTemp,
     bedTemp: MATERIAL_PRESETS.PLA.bedTemp,
     enableSupports: false,
@@ -115,10 +99,9 @@ export const NewSliceJobPage: React.FC = () => {
   const [priority, setPriority] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [selectedWorkerId, setSelectedWorkerId] = useState<string | undefined>(undefined);
 
   // === Queries ===
-  const { data: availableWorkers = [], isLoading: loadingWorkers } = useQuery<WorkerResponse[], Error>({
+  const { data: availableWorkers = [] } = useQuery<WorkerResponse[], Error>({
     queryKey: ['workers-available'],
     queryFn: () => workersService.getAvailableWorkers(),
     staleTime: 10_000,
@@ -132,23 +115,31 @@ export const NewSliceJobPage: React.FC = () => {
     refetchInterval: 15_000,
   });
 
-  const slicerEngine = useMemo(() => {
-    const found = availableSlicers.find(s => s.slicerType === 'OrcaSlicer');
-    return found ? 2 : 1;
-  }, [availableSlicers]);
+  // Slicer info with version
+  const slicerInfo = useMemo(() => {
+    const slicer = availableSlicers.find(s => s.slicerType === (selectedSlicerId === 1 ? 'PrusaSlicer' : 'OrcaSlicer'));
+    return {
+      name: slicer?.name || (selectedSlicerId === 1 ? 'PrusaSlicer' : 'OrcaSlicer'),
+      version: slicer?.version || 'Unknown',
+      engine: selectedSlicerId
+    };
+  }, [selectedSlicerId, availableSlicers]);
 
   const engineOptions = useMemo(() => {
     return availableSlicers.map(slicer => ({
-      label: slicer.name || slicer.slicerType || 'Unknown',
+      label: `${slicer.name || slicer.slicerType || 'Unknown'} v${slicer.version || '?'}`,
       value: slicer.slicerType === 'PrusaSlicer' ? 1 : slicer.slicerType === 'OrcaSlicer' ? 2 : 0
     }));
   }, [availableSlicers]);
 
-  const filteredWorkers = useMemo(() => {
+  // Auto-select first available worker based on capabilities (for system use)
+  // selectedWorkerId is auto-selected by the backend based on capabilities
+  useMemo(() => {
     if (parsedCapabilities.length === 0) {
-      return availableWorkers;
+      return availableWorkers[0]?.id;
     }
-    return availableWorkers.filter(worker => hasRequiredCapabilities(worker, parsedCapabilities));
+    const compatible = availableWorkers.find(w => hasRequiredCapabilities(w, parsedCapabilities));
+    return compatible?.id || availableWorkers[0]?.id;
   }, [availableWorkers, parsedCapabilities]);
 
   // Fetch printers for dropdown
@@ -170,12 +161,23 @@ export const NewSliceJobPage: React.FC = () => {
     return printers.filter(p => p.name.toLowerCase().includes(search) || p.model?.toLowerCase().includes(search));
   }, [printers, printerSearchText]);
 
-  // Fetch extended profiles for selection
+  // Fetch process profiles - filter by selected printer
   const { data: profiles = [] } = useQuery<SlicerProfileListItem[], Error>({
-    queryKey: ['slicerProfilesExtended'],
+    queryKey: ['slicerProfilesExtended', selectedPrinterId],
     queryFn: () => slicerProfilesService.listExtended(),
     staleTime: 15_000
   });
+
+  // Filter profiles for the selected printer
+  const printerProcessProfiles = useMemo(() => {
+    // Return all profiles - filtering can be done based on availability
+    return profiles;
+  }, [profiles]);
+
+  // Filament profiles - combination of slicer profiles + custom for printer
+  const filamentProfiles = useMemo(() => {
+    return MATERIAL_PRESETS;
+  }, []);
 
   // Fetch models for picker
   const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
@@ -307,6 +309,16 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [requiredCapabilitiesJson]);
 
+  // Update temps when filament changes
+  const applyFilamentMaterial = (material: MaterialType) => {
+    setSelectedFilamentMaterial(material);
+    setCustomSettings(prev => ({
+      ...prev,
+      nozzleTemp: MATERIAL_PRESETS[material].nozzleTemp,
+      bedTemp: MATERIAL_PRESETS[material].bedTemp,
+    }));
+  };
+
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
@@ -364,7 +376,7 @@ export const NewSliceJobPage: React.FC = () => {
       printerId: undefined,
       modelFileUrl: modelFileUrl,
       modelFileName: modelFileName,
-      slicerEngine,
+      slicerEngine: slicerInfo.engine,
       slicerProfileJson: useProfile ? '{}' : rawProfileJson,
       slicerProfileId: useProfile ? selectedProfileId : undefined,
       requiredCapabilitiesJson: capabilities,
@@ -384,28 +396,6 @@ export const NewSliceJobPage: React.FC = () => {
     return 'stl';
   };
 
-  // Update custom settings when quality preset changes
-  const applyQualityPreset = (preset: QualityPreset) => {
-    setSelectedQualityPreset(preset);
-    setCustomSettings(prev => ({
-      ...prev,
-      layerHeight: QUALITY_PRESETS[preset].layerHeight,
-      infill: QUALITY_PRESETS[preset].infill,
-      printSpeed: QUALITY_PRESETS[preset].printSpeed,
-      wallThickness: QUALITY_PRESETS[preset].wallThickness,
-    }));
-  };
-
-  // Update temps when filament changes
-  const applyFilamentMaterial = (material: MaterialType) => {
-    setSelectedFilamentMaterial(material);
-    setCustomSettings(prev => ({
-      ...prev,
-      nozzleTemp: MATERIAL_PRESETS[material].nozzleTemp,
-      bedTemp: MATERIAL_PRESETS[material].bedTemp,
-    }));
-  };
-
   return (
     <PageTemplate
       title="New Slice Job"
@@ -417,7 +407,7 @@ export const NewSliceJobPage: React.FC = () => {
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
         <div className="w-full lg:w-96 space-y-4 flex-shrink-0 pb-4 max-h-screen overflow-y-auto">
 
-          {/* SLICER SELECTION */}
+          {/* SLICER SELECTION - Shows name and version */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <label className="block text-sm font-semibold text-pf-text mb-2">Slicer</label>
             <Select
@@ -453,7 +443,7 @@ export const NewSliceJobPage: React.FC = () => {
             </Select>
           </div>
 
-          {/* FILAMENT / MATERIAL PROFILE */}
+          {/* FILAMENT / MATERIAL PROFILE - Shows slicer + custom profiles */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <label className="block text-sm font-semibold text-pf-text mb-2">Filament</label>
             <Select
@@ -461,7 +451,7 @@ export const NewSliceJobPage: React.FC = () => {
               onChange={e => applyFilamentMaterial(e.target.value as MaterialType)}
               className="w-full"
             >
-              {Object.keys(MATERIAL_PRESETS).map(m => (
+              {Object.keys(filamentProfiles).map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </Select>
@@ -470,334 +460,341 @@ export const NewSliceJobPage: React.FC = () => {
             </div>
           </div>
 
-          {/* PROCESS PRESETS */}
+          {/* PROCESS PRESETS - Only for selected printer, with Advanced toggle */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Process</label>
-
-            {/* Quality Preset Quick Select */}
-            <div className="flex gap-2 mb-3">
-              {(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map(preset => (
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-sm font-semibold text-pf-text">Process</label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-pf-text">Advanced</span>
                 <button
-                  key={preset}
                   type="button"
-                  onClick={() => applyQualityPreset(preset)}
-                  className={`flex-1 px-2 py-1 text-xs font-medium rounded transition-colors ${selectedQualityPreset === preset
-                    ? 'bg-pf-accent text-pf-accent-text'
-                    : 'bg-pf-border text-pf-text hover:bg-pf-hover'
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                  className={`w-10 h-6 rounded-full transition-colors flex items-center ${showAdvancedSettings
+                    ? 'bg-pf-accent'
+                    : 'bg-pf-border'
                     }`}
+                  title="Toggle advanced settings"
                 >
-                  {preset}
+                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${showAdvancedSettings
+                    ? 'translate-x-4'
+                    : 'translate-x-0.5'
+                    }`} />
                 </button>
-              ))}
+              </div>
             </div>
 
-            {/* Process Presets Dropdown */}
+            {/* Process Presets Dropdown - Filtered by printer */}
             <Select
               value={selectedProcessPresetId}
               onChange={e => setSelectedProcessPresetId(e.target.value)}
               className="w-full mb-3"
             >
-              <option value="">-- Search for Setting --</option>
-              {profiles.map(p => (
+              <option value="">-- Select Process Profile --</option>
+              {printerProcessProfiles.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
 
-            {/* Settings Tabs */}
-            <div className="flex gap-1 border-b border-pf-border mb-3 text-xs">
-              {(['quality', 'strength', 'speed', 'support', 'material', 'other'] as const).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveSettingsTab(tab)}
-                  className={`pb-2 px-2 transition-colors capitalize ${activeSettingsTab === tab
-                    ? 'border-b-2 border-pf-accent text-pf-accent font-medium'
-                    : 'text-pf-text-muted hover:text-pf-text'
-                    }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+            {/* Advanced Settings - Only shown if Advanced toggle is ON */}
+            {showAdvancedSettings && (
+              <>
+                {/* Settings Tabs */}
+                <div className="flex gap-1 border-b border-pf-border mb-3 text-xs">
+                  {(['quality', 'strength', 'speed', 'support', 'material', 'other'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setActiveSettingsTab(tab)}
+                      className={`pb-2 px-2 transition-colors capitalize ${activeSettingsTab === tab
+                        ? 'border-b-2 border-pf-accent text-pf-accent font-medium'
+                        : 'text-pf-text-muted hover:text-pf-text'
+                        }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
 
-            {/* Settings Panel Content */}
-            <div className="space-y-3 text-sm">
-              {activeSettingsTab === 'quality' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Layer Height: {customSettings.layerHeight.toFixed(2)}mm
-                    </label>
-                    <input
-                      type="range"
-                      min="0.08"
-                      max="0.4"
-                      step="0.04"
-                      value={customSettings.layerHeight}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, layerHeight: parseFloat(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Layer Height"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Wall Thickness: {customSettings.wallThickness.toFixed(1)}mm
-                    </label>
-                    <input
-                      type="range"
-                      min="0.8"
-                      max="2.4"
-                      step="0.2"
-                      value={customSettings.wallThickness}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, wallThickness: parseFloat(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Wall Thickness"
-                    />
-                  </div>
-                </>
-              )}
-
-              {activeSettingsTab === 'strength' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Infill: {customSettings.infill}%
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="5"
-                      value={customSettings.infill}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, infill: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Infill Percentage"
-                    />
-                  </div>
-                </>
-              )}
-
-              {activeSettingsTab === 'speed' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Print Speed: {customSettings.printSpeed}mm/s
-                    </label>
-                    <input
-                      type="range"
-                      min="20"
-                      max="200"
-                      step="10"
-                      value={customSettings.printSpeed}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, printSpeed: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Print Speed"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Travel Speed: {customSettings.travelSpeed}mm/s
-                    </label>
-                    <input
-                      type="range"
-                      min="100"
-                      max="300"
-                      step="10"
-                      value={customSettings.travelSpeed}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, travelSpeed: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Travel Speed"
-                    />
-                  </div>
-                </>
-              )}
-
-              {activeSettingsTab === 'support' && (
-                <>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={customSettings.enableSupports}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, enableSupports: e.target.checked }))}
-                      title="Enable Supports"
-                    />
-                    <span>Enable Supports</span>
-                  </label>
-                  {customSettings.enableSupports && (
+                {/* Settings Panel Content */}
+                <div className="space-y-3 text-sm">
+                  {activeSettingsTab === 'quality' && (
                     <>
                       <div>
                         <label className="block text-xs font-medium text-pf-text mb-1">
-                          Density: {customSettings.supportDensity}%
+                          Layer Height: {customSettings.layerHeight.toFixed(2)}mm
                         </label>
                         <input
                           type="range"
-                          min="5"
-                          max="50"
-                          step="5"
-                          value={customSettings.supportDensity}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, supportDensity: parseInt(e.target.value) }))}
+                          min="0.08"
+                          max="0.4"
+                          step="0.04"
+                          value={customSettings.layerHeight}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, layerHeight: parseFloat(e.target.value) }))}
                           className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Support Density"
+                          title="Layer Height"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">Pattern</label>
-                        <Select
-                          value={customSettings.supportPattern}
-                          onChange={e => {
-                            const value = e.target.value;
-                            if (value === 'linear' || value === 'grid' || value === 'honeycomb') {
-                              setCustomSettings(prev => ({ ...prev, supportPattern: value }));
-                            }
-                          }}
-                          className="w-full text-xs"
-                        >
-                          <option value="linear">Linear</option>
-                          <option value="grid">Grid</option>
-                          <option value="honeycomb">Honeycomb</option>
-                        </Select>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Wall Thickness: {customSettings.wallThickness.toFixed(1)}mm
+                        </label>
+                        <input
+                          type="range"
+                          min="0.8"
+                          max="2.4"
+                          step="0.2"
+                          value={customSettings.wallThickness}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, wallThickness: parseFloat(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Wall Thickness"
+                        />
                       </div>
                     </>
                   )}
-                </>
-              )}
 
-              {activeSettingsTab === 'material' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Nozzle: {customSettings.nozzleTemp}°C
-                    </label>
-                    <input
-                      type="range"
-                      min="190"
-                      max="280"
-                      step="5"
-                      value={customSettings.nozzleTemp}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, nozzleTemp: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Nozzle Temperature"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Bed: {customSettings.bedTemp}°C
-                    </label>
-                    <input
-                      type="range"
-                      min="20"
-                      max="120"
-                      step="5"
-                      value={customSettings.bedTemp}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, bedTemp: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Bed Temperature"
-                    />
-                  </div>
-                </>
-              )}
+                  {activeSettingsTab === 'strength' && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Infill: {customSettings.infill}%
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="5"
+                          value={customSettings.infill}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, infill: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Infill Percentage"
+                        />
+                      </div>
+                    </>
+                  )}
 
-              {activeSettingsTab === 'other' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Top Layers: {customSettings.topLayerCount}
-                    </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      step="1"
-                      value={customSettings.topLayerCount}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, topLayerCount: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Top Layer Count"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text mb-1">
-                      Bottom Layers: {customSettings.bottomLayerCount}
-                    </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      step="1"
-                      value={customSettings.bottomLayerCount}
-                      onChange={e => setCustomSettings(prev => ({ ...prev, bottomLayerCount: parseInt(e.target.value) }))}
-                      className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                      title="Bottom Layer Count"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
+                  {activeSettingsTab === 'speed' && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Print Speed: {customSettings.printSpeed}mm/s
+                        </label>
+                        <input
+                          type="range"
+                          min="20"
+                          max="200"
+                          step="10"
+                          value={customSettings.printSpeed}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, printSpeed: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Print Speed"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Travel Speed: {customSettings.travelSpeed}mm/s
+                        </label>
+                        <input
+                          type="range"
+                          min="100"
+                          max="300"
+                          step="10"
+                          value={customSettings.travelSpeed}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, travelSpeed: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Travel Speed"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {activeSettingsTab === 'support' && (
+                    <>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={customSettings.enableSupports}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, enableSupports: e.target.checked }))}
+                          title="Enable Supports"
+                        />
+                        <span>Enable Supports</span>
+                      </label>
+                      {customSettings.enableSupports && (
+                        <>
+                          <div>
+                            <label className="block text-xs font-medium text-pf-text mb-1">
+                              Density: {customSettings.supportDensity}%
+                            </label>
+                            <input
+                              type="range"
+                              min="5"
+                              max="50"
+                              step="5"
+                              value={customSettings.supportDensity}
+                              onChange={e => setCustomSettings(prev => ({ ...prev, supportDensity: parseInt(e.target.value) }))}
+                              className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                              title="Support Density"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-pf-text mb-1">Pattern</label>
+                            <Select
+                              value={customSettings.supportPattern}
+                              onChange={e => {
+                                const value = e.target.value;
+                                if (value === 'linear' || value === 'grid' || value === 'honeycomb') {
+                                  setCustomSettings(prev => ({ ...prev, supportPattern: value }));
+                                }
+                              }}
+                              className="w-full text-xs"
+                            >
+                              <option value="linear">Linear</option>
+                              <option value="grid">Grid</option>
+                              <option value="honeycomb">Honeycomb</option>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {activeSettingsTab === 'material' && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Nozzle: {customSettings.nozzleTemp}°C
+                        </label>
+                        <input
+                          type="range"
+                          min="190"
+                          max="280"
+                          step="5"
+                          value={customSettings.nozzleTemp}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, nozzleTemp: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Nozzle Temperature"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Bed: {customSettings.bedTemp}°C
+                        </label>
+                        <input
+                          type="range"
+                          min="20"
+                          max="120"
+                          step="5"
+                          value={customSettings.bedTemp}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, bedTemp: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Bed Temperature"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {activeSettingsTab === 'other' && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Top Layers: {customSettings.topLayerCount}
+                        </label>
+                        <input
+                          type="range"
+                          min="1"
+                          max="10"
+                          step="1"
+                          value={customSettings.topLayerCount}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, topLayerCount: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Top Layer Count"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-pf-text mb-1">
+                          Bottom Layers: {customSettings.bottomLayerCount}
+                        </label>
+                        <input
+                          type="range"
+                          min="1"
+                          max="10"
+                          step="1"
+                          value={customSettings.bottomLayerCount}
+                          onChange={e => setCustomSettings(prev => ({ ...prev, bottomLayerCount: parseInt(e.target.value) }))}
+                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
+                          title="Bottom Layer Count"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
-          {/* MODEL & ADVANCED SETTINGS */}
-          <details className="bg-pf-panel border border-pf-border rounded-lg">
-            <summary className="p-4 cursor-pointer font-semibold text-pf-text hover:bg-pf-hover">
-              Model & Advanced
-            </summary>
-            <div className="p-4 space-y-3 border-t border-pf-border">
-              <FormField
-                label="Use Model Picker"
-                helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
-                inline
-              >
-                <input
-                  id="useModelPicker"
-                  type="checkbox"
-                  checked={useModelPicker}
-                  onChange={() => {
-                    setUseModelPicker(v => !v);
-                    if (useModelPicker) {
-                      setSelectedModelId('');
-                      setModelFileUrl('');
-                      setModelFileName('');
-                    }
-                  }}
-                  title="Use Model Picker"
-                />
+          {/* MODEL SELECTION - Inline, not collapsible */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+            <label className="block text-sm font-semibold text-pf-text">Model</label>
+            
+            <FormField
+              label="Use Model Picker"
+              helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
+              inline
+            >
+              <input
+                id="useModelPicker"
+                type="checkbox"
+                checked={useModelPicker}
+                onChange={() => {
+                  setUseModelPicker(v => !v);
+                  if (useModelPicker) {
+                    setSelectedModelId('');
+                    setModelFileUrl('');
+                    setModelFileName('');
+                  }
+                }}
+                title="Use Model Picker"
+              />
+            </FormField>
+
+            {useModelPicker ? (
+              <FormField label="Model" error={modelsError ? modelsError.message : undefined}>
+                {models && models.length > 0 ? (
+                  <Select value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)}>
+                    <option value="">-- Select model --</option>
+                    {models.map(m => (
+                      <option key={m.id} value={m.id}>{m.fileName}</option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Select disabled className="bg-pf-disabled" title="No models available">
+                    <option>-- No models --</option>
+                  </Select>
+                )}
               </FormField>
-
-              {useModelPicker ? (
-                <FormField label="Model" error={modelsError ? modelsError.message : undefined}>
-                  {models && models.length > 0 ? (
-                    <Select value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)}>
-                      <option value="">-- Select model --</option>
-                      {models.map(m => (
-                        <option key={m.id} value={m.id}>{m.fileName}</option>
-                      ))}
-                    </Select>
-                  ) : (
-                    <Select disabled className="bg-pf-disabled" title="No models available">
-                      <option>-- No models --</option>
-                    </Select>
-                  )}
+            ) : (
+              <>
+                <FormField label="File URL" required>
+                  <Input
+                    type="text"
+                    value={modelFileUrl}
+                    onChange={e => setModelFileUrl(e.target.value)}
+                    placeholder="https://... or /storage/..."
+                  />
                 </FormField>
-              ) : (
-                <>
-                  <FormField label="File URL" required>
-                    <Input
-                      type="text"
-                      value={modelFileUrl}
-                      onChange={e => setModelFileUrl(e.target.value)}
-                      placeholder="https://... or /storage/..."
-                    />
-                  </FormField>
-                  <FormField label="File Name" required>
-                    <Input
-                      type="text"
-                      value={modelFileName}
-                      onChange={e => setModelFileName(e.target.value)}
-                      placeholder="model.stl"
-                    />
-                  </FormField>
-                </>
-              )}
+                <FormField label="File Name" required>
+                  <Input
+                    type="text"
+                    value={modelFileName}
+                    onChange={e => setModelFileName(e.target.value)}
+                    placeholder="model.stl"
+                  />
+                </FormField>
+              </>
+            )}
 
-              <div className="flex gap-3">
+            {/* Profile Selection */}
+            <div className="border-t border-pf-border pt-3">
+              <div className="flex gap-3 mb-2">
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input type="radio" name="mode" checked={useProfile} onChange={() => setUseProfile(true)} title="Use Profile Mode" />
                   <span>Profile</span>
@@ -854,24 +851,7 @@ export const NewSliceJobPage: React.FC = () => {
                 />
               </FormField>
             </div>
-          </details>
-
-          {/* WORKER SELECTOR */}
-          <details className="bg-pf-panel border border-pf-border rounded-lg">
-            <summary className="p-4 cursor-pointer font-semibold text-pf-text hover:bg-pf-hover">
-              Worker
-            </summary>
-            <div className="p-4 border-t border-pf-border">
-              <WorkerSelector
-                workers={filteredWorkers}
-                selectedWorkerId={selectedWorkerId}
-                onWorkerSelect={setSelectedWorkerId}
-                loading={loadingWorkers}
-                showCapabilities={true}
-                highlightAvailable={true}
-              />
-            </div>
-          </details>
+          </div>
 
           {/* STATUS MESSAGES */}
           {error && <Alert type="error">{error}</Alert>}
