@@ -2074,7 +2074,7 @@ configure_external_storage() {
     
     # Check if external storage was already configured
     if [ -z "${USE_EXTERNAL_STORAGE:-}" ]; then
-        prompt_yes_no "Use external host directories for model uploads and G-code? (Recommended: YES for production)" "yes" "USE_EXTERNAL_STORAGE"
+        prompt_yes_no "Use external host directories for model uploads and G-code? (Required for data persistence)" "yes" "USE_EXTERNAL_STORAGE"
     else
         if [ "${USE_EXTERNAL_STORAGE}" = "true" ] || [ "${USE_EXTERNAL_STORAGE}" = "yes" ]; then
             USE_EXTERNAL_STORAGE="yes"
@@ -2141,7 +2141,9 @@ configure_external_storage() {
         
     else
         print_warning "Docker-managed volumes will be used - data may be lost if volumes are removed"
-        print_info "Recommended: Use --tear-down flag to back up data before major updates"
+        print_warning "⚠️  WARNING: Uploaded models and G-code will NOT persist across container recreation"
+        print_warning "To preserve user data, use external storage (answer 'yes' on next deployment)"
+        print_info "For development/testing only: Recommended to use external storage for any persistent deployment"
         USE_EXTERNAL_STORAGE="no"
         EXTERNAL_MODELS_PATH=""
         EXTERNAL_GCODE_PATH=""
