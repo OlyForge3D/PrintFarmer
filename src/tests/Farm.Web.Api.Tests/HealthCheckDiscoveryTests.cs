@@ -414,12 +414,12 @@ public class HealthCheckDiscoveryTests
         {
             // From .env.microservices
             { "SPOOLMAN_BASE_URL", "http://spoolman.local:7912" },
-            { "ENABLE_DISCOVERY", "yes" },
+            { "ENABLE_DISCOVERY", "true" },
             { "NETWORK_RANGES", "192.168.0.0/16,10.0.0.0/8" },
             
             // These should be added by deploy script to .env file (around line 2439)
             { "PFARM__Spoolman__BaseUrl", "http://spoolman.local:7912" },
-            { "PFARM__NetworkDiscovery__EnableDiscovery", "yes" },
+            { "PFARM__NetworkDiscovery__EnableDiscovery", "true" },
             { "PFARM__NetworkDiscovery__DiscoverySubnets", "192.168.0.0/16,10.0.0.0/8" }
         };
 
@@ -430,7 +430,7 @@ public class HealthCheckDiscoveryTests
 
         // Assert
         pfarmSpoolmanUrl.Should().Be("http://spoolman.local:7912");
-        pfarmDiscoveryEnabled.Should().Be("yes");
+        pfarmDiscoveryEnabled.Should().Be("true");
         pfarmDiscoverySubnets.Should().Be("192.168.0.0/16,10.0.0.0/8");
     }
 

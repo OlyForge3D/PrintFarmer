@@ -2252,9 +2252,9 @@ configure_additional() {
     
     # Map INCLUDE_DISCOVERY to ENABLE_DISCOVERY for downstream use
     if [ "$INCLUDE_DISCOVERY" = "true" ]; then
-        ENABLE_DISCOVERY="yes"
+        ENABLE_DISCOVERY="true"
     else
-        ENABLE_DISCOVERY="no"
+        ENABLE_DISCOVERY="false"
     fi
     
 
