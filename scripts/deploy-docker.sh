@@ -2087,46 +2087,41 @@ configure_external_storage() {
         print_success "External storage enabled - data will persist on host filesystem"
         echo
         
-        # Model uploads directory
-        local default_models_path="${EXTERNAL_MODELS_PATH:-/var/lib/printfarmer/models}"
+        # Model uploads directory (defaults to user's home directory - no sudo needed)
+        local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
         prompt_with_default "Host directory for 3D model uploads:" "$default_models_path" "EXTERNAL_MODELS_PATH"
         
-        # Create directory if it doesn't exist
-        if [ ! -d "$EXTERNAL_MODELS_PATH" ]; then
-            print_info "Creating models directory: $EXTERNAL_MODELS_PATH"
-            mkdir -p "$EXTERNAL_MODELS_PATH" || {
-                print_error "Failed to create models directory. Ensure you have write permissions."
-                return 1
-            }
-            chmod 755 "$EXTERNAL_MODELS_PATH"
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
+            print_error "Failed to create models directory: $EXTERNAL_MODELS_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
         fi
+        print_success "Models directory ready: $EXTERNAL_MODELS_PATH"
         
-        # G-code storage directory
-        local default_gcode_path="${EXTERNAL_GCODE_PATH:-/var/lib/printfarmer/gcode}"
+        # G-code storage directory (defaults to user's home directory)
+        local default_gcode_path="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
         prompt_with_default "Host directory for generated G-code:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
         
-        # Create directory if it doesn't exist
-        if [ ! -d "$EXTERNAL_GCODE_PATH" ]; then
-            print_info "Creating G-code directory: $EXTERNAL_GCODE_PATH"
-            mkdir -p "$EXTERNAL_GCODE_PATH" || {
-                print_error "Failed to create G-code directory. Ensure you have write permissions."
-                return 1
-            }
-            chmod 755 "$EXTERNAL_GCODE_PATH"
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_GCODE_PATH" 2>/dev/null; then
+            print_error "Failed to create G-code directory: $EXTERNAL_GCODE_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
         fi
+        print_success "G-code directory ready: $EXTERNAL_GCODE_PATH"
         
-        # Slicer profiles directory (optional but recommended)
-        local default_profiles_path="${EXTERNAL_PROFILES_PATH:-/var/lib/printfarmer/slicer-profiles}"
+        # Slicer profiles directory (defaults to user's home directory, optional)
+        local default_profiles_path="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
         prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
         
-        if [ ! -d "$EXTERNAL_PROFILES_PATH" ]; then
-            print_info "Creating slicer profiles directory: $EXTERNAL_PROFILES_PATH"
-            mkdir -p "$EXTERNAL_PROFILES_PATH" || {
-                print_error "Failed to create profiles directory. Ensure you have write permissions."
-                return 1
-            }
-            chmod 755 "$EXTERNAL_PROFILES_PATH"
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_PROFILES_PATH" 2>/dev/null; then
+            print_error "Failed to create slicer profiles directory: $EXTERNAL_PROFILES_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
         fi
+        print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
         print_success "External storage directories configured:"
         echo "  • Models:  $EXTERNAL_MODELS_PATH"
@@ -2136,7 +2131,7 @@ configure_external_storage() {
         print_info "⚠️  Data Persistence Guarantee:"
         echo "  • Data survives container recreation (docker-compose down/up)"
         echo "  • Data survives image rebuild"
-        echo "  • Data only deleted if you explicitly remove: $EXTERNAL_MODELS_PATH or $EXTERNAL_GCODE_PATH"
+        echo "  • Data only deleted if you explicitly remove: $EXTERNAL_MODELS_PATH"
         echo "  • Database deletion does NOT affect these directories"
         
     else
