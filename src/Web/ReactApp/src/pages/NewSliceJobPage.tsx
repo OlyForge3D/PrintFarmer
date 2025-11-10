@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import slicerProfilesService, { SlicerProfileListItem } from '@/services/slicerProfilesService';
@@ -31,10 +32,13 @@ import { useAuth } from '@/contexts/AuthHooks';
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const modelIdFromUrl = searchParams.get('modelId') || '';
+  
   const [modelFileUrl, setModelFileUrl] = useState('');
   const [modelFileName, setModelFileName] = useState('');
   const [useModelPicker, setUseModelPicker] = useState(true);
-  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
   const [slicerEngine, setSlicerEngine] = useState<number>(1);
   const [useProfile, setUseProfile] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
