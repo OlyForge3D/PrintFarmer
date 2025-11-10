@@ -1691,53 +1691,6 @@ configure_networking() {
     fi
     
     echo
-    
-    # Configure discovery based on network mode
-    if [ "$NETWORK_MODE" = "host" ]; then
-        # Host mode: Auto-enable discovery with sensible defaults
-        print_success "Network discovery automatically enabled with host networking"
-        ENABLE_DISCOVERY="true"
-        ALLOW_LOCAL_NETWORK="true"
-        
-        echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
-        echo "Common ranges:"
-        echo "  • 192.168.0.0/16 (Most home networks: 192.168.x.x)"
-        echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
-        echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
-        echo
-        
-        prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
-    else
-        # Bridge mode: Ask about discovery
-        echo -e "${BLUE}Network discovery allows PrintFarmer to find 3D printers on your network.${NC}"
-        echo
-        
-        if [ "$OS" = "macos" ]; then
-            print_warning "macOS Docker has limited WiFi access. Network discovery may not work for WiFi-connected printers."
-            print_info "Consider using local development instead of Docker on macOS."
-            echo
-        fi
-        
-        prompt_yes_no "Enable network discovery?" "yes" "ENABLE_DISCOVERY"
-        
-        if [ "$ENABLE_DISCOVERY" = "yes" ]; then
-            echo
-            echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
-            echo "Common ranges:"
-            echo "  • 192.168.0.0/16 (Most home networks: 192.168.x.x)"
-            echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
-            echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
-            echo
-            
-            prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
-            ALLOW_LOCAL_NETWORK="true"
-        else
-            ALLOW_LOCAL_NETWORK="false"
-            NETWORK_RANGES=""
-        fi
-    fi
-    
-    echo
     echo -e "${BLUE}Configure external access:${NC}"
     prompt_with_default "HTTP port for web access:" "8080" "HTTP_PORT"
     
@@ -2120,6 +2073,8 @@ configure_additional() {
         prompt_yes_no "Enable monitoring stack (Prometheus, Grafana)?" "no" "INCLUDE_MONITORING_CHOICE"
         if [ "$INCLUDE_MONITORING_CHOICE" = "yes" ]; then
             INCLUDE_MONITORING="true"
+        else
+            INCLUDE_MONITORING="false"
         fi
     else
         print_info "Monitoring stack enabled via CLI flag"
@@ -2261,24 +2216,45 @@ configure_additional() {
     fi
     
     if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "false" ]; then
-        # Only offer discovery in microservices mode
-        if [ "$ARCHITECTURE" = "microservices" ]; then
-            prompt_yes_no "Enable network printer discovery service (scans local network for 3D printers)?" "yes" "INCLUDE_DISCOVERY_CHOICE"
-            if [ "$INCLUDE_DISCOVERY_CHOICE" = "yes" ]; then
-                INCLUDE_DISCOVERY="true"
-            fi
+        echo -e "${BLUE}Network Discovery Configuration${NC}"
+        echo "Network discovery allows PrintFarmer to find 3D printers on your network."
+        echo
+        
+        if [ "$OS" = "macos" ] && [ "$ARCHITECTURE" = "docker" ]; then
+            print_warning "macOS Docker has limited network access. Discovery may not work for all WiFi-connected printers."
+        fi
+        
+        prompt_yes_no "Enable network printer discovery?" "yes" "INCLUDE_DISCOVERY_CHOICE"
+        
+        if [ "$INCLUDE_DISCOVERY_CHOICE" = "yes" ]; then
+            INCLUDE_DISCOVERY="true"
+            ALLOW_LOCAL_NETWORK="true"
+            
+            echo
+            echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
+            echo "Common ranges:"
+            echo "  • 192.168.0.0/16 (Most home networks: 192.168.x.x)"
+            echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
+            echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
+            echo
+            
+            prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
         else
-            print_info "Printer discovery service is only available in microservices architecture"
             INCLUDE_DISCOVERY="false"
+            ALLOW_LOCAL_NETWORK="false"
+            NETWORK_RANGES=""
         fi
     else
-        if [ "$ARCHITECTURE" = "microservices" ]; then
-            print_info "Printer discovery service enabled via CLI flag"
-            INCLUDE_DISCOVERY="true"
-        else
-            print_warning "Printer discovery service requested but not supported in $ARCHITECTURE architecture"
-            INCLUDE_DISCOVERY="false"
-        fi
+        print_info "Network printer discovery enabled via CLI flag"
+        INCLUDE_DISCOVERY="true"
+        ALLOW_LOCAL_NETWORK="true"
+    fi
+    
+    # Map INCLUDE_DISCOVERY to ENABLE_DISCOVERY for downstream use
+    if [ "$INCLUDE_DISCOVERY" = "true" ]; then
+        ENABLE_DISCOVERY="yes"
+    else
+        ENABLE_DISCOVERY="no"
     fi
     
 
